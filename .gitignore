@@ -1,0 +1,4 @@
+.tmp/
+.analysis/
+reports/troubleshooting/
+.env*

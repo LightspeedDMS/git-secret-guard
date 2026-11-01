@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+set -u
+marker="${STUB_MARKER:-NOMARKER}"
+[ -n "${STUB_LOG:-}" ] && printf 'trufflehog %s\n' "$*" >>"$STUB_LOG"
+scan_dir="${2:-}"
+[ -n "${STUB_LOG:-}" ] && printf 'workdir-mode=%s\n' "$(stat -c %a "$scan_dir/..")" >>"$STUB_LOG"
+if [ -n "${STUB_RECORD:-}" ] && [ -d "$scan_dir" ]; then
+    while IFS= read -r f; do
+        printf '== %s\n' "${f#"$scan_dir"/}" >>"$STUB_RECORD.trufflehog"
+        cat -- "$f" >>"$STUB_RECORD.trufflehog"
+    done < <(find "$scan_dir" -type f | LC_ALL=C sort)
+fi
+if [ -n "${STUB_TF_GRANDCHILD:-}" ]; then
+    sleep 17.43 &
+    echo "$!" >"$STUB_TF_GRANDCHILD"
+    wait
+fi
+if [ -n "${STUB_TF_STUBBORN:-}" ]; then
+    trap '' TERM
+    for _ in 1 2 3; do sleep "${STUB_TF_SLEEP:-1}"; done
+fi
+[ -n "${STUB_TF_SLEEP:-}" ] && sleep "$STUB_TF_SLEEP"
+
+found=0
+if [ -n "${STUB_TF_FINDINGS:-}" ]; then
+    IFS=';' read -ra entries <<<"$STUB_TF_FINDINGS"
+    for e in "${entries[@]}"; do
+        IFS='|' read -r detector verified rel line <<<"$e"
+        jq -nc --arg d "$detector" --argjson v "$verified" --arg f "$scan_dir/$rel" --argjson l "$line" --arg m "$marker" \
+            '{SourceMetadata:{Data:{Filesystem:{file:$f,line:$l}}},SourceID:1,DetectorName:$d,Verified:$v,
+              Raw:$m,RawV2:($m+"v2"),Redacted:$m,ExtraData:{secret:$m},VerificationError:("dial https://x.invalid/"+$m)}'
+        found=1
+    done
+fi
+if [ -n "${STUB_TF_ERRLOG:-}" ]; then
+    jq -nc --arg msg "$STUB_TF_ERRLOG" --arg m "$marker" \
+        '{level:"error",ts:"2026-01-01T00:00:00Z",logger:"trufflehog",msg:$msg,url:("https://verify.invalid/"+$m),error:$m}' >&2
+fi
+[ -n "${STUB_TF_RAWERR:-}" ] && printf '%s\n' "$STUB_TF_RAWERR" >&2
+chunks="${STUB_TF_CHUNKS:-$(find "$scan_dir" -type f 2>/dev/null | wc -l)}"
+jq -nc --argjson c "$chunks" '{level:"info-0",ts:"2026-01-01T00:00:00Z",logger:"trufflehog",msg:"finished scanning",chunks:$c,bytes:1}' >&2
+if [ -n "${STUB_TF_RC:-}" ]; then exit "$STUB_TF_RC"; fi
+if [ "$found" -eq 1 ]; then exit 183; fi
+exit 0

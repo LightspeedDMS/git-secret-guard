@@ -1,0 +1,169 @@
+# Coverage report: `doctor`
+
+The hook cannot report a repository where it never runs. `git-secret-guard doctor [--roots DIR...]` checks the machine and
+every repository under the roots and lists what is not protected, with the config file responsible.
+
+```bash
+git-secret-guard doctor                          # machine + every repository under ~/Dev
+git-secret-guard doctor --roots ~/Dev ~/work     # other roots (several allowed)
+```
+
+**It is read-only.** It runs `git config`, `git hook list pre-commit`, `git rev-parse`, `git ls-tree`, `git cat-file`,
+`git ls-files`, `<tool> --version` and, for a repository with a `.gitleaks.toml` at HEAD, the same gitleaks pre-flight the
+hook runs. It writes nothing: no file, no git config, no state. Its only scratch space is one private directory under
+`$TMPDIR` (or `/tmp`), removed on exit. `tests/test_doctor_readonly.sh` checksums every file of a sandbox (hashes, modes,
+sizes, modification times: config files, repositories, state and share dirs) before and after a run over repositories
+with every kind of problem, and requires the temp directory to be empty afterwards. Before any HEAD read it exports
+`GIT_NO_REPLACE_OBJECTS=1`, unsets the four `GIT_*_PATHSPECS` variables and every repository-local `GIT_*` variable (a
+`GIT_DIR` inherited from a calling hook cannot point every check at one repository), and sets `GIT_OPTIONAL_LOCKS=0`.
+
+**It runs nothing a repository configures, and it contacts no remote.** The repositories it reads are other people's
+checkouts, so after the variable cleanup above doctor exports `GIT_NO_LAZY_FETCH=1` (a missing blob or tree in a partial
+clone is reported as unreadable, never fetched through the promisor remote: no `uploadpack`, `sshCommand` or credential
+helper runs) and forces `core.fsmonitor=false` through `GIT_CONFIG_COUNT` (command scope beats repository config; reading
+the index would otherwise start the repository's fsmonitor command). This is doctor-only: the hook runs inside the
+committer's own repository, where git already runs that config, and it never loads the doctor code. Checked and found
+harmless: `gc.auto` and `maintenance.auto` (no command doctor runs triggers them), `core.hooksPath` hooks such as
+`reference-transaction` and `post-index-change` (doctor updates no ref and writes no index), diff and textconv drivers
+(doctor diffs nothing in the repositories). A repository git refuses for ownership reasons (`safe.directory`) is listed as
+`cannot be inspected: fatal: detected dubious ownership ...`, not a doctor error. `tests/test_doctor_readonly.sh` plants a
+marker-writing fsmonitor and hooks, and a `--filter=blob:none` partial clone served by a local `file://` remote with a
+marker-writing `uploadpack`, and requires no marker file and an unchanged object store.
+
+**It is time-bounded.** Every git call of the repository phase runs under the settings' `timeout`, limited by
+`DOCTOR_TIMEOUT_SECONDS` in the settings file (default 30, a positive integer; an invalid value is a machine PROBLEM). A
+repository whose config makes git block (an `include.path` pointing at a FIFO, say) becomes `cannot be inspected: timed out
+after 30s` or `cannot read the hooks git runs (... exit 124: timed out after 30s)`, and the run goes on. The gitleaks
+pre-flight uses the smaller of that value and `SCAN_TIMEOUT_SECONDS`; its timeout reads `gitleaks timed out after Ns loading
+.gitleaks.toml at HEAD (doctor's limit; the hook allows 300s)`. If `timeout` itself is unusable no git is run in the
+repository phase and every repository is listed as not inspected. The timer's service adds `TimeoutStartSec=1h` as the
+outer bound.
+
+## Machine checks
+
+| Check | Problem when |
+|---|---|
+| Installed | no state file (`not installed`) or an unreadable one |
+| State records | `tools_installed_by_us`, `tools_placed` or `tools_replaced` hold an invalid word or a tool install does not manage (PROBLEM); two hashes for one tool (an install did not finish placing it) or an aside file recorded in `tools_replaced` that is gone (WARNING) |
+| Hook config | `hook.git-secret-guard.event` is not exactly one `pre-commit`, `.command` is not exactly one value equal to the installed `hooks/secret-scan`, that file is missing or not executable, or `enabled` is false in the global or system config. A wrong count is reported as `has 2 values (global <file>; global <file>), 1 of them the installed hook`: **never the values**, a global command can hold a token and the timer writes this output to the journal |
+| Tools | the settings file is missing, or `TRUFFLEHOG_BIN`, `GITLEAKS_BIN`, `JQ_BIN`, `SETSID_BIN`, `TIMEOUT_BIN` is not an absolute executable, or a scanner does not report the version `tools.lock` pins (judged exactly like `install` and `status`) |
+| `core.hooksPath` | any global value is left, including one in the XDG config or in an included file (the file is named) |
+| git | WARNING for every reachable git older than 2.54: all `git` on `PATH` plus `/usr/bin/git` (2.52 on this machine), by path and version. Such a git ignores config hooks silently, so commits made with it are **not scanned**. Doctor itself needs the git first on `PATH` to be 2.54 or newer (otherwise it exits 2) |
+| Timer | only when the state says a timer is installed: both unit files exist, were written by install, and `SYSTEMCTL_BIN` in the settings is usable |
+
+## Repository discovery
+
+Every `.git` entry (directory or file) at most **three levels** below a root is a repository: `ROOT/a`, `ROOT/a/b`,
+`ROOT/a/b/c`, and the root itself. `node_modules` directories are not entered. Symlinks are not followed. Repositories are
+deduplicated by `git rev-parse --git-common-dir`, so a **worktree** is reported once, under its main repository (shown as
+`worktrees: ...`; when the main repository is outside the roots it is still named, from its common dir). Bounds, all
+fail-closed: more than 2000 `.git` entries, a root that is not a directory, or a `find` failure that is not a permission
+problem is a doctor error (exit status 2), never a silently shorter list. **A directory the user cannot read** (a database
+data dir, say) does not stop the report: it is listed under `not searched:` as `PROBLEM  cannot read <dir>; repositories
+below it are not checked`, the rest is checked, and the exit status is 1. A `.git` that git cannot open is **listed**
+(`cannot be inspected: ...`), not skipped; so is a `.git` entry that does not resolve to its own directory (an empty
+`parent/fixtures/sub/.git` makes git answer for `parent`: it is reported as `sub`, `git resolves it to <parent>`, and the
+parent is judged on its own). Bare repositories have no `.git` entry and are not found.
+
+## Per-repository checks
+
+| Check | Result |
+|---|---|
+| Is the hook effective? | `git-secret-guard` must be listed, with no prefix, by `git hook list pre-commit`. A `disabled` or `event-disabled` line means `hook.git-secret-guard.enabled=false` or `hook.pre-commit.enabled=false`; the report says `disabled in local config: <key>=<value> (<file>)` and names the scope that holds the key (local, global, worktree, command) and the file git read it from (`--show-origin`, also an included file). Not listed at all means no `hook.git-secret-guard.event=pre-commit` reaches the repository; an event without its command (git refuses) reads `hook not reached: the global hook config is incomplete (see machine section)`. **This check runs in the main checkout and in every linked worktree**: with `extensions.worktreeConfig=true` a worktree can switch the hook off in its own `config.worktree`, and the finding is shown under the main repository as `worktree <path>: disabled in worktree config: ...`. A finding the main checkout already has (shared config) is not repeated per worktree. PROBLEM |
+| Command overridden? | the last `hook.git-secret-guard.command` comes from a non-global scope and is not the installed script: `command overridden in local config: hook.git-secret-guard.command (<file>)`. The value is never printed. PROBLEM |
+| HEAD `.secret-scan-ignore` | validated with the hook's own code (`scan_ignore_parse`, `scan_ignore_scope`): a line without a reason is a PROBLEM with its line number, as are a symlink or directory, a control character, a `..` component and more than 1000 lines (the hook blocks every commit on these); a catch-all (`**`, `./**`, a union of patterns that covers every tracked file, `*` for top-level files) is a WARNING that quotes the pattern as written, cut at 60 characters (a cut is always marked with `…`). Only HEAD counts, never the index or the work tree, and a `git replace` ref cannot substitute it |
+| HEAD `.gitleaks.toml` | the hook's own pre-flight (`gitleaks_config_preflight`, under `SCAN_TIMEOUT_SECONDS` from the settings): a config that does not load (an `[extend] path`, a syntax error, a timeout) is a PROBLEM; one that loads but leaves gitleaks' built-in rules off is the hook's WARNING sentence. If gitleaks or timeout is unusable the check is reported as not done (WARNING), never skipped silently |
+| `.pre-commit-config.yaml` | info when `<common-dir>/hooks/pre-commit` is not the pre-commit framework's hook (`pre-commit install not run`) |
+| Repo-local `core.hooksPath` | info (husky and similar): config hooks run whatever it says, so it is harmless, and it is listed so you can see it |
+
+## Output and exit status
+
+```
+machine:
+  ok       installed: version 0.1.0 (state /home/me/.local/state/git-secret-guard/state)
+  ok       state records: 2 placed hash(es), 0 original(s) moved aside
+  ok       hook: hook.git-secret-guard.event=pre-commit, command=/home/me/.local/share/git-secret-guard/hooks/secret-scan (executable)
+  ok       trufflehog: /home/me/.local/bin/trufflehog 3.99.2 (pinned 3.99.2)
+  ok       gitleaks: /home/me/.local/bin/gitleaks 8.30.1 (pinned 8.30.1)
+  ok       jq: /usr/bin/jq
+  ok       core.hooksPath: no global value
+  ok       git: /usr/local/bin/git 2.56.0
+  WARNING  git: /usr/bin/git is git 2.52.0; it ignores config-based hooks without any message, so commits made with it are NOT scanned
+repos with findings:
+  /home/me/Dev/legacy
+    PROBLEM  disabled in local config: hook.git-secret-guard.enabled=false (/home/me/Dev/legacy/.git/config); remove that key to cover this repository
+  /home/me/Dev/web
+    info     core.hooksPath=.husky/_ in local config (/home/me/Dev/web/.git/config); harmless, config hooks run whatever it says
+summary: 57 repos, 56 covered
+warnings: 1 (listed above, they do not change the exit status)
+```
+
+The machine section is always printed in full. Only repositories with a finding follow it. A repository counts as
+**covered** when it has no PROBLEM (warnings and info do not change that). `warnings:` appears only when there are some.
+
+| Exit status | Meaning |
+|---|---|
+| exit status 0 | no PROBLEM anywhere (WARNING and info lines can still be printed) |
+| exit status 1 | at least one PROBLEM, on the machine or in a repository |
+| exit status 2 | doctor could not run or finish: git first on `PATH` older than 2.54, a root that is not a directory (`~/Dev` is the default root and must exist), a global git config that cannot be read, a bound exceeded, a `find` failure that is not a permission problem, a usage error. (An unreadable directory is a PROBLEM line and exit status 1, see discovery) |
+
+PROBLEM, WARNING and info are the three severities; a PROBLEM names what to do (`run git-secret-guard install`, remove a
+key from a named file). Nothing from a file's content, a secret or the environment is printed: not a reason text, not a
+command override value, not the probe value of the pre-flight. Repository names, paths and tool-provided text pass
+through a filter that turns control characters into `?`, as the hook does. Every value doctor cuts (a `core.hooksPath`
+value at 120 characters, a catch-all pattern at 60, state entries at 80, git's own error text at 200) ends with `…`, and a
+value that fits is printed whole, so a cut path is never mistaken for a complete, different one.
+
+**Limits.** The hook-effective check runs in every worktree, but the HEAD files (`.secret-scan-ignore`, `.gitleaks.toml`)
+are read at the main repository's HEAD: a linked worktree on another branch can carry a different `.secret-scan-ignore`,
+which is not read. A linked worktree outside `--roots` is not checked: only `.git` entries under the roots are looked at, even when its
+main repository is inside them. Bare repositories and repositories deeper than three levels are not found.
+Doctor reports what the config files say: before it looks it drops every variable that `git rev-parse --local-env-vars`
+lists, `GIT_CONFIG_PARAMETERS` and `GIT_CONFIG_COUNT` included, so a switch-off exported in your shell (or `--no-verify`)
+is not visible to it. A git older than 2.54 shows up only as the git warning above. `doctor` does not ask systemd whether
+the timer is enabled (see below).
+
+## The weekly timer
+
+```bash
+bin/git-secret-guard install --with-timer      # or: git-secret-guard install --with-timer
+journalctl --user -u git-secret-guard-doctor.service     # read the reports
+systemctl --user list-timers git-secret-guard-doctor.timer
+```
+
+`install --with-timer` writes `git-secret-guard-doctor.service` (a one-shot `ExecStart="<share>/bin/git-secret-guard" doctor`,
+with the `PATH` of the git install found first, followed by `/usr/local/bin:/usr/bin:/bin`, each directory once, because
+the user manager has its own; `TimeoutStartSec=1h`, because systemd gives a one-shot service no start timeout otherwise; and
+an `Environment=` line for each of `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CONFIG_HOME` and `GIT_CONFIG_GLOBAL` that was set
+when you ran install, because the user manager does not pass your login environment on and a custom one would make the
+timer's doctor report `not installed`) and `git-secret-guard-doctor.timer`
+(`OnCalendar=weekly`, `Persistent=true`, `WantedBy=timers.target`) into `${XDG_CONFIG_HOME:-~/.config}/systemd/user/`, then
+runs `systemctl --user enable --now git-secret-guard-doctor.timer`. The service output goes to the journal. Because doctor
+exits 1 on a PROBLEM, the unit is shown as failed in `systemctl --user status git-secret-guard-doctor.service` whenever
+the machine has a finding, which is what a timer can act on.
+
+- **Without `--with-timer` nothing is installed**, and `systemctl` is never called.
+- `systemctl` is looked up on `PATH` once, at install time, and its absolute path is written to the settings file as
+  `SYSTEMCTL_BIN`, like `jq`, `setsid` and `timeout`. Uninstall and doctor use that path and never search `PATH`
+  (`test_systemctl_is_looked_up_only_in_lib_install_sh`). A missing `systemctl` refuses the install before anything changes.
+- The state records `timer_installed=yes` before the units are written, so an interrupted install can still be uninstalled.
+  A plain `install` over an installed timer **keeps it recorded and leaves its enablement alone**: a timer you disabled
+  stays disabled, `systemctl` is never called and is not needed (a machine that lost it can still upgrade the hook; the
+  recorded `SYSTEMCTL_BIN` stays in the settings for `uninstall`). Units are rewritten only when they are ours and their text
+  changed, with a hint to run `systemctl --user daemon-reload`; a foreign unit is left alone, and a value that cannot go into
+  a unit file skips the refresh with a message. Only `--with-timer` writes and enables. `uninstall` is the way to remove it.
+- Units are written atomically and carry a marker line. Install refuses to overwrite a unit of the same name that it did not
+  write, and uninstall leaves such a unit alone and says so. A share, config or git path containing a quote, a backslash,
+  `%`, `$` or a control character is refused (a unit file cannot carry it safely); spaces are quoted.
+- A failing `systemctl --user enable --now` leaves the hook installed and scanning and says so; run
+  `install --with-timer` again once the cause (usually no user manager reachable) is fixed.
+- `uninstall` runs `systemctl --user disable --now git-secret-guard-doctor.timer`, removes both unit files, then runs
+  `systemctl --user daemon-reload`, all before the share dir goes (the settings that name `systemctl` live there). If any
+  step fails it stops with the units, share dir and state kept and says what to run; running `uninstall` again finishes.
+  If `systemctl` from the settings cannot run, it prints the manual `systemctl --user disable --now ...` command. A
+  `timers.target.wants/git-secret-guard-doctor.timer` enable link that dangles because the timer file is already gone is
+  removed too, but only a symlink whose own text is our timer unit path (a link to anything else, a live link and a regular
+  file stay).
+- **Tests never touch the real user manager.** Lifecycle tests put a recording `systemctl` stand-in first on every `PATH`
+  they use, write units into a scratch `XDG_CONFIG_HOME`, and validate the generated units with the real
+  `systemd-analyze --user verify` (a parser; it runs in an in-process test manager with a scratch `XDG_RUNTIME_DIR`).

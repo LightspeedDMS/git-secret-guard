@@ -27,7 +27,7 @@ test_an_old_git_on_ubuntu_names_the_ppa_command_and_changes_nothing() {
     assert_contains "$ERR" "git 2.43.0; config-based hooks need git >= 2.54, install refused" "the existing refusal"
     assert_contains "$ERR" "$UBUNTU_FIX" "the exact command"
     assert_contains "$ERR" "software-properties-common" "and the package add-apt-repository comes from"
-    assert_contains "$ERR" "Supported platforms" "and where the build path is described"
+    assert_contains "$ERR" "see docs/platforms.md" "and where the build path is described"
     nothing_changed "old git on ubuntu"
 }
 
@@ -52,7 +52,7 @@ test_debian_gets_a_source_build_pointer_and_no_ppa_command() {
     gsg install
     assert_rc 1 "old git on Debian"
     assert_contains "$ERR" "Debian" "names the distribution"
-    assert_contains "$ERR" "Supported platforms" "points at the build instructions"
+    assert_contains "$ERR" "see docs/platforms.md" "points at the build instructions"
     assert_not_contains "$ERR" "add-apt-repository" "a PPA exists for Ubuntu only"
     nothing_changed "old git on debian"
 }
@@ -70,7 +70,7 @@ test_other_distributions_and_a_missing_os_release_get_a_generic_text() {
         gsg install
         assert_rc 1 "old git, os-release [$release]"
         assert_contains "$ERR" "git >= 2.54 from your distribution" "a generic hint"
-        assert_contains "$ERR" "Supported platforms" "and the build pointer"
+        assert_contains "$ERR" "see docs/platforms.md" "and the build pointer"
         assert_not_contains "$ERR" "apt" "no apt command for [$release]"
     done
 }

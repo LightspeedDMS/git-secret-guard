@@ -215,7 +215,7 @@ test_the_project_gitignore_keeps_scratch_and_secret_paths_out_of_the_container_c
         run_cap gitx -C "$root" check-ignore -q -- "$p"
         assert_rc 0 "[$p] is ignored (taxonomy standard: .tmp/ .analysis/ reports/troubleshooting/, plus .env*), so the container copy does not hold it"
     done
-    for p in .gitignore README.md lib/common.sh tests/platform/ubuntu.sh plans/backlog/GitSecretGuard/Epic_GitSecretGuard.md tests/fixtures/husky/h \
+    for p in .gitignore README.md lib/common.sh tests/platform/ubuntu.sh docs/scan.md tests/fixtures/husky/h \
         reports/bugs/x.md reports/reviews/x.md plans/designs/x.md; do
         run_cap gitx -C "$root" check-ignore -q -- "$p"
         assert_rc 1 "[$p] is a project file and stays in the copy (reports/bugs/ is the no-remote bug tracker and must stay committable)"

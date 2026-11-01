@@ -73,19 +73,19 @@ install_fix_hint() {
     esac
 }
 
-# ^ external ppa:git-core/ppa carries git >= 2.54 for Ubuntu only; Ubuntu 24.04 ships 2.43; the build path is in README.md "Supported platforms"
+# ^ external ppa:git-core/ppa carries git >= 2.54 for Ubuntu only; Ubuntu 24.04 ships 2.43; the build path is in docs/platforms.md
 install_git_hint() {
     install_os_family
     case "$REPLY" in
         ubuntu)
             printf '%s: on Ubuntu get a current git with: sudo add-apt-repository ppa:git-core/ppa && sudo apt install git\n' "$GSG_NAME" >&2
-            printf '%s: add-apt-repository comes from the software-properties-common package; or build git from source, see README.md "Supported platforms"\n' "$GSG_NAME" >&2
+            printf '%s: add-apt-repository comes from the software-properties-common package; or build git from source, see docs/platforms.md\n' "$GSG_NAME" >&2
             ;;
         debian)
-            printf '%s: Debian has no PPA; install git >= 2.54 from a newer release or backports, or build it from source, see README.md "Supported platforms"\n' "$GSG_NAME" >&2
+            printf '%s: Debian has no PPA; install git >= 2.54 from a newer release or backports, or build it from source, see docs/platforms.md\n' "$GSG_NAME" >&2
             ;;
         *)
-            printf '%s: get git >= 2.54 from your distribution or build it from source, see README.md "Supported platforms"\n' "$GSG_NAME" >&2
+            printf '%s: get git >= 2.54 from your distribution or build it from source, see docs/platforms.md\n' "$GSG_NAME" >&2
             ;;
     esac
 }

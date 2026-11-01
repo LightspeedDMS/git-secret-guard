@@ -304,7 +304,7 @@ test_fresh_install_copies_the_package_into_the_share_dir_and_links_the_cli() {
     [ -x "$LC_DATA/hooks/secret-scan" ] && [ -x "$LC_DATA/bin/git-secret-guard" ] || fail "hook and CLI keep their exec bit"
     assert_eq "$(readlink -- "$LC_BIN/git-secret-guard")" "$LC_DATA/bin/git-secret-guard" "the link in ~/.local/bin points at the installed CLI"
     assert_no_file "$LC_DATA/tests" "tests are not shipped"
-    assert_no_file "$LC_DATA/plans" "plans are not shipped"
+    assert_no_file "$LC_DATA/docs" "docs are not shipped"
     gsg_installed version
     assert_eq "$OUT" "git-secret-guard $(<"$GSG_PROJECT/VERSION")" "the installed CLI runs from the symlink"
 }

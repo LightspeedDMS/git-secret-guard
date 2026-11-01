@@ -121,116 +121,203 @@ test_the_exit_trap_is_set_before_the_work_dir_is_created() {
     [ "$trap_line" -lt "$mktemp_line" ] || fail "trap at line $trap_line comes after mktemp at line $mktemp_line"
 }
 
-test_the_readme_names_utf16_as_unscanned() {
+test_the_docs_name_utf16_as_unscanned() {
     cd -- "$GSG_PROJECT" || return 1
-    grep -q 'UTF-16' README.md || fail "README.md does not say that UTF-16 text counts as binary and is not scanned"
+    grep -q 'UTF-16' docs/scan.md || fail "docs/scan.md does not say that UTF-16 text counts as binary and is not scanned"
 }
 
-test_the_readme_documents_every_exemption_mechanism_and_its_verified_syntax() {
+# ^ why docs/exemptions.md and docs/scan.md, not docs/exemptions.md alone; core.bigFileThreshold and core.attributesFile are in docs/scan.md
+test_the_docs_document_every_exemption_mechanism_and_its_verified_syntax() {
     cd -- "$GSG_PROJECT" || return 1
     local needle
-    for needle in '## Exemptions' '.secret-scan-ignore' 'git ls-tree' 'regular file' 'reason is mandatory' 'WARNING' 'together exempt every tracked file' \
-        '[extend] path' 'git commit --amend' 'GIT_LITERAL_PATHSPECS' 'does not load on its own' 'absolute path' 'core.bigFileThreshold' \
+    for needle in '# Exemptions' '.secret-scan-ignore' 'git ls-tree' 'regular file' 'reason is mandatory' 'WARNING' 'together exempt every tracked file' \
+        '[extend] path' 'git commit --amend' 'GIT_LITERAL_PATHSPECS' 'does not load on its own' 'core.bigFileThreshold' \
         'core.attributesFile=/dev/null' 'GIT_NO_REPLACE_OBJECTS' 'git replace' \
         'trufflehog:ignore' 'gitleaks:allow' '.gitleaks.toml' '.gitleaksignore' '--gitleaks-ignore-path' 'useDefault = true' \
         'git config hook.git-secret-guard.enabled false' "GIT_CONFIG_PARAMETERS=\"'hook.git-secret-guard.enabled'='false'\"" '--no-verify'; do
-        grep -qiF -- "$needle" README.md || fail "README.md does not mention [$needle]"
+        grep -qiF -- "$needle" docs/exemptions.md docs/scan.md || fail "docs/exemptions.md and docs/scan.md do not mention [$needle]"
     done
+    grep -qiF 'absolute path' docs/install.md docs/doctor.md || fail "docs/install.md and docs/doctor.md do not mention [absolute path]"
 }
 
-test_the_readme_documents_install_upgrade_and_uninstall() {
+test_the_docs_document_install_upgrade_and_uninstall() {
     cd -- "$GSG_PROJECT" || return 1
     local needle
     # shellcheck disable=SC2088,SC2016
-    for needle in '## Install, upgrade and uninstall' 'bin/git-secret-guard install' 'git-secret-guard uninstall' 'git-secret-guard status' \
+    for needle in '# Install, upgrade and uninstall' 'bin/git-secret-guard install' 'git-secret-guard uninstall' 'git-secret-guard status' \
         '--replace-hooks-path' '--remove-tools' 'hooks-path-backup-' 'previous `core.hooksPath`' 'verbatim' \
         'tools.lock' 'SHA-256' 'GSG_TOOLS_BASE_URL' 'GSG_TOOLS_LOCK' 'still verified' \
         'XDG_DATA_HOME' 'XDG_STATE_HOME' '~/.local/bin' 'SETSID_BIN' 'TIMEOUT_BIN' \
         '/usr/bin/git' '2.52' 'ignores config hooks' 'Linux' 'macOS' 'nothing to do' \
         'gsg-replaced-' 'includeIf' 'XDG config' 'recorded value differs' '50 MB' '10000 files' 'curlrc' \
         '%(prefix)/' '~user/' 'real directory' 'replaced in place' 'GIT_CONFIG_GLOBAL'; do
-        grep -qF -- "$needle" README.md || fail "README.md does not mention [$needle]"
+        grep -qF -- "$needle" docs/install.md || fail "docs/install.md does not mention [$needle]"
     done
-    if grep -q 'Wire it manually' README.md; then fail "the manual wiring section is still in README.md"; fi
+    if grep -q 'Wire it manually' README.md docs/*.md; then fail "the manual wiring section is still in the docs"; fi
 }
 
-test_the_readme_documents_doctor_and_the_timer() {
+test_the_docs_document_doctor_and_the_timer() {
     cd -- "$GSG_PROJECT" || return 1
     local needle
     # shellcheck disable=SC2016
-    for needle in '## Coverage report: `doctor`' 'git-secret-guard doctor' '--roots' 'node_modules' 'three levels' '--git-common-dir' 'worktree' \
+    for needle in '# Coverage report: `doctor`' 'git-secret-guard doctor' '--roots' 'node_modules' 'three levels' '--git-common-dir' 'worktree' \
         'git hook list pre-commit' 'disabled in local config' 'command overridden' 'pre-commit install not run' 'read-only' \
         'machine:' 'repos with findings:' 'summary:' 'exit status 0' 'exit status 1' 'exit status 2' 'PROBLEM' 'WARNING' 'info' \
         '/usr/bin/git' '.secret-scan-ignore' 'catch-all' '.gitleaks.toml' 'tools_placed' 'core.hooksPath' 'GIT_NO_REPLACE_OBJECTS' \
         '--with-timer' 'git-secret-guard-doctor.timer' 'git-secret-guard-doctor.service' 'OnCalendar=weekly' 'systemctl --user enable --now' \
         'journalctl --user -u git-secret-guard-doctor.service' 'SYSTEMCTL_BIN' 'timer_installed' 'systemd-analyze --user verify' \
         'XDG_CONFIG_HOME' 'daemon-reload' 'systemctl --user disable --now'; do
-        grep -qF -- "$needle" README.md || fail "README.md does not mention [$needle]"
+        grep -qF -- "$needle" docs/doctor.md || fail "docs/doctor.md does not mention [$needle]"
     done
-    if grep -q 'comes with a later story' README.md; then fail "README.md still says doctor is a later story"; fi
-    if grep -q 'The doctor, in a later story' README.md; then fail "README.md still says the doctor is a later story in the exemptions section"; fi
+    if grep -q 'comes with a later story' README.md docs/*.md; then fail "the docs still say doctor is a later story"; fi
+    if grep -q 'The doctor, in a later story' README.md docs/*.md; then fail "the docs still say the doctor is a later story in the exemptions section"; fi
 }
 
-test_the_readme_says_a_linked_worktree_outside_the_roots_is_not_checked() {
+test_the_docs_say_a_linked_worktree_outside_the_roots_is_not_checked() {
     cd -- "$GSG_PROJECT" || return 1
     # shellcheck disable=SC2016
-    grep -qF 'A linked worktree outside `--roots` is not checked' README.md || fail "README.md does not say that a linked worktree outside --roots is not checked"
+    grep -qF 'A linked worktree outside `--roots` is not checked' docs/doctor.md || fail "docs/doctor.md does not say that a linked worktree outside --roots is not checked"
 }
 
-test_the_readme_has_a_supported_platforms_section() {
+test_the_docs_have_a_supported_platforms_chapter() {
     cd -- "$GSG_PROJECT" || return 1
     local needle
     # shellcheck disable=SC2016
-    for needle in '## Supported platforms' 'RHEL 9' 'Ubuntu 24.04' 'tests/platform/ubuntu.sh' 'ppa:git-core/ppa' \
+    for needle in '# Supported platforms' 'RHEL 9' 'Ubuntu 24.04' 'tests/platform/ubuntu.sh' 'ppa:git-core/ppa' \
         'sudo add-apt-repository ppa:git-core/ppa && sudo apt install git' 'sudo apt install jq' 'git-2.56.0.tar.xz' \
         '26c56c296b38c0695b26fa95f475f1d01704d2d38e73465ca30b0b2f5dc789d3' 'NO_RUST=1' 'mawk' 'gawk' 'macOS is not supported yet'; do
-        grep -qF -- "$needle" README.md || fail "README.md does not mention [$needle] in its supported platforms"
+        grep -qF -- "$needle" docs/platforms.md || fail "docs/platforms.md does not mention [$needle] in its supported platforms"
     done
 }
 
-test_the_readme_states_the_platform_test_trust_decisions() {
+test_the_docs_state_the_platform_test_trust_decisions() {
     cd -- "$GSG_PROJECT" || return 1
     local needle
     for needle in 'RHEL 9-compatible (tested on Rocky Linux 9.7)' 'sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852' \
         'F911AB184317630C59970973E363C90F8F1B6217' 'env -i' '/run/secrets' '--init' 'not version-pinned' 'Launchpad'; do
-        grep -qF -- "$needle" README.md || fail "README.md does not state [$needle]"
+        grep -qF -- "$needle" docs/platforms.md || fail "docs/platforms.md does not state [$needle]"
     done
-    if grep -qF "tested on the maintainer's machine" README.md; then fail "README.md still says the maintainer's machine instead of the distribution"; fi
+    if grep -qF "tested on the maintainer's machine" README.md docs/*.md; then fail "the docs still say the maintainer's machine instead of the distribution"; fi
 }
 
 # shellcheck disable=SC2016
-test_the_readme_states_the_container_config_copy_and_ppa_rules() {
+test_the_docs_state_the_container_config_copy_and_ppa_rules() {
     cd -- "$GSG_PROJECT" || return 1
     local needle
     for needle in 'exact list of mount points' '/proc/self/mountinfo' 'volumes' 'devices' 'hooks_dir' 'containers.conf.d' '`copy-file:`' \
         'untracked files that are not ignored are copied' '.tmp/' '.analysis/' 'reports/' '.env*' 'add-apt-repository -y -n' '`podman rm -f` runs under `timeout`'; do
-        grep -qF -- "$needle" README.md || fail "README.md does not state [$needle]"
+        grep -qF -- "$needle" docs/platforms.md || fail "docs/platforms.md does not state [$needle]"
     done
-    if grep -qF 'no ignored local folder (`.tmp/`, `reports/`, `.env`) reaches the container' README.md; then
-        fail "README.md still promises that nothing ignored reaches the container without saying the project .gitignore does it"
+    if grep -qF 'no ignored local folder (`.tmp/`, `reports/`, `.env`) reaches the container' README.md docs/*.md; then
+        fail "the docs still promise that nothing ignored reaches the container without saying the project .gitignore does it"
     fi
 }
 
 # shellcheck disable=SC2016
-test_the_readme_separates_what_the_platform_run_enforces_from_what_it_trusts() {
+test_the_docs_separate_what_the_platform_run_enforces_from_what_it_trusts() {
     cd -- "$GSG_PROJECT" || return 1
     local needle
-    for needle in '#### What the platform run enforces' '#### What the platform run trusts' 'CONTAINERS_CONF' 'ping_group_range' 'mounted more than once' \
+    for needle in '### What the platform run enforces' '### What the platform run trusts' 'CONTAINERS_CONF' 'ping_group_range' 'mounted more than once' \
         'fstype' 'namespaces' '--host-ns' 'reports/troubleshooting/' 'reports/bugs/' 'image digest' 'default_mounts_file' 'not compared'; do
-        grep -qF -- "$needle" README.md || fail "README.md does not state [$needle]"
+        grep -qF -- "$needle" docs/platforms.md || fail "docs/platforms.md does not state [$needle]"
     done
     for needle in 'catch what they add' 'Probed with a real container: a `volumes` layer aborted' 'The system layers'; do
-        if grep -qF -- "$needle" README.md; then fail "README.md still says [$needle], which overstates what is enforced"; fi
+        if grep -qF -- "$needle" README.md docs/*.md; then fail "the docs still say [$needle], which overstates what is enforced"; fi
     done
 }
 
-test_the_readme_does_not_claim_the_hook_has_no_PATH_lookup() {
+test_the_docs_do_not_claim_the_hook_has_no_PATH_lookup() {
     cd -- "$GSG_PROJECT" || return 1
     local needle
     # shellcheck disable=SC2016
-    if grep -qF 'There is no `PATH` lookup' README.md; then fail "README.md still claims there is no PATH lookup"; fi
+    if grep -qF 'There is no `PATH` lookup' README.md docs/*.md; then fail "the docs still claim there is no PATH lookup"; fi
     for needle in 'shebang' 'exec-path' 'realpath' 'mktemp'; do
-        grep -qF -- "$needle" README.md || fail "README.md does not mention [$needle] among what the hook finds through PATH"
+        grep -qF -- "$needle" docs/scan.md || fail "docs/scan.md does not mention [$needle] among what the hook finds through PATH"
+    done
+}
+
+GSG_README_MAX_LINES=120
+
+test_the_readme_stays_a_short_overview() {
+    cd -- "$GSG_PROJECT" || return 1
+    local n
+    n="$(wc -l <README.md)"
+    [ "$n" -le "$GSG_README_MAX_LINES" ] || fail "README.md has $n lines, more than $GSG_README_MAX_LINES: move detail into docs/"
+}
+
+# ^ why exit 3 on an indented or ~~~ fence, not guess; a half-handled fence hides links and headings from the check
+md_body() {
+    awk '/^[ \t]+```/ || /^[ \t]*~~~/ { printf "%s:%d: unsupported fence (only backtick fences at column 0 are handled)\n", FILENAME, NR > "/dev/stderr"; exit 3 }
+        /^```/ { fence = !fence; next } !fence' "$1"
+}
+
+# ^ external GitHub heading slug = lowercase, punctuation except _ - dropped, spaces to hyphens; test:test_the_markdown_link_check_flags_planted_breakage
+md_slugs() {
+    local body
+    body="$(md_body "$1")" || return $?
+    printf '%s\n' "$body" | awk '/^#+ / { t = $0; sub(/^#+ +/, "", t); t = tolower(t); gsub(/[^a-z0-9 _-]/, "", t); gsub(/ /, "-", t)
+        n = seen[t]++; print (n ? t "-" n : t) }'
+}
+
+md_link_targets() {
+    local body
+    body="$(md_body "$1")" || return $?
+    printf '%s\n' "$body" | { grep -o ']([^)]*)' || [ $? -eq 1 ]; } | sed 's/^](//; s/)$//'
+}
+
+# ^ why skip fenced code, web and mailto links, not check them; examples, external URLs != repository files
+md_link_problems() {
+    local md="$1" targets slugs target path anchor dest
+    targets="$(md_link_targets "$md" 2>&1)" || { printf '%s\n' "$targets"; return 0; }
+    while IFS= read -r target; do
+        [ -n "$target" ] || continue
+        case "$target" in http://* | https://* | mailto:*) continue ;; esac
+        path="${target%%#*}"
+        anchor=""
+        case "$target" in *'#'*) anchor="${target#*#}" ;; esac
+        if [ -z "$path" ]; then dest="$md"; else dest="$(dirname -- "$md")/$path"; fi
+        if [ ! -f "$dest" ]; then
+            printf '%s: [%s] points at %s, which is not a file\n' "$md" "$target" "$dest"
+        elif [ -n "$anchor" ]; then
+            slugs="$(md_slugs "$dest" 2>&1)" || { printf '%s\n' "$slugs"; continue; }
+            printf '%s\n' "$slugs" | grep -qxF -- "$anchor" || printf '%s: [%s] has no heading #%s in %s\n' "$md" "$target" "$anchor" "$dest"
+        fi
+    done <<<"$targets"
+}
+
+test_every_relative_markdown_link_in_the_docs_resolves() {
+    cd -- "$GSG_PROJECT" || return 1
+    local md links=0
+    for md in README.md docs/*.md; do
+        [ -f "$md" ] || { fail "$md does not exist"; continue; }
+        run_cap md_link_problems "$md"
+        assert_empty "$OUT" "broken links in $md"
+        links=$((links + $(md_link_targets "$md" | wc -l)))
+    done
+    [ "$links" -ge 10 ] || fail "only $links links outside code fences found in README.md and docs/*.md"
+    [ -f docs/install.md ] && [ -f docs/platforms.md ] && [ -f docs/scan.md ] && [ -f docs/exemptions.md ] && [ -f docs/doctor.md ] \
+        || fail "one of the five docs files is missing"
+}
+
+# shellcheck disable=SC2016
+test_the_markdown_link_check_flags_planted_breakage() {
+    mkdir -p -- "$SANDBOX/md"
+    printf '# A\n\n## Same\n\n## Same\n\n[ok](b.md#target-one) [self](#same-1) [web](https://example.com/x#y)\n[gone](nope.md) [bad](b.md#missing) [selfbad](#nowhere)\n```\n[fenced](also-missing.md)\n```\n' >"$SANDBOX/md/a.md"
+    printf '# B\n\n## Target `One`\n' >"$SANDBOX/md/b.md"
+    run_cap md_link_problems "$SANDBOX/md/a.md"
+    assert_contains "$OUT" "[nope.md] points at" "missing file"
+    assert_contains "$OUT" "[b.md#missing] has no heading #missing" "missing anchor in another file"
+    assert_contains "$OUT" "[#nowhere] has no heading #nowhere" "missing anchor in the same file"
+    assert_eq "$(printf '%s\n' "$OUT" | grep -c .)" 3 "only the three planted breaks; ok, repeated heading, web and fenced links pass"
+    assert_eq "$(md_link_targets "$SANDBOX/md/a.md" | wc -l)" 6 "six links outside fences are counted, the fenced one is not"
+    printf '# C\n\n  ```\n  [x](y.md)\n  ```\n' >"$SANDBOX/md/indented.md"
+    printf '# D\n\n~~~\n[x](y.md)\n~~~\n' >"$SANDBOX/md/tilde.md"
+    for f in indented tilde; do
+        run_cap md_link_problems "$SANDBOX/md/$f.md"
+        assert_contains "$OUT" "unsupported fence" "link check on a $f fence says so instead of half-handling it"
+        run_cap md_slugs "$SANDBOX/md/$f.md"
+        assert_rc 3 "heading slugs of a $f fence"
+        assert_contains "$ERR" "unsupported fence" "slugs of a $f fence say so"
     done
 }
 

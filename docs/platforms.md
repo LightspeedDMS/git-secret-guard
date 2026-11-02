@@ -270,3 +270,28 @@ Both run the whole suite and the install E2E as a non-root user, in a podman-mac
   `podman images --digests`). Its repositories already serve 9.8, so the run mixes 9.7 base packages with current 9.x updates.
 - **Not covered:** x86_64 (the `linux_x64` and `linux_amd64` rows of `tools.lock` are not exercised on an arm64 VM), and macOS itself, which
   `tests/run.sh` covers natively.
+
+## Maintainer notes
+
+- **Bumping the Ubuntu image digest.** `IMAGE` in `tests/platform/ubuntu.sh` is the manifest-list digest. Look it up without skopeo: an anonymous
+  token from `auth.docker.io/token?service=registry.docker.io&scope=repository:library/ubuntu:pull`, then
+  `curl -I -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json'
+  https://registry-1.docker.io/v2/library/ubuntu/manifests/24.04` and read `docker-content-digest`. It equals the DIGEST column of
+  `podman images --digests` and one of the two `podman image inspect --format '{{.RepoDigests}}'` entries (the other is the platform manifest,
+  not the list). Then `podman pull` the new reference, change `IMAGE` and the digest in this file (`test_the_docs_state_the_platform_test_trust_decisions`
+  asserts it). The Rocky image (`ROCKY_IMAGE` in `tests/platform/mac-linux.sh`, `test_the_mac_runner_uses_the_pinned_images`) is bumped the same way.
+- **Bumping the PPA key fingerprint.** On 24.04 `add-apt-repository` writes `/etc/apt/sources.list.d/git-core-ubuntu-ppa-noble.sources` with the
+  key inlined in an indented `Signed-By:` block (blank armor lines as ` .`) and nothing under `trusted.gpg.d`. `ppa_key_fingerprints` feeds that
+  armor to `gpg --show-keys --with-colons` in a scratch `GNUPGHOME` and prints field 10 of the first `fpr` record after each `pub`. To bump
+  `PPA_PINNED_FPR` (in `tests/platform/ubuntu-container.sh`), read the new fingerprint the same way inside a container and compare it with
+  Launchpad's page for the PPA before changing the constant.
+- **shellcheck digests.** koalaman publishes no digests for the release tarballs; `SHELLCHECK_SHA256_X86_64` and `SHELLCHECK_SHA256_AARCH64` in
+  `tests/platform/ubuntu-container.sh` were computed once from the downloads.
+- **Deriving the mount table.** Podman's default masked and read-only paths are strings in its binary:
+  `strings "$(command -v podman)" | grep -oE '/(proc|sys)/[A-Za-z0-9_./-]+'` (the Go strings run together, so read them by name). Probing a
+  mask needs a path that exists: crun skips an absent masked path (no mount, rc 0), and `--tmpfs` on sysfs fails with `Permission denied`.
+  Use an existing directory, for example `--security-opt mask=/sys/devices/virtual/misc`; the mask then shows as a `tmpfs` mount at exactly that
+  mount point, which the check reports as stray until it is added to `ISOLATION_MOUNT_RULES` (`MOUNTPOINT=FSTYPE`, `*` = any fstype).
+- **Entering the platform container from a shell.** `podman exec` needs the same `env -i` environment the script uses
+  (`env -i HOME=<scratch> PATH XDG_RUNTIME_DIR XDG_DATA_HOME XDG_CONFIG_HOME LANG=C.UTF-8 podman exec ...`); a plain shell's podman falls back to
+  cgroupfs and crun fails with `cgroup.procs: Permission denied` (rc 126). A container started with `sleep 7200` for iteration exits after two hours.

@@ -89,3 +89,7 @@ tests/platform/ubuntu.sh     # the same suite in an Ubuntu 24.04 container
 ```
 
 Notes for contributors are in `CLAUDE.md`; the epic and stories are GitHub issues (epic #1).
+
+## License
+
+MIT, see `LICENSE`. `tests/fixtures/husky/h` is husky's own file under its MIT license.

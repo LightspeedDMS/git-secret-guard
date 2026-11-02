@@ -342,6 +342,8 @@ test_real_every_spelling_of_extend_path_is_refused() {
     for spec in "${EXTEND_SPELLINGS[@]}"; do
         name="${spec%%|*}"
         body="${spec#*|}"
+        # ^ external macOS has no /proc; the proc-self-cwd spelling names no file there and its control run cannot mute anything
+        if [ "$name" = proc-self-cwd ] && [ "$TEST_OS" = Darwin ]; then continue; fi
         n=$((n + 1))
         mkdir -p -- "$SANDBOX/ev$n/scan" "$SANDBOX/ev$n/ign"
         printf '[allowlist]\npaths = [%s]\n' "'''.*'''" >"$SANDBOX/ev$n/scan/base.toml"

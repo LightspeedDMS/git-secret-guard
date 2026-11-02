@@ -45,11 +45,11 @@ state_read() {
 }
 
 # ^ security umask 077 and a 700 dir => the recorded hooksPath and backup tarballs are readable by this user only
-# ^ order state_make_dir before any file moves => "nothing was changed" holds; reason = last field of the mkdir error
+# ^ order state_make_dir before any file moves => the refusal changed nothing of ours; brew_unchanged_text adds the brew install; reason = last mkdir field
 state_make_dir() {
     local err
     err="$( (umask 077 && mkdir -p -- "$GSG_STATE_DIR") 2>&1)" || {
-        printf '%s: cannot create the state dir %s (%s); nothing was changed\n' "$GSG_NAME" "$GSG_STATE_DIR" "${err##*: }" >&2
+        printf '%s: cannot create the state dir %s (%s); %s\n' "$GSG_NAME" "$GSG_STATE_DIR" "${err##*: }" "$(brew_unchanged_text)" >&2
         return 1
     }
     chmod 700 -- "$GSG_STATE_DIR" || return 1

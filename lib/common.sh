@@ -18,10 +18,10 @@ GSG_REPO_GITLEAKS_IGNORE=repo-gitleaksignore
 # shellcheck disable=SC2034
 GSG_JQ_CLEAN='def clean: tostring | gsub("[\u0000-\u001f\u007f]"; "?"); '
 
-# ^ security unset before source => an inherited TRUFFLEHOG_BIN/GITLEAKS_BIN/JQ_BIN/SETSID_BIN/TIMEOUT_BIN cannot fill a gap (silent bypass)
+# ^ security unset before source => an inherited TRUFFLEHOG_BIN/GITLEAKS_BIN/JQ_BIN/SETSID_BIN/TIMEOUT_BIN/BASH_BIN/GNUBIN_DIR cannot fill a gap (silent bypass)
 load_settings() {
     local file="$1"
-    unset TRUFFLEHOG_BIN GITLEAKS_BIN JQ_BIN SETSID_BIN TIMEOUT_BIN SYSTEMCTL_BIN SCAN_TIMEOUT_SECONDS DOCTOR_TIMEOUT_SECONDS
+    unset TRUFFLEHOG_BIN GITLEAKS_BIN JQ_BIN SETSID_BIN TIMEOUT_BIN SYSTEMCTL_BIN BASH_BIN GNUBIN_DIR SCAN_TIMEOUT_SECONDS DOCTOR_TIMEOUT_SECONDS
     if [ ! -f "$file" ] || [ ! -r "$file" ]; then
         printf 'settings file is missing or unreadable: %s\n' "$file" >&2
         return 1
@@ -111,4 +111,24 @@ tool_unusable() {
         return 1
     fi
     return 0
+}
+
+# ^ invariant prints the value hook.git-secret-guard.command must hold, the hook path alone on Linux, "'<bash>' '<hook>'" when a bash is recorded (macOS)
+# ^ why the recorded bash is named in the command, not left to the shebang; a git client started from the GUI has /bin/bash 3.2 first on PATH
+# ^ see test:test_the_hook_command_names_the_recorded_bash_and_status_accepts_it
+hook_command_text() {
+    local hook="$1/hooks/secret-scan" bash_bin="${2:-}" q="'" esc="'\\''"
+    if [ -z "$bash_bin" ]; then
+        printf '%s' "$hook"
+        return 0
+    fi
+    printf "'%s' '%s'" "${bash_bin//$q/$esc}" "${hook//$q/$esc}"
+}
+
+# ^ invariant prints BASH_BIN from the settings of the installed share, "" when there is none (Linux, or not installed)
+share_recorded_bash() {
+    (
+        load_settings "$1/settings" >/dev/null 2>&1 || exit 0
+        printf '%s' "${BASH_BIN:-}"
+    )
 }

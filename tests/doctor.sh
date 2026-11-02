@@ -27,4 +27,4 @@ doctor() { gsg doctor --roots "$DR_ROOTS"; }
 
 # ^ external a socket on stdin makes the RHEL bash read ~/.bashrc even under env -i; HOME in the sandbox and stdin from /dev/null keep the lookup clean
 # shellcheck disable=SC2016
-dr_which() { env -i HOME="$SANDBOX/home" PATH="$SANDBOX/pathbin:/usr/local/bin:/usr/bin:/bin" bash -c 'type -P "$1"' _ "$1" </dev/null; }
+dr_which() { env -i HOME="$SANDBOX/home" PATH="$SANDBOX/pathbin:$TEST_BASE_PATH" bash -c 'type -P "$1"' _ "$1" </dev/null; }

@@ -4,7 +4,8 @@
 |---|---|
 | RHEL 9-compatible (x86_64) | Supported. RHEL 9-compatible (tested on Rocky Linux 9.7); there `/usr/local/bin/git` is built from source and `/usr/bin/git` 2.52 is left alone. |
 | Ubuntu 24.04 LTS | Supported. The whole suite and an install E2E with real downloads run in a podman `ubuntu:24.04` container, as a non-root user, with mawk as the default awk: `tests/platform/ubuntu.sh`. |
-| macOS | **macOS is not supported yet.** `install` refuses it; the darwin rows of `tools.lock` are data only. The port is planned on a Mac. |
+| macOS arm64 (tested on macOS 26.7.1) | Supported, with Homebrew: see [macOS (Homebrew)](#macos-homebrew). The whole suite and an install E2E in a scratch home run on a real Mac. |
+| macOS x86_64 (Intel) | Mapped (`darwin_amd64` / `darwin_x64` rows of `tools.lock`) but **not tested**. |
 | Other Linux | Not tested. `install` names what is missing and falls back to generic advice when `/etc/os-release` is not Ubuntu or Debian. |
 
 ## Ubuntu 24.04: prerequisites
@@ -37,6 +38,66 @@ Debian, generic text elsewhere), `jq` (`sudo apt install jq`), `setsid` (`util-l
 (with the count when there are several), so one run is enough to see everything to install. The distribution is read from `/etc/os-release`
 as data (never sourced); a missing or unreadable file gives the generic hint and no shell error.
 
+## macOS (Homebrew)
+
+Tested on macOS 26.7.1, arm64, with Apple Git 2.54.0 (it meets the git >= 2.54 floor and honours `hook.<name>.command`; it has no
+`hook.<event>.enabled`, so a repository switching the whole `pre-commit` event off that way is not visible to it either). Intel Macs
+(x86_64) map to the `darwin_amd64` and `darwin_x64` rows of `tools.lock` and are **not tested**. Homebrew is required on macOS and
+nowhere else; Linux behaviour, prerequisites and hints are unchanged.
+
+```bash
+git clone <this repository> && cd git-secret-guard
+bin/git-secret-guard install        # lists what is missing, installs it with brew after the other checks pass, then installs as on Linux
+```
+
+- **What `install` asks of Homebrew.** It finds `brew` on `PATH` (without it: refusal with `https://brew.sh`, nothing changed), then
+  checks four prerequisites and lists the missing ones in the prerequisite report: `bash` (bash 4.4 or newer; macOS ships 3.2),
+  `coreutils` (GNU `timeout`, `realpath -m`, `mv -T`, `install -T` ... in `$(brew --prefix)/opt/coreutils/libexec/gnubin`), `util-linux`
+  (`setsid`; keg-only, so it lives in `$(brew --prefix)/opt/util-linux/bin`) and `jq` only when none is on `PATH` (macOS 15 and later ship
+  `/usr/bin/jq`).
+- **When `brew install` runs.** Started by the system bash 3.2 and with no Homebrew bash 4.4 or newer present, `install` first runs
+  `brew install bash` **alone** (it says so) and re-executes under that bash. That is the one Homebrew package installed before the checks. With a
+  suitable bash already running or installed, nothing is installed up front. The other missing formulae (`coreutils`, `util-linux`, `jq`) are
+  installed by **one** `brew install` only after every refusable check has passed (the `core.hooksPath` read and refusal, the CLI link,
+  the global-config write probe, the state and recorded-`core.hooksPath` checks, the `tools.lock` lookup of every scanner for this platform).
+  When a GNU `timeout` already exists (`coreutils` installed), the tool plan, the download, the SHA-256 check and the `--version` check run
+  before that `brew install` as well, so a bad download refuses with nothing changed. Only on a Mac without `coreutils` do they follow it, because
+  the version probes need a bounded `timeout`; a failed download there is a refusal that names what brew installed. An old git, an
+  unsupported CPU, `--with-timer`, a set `core.hooksPath`, a lock without a row for this platform and the other refusals therefore install
+  nothing beyond the bootstrap's `bash`.
+- **The CLI needs the GNU directory.** On macOS every command except `install`, `version` and `help` refuses, naming `brew install coreutils`,
+  when no GNU directory is known (the installed copy's settings have no `GNUBIN_DIR`, or a checkout finds no `brew` on `PATH`). A global-config
+  `include` whose target does not exist (a dangling symlink) is skipped, as git does; one that exists but cannot be resolved is refused.
+- **What a refusal says after a brew install.** Once any `brew install` ran in the invocation, no message claims that nothing was changed;
+  it names what changed (`the only change made was the Homebrew install of bash in this run`). A failing `brew install` ends the run with brew's
+  own message and says Homebrew may have installed part of the list before failing (see `brew list`).
+- **The scanners are never installed with brew.** trufflehog and gitleaks come from the SHA-256-pinned darwin rows of `tools.lock`
+  through the same download, verify, extract and `--version` path as on Linux, into `~/.local/bin`. Brew only has the latest release
+  (trufflehog 3.99.7 against the pin 3.99.2 when this was written), and the documented behaviours are verified per pinned version.
+- **Absolute paths, no `PATH` order.** The settings file records `BASH_BIN` (the Homebrew bash), `GNUBIN_DIR` (the GNU coreutils
+  directory), `TIMEOUT_BIN` (`gnubin/timeout`), `SETSID_BIN` and `JQ_BIN`. The hook puts `GNUBIN_DIR` first on its own `PATH`
+  (an absolute, existing directory or it blocks) and the CLI does the same, so no BSD tool answers where a GNU flag is used.
+- **The hook never runs unscanned under bash 3.2.** The configured command is `'<BASH_BIN>' '<share>/hooks/secret-scan'`, so a GUI git
+  client that starts with `/usr/bin:/bin` (and `/bin/bash` 3.2 first) still runs the hook under the recorded bash. A hook started any
+  other way under bash older than 4.4 blocks with `nothing was scanned` before it reads another line. The CLI behaves the same: started
+  by bash 3.2 it re-executes under the Homebrew bash (`install` first runs `brew install bash` alone when none exists), or refuses.
+- **`install --with-timer` is refused** on macOS (`launchd is not supported yet`) and changes nothing; the weekly doctor timer is
+  systemd only for now. `doctor` and `status` work and check `BASH_BIN` like the other recorded tools.
+- **GNU flags and their answers.** `realpath -m`, `mktemp --suffix`, `mv -T`/`-n`, `install -T`, `chmod 700 -- DIR` and `sort -z` run from
+  the GNU directory. `find -printf` (backup bounds) stays where `find` has it (Linux) and is `find -print0 | xargs stat` elsewhere (GNU or BSD `stat` format chosen by a probe);
+  `find -ls` was tried and dropped, because an owner or group name with a space moves its size column;
+  `find -readable`/`-executable` (doctor's unreadable directories) became `[ -r ]` and `[ -x ]` on the directories `find` lists; BSD `wc`
+  pads its count with spaces, so the report line strips them. `cp -a`, `tar --no-same-owner`, `sed 's/\x1b...//'` and `find -quit` behave
+  as on Linux with the BSD tools.
+- **awk.** macOS `/usr/bin/awk` (one-true-awk 20200816) gives the expected results for `lib/extract.awk`, every malformed diff and the
+  inline programs: `tests/test_awk_portability.sh` runs them under it (named `bwk`) next to the gawk and mawk cases.
+- **Running the suite on a Mac.** `tests/run.sh` puts the Homebrew bash and the GNU directory first on `PATH` itself. The real-scanner
+  suites use the pinned binaries: `tests/fetch-test-tools.sh` downloads them (SHA-256 checked against `tools.lock`) into
+  `~/.cache/git-secret-guard-test-tools`, never into `~/.local/bin`. The brew steps are tested with a recording `brew` stand-in and a
+  fake prefix (never a real `brew install`); the Linux-behaviour lifecycle suites run on a Mac under a fake Linux `uname`. Explained
+  skips: the podman suite (`test_platform.sh`: Linux only), systemd tests (no `systemctl`), `hook.<event>.enabled` (Apple Git has no
+  such key), the gawk and mawk cases when those awks are not installed.
+
 ## What differs on Ubuntu, and what was checked
 
 - **awk.** Ubuntu's default `awk` is **mawk**, RHEL's is **gawk**. Every awk program of the project (`lib/extract.awk`, the inline programs in
@@ -45,8 +106,9 @@ as data (never sourced); a missing or unreadable file gives the generic hint and
   installed and compares mawk with gawk when both are (the platform test installs both; on a machine with one of them the other tests skip with
   a reason). The corpus includes odd file names, `++`/`--`/`@@` lookalike lines, a 25000-line file, a 200000-character line, backslashes,
   malformed diffs, and numeric edge cases (9 against 10, a 3 GB file against a 2 GiB bound).
-- **Checked and found identical:** `realpath -m`, `find -printf`, `stat`, `sha256sum`, `setsid`, `timeout --foreground`, `mktemp --suffix`,
+- **Checked and found identical:** `realpath -m`, `stat`, `sha256sum`, `setsid`, `timeout --foreground`, `mktemp --suffix`,
   `tar`, `sed -E`, coreutils 9.4, bash 5.2, and dash as `/bin/sh` (the hook and the CLI use no `sh -c`; the test stand-ins use `#!/bin/sh`).
+  The backup-bounds walk uses `find -printf` on Linux, exactly as before story 06.01 (the macOS size source only runs where `find` has no `-printf`).
 - **Test infrastructure that moved:** the suite drives `$GSG_TEST_GIT` (default `/usr/local/bin/git`), because the PPA git lives in
   `/usr/bin/git`; the timer tests compute the unit `PATH` from the first git on the lifecycle `PATH`.
 
@@ -177,3 +239,29 @@ lacks skip with a reason (`cidx-server unit cannot be read` is the host's own se
   apt's own keyring) and the PPA at whatever version they carry on the day; the summary prints the versions that were used.
 - **Pinned by SHA-256:** the `git-2.56.0.tar.xz` source tarball from kernel.org and the shellcheck 0.11.0 release tarballs. **Pinned by digest:** the
   base image. **Pinned in `tools.lock`:** trufflehog and gitleaks, which the install E2E downloads for real.
+
+## Linux containers from a Mac (a regression run, not a trust boundary)
+
+```
+brew install podman coreutils            # then: podman machine init && podman machine start
+PATH=/opt/homebrew/bin:$PATH tests/platform/mac-linux.sh ubuntu    # Ubuntu 24.04, same pinned image as ubuntu.sh
+PATH=/opt/homebrew/bin:$PATH tests/platform/mac-linux.sh rocky     # Rocky Linux 9.7 image (RHEL 9 family)
+```
+
+Both run the whole suite and the install E2E as a non-root user, in a podman-machine container (aarch64 on an Apple Silicon Mac), with the same
+`--phase` / `--suite-file` options as `ubuntu.sh`; `--dry-run` prints the podman command. They check the macOS changes against Linux, nothing more.
+
+- **The isolation check is skipped, loudly.** `check_isolation` (variable names, mount table, `/dev`, namespaces) was derived for rootless podman on
+  RHEL and does not describe podman machine. The runner passes `--skip-isolation` with a fixed reason; the container prints it at the start and in the
+  summary. `ubuntu.sh` and its checks are unchanged. The VM is the boundary here, and nothing verifies it. The container still gets no `-e`, no host
+  `HOME`, no `~/.gitconfig` or `~/.ssh`, `--http-proxy=false`, and a read-only copy of the files `git ls-files -co --exclude-standard` lists.
+- **`--tmpfs /run/secrets`**: podman machine mounts `/run/secrets/rhsm` into every container, and the suite's isolation test expects an empty directory.
+- **Rocky** has its own script, `tests/platform/rocky-container.sh`, which sources `ubuntu-container.sh` and redefines only the prepare phase: dnf
+  prerequisites (with `--allowerasing`, the image's `libcurl-minimal` conflicts with `libcurl-devel`), shellcheck 0.11.0 (SHA-256), pre-commit from pip
+  (unpinned), git 2.56.0 built from the SHA-256 verified tarball into `/usr/local` next to the stock `/usr/bin/git`. The Rocky image is
+  `docker.io/rockylinux/rockylinux:9.7@sha256:53f4c6dcb34e1403bd93207351f0af9a593610faeb7165cb8a037346765199b0` (manifest-list digest, looked up like the
+  Ubuntu one: anonymous token from `auth.docker.io` for `repository:rockylinux/rockylinux:pull`, then `curl -I --max-time 30` on
+  `registry-1.docker.io/v2/rockylinux/rockylinux/manifests/9.7` with the OCI index and Docker manifest-list `Accept` headers; it equals the DIGEST column of
+  `podman images --digests`). Its repositories already serve 9.8, so the run mixes 9.7 base packages with current 9.x updates.
+- **Not covered:** x86_64 (the `linux_x64` and `linux_amd64` rows of `tools.lock` are not exercised on an arm64 VM), and macOS itself, which
+  `tests/run.sh` covers natively.

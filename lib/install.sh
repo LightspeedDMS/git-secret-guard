@@ -125,7 +125,7 @@ install_collect_gits() {
 install_warn_other_gits() {
     local i cand used ver
     used="$(realpath -- "$GSG_GIT")" || {
-        printf '%s: cannot resolve the real path of %s; install refused, nothing was changed\n' "$GSG_NAME" "$GSG_GIT" >&2
+        printf '%s: cannot resolve the real path of %s; install refused, %s\n' "$GSG_NAME" "$GSG_GIT" "$(brew_unchanged_text)" >&2
         return 1
     }
     install_collect_gits
@@ -163,6 +163,39 @@ install_resolve_bins() {
     return "$bad"
 }
 
+# ^ invariant macOS only, detection only; rc 0 = Homebrew and the paths are known and the missing formulae are listed, rc 1 = refused with a message
+# ^ order inspect before any install => the refusable checks after it can still end the run with the machine untouched
+install_macos_inspect() {
+    install_check_platform || return 1
+    brew_inspect || return 1
+    if [ -n "$BREW_NEED" ]; then
+        printf '%s: Homebrew prerequisites missing: %s; install runs brew install %s only after every other check has passed\n' "$GSG_NAME" "$BREW_NEED" "$BREW_NEED"
+    fi
+    if [ -x "$BREW_TIMEOUT" ]; then INSTALL_TIMEOUT_BIN="$BREW_TIMEOUT"; fi
+}
+
+# ^ why prepend, not rely on the caller's PATH; sha256sum, realpath -m, mv -T and install -T are GNU-only and macOS ships the BSD ones
+# ^ invariant needs BREW_GNUBIN to hold coreutils; a second call changes nothing
+install_macos_use_gnubin() {
+    case ":$PATH:" in
+        ":$BREW_GNUBIN:"*) return 0 ;;
+    esac
+    PATH="$BREW_GNUBIN:$PATH"
+    export PATH
+}
+
+# ^ order install_run calls this after the last refusable check without a brewed tool
+# ^ invariant rc 0 = every INSTALL_*_BIN is set; rc 1 = refused with a message stating what changed
+install_macos_finish() {
+    brew_install_missing || return 1
+    INSTALL_JQ_BIN="$BREW_JQ"
+    INSTALL_SETSID_BIN="$BREW_SETSID"
+    INSTALL_TIMEOUT_BIN="$BREW_TIMEOUT"
+    INSTALL_BASH_BIN="$BREW_BASH"
+    INSTALL_GNUBIN_DIR="$BREW_GNUBIN"
+    install_macos_use_gnubin
+}
+
 install_require_curl() {
     if type -P curl >/dev/null; then return 0; fi
     printf '%s: curl is required to download the scanners but was not found on PATH; %s\n' "$GSG_NAME" "$(install_fix_hint curl)" >&2
@@ -185,19 +218,24 @@ install_downloads_needed() {
 # ^ order every prerequisite is checked and reported before any change => one refusal names them all; test:test_every_missing_prerequisite_is_named_at_once
 install_check_prerequisites() {
     local timer="$1" bad=0
-    INSTALL_TIMEOUT_BIN=""
+    INSTALL_TIMEOUT_BIN="" INSTALL_BASH_BIN="" INSTALL_GNUBIN_DIR=""
     if install_require_git; then
         install_warn_other_gits || bad=$((bad + 1))
     else
         bad=$((bad + 1))
     fi
-    install_resolve_bins || bad=$((bad + $?))
+    if brew_is_macos; then
+        install_macos_inspect || bad=$((bad + 1))
+    else
+        install_resolve_bins || bad=$((bad + $?))
+    fi
     if install_downloads_needed; then install_require_curl || bad=$((bad + 1)); fi
-    # ^ order systemctl check after every other check; bad > 0 => the count line follows and carries "nothing was changed"
+    # ^ order systemctl check after every other check; bad > 1 => the count line follows and carries the claim of what changed
     if [ "$timer" -eq 1 ]; then
         if [ "$bad" -gt 0 ]; then install_find_systemctl counted >/dev/null || bad=$((bad + 1)); else install_find_systemctl >/dev/null || bad=$((bad + 1)); fi
     fi
-    if [ "$bad" -gt 1 ]; then printf '%s: %s prerequisites are missing; install refused, nothing was changed\n' "$GSG_NAME" "$bad" >&2; fi
+    if [ "$bad" -gt 1 ]; then printf '%s: %s prerequisites are missing; install refused, %s\n' "$GSG_NAME" "$bad" "$(brew_unchanged_text)" >&2; fi
+    if [ "$bad" -eq 1 ] && [ -n "$BREW_INSTALLED" ]; then printf '%s: install refused; %s\n' "$GSG_NAME" "$(brew_unchanged_text)" >&2; fi
     [ "$bad" -eq 0 ]
 }
 
@@ -307,8 +345,8 @@ install_check_hooks_path() {
     GSG_PREV=""
     lifecycle_read_hooks_path || return 1
     for i in "${!GSG_HP_FOREIGN_FILE[@]}"; do
-        printf '%s: core.hooksPath is set to [%s] in %s, a file install does not write to; remove it there and run install again; nothing was changed.\n' \
-            "$GSG_NAME" "${GSG_HP_FOREIGN_VALUE[$i]}" "${GSG_HP_FOREIGN_FILE[$i]}" >&2
+        printf '%s: core.hooksPath is set to [%s] in %s, a file install does not write to; remove it there and run install again; %s.\n' \
+            "$GSG_NAME" "${GSG_HP_FOREIGN_VALUE[$i]}" "${GSG_HP_FOREIGN_FILE[$i]}" "$(brew_unchanged_text)" >&2
     done
     if [ "${#GSG_HP_FOREIGN_FILE[@]}" -gt 0 ]; then return 1; fi
     if [ "${#GSG_HP_OWN[@]}" -eq 0 ]; then return 0; fi
@@ -372,29 +410,39 @@ install_prune_replaced() {
     ST_REPLACED="$kept"
 }
 
-# ^ invariant parallel arrays indexed like GSG_TOOL_NAMES; NEED=1 means the pinned version is not in ~/.local/bin yet
-# ^ invariant ASIDE = name the user's file moves to (<tool>.gsg-replaced-<UTC stamp>); "" when the path is empty or holds install's own file, replaced in place
-install_plan_tools() {
-    local tool plat row lock stamp aside
-    GSG_TOOL_VER=() GSG_TOOL_SHA=() GSG_TOOL_PLAT=() GSG_TOOL_NEED=() GSG_TOOL_ASIDE=()
+# ^ order pure bash, no timeout needed => install_run calls it before the brew install, a missing or invalid lock row refuses with the machine untouched
+# ^ invariant parallel arrays indexed like GSG_TOOL_NAMES, holding platform key, pinned version and SHA-256 from the lock
+install_plan_lock() {
+    local tool plat row lock
+    GSG_TOOL_VER=() GSG_TOOL_SHA=() GSG_TOOL_PLAT=()
     lock="$(tools_lock_path)"
-    stamp="$(date -u +%Y%m%dT%H%M%SZ)" || return 1
-    install_prune_replaced
     for tool in "${GSG_TOOL_NAMES[@]}"; do
         plat="$(tools_platform_key "$tool" "$GSG_OS" "$GSG_ARCH")" || return 1
         row="$(tools_lock_lookup "$lock" "$tool" "$plat")" || return 1
         GSG_TOOL_PLAT+=("$plat")
         GSG_TOOL_VER+=("${row%% *}")
         GSG_TOOL_SHA+=("${row##* }")
+    done
+}
+
+# ^ invariant parallel arrays indexed like GSG_TOOL_NAMES; NEED=1 means the pinned version is not in ~/.local/bin yet; needs install_plan_lock first
+# ^ invariant ASIDE = name the user's file moves to (<tool>.gsg-replaced-<UTC stamp>); "" when the path is empty or holds install's own file, replaced in place
+install_plan_tools() {
+    local i tool stamp aside
+    GSG_TOOL_NEED=() GSG_TOOL_ASIDE=()
+    stamp="$(date -u +%Y%m%dT%H%M%SZ)" || return 1
+    install_prune_replaced
+    for i in "${!GSG_TOOL_NAMES[@]}"; do
+        tool="${GSG_TOOL_NAMES[$i]}"
         aside=""
-        if tools_has_version "$GSG_BIN_DIR/$tool" "${row%% *}" "$INSTALL_TIMEOUT_BIN"; then
+        if tools_has_version "$GSG_BIN_DIR/$tool" "${GSG_TOOL_VER[$i]}" "$INSTALL_TIMEOUT_BIN"; then
             GSG_TOOL_NEED+=(0)
         else
             GSG_TOOL_NEED+=(1)
             if { [ -e "$GSG_BIN_DIR/$tool" ] || [ -L "$GSG_BIN_DIR/$tool" ]; } && ! install_owns_file "$tool"; then aside="$tool.gsg-replaced-$stamp"; fi
         fi
         if [ -n "$aside" ] && { [ -e "$GSG_BIN_DIR/$aside" ] || [ -L "$GSG_BIN_DIR/$aside" ]; }; then
-            printf '%s: %s already exists, so %s cannot be moved there; nothing was changed\n' "$GSG_NAME" "$GSG_BIN_DIR/$aside" "$GSG_BIN_DIR/$tool" >&2
+            printf '%s: %s already exists, so %s cannot be moved there; %s\n' "$GSG_NAME" "$GSG_BIN_DIR/$aside" "$GSG_BIN_DIR/$tool" "$(brew_unchanged_text)" >&2
             return 1
         fi
         GSG_TOOL_ASIDE+=("$aside")
@@ -408,25 +456,52 @@ install_cleanup() {
     if [ -n "${GSG_SHARE_NEW:-}" ]; then rm -rf -- "$GSG_SHARE_NEW"; fi
 }
 
+# ^ invariant always returns 1; the closing line of a staging refusal, true before and after a brew install
+install_stage_refused() {
+    printf '%s: install refused; %s\n' "$GSG_NAME" "$(brew_unchanged_text)" >&2
+    return 1
+}
+
 # ^ order every needed tool is downloaded, verified and version-checked before any file leaves the staging dir => a bad second tool installs nothing
 install_stage_tools() {
     local i tool tarball out
     GSG_STAGE=""
     if [[ " ${GSG_TOOL_NEED[*]} " != *" 1 "* ]]; then return 0; fi
-    install_require_curl || return 1
+    install_require_curl || install_stage_refused || return 1
     GSG_STAGE="$(mktemp -d)" || return 1
     mkdir -p -- "$GSG_STAGE/out" || return 1
     for i in "${!GSG_TOOL_NAMES[@]}"; do
         if [ "${GSG_TOOL_NEED[$i]}" -ne 1 ]; then continue; fi
         tool="${GSG_TOOL_NAMES[$i]}"
-        tarball="$(tools_fetch_verified "$tool" "${GSG_TOOL_VER[$i]}" "${GSG_TOOL_PLAT[$i]}" "${GSG_TOOL_SHA[$i]}" "$GSG_STAGE")" || return 1
-        tools_extract_binary "$tarball" "$tool" "$GSG_STAGE/out" || return 1
+        tarball="$(tools_fetch_verified "$tool" "${GSG_TOOL_VER[$i]}" "${GSG_TOOL_PLAT[$i]}" "${GSG_TOOL_SHA[$i]}" "$GSG_STAGE")" || install_stage_refused || return 1
+        tools_extract_binary "$tarball" "$tool" "$GSG_STAGE/out" || install_stage_refused || return 1
         if ! tools_has_version "$GSG_STAGE/out/$tool" "${GSG_TOOL_VER[$i]}" "$INSTALL_TIMEOUT_BIN"; then
             out="$("$INSTALL_TIMEOUT_BIN" "$GSG_VERSION_PROBE_SECONDS" "$GSG_STAGE/out/$tool" --version 2>&1 | head -c 200)"
-            printf '%s: the extracted %s does not report version %s (it said: %s); nothing installed\n' "$GSG_NAME" "$tool" "${GSG_TOOL_VER[$i]}" "${out//[^[:print:]]/?}" >&2
-            return 1
+            printf '%s: the extracted %s does not report version %s (it said: %s)\n' "$GSG_NAME" "$tool" "${GSG_TOOL_VER[$i]}" "${out//[^[:print:]]/?}" >&2
+            install_stage_refused || return 1
         fi
     done
+}
+
+install_plan_and_stage() {
+    install_plan_tools || return 1
+    install_stage_tools || return 1
+}
+
+install_tools_ready() {
+    if ! brew_is_macos; then
+        install_plan_and_stage
+        return
+    fi
+    # ^ order an existing GNU timeout lets the plan and the staging run before brew; without one the version probes wait for the brewed timeout
+    if [ -n "$INSTALL_TIMEOUT_BIN" ]; then
+        install_macos_use_gnubin || return 1
+        install_plan_and_stage || return 1
+        install_macos_finish
+    else
+        install_macos_finish || return 1
+        install_plan_and_stage
+    fi
 }
 
 install_hash_staged() {
@@ -438,8 +513,8 @@ install_hash_staged() {
         tool="${GSG_TOOL_NAMES[$i]}"
         sha="$(sha256sum -- "$GSG_STAGE/out/$tool" | cut -d' ' -f1)"
         if [ -z "$sha" ]; then
-            printf '%s: cannot hash the staged %s; nothing installed\n' "$GSG_NAME" "$tool" >&2
-            return 1
+            printf '%s: cannot hash the staged %s\n' "$GSG_NAME" "$tool" >&2
+            install_stage_refused || return 1
         fi
         GSG_TOOL_NEWSHA[i]="$sha"
     done
@@ -469,7 +544,8 @@ install_commit_tools() {
             mv -T -n -- "$target" "$GSG_BIN_DIR/$aside"
             if [ -e "$target" ] || [ -L "$target" ] || { [ ! -e "$GSG_BIN_DIR/$aside" ] && [ ! -L "$GSG_BIN_DIR/$aside" ]; }; then
                 rm -f -- "$new"
-                printf '%s: could not move %s aside to %s; nothing installed\n' "$GSG_NAME" "$target" "$GSG_BIN_DIR/$aside" >&2
+                printf '%s: could not move %s aside to %s; your original was left where it was%s\n' "$GSG_NAME" "$target" "$GSG_BIN_DIR/$aside" \
+                    "${BREW_INSTALLED:+; the Homebrew install of $BREW_INSTALLED in this run was kept}" >&2
                 return 1
             fi
         fi
@@ -501,6 +577,8 @@ install_write_settings() {
         printf 'JQ_BIN=%q\n' "$INSTALL_JQ_BIN"
         printf 'SETSID_BIN=%q\n' "$INSTALL_SETSID_BIN"
         printf 'TIMEOUT_BIN=%q\n' "$INSTALL_TIMEOUT_BIN"
+        if [ -n "$INSTALL_BASH_BIN" ]; then printf 'BASH_BIN=%q\n' "$INSTALL_BASH_BIN"; fi
+        if [ -n "$INSTALL_GNUBIN_DIR" ]; then printf 'GNUBIN_DIR=%q\n' "$INSTALL_GNUBIN_DIR"; fi
         if [ -n "$INSTALL_SYSTEMCTL_BIN" ]; then printf 'SYSTEMCTL_BIN=%q\n' "$INSTALL_SYSTEMCTL_BIN"; fi
         printf 'SCAN_TIMEOUT_SECONDS=%s\n' "$GSG_DEFAULT_SCAN_TIMEOUT"
     } >"$1"
@@ -553,7 +631,7 @@ install_check_config_writable() {
     if "$GSG_GIT" config --global gsg-install-probe.ok 1 2>/dev/null; then
         "$GSG_GIT" config --global --remove-section gsg-install-probe 2>/dev/null && return 0
     fi
-    printf '%s: cannot write the global git config; nothing was changed\n' "$GSG_NAME" >&2
+    printf '%s: cannot write the global git config; %s\n' "$GSG_NAME" "$(brew_unchanged_text)" >&2
     return 1
 }
 
@@ -565,8 +643,22 @@ install_link_cli() {
 GSG_BACKUP_MAX_BYTES=52428800
 GSG_BACKUP_MAX_FILES=10000
 
+# ^ external GNU find has -printf, BSD find does not; stat's format letter differs too (GNU -c %s, BSD -f %z) and a Mac's PATH may hold either stat
+# ^ why sizes from stat or -printf, not find -ls; -ls prints owner and group as words, and a name with a space moves the size column
+# ^ why find -print0 into xargs, not find -exec stat; find must write to the pipe itself => a closed pipe stops the walk through SIGPIPE
+install_entry_sizes() {
+    # ^ invariant prints one lstat size in bytes per entry below $1, nothing else; errors of find and stat are discarded, as the find -ls call did
+    if find "$1" -maxdepth 0 -printf '' 2>/dev/null; then
+        find "$1" -mindepth 1 -printf '%s\n' 2>/dev/null
+    elif stat -c %s -- "$1" >/dev/null 2>&1; then
+        find "$1" -mindepth 1 -print0 2>/dev/null | xargs -r -0 stat -c %s -- 2>/dev/null
+    else
+        find "$1" -mindepth 1 -print0 2>/dev/null | xargs -r -0 stat -f %z 2>/dev/null
+    fi
+}
+
 # ^ why a bound on the backup, not an unbounded tar; a hooksPath of ~ or / would archive the whole home or disk into the state dir
-# ^ invariant the walk stops at the first bound crossed => a huge tree is never read to the end; find dies of SIGPIPE, hence pipefail is off in the subshell
+# ^ invariant the walk stops at the first bound crossed => a huge tree is never read to the end; SIGPIPE kills the producer => pipefail is off in the subshell
 install_check_backup_bounds() {
     local dir="$1" home verdict
     home="$(realpath -- "$HOME")" || return 1
@@ -580,7 +672,7 @@ install_check_backup_bounds() {
     fi
     verdict="$(
         set +o pipefail
-        find "$dir" -mindepth 1 -printf '%s\n' 2>/dev/null | awk -v max_files="$GSG_BACKUP_MAX_FILES" -v max_bytes="$GSG_BACKUP_MAX_BYTES" '
+        install_entry_sizes "$dir" | awk -v max_files="$GSG_BACKUP_MAX_FILES" -v max_bytes="$GSG_BACKUP_MAX_BYTES" '
             { files++; bytes += $1 }
             files > max_files { print "files"; found = 1; exit }
             bytes > max_bytes { print "bytes"; found = 1; exit }
@@ -638,7 +730,7 @@ install_backup_hooks_dir() {
     GSG_BACKUP_NEW="$(umask 077 && mktemp --suffix=.tar.gz "$GSG_STATE_DIR/hooks-path-backup-$stamp.XXXXXX")" || return 1
     tar -czf "$GSG_BACKUP_NEW" -C "${GSG_PREV_DIR%/*}" -- "${GSG_PREV_DIR##*/}" || {
         rm -f -- "$GSG_BACKUP_NEW"
-        printf '%s: cannot back up %s; nothing was changed\n' "$GSG_NAME" "$GSG_PREV_DIR" >&2
+        printf '%s: cannot back up %s; %s\n' "$GSG_NAME" "$GSG_PREV_DIR" "$(brew_unchanged_text)" >&2
         return 1
     }
     tar -tzf "$GSG_BACKUP_NEW" >/dev/null || return 1
@@ -722,14 +814,17 @@ install_write_state() {
 
 # ^ why --replace-all, not a plain set; a plain set exits 5 when the key already has several values, and --add would duplicate the event
 install_set_config() {
+    local cmd
+    cmd="$(hook_command_text "$GSG_SHARE" "$INSTALL_BASH_BIN")" || return 1
     "$GSG_GIT" config --global --replace-all hook.git-secret-guard.event pre-commit || return 1
-    "$GSG_GIT" config --global --replace-all hook.git-secret-guard.command "$GSG_SHARE/hooks/secret-scan" || return 1
+    "$GSG_GIT" config --global --replace-all hook.git-secret-guard.command "$cmd" || return 1
 }
 
 install_summary() {
-    local i tool
+    local i tool hook_cmd
     printf '%s: installed %s %s\n' "$GSG_NAME" "$GSG_NAME" "$(<"$GSG_ROOT/VERSION")"
-    printf '%s: hook command: %s\n' "$GSG_NAME" "$GSG_SHARE/hooks/secret-scan"
+    hook_cmd="$(hook_command_text "$GSG_SHARE" "$INSTALL_BASH_BIN")" || return 1
+    printf '%s: hook command: %s\n' "$GSG_NAME" "$hook_cmd"
     for i in "${!GSG_TOOL_NAMES[@]}"; do
         tool="${GSG_TOOL_NAMES[$i]}"
         if [ "${GSG_TOOL_NEED[$i]}" -eq 1 ]; then
@@ -743,14 +838,15 @@ install_summary() {
 # ^ invariant a recorded hooksPath stays the only record => a takeover of a different value is refused, never recorded or backed up half way
 install_check_recorded_hooks_path() {
     if [ "$GSG_PREV_SET" != yes ] || [ "$ST_PREV_SET" != yes ] || [ "$GSG_PREV" = "$ST_PREV" ]; then return 0; fi
-    printf '%s: the state already records the previous core.hooksPath [%s] but the global value is now [%s]; nothing was changed.\n' \
-        "$GSG_NAME" "$ST_PREV" "$GSG_PREV" >&2
+    printf '%s: the state already records the previous core.hooksPath [%s] but the global value is now [%s]; %s.\n' \
+        "$GSG_NAME" "$ST_PREV" "$GSG_PREV" "$(brew_unchanged_text)" >&2
     printf '%s: run uninstall (it keeps the current value and the backup tarballs) and then install --replace-hooks-path to record the new value.\n' "$GSG_NAME" >&2
     return 1
 }
 
 install_run() {
-    local replace="$1" timer="$2"
+    local replace="$1" timer="$2" claim
+    brew_refuse_timer "$timer" || return 1
     paths_init || return 1
     lifecycle_note_global_config
     install_check_prerequisites "$timer" || return 1
@@ -758,7 +854,9 @@ install_run() {
     install_check_hooks_path || return 1
     install_check_cli_link || return 1
     if [ "$GSG_PREV_SET" = yes ] && [ "$replace" -ne 1 ]; then
-        printf '%s: the global core.hooksPath is set to [%s]; install changes nothing and refuses.\n' "$GSG_NAME" "$GSG_PREV" >&2
+        claim="install changes nothing and refuses"
+        if [ -n "$BREW_INSTALLED" ]; then claim="install refuses ($(brew_unchanged_text))"; fi
+        printf '%s: the global core.hooksPath is set to [%s]; %s.\n' "$GSG_NAME" "$GSG_PREV" "$claim" >&2
         printf '%s: run install --replace-hooks-path to record it, back up the directory it points to, and unset it.\n' "$GSG_NAME" >&2
         return 1
     fi
@@ -772,10 +870,10 @@ install_run() {
     install_check_recorded_hooks_path || return 1
     install_prepare_timer "$timer" || return 1
     tools_announce_overrides
-    install_plan_tools || return 1
-    install_stage_tools || return 1
-    install_backup_hooks_dir || return 1
+    install_plan_lock || return 1
+    install_tools_ready || return 1
     install_hash_staged || return 1
+    install_backup_hooks_dir || return 1
     install_write_state pending || return 1
     install_commit_tools || return 1
     install_write_state final || return 1

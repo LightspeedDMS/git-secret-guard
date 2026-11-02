@@ -34,6 +34,8 @@ report_results() {
     fi
     if [ -s "$rows" ]; then
         n="$(wc -l <"$rows")" || return 1
+        # ^ external BSD wc pads the count with spaces and GNU wc does not; the printed line is the same on both
+        n="${n//[[:space:]]/}"
         printf '%s: %s potential secret(s) in lines this commit adds:\n' "$GSG_NAME" "$n" >&2
         awk -F'\t' '{ printf "  %-10s %s (%s)  %s:%s\n", $1, $2, $3, $4, $5 }' "$rows" >&2
         printf '  (values are not shown; remove them and rotate any real credential)\n' >&2

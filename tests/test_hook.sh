@@ -201,7 +201,7 @@ test_missing_jq_blocks_naming_the_tool() {
 
 test_a_trufflehog_that_exits_0_silently_blocks_like_a_missing_gitleaks_report() {
     begin silenttf || return 1
-    write_settings /bin/true "$STUBS_DIR/gitleaks" "$TEST_JQ"
+    write_settings "$TEST_TRUE" "$STUBS_DIR/gitleaks" "$TEST_JQ"
     stage_file a.txt one
     commit_cap "x"
     assert_rc 1 "blocked"
@@ -382,7 +382,7 @@ test_hook_outside_a_repository_blocks_instead_of_passing() {
 
 test_hook_blocks_when_neither_tmpdir_nor_home_is_set() {
     begin nohome || return 1
-    run_cap env -i PATH="/usr/local/bin:/usr/bin:/bin" "$SHARE/hooks/secret-scan"
+    run_cap env -i PATH="$TEST_BASE_PATH" "$SHARE/hooks/secret-scan"
     assert_rc 1 "blocked"
     assert_contains "$ERR" "TMPDIR nor HOME" "names the problem"
     assert_contains "$ERR" "nothing was scanned" "says nothing was scanned"
@@ -440,7 +440,13 @@ test_term_signal_stops_the_scanners_and_removes_the_private_temp_dir() { signal_
 test_int_signal_stops_the_scanners_and_removes_the_private_temp_dir() { signal_test int INT; }
 test_a_scanner_that_ignores_term_is_killed_before_the_temp_dir_is_removed() { signal_test stubborn TERM STUB_TF_STUBBORN=1; }
 
-proc_alive() { [ -r "/proc/$1/stat" ] && [ "$(awk '{print $3}' "/proc/$1/stat")" != Z ]; }
+# ^ external macOS has no /proc; ps -p reports the state letter on both, Z (zombie) counts as gone
+proc_alive() {
+    local st
+    st="$(ps -p "$1" -o stat= 2>/dev/null)" || return 1
+    st="${st//[[:space:]]/}"
+    [ -n "$st" ] && [ "${st:0:1}" != Z ]
+}
 
 test_scanner_process_detection_ignores_look_alikes_from_other_sandboxes() {
     begin decoy || return 1
@@ -492,16 +498,18 @@ test_the_hook_blocks_when_setsid_or_timeout_is_not_a_usable_absolute_path() {
 test_the_hook_takes_setsid_and_timeout_from_settings_never_from_PATH() {
     begin fromsettings || return 1
     mkdir -p -- "$SANDBOX/poison" "$SANDBOX/wrap"
-    local tool
+    local tool real
     for tool in setsid timeout; do
+        real="$TEST_SETSID"
+        if [ "$tool" = timeout ]; then real="$TEST_TIMEOUT"; fi
         printf '#!/bin/bash\necho PATH-USED >>"%s/poison.log"\nexit 99\n' "$SANDBOX" >"$SANDBOX/poison/$tool"
         # shellcheck disable=SC2016
-        printf '#!/bin/bash\necho "$0" >>"%s/wrap.log"\nexec /bin/%s "$@"\n' "$SANDBOX" "$tool" >"$SANDBOX/wrap/$tool"
+        printf '#!/bin/bash\necho "$0" >>"%s/wrap.log"\nexec %s "$@"\n' "$SANDBOX" "$real" >"$SANDBOX/wrap/$tool"
         chmod +x "$SANDBOX/poison/$tool" "$SANDBOX/wrap/$tool"
     done
     use_stubs "SETSID_BIN=$SANDBOX/wrap/setsid
 TIMEOUT_BIN=$SANDBOX/wrap/timeout"
-    set_env PATH="$SANDBOX/poison:/usr/local/bin:/usr/bin:/bin"
+    set_env PATH="$SANDBOX/poison:$TEST_BASE_PATH"
     stage_file a.txt one
     commit_cap "x"
     assert_rc 0 "scan completes with PATH poisoned"
@@ -514,7 +522,7 @@ TIMEOUT_BIN=$SANDBOX/wrap/timeout"
 test_a_signal_before_the_runner_has_its_own_group_does_not_wait_for_the_scan() {
     begin earlysig || return 1
     mkdir -p -- "$SANDBOX/fakebin"
-    printf '#!/bin/bash\nsleep 1.5\nexec /bin/setsid "$@"\n' >"$SANDBOX/fakebin/setsid"
+    printf '#!/bin/bash\nsleep 1.5\nexec %s "$@"\n' "$TEST_SETSID" >"$SANDBOX/fakebin/setsid"
     chmod +x "$SANDBOX/fakebin/setsid"
     use_stubs "SETSID_BIN=$SANDBOX/fakebin/setsid"
     set_env STUB_TF_SLEEP=4 STUB_GL_SLEEP=4
@@ -532,6 +540,64 @@ test_a_signal_before_the_runner_has_its_own_group_does_not_wait_for_the_scan() {
     assert_empty "$(workdirs)" "work dir removed"
     sleep 3
     assert_eq "$(tf_runs)$(gl_runs)" 00 "no scanner started after the hook was gone"
+}
+
+# ^ external a GUI git client on macOS starts with /usr/bin:/bin; /bin/bash 3.2 and the BSD tools come first, the recorded bash and GNU directory must win
+test_a_git_client_with_the_system_bash_first_on_PATH_still_scans() {
+    [ -n "$TEST_BASH" ] || skip_test "the recorded bash and GNU directory exist on macOS only"
+    begin guipath || return 1
+    stage_file a.txt one two
+    run_cap env -i HOME="$SANDBOX/home" PATH="/usr/bin:/bin" TMPDIR="$SANDBOX/tmp" GIT_CONFIG_GLOBAL="$SANDBOX/gitconfig" \
+        GIT_CONFIG_NOSYSTEM=1 STUB_LOG="$CALLS" "$GIT" commit -q -m gui
+    assert_rc 0 "commit under a GUI-style PATH"
+    assert_empty "$OUT$ERR" "nothing is printed on success"
+    assert_eq "$(tf_runs)$(gl_runs)" 11 "both scanners ran"
+    assert_empty "$(workdirs)" "private temp dir removed"
+}
+
+# ^ external macOS /bin/bash is 3.2; any other host with a bash >= 4.4 there has nothing to test here
+old_system_bash() {
+    [ -x /bin/bash ] && /bin/bash -c '[ "${BASH_VERSINFO[0]}" -lt 4 ] || { [ "${BASH_VERSINFO[0]}" -eq 4 ] && [ "${BASH_VERSINFO[1]}" -lt 4 ]; }'
+}
+
+test_a_gnu_directory_in_the_settings_that_is_relative_or_missing_blocks_the_commit() {
+    [ -n "$TEST_BASH" ] || skip_test "GNUBIN_DIR exists on macOS only"
+    local bad
+    begin badgnu || return 1
+    for bad in "relative/gnubin" "$SANDBOX/no-such-gnubin"; do
+        use_stubs "GNUBIN_DIR=$bad"
+        stage_file a.txt one
+        commit_cap "x"
+        assert_rc 1 "GNUBIN_DIR=[$bad] blocks"
+        assert_contains "$ERR" "GNUBIN_DIR" "names the setting for [$bad]"
+        assert_contains "$ERR" "nothing was scanned" "says nothing was scanned for [$bad]"
+        assert_no_commit
+        assert_eq "$(tf_runs)$(gl_runs)" 00 "no scanner started for [$bad]"
+    done
+}
+
+test_the_hook_blocks_under_a_bash_older_than_4_4_instead_of_scanning() {
+    old_system_bash || skip_test "/bin/bash is 4.4 or newer on this host"
+    begin oldbash || return 1
+    stage_file a.txt one
+    run_cap env -i HOME="$SANDBOX/home" PATH="/usr/bin:/bin" TMPDIR="$SANDBOX/tmp" STUB_LOG="$CALLS" /bin/bash "$SHARE/hooks/secret-scan"
+    assert_rc 1 "the hook under bash 3.2"
+    assert_contains "$ERR" "bash 4.4" "names the bash it needs"
+    assert_contains "$ERR" "nothing was scanned" "says nothing was scanned"
+    assert_eq "$(tf_runs)$(gl_runs)" 00 "no scanner started"
+}
+
+test_a_commit_through_a_bare_hook_command_under_the_system_bash_is_blocked() {
+    old_system_bash || skip_test "/bin/bash is 4.4 or newer on this host"
+    begin barecmd || return 1
+    gitx config --global "hook.$HOOK_NAME.command" "$SHARE/hooks/secret-scan" || return 1
+    stage_file a.txt one
+    run_cap env -i HOME="$SANDBOX/home" PATH="/usr/bin:/bin" TMPDIR="$SANDBOX/tmp" GIT_CONFIG_GLOBAL="$SANDBOX/gitconfig" \
+        GIT_CONFIG_NOSYSTEM=1 STUB_LOG="$CALLS" "$GIT" commit -q -m bare
+    assert_rc 1 "the commit is blocked"
+    assert_contains "$ERR" "nothing was scanned" "says nothing was scanned"
+    assert_no_commit
+    assert_eq "$(tf_runs)$(gl_runs)" 00 "no scanner started"
 }
 
 run_file_tests

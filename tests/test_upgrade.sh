@@ -271,4 +271,23 @@ test_a_placement_blocked_by_a_directory_prints_one_clear_message_and_no_raw_inst
     assert_contains "$ERR" "git-secret-guard: could not place $LC_BIN/gitleaks (cannot write $LC_BIN/.gitleaks.gsg-new: cannot overwrite directory" "the reason is folded into the one message"
 }
 
+# ^ external a sha256sum first on PATH prints nothing for files below an out/ dir (the staged binaries) and runs the real one otherwise
+test_a_hash_failure_during_a_takeover_writes_no_backup_and_the_refusal_is_true() {
+    local hooks real
+    lc_begin && lc_make_fixtures && lc_use_fixtures || return 1
+    real="$(type -P sha256sum)" || return 1
+    hooks="$LC_HOME/old hooks"
+    mkdir -p -- "$hooks" && printf '#!/bin/sh\n' >"$hooks/pre-commit" && gitx config --global core.hooksPath "$hooks" || return 1
+    # shellcheck disable=SC2016
+    printf '#!/bin/sh\nfor last in "$@"; do :; done\ncase "$last" in */out/*) exit 1 ;; esac\nexec %s "$@"\n' "$real" >"$SANDBOX/pathbin/sha256sum" || return 1
+    chmod 755 "$SANDBOX/pathbin/sha256sum" || return 1
+    gsg install --replace-hooks-path
+    assert_rc 1 "the staged binary cannot be hashed"
+    assert_contains "$ERR" "cannot hash the staged" "the failure is named"
+    assert_contains "$ERR" "nothing was changed" "the claim is made"
+    assert_empty "$(find "$LC_STATE" -name 'hooks-path-backup-*' 2>/dev/null)" "so no backup tarball exists, the claim is true"
+    assert_no_file "$LC_BIN" "no tool installed"
+    assert_eq "$(gitx config --global --get core.hooksPath)" "$hooks" "core.hooksPath is untouched"
+}
+
 run_file_tests

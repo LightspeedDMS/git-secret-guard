@@ -12,7 +12,7 @@ fresh_install() {
 
 lc_which() {
     # shellcheck disable=SC2016
-    env -i HOME="$SANDBOX/home" PATH="$SANDBOX/pathbin:/usr/local/bin:/usr/bin:/bin" bash -c 'type -P "$1"' _ "$1" </dev/null
+    env -i HOME="$SANDBOX/home" PATH="$SANDBOX/pathbin:$TEST_BASE_PATH" bash -c 'type -P "$1"' _ "$1" </dev/null
 }
 
 test_status_reports_not_installed_with_exit_1() {

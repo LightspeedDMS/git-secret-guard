@@ -193,4 +193,83 @@ test_a_note_names_the_global_config_file_when_GIT_CONFIG_GLOBAL_is_set() {
     assert_not_contains "$ERR" "GIT_CONFIG_GLOBAL" "no note when the variable is not set"
 }
 
+# ^ external BSD realpath (macOS) has no -m; the stand-in refuses it and runs the real realpath for every other call, in a directory put first on PATH
+bsd_realpath_dir() {
+    local real dir="$SANDBOX/bsdbin"
+    real="$(type -P realpath)" || return 1
+    mkdir -p -- "$dir" || return 1
+    # shellcheck disable=SC2016
+    printf '#!/bin/sh\nif [ "$1" = -m ]; then echo "realpath: illegal option -- m" >&2; exit 1; fi\nfor last in "$@"; do :; done\nif [ "$last" != -- ] && [ ! -e "$last" ]; then echo "realpath: $last: No such file or directory" >&2; exit 1; fi\ncase "$last" in *.noreal) echo "realpath: $last: Permission denied" >&2; exit 1 ;; esac\nexec %s "$@"\n' "$real" >"$dir/realpath" || return 1
+    chmod 755 "$dir/realpath" || return 1
+    printf '%s' "$dir"
+}
+
+test_an_include_pointing_at_a_dangling_symlink_is_skipped_like_git_does() {
+    local fake
+    lc_begin && lc_real_lookup && lc_make_fixtures && lc_use_fixtures || return 1
+    fake="$(bsd_realpath_dir)" || return 1
+    ln -s "$SANDBOX/deleted-dotfiles/gitconfig.local" "$LC_HOME/.gitconfig.local" || return 1
+    printf '[user]\n\tname = T\n[include]\n\tpath = ~/.gitconfig.local\n' >"$LC_HOME/.gitconfig" || return 1
+    EXTRA_ENV+=(PATH="$fake:$SANDBOX/pathbin:$TEST_BASE_PATH")
+    gsg install
+    assert_rc 0 "install with an include whose target is a dangling symlink, BSD realpath"
+    assert_not_contains "$ERR" "No such file or directory" "no raw realpath error reaches the user"
+}
+
+test_a_dangling_include_does_not_hide_a_later_include_that_sets_core_hooks_path() {
+    local fake
+    lc_begin && lc_real_lookup && lc_make_fixtures && lc_use_fixtures || return 1
+    fake="$(bsd_realpath_dir)" || return 1
+    printf '[core]\n\thooksPath = /foreign-hooks\n' >"$LC_HOME/second.conf" || return 1
+    printf '[includeIf "gitdir:/a/"]\n\tpath = dangling.conf\n[includeIf "gitdir:/b/"]\n\tpath = second.conf\n' >"$LC_HOME/.gitconfig" || return 1
+    EXTRA_ENV+=(PATH="$fake:$SANDBOX/pathbin:$TEST_BASE_PATH")
+    gsg install --replace-hooks-path
+    assert_rc 1 "a skipped dangling include must not stop the walk, BSD realpath"
+    assert_contains "$ERR" "/foreign-hooks" "the value set by the later include is seen and named"
+    assert_no_file "$LC_BIN" "nothing was installed"
+}
+
+test_an_include_that_realpath_cannot_resolve_is_refused_with_a_message_of_ours() {
+    local fake
+    lc_begin && lc_real_lookup && lc_make_fixtures && lc_use_fixtures || return 1
+    fake="$(bsd_realpath_dir)" || return 1
+    printf '[user]\n\temail = t@example.invalid\n' >"$LC_HOME/inc.noreal" || return 1
+    printf '[user]\n\tname = T\n[include]\n\tpath = ~/inc.noreal\n' >"$LC_HOME/.gitconfig" || return 1
+    EXTRA_ENV+=(PATH="$fake:$SANDBOX/pathbin:$TEST_BASE_PATH")
+    gsg install
+    assert_rc 1 "an existing include that realpath cannot resolve"
+    assert_contains "$ERR" "git-secret-guard: cannot resolve the include path $LC_HOME/inc.noreal" "our own line names the path"
+    assert_contains "$ERR" "nothing was changed" "the claim is true: nothing ran yet"
+    assert_no_file "$LC_BIN" "no tool installed"
+    assert_no_file "$LC_STATE" "no state dir"
+}
+
+test_the_global_config_read_does_not_need_a_realpath_that_knows_dash_m() {
+    local fake
+    lc_begin && lc_real_lookup && lc_make_fixtures && lc_use_fixtures || return 1
+    fake="$(bsd_realpath_dir)" || return 1
+    printf '[user]\n\tname = T\n[include]\n\tpath = extra.conf\n' >"$LC_HOME/.gitconfig" || return 1
+    printf '[user]\n\temail = t@example.invalid\n' >"$LC_HOME/extra.conf" || return 1
+    EXTRA_ENV+=(PATH="$fake:$SANDBOX/pathbin:$TEST_BASE_PATH")
+    gsg install
+    assert_rc 0 "install on a machine whose realpath has no -m, with an include in the global config"
+}
+
+test_lifecycle_realpath_m_normalizes_a_missing_tail_and_resolves_a_symlinked_ancestor() {
+    local fake base
+    lc_begin || return 1
+    fake="$(bsd_realpath_dir)" || return 1
+    base="$(cd -- "$SANDBOX" && pwd -P)/rp" || return 1
+    mkdir -p -- "$base/target" && ln -s target "$base/link" || return 1
+    # shellcheck disable=SC2016
+    run_cap env -i "${LC_ENV[@]}" PATH="$fake:$SANDBOX/pathbin:$TEST_BASE_PATH" bash -c \
+        'source "$1/lib/common.sh" && source "$1/lib/hookspath.sh" && lifecycle_realpath_m "$2"' _ "$GSG_PROJECT" "$base/link/new/./sub/../x//y"
+    assert_rc 0 "a path below a symlink with a missing tail"
+    assert_eq "$OUT" "$base/target/new/x/y" "symlink resolved, dot, dotdot and double slash normalized"
+    # shellcheck disable=SC2016
+    run_cap env -i "${LC_ENV[@]}" PATH="$fake:$SANDBOX/pathbin:$TEST_BASE_PATH" bash -c \
+        'source "$1/lib/common.sh" && source "$1/lib/hookspath.sh" && lifecycle_realpath_m "$2"' _ "$GSG_PROJECT" "relative/path"
+    assert_rc 1 "a relative path is refused"
+}
+
 run_file_tests

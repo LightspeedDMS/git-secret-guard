@@ -7,11 +7,12 @@ git config-based hook, so it runs alongside whatever hooks a repository brings (
 
 ## Requirements
 
-- Linux on x86_64 or arm64. Tested on RHEL 9-compatible (Rocky Linux 9.7) and Ubuntu 24.04 (in a podman container).
-  macOS is not supported yet.
+- Linux on x86_64 or arm64 (tested on RHEL 9-compatible Rocky Linux 9.7 and on Ubuntu 24.04 in a podman container), or
+  macOS arm64 with Homebrew (tested on macOS 26.7.1; macOS x86_64 is mapped but not tested).
 - **git 2.54 or newer, first on `PATH`.** Older git ignores config hooks without any message. Ubuntu 24.04 ships
   2.43: see [docs/platforms.md](docs/platforms.md) for the PPA or a source build.
-- bash, `jq`, `setsid`, `timeout`, and `curl` plus `tar` to download the scanners.
+- bash, `jq`, `setsid`, `timeout`, and `curl` plus `tar` to download the scanners. On macOS, `install` installs the missing
+  bash 4.4+, `coreutils`, `util-linux` and `jq` with `brew install`, after its other checks have passed.
 
 ## Install
 

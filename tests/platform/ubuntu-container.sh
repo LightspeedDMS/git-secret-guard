@@ -31,6 +31,8 @@ GIT_BIN=""
 SUITE_SUMMARY=""
 E2E_SUMMARY=""
 OS_RELEASE=/etc/os-release
+ISOLATION_SKIP_REASON=""
+PLATFORM_TITLE="UBUNTU 24.04"
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)" || exit 2
 # shellcheck source=lib/install.sh
 source "$HERE/../../lib/install.sh" || exit 2
@@ -106,6 +108,12 @@ parse_args() {
                 shift
                 [[ ${1:-} =~ ^[A-Za-z0-9._/:@-]+$ ]] || { usage >&2; exit 2; }
                 IMAGE_REF="$1"
+                ;;
+            --skip-isolation)
+                shift
+                local skip_re='^[A-Za-z0-9._ ,:;/()-]{10,200}$'
+                [[ ${1:-} =~ $skip_re ]] || { usage >&2; exit 2; }
+                ISOLATION_SKIP_REASON="$1"
                 ;;
             -h | --help)
                 usage
@@ -419,9 +427,14 @@ install_git_ppa() {
 # ^ external git 2.56 builds without Rust, Tcl/Tk and gettext; the digest is the one of git-2.56.0.tar.xz on kernel.org
 # shellcheck disable=SC2016
 install_git_source() {
-    local dir=/opt/gsg-git-build
     step "apt-get install git build dependencies" "$APT_TIMEOUT" apt-get install -y --no-install-recommends \
         build-essential libcurl4-openssl-dev libssl-dev libexpat1-dev zlib1g-dev perl || return 1
+    build_git_from_tarball
+}
+
+# shellcheck disable=SC2016
+build_git_from_tarball() {
+    local dir=/opt/gsg-git-build
     mkdir -p "$dir" || return 1
     step "download git $GIT_BUILD_VERSION" "$DOWNLOAD_TIMEOUT" curl -fsSL -o "$dir/git.tar.xz" "$GIT_BUILD_URL" || return 1
     step "verify the SHA-256 of the tarball" 60 bash -c 'cd "$1" && printf "%s  git.tar.xz\n" "$2" | sha256sum -c -' _ "$dir" "$GIT_BUILD_SHA256" || return 1
@@ -501,6 +514,8 @@ stage_checkout() {
     rm -rf -- "$CHECKOUT" || return 1
     cp -a /src "$CHECKOUT" || return 1
     chown -R "$TEST_USER:$TEST_USER" "$CHECKOUT" || return 1
+    # ^ why an empty repository in the copy, not the host history; tests list the project's files with git ls-files (test_quality.sh), and /src has no .git
+    runuser -u "$TEST_USER" -- env -i HOME="$USER_HOME" PATH="/usr/local/bin:/usr/bin:/bin" "$GIT_BIN" -C "$CHECKOUT" init -q || return 1
 }
 
 # ^ security env -i and a fixed variable list => the test user's shell starts with nothing from this container's process environment
@@ -543,8 +558,9 @@ phase_suite() {
 
 print_summary() {
     local v
-    printf '\n=== UBUNTU 24.04 PLATFORM TEST SUMMARY ===\n'
+    printf '\n=== %s PLATFORM TEST SUMMARY ===\n' "$PLATFORM_TITLE"
     printf 'os:        %s\n' "$(os_field PRETTY_NAME)"
+    if [ -n "$ISOLATION_SKIP_REASON" ]; then printf 'isolation: SKIPPED (%s)\n' "$ISOLATION_SKIP_REASON"; fi
     printf 'image:     %s\n' "${IMAGE_REF:-not passed (start the run through tests/platform/ubuntu.sh)}"
     printf 'bash:      %s\n' "${BASH_VERSION}"
     printf 'awk:       %s -> %s\n' "$(readlink -f /usr/bin/awk)" "$(awk -W version 2>&1 | head -n 1)"
@@ -572,10 +588,15 @@ main() {
     parse_args "$@"
     mkdir -p -- "$LOGDIR" || exit 2
     # ^ order check_isolation before every phase => a leaked host variable or secret ends the run before any apt or network step
-    check_isolation || {
-        printf 'ABORT: the isolation check failed; nothing was installed or downloaded\nRESULT: FAIL (%s failed step(s))\n' "$FAILURES"
-        return 1
-    }
+    # ^ security --skip-isolation is for the macOS host runner only (podman VM boundary); the reason is printed here and in the summary
+    if [ -n "$ISOLATION_SKIP_REASON" ]; then
+        printf 'SKIPPED isolation check: %s\n' "$ISOLATION_SKIP_REASON"
+    else
+        check_isolation || {
+            printf 'ABORT: the isolation check failed; nothing was installed or downloaded\nRESULT: FAIL (%s failed step(s))\n' "$FAILURES"
+            return 1
+        }
+    fi
     for phase in "${PHASES[@]}"; do
         "phase_$phase" || record_fail "phase $phase did not finish"
     done

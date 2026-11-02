@@ -256,6 +256,103 @@ test_the_cli_started_by_the_system_bash_without_a_homebrew_bash_says_so_for_othe
     assert_eq "$(brew_calls)" "" "only install may run brew install"
 }
 
+# ^ external bug #10 starts with a GUI-like PATH without brew; the installed copy knows its bash from its own settings file
+# ^ invariant $@ = settings lines written as given; the share copy is laid out like an install (bin, lib, hooks, VERSION, tools.lock, settings)
+installed_copy() {
+    local share="$SANDBOX/instshare"
+    rm -rf -- "$share" && mkdir -p -- "$share/bin" || return 1
+    cp -R -- "$GSG_PROJECT/lib" "$GSG_PROJECT/hooks" "$GSG_PROJECT/VERSION" "$GSG_PROJECT/tools.lock" "$share/" || return 1
+    cp -- "$GSG_PROJECT/bin/git-secret-guard" "$share/bin/" || return 1
+    { printf 'GNUBIN_DIR=%q\n' "$TEST_GNUBIN"; if [ "$#" -gt 0 ]; then printf '%s\n' "$@"; fi; } >"$share/settings"
+}
+baregsg() { run_cap env -i HOME="$SANDBOX/home" PATH=/usr/bin:/bin /bin/bash "$SANDBOX/instshare/bin/git-secret-guard" "$@"; }
+
+REEXEC_TEST_TIMEOUT_SECONDS=20
+
+assert_command_fitting_refusal() {
+    assert_rc 1 "$1: refused"
+    assert_contains "$ERR" "needs bash $MIN_BASH_MAJOR.$MIN_BASH_MINOR or newer" "$1: says what is missing"
+    assert_contains "$ERR" "brew install bash" "$1: says how to fix it"
+    assert_not_contains "$ERR" "run install again" "$1: no install wording"
+    assert_not_contains "$ERR" "nothing was changed" "$1: no install claim"
+}
+
+test_the_installed_cli_under_the_system_bash_reexecs_under_the_recorded_bash() {
+    old_system_bash || skip_test "$NO_OLD_BASH"
+    lc_begin || return 1
+    installed_copy "BASH_BIN=$(printf '%q' "$TEST_BASH")" || return 1
+    baregsg version
+    assert_rc 0 "version under bash 3.2 without brew on PATH"
+    assert_eq "$OUT" "git-secret-guard $(<"$GSG_PROJECT/VERSION")" "the CLI answered"
+}
+
+test_an_unusable_recorded_bash_is_refused_with_text_that_fits_the_command() {
+    old_system_bash || skip_test "$NO_OLD_BASH"
+    lc_begin || return 1
+    local label line
+    for label in missing relative old-bash empty; do
+        case "$label" in
+            missing) line="BASH_BIN=/nonexistent/bin/bash" ;;
+            relative) line="BASH_BIN=bash" ;;
+            old-bash) line="BASH_BIN=/bin/bash" ;;
+            empty) line="BASH_BIN=" ;;
+        esac
+        installed_copy "$line" || return 1
+        baregsg status
+        assert_command_fitting_refusal "$label"
+        assert_contains "$ERR" "BASH_BIN recorded in $SANDBOX/instshare/settings" "$label: names the recorded setting"
+    done
+}
+
+test_a_recorded_bash_that_needs_shell_quoting_or_expansion_is_ignored_as_data_and_never_run() {
+    old_system_bash || skip_test "$NO_OLD_BASH"
+    lc_begin || return 1
+    local pwned="$SANDBOX/pwned" line
+    for line in "BASH_BIN=/tmp/a\\ b/bash" "BASH_BIN='$TEST_BASH'" "BASH_BIN=\$(touch $pwned)" "BASH_BIN=\$'$TEST_BASH'" "BASH_BIN=/tmp/x;touch $pwned"; do
+        installed_copy "$line" || return 1
+        baregsg version
+        assert_command_fitting_refusal "[$line]"
+        assert_not_contains "$ERR" "$pwned" "the odd value is never echoed"
+    done
+    assert_no_file "$pwned" "the settings file was read as data, never executed under bash 3.2"
+}
+
+test_settings_without_a_recorded_bash_refuse_with_text_that_fits_the_command() {
+    old_system_bash || skip_test "$NO_OLD_BASH"
+    lc_begin || return 1
+    installed_copy || return 1
+    baregsg doctor
+    assert_command_fitting_refusal "no BASH_BIN"
+    assert_not_contains "$ERR" "recorded in" "nothing was recorded, so nothing is blamed"
+}
+
+test_a_recorded_bash_that_is_really_bash_3_2_is_refused_after_one_exec_not_looped() {
+    old_system_bash || skip_test "$NO_OLD_BASH"
+    lc_begin || return 1
+    local fake="$SANDBOX/fakebash"
+    # shellcheck disable=SC2016
+    printf '%s\n' '#!/bin/bash' 'if [ "${1:-}" = -c ]; then printf 4.4; exit 0; fi' 'exec /bin/bash "$@"' >"$fake" && chmod 755 "$fake" || return 1
+    assert_fake_bash_is_refused "$fake"
+}
+
+# ^ invariant arg 1 is a recorded bash claiming 4.4 without being it; the CLI must refuse inside the timeout, 124 means it looped
+assert_fake_bash_is_refused() {
+    installed_copy "BASH_BIN=$1" || return 1
+    run_cap env -i HOME="$SANDBOX/home" PATH=/usr/bin:/bin "$TEST_TIMEOUT" "$REEXEC_TEST_TIMEOUT_SECONDS" /bin/bash "$SANDBOX/instshare/bin/git-secret-guard" version
+    assert_rc 1 "refused, not killed by the timeout (124)"
+    assert_contains "$ERR" "still" "says the bash it got is still too old"
+    assert_contains "$ERR" "brew install bash" "says how to fix it"
+}
+
+test_a_recorded_bash_wrapper_that_runs_bash_as_a_child_is_refused_by_the_depth_bound_not_looped() {
+    old_system_bash || skip_test "$NO_OLD_BASH"
+    lc_begin || return 1
+    local fake="$SANDBOX/childbash"
+    # shellcheck disable=SC2016
+    printf '%s\n' '#!/bin/bash' 'if [ "${1:-}" = -c ]; then printf 4.4; exit 0; fi' '/bin/bash "$@"' 'exit $?' >"$fake" && chmod 755 "$fake" || return 1
+    assert_fake_bash_is_refused "$fake"
+}
+
 test_install_with_timer_under_the_system_bash_is_refused_before_brew_runs() {
     old_system_bash || skip_test "$NO_OLD_BASH"
     lc_begin && as_macos && lc_brew_reset || return 1

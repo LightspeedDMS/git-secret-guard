@@ -16,12 +16,17 @@ has_head() { gitx rev-parse -q --verify HEAD >/dev/null 2>&1; }
 assert_no_commit() { if has_head; then fail "a commit was created"; fi; }
 workdirs() { find "$SANDBOX/tmp" -maxdepth 1 -name 'git-secret-guard.*' 2>/dev/null; }
 
-test_clean_commit_passes_quietly_and_runs_both_tools() {
+test_clean_commit_prints_one_summary_line_and_runs_both_tools() {
     begin clean || return 1
     stage_file src/app.txt one two three
     commit_cap "clean"
     assert_rc 0 commit
-    assert_empty "$OUT$ERR" "nothing is printed on success"
+    assert_empty "$OUT" "stdout stays empty"
+    [[ $ERR =~ $PASS_LINE_RE ]] || fail "stderr is not exactly the pass line: [$ERR]"
+    assert_eq "${BASH_REMATCH[1]}" 1 "one file"
+    assert_eq "${BASH_REMATCH[2]}" 3 "three added lines"
+    assert_eq "${BASH_REMATCH[3]}" "trufflehog 1.2.3, gitleaks 4.5.6" "versions come from the settings"
+    assert_eq "$(wc -l <<<"$ERR" | tr -d ' ')" 1 "exactly one line"
     assert_eq "$(tf_runs)" 1 "trufflehog ran once"
     assert_eq "$(gl_runs)" 1 "gitleaks ran once"
     has_head || fail "commit was not created"
@@ -265,6 +270,7 @@ test_empty_commit_starts_no_scanner_and_succeeds() {
     begin empty || return 1
     commit_cap "empty" --allow-empty
     assert_rc 0 commit
+    assert_eq "$ERR" "git-secret-guard: no added lines to scan" "one line says nothing was there to scan"
     assert_eq "$(tf_runs)$(gl_runs)" 00 "no scanner started"
     has_head || fail "commit was not created"
 }
@@ -275,6 +281,7 @@ test_deletion_only_commit_starts_no_scanner_and_succeeds() {
     gitx rm -q -- gone.txt
     commit_cap "delete"
     assert_rc 0 commit
+    assert_eq "$ERR" "git-secret-guard: no added lines to scan" "one line says nothing was there to scan"
     assert_eq "$(tf_runs)$(gl_runs)" 00 "no scanner started"
 }
 
@@ -294,12 +301,100 @@ test_binary_content_is_never_passed_to_the_scanners() {
     done
 }
 
+drop_versions() {
+    grep -v '_VERSION=' "$SHARE/settings" >"$SHARE/settings.new" && mv -- "$SHARE/settings.new" "$SHARE/settings"
+}
+
+test_the_pass_line_counts_files_and_added_lines_from_the_extraction() {
+    begin counts || return 1
+    stage_file a.txt one ''
+    stage_file deep/b.txt x y z
+    commit_cap "two files"
+    assert_rc 0 commit
+    [[ $ERR =~ $PASS_LINE_RE ]] || fail "not the pass line: [$ERR]"
+    assert_eq "${BASH_REMATCH[1]}" 2 "two files"
+    assert_eq "${BASH_REMATCH[2]}" 5 "five added lines, the blank one included"
+    assert_not_contains "$ERR" "a.txt" "no path in the line"
+}
+
+test_settings_without_versions_print_the_line_without_versions() {
+    begin nover || return 1
+    drop_versions || return 1
+    stage_file a.txt one
+    commit_cap "old settings"
+    assert_rc 0 "an older install still commits"
+    assert_pass_line_only "$ERR" "still the pass line"
+    assert_contains "$ERR" "(trufflehog, gitleaks)" "tool names without versions"
+}
+
+test_a_version_that_is_not_digits_and_dots_is_dropped_from_the_line() {
+    begin badver || return 1
+    use_stubs "TRUFFLEHOG_VERSION='9.9 FORGED all clear'"
+    stage_file a.txt one
+    commit_cap "forged"
+    assert_rc 0 commit
+    assert_pass_line_only "$ERR" "still one pass line"
+    assert_contains "$ERR" "(trufflehog, gitleaks 4.5.6)" "only the sane version is shown"
+    assert_not_contains "$ERR" "FORGED" "the odd text never reaches the terminal"
+}
+
+test_an_inherited_version_variable_cannot_fill_a_version_the_settings_omit() {
+    begin inherit || return 1
+    drop_versions || return 1
+    set_env TRUFFLEHOG_VERSION=7.7.7 GITLEAKS_VERSION=8.8.8
+    stage_file a.txt one
+    commit_cap "inherited"
+    assert_rc 0 commit
+    assert_contains "$ERR" "(trufflehog, gitleaks)" "no inherited version"
+}
+
+test_findings_and_blocks_print_no_pass_line() {
+    begin nopass || return 1
+    stage_file a.txt one two
+    set_env STUB_TF_FINDINGS="AWS|true|a.txt|2"
+    commit_cap "finding"
+    assert_rc 1 "blocked by the finding"
+    assert_not_contains "$ERR" "no findings" "no pass line with a finding"
+    assert_not_contains "$ERR" "scanned " "no pass line with a finding"
+    set_env STUB_TF_FINDINGS=
+    use_stubs "GITLEAKS_BIN=/nonexistent/gitleaks"
+    commit_cap "blocked"
+    assert_rc 1 "blocked by the missing tool"
+    assert_contains "$ERR" "nothing was scanned" "the existing block text"
+    assert_not_contains "$ERR" "no findings" "no pass line on a block"
+}
+
+# ^ external the hook resolves awk through PATH; the wrapper runs the real awk and afterwards damages the counts file it was told to write
+test_a_missing_or_garbage_counts_file_blocks_and_never_reports_zero() {
+    begin badcounts || return 1
+    local real_awk mode
+    real_awk="$(command -v awk)" || return 1
+    mkdir -p -- "$SANDBOX/fakeawk" || return 1
+    # shellcheck disable=SC2016
+    printf '%s\n' '#!/bin/bash' "\"$real_awk\" \"\$@\"" 'rc=$?' \
+        'if [ -n "${GSG_EXTRACT_COUNTS:-}" ]; then' \
+        '  case "${GSG_TEST_COUNTS_MODE:-}" in missing) rm -f -- "$GSG_EXTRACT_COUNTS" ;; garbage) printf "x y\n" >"$GSG_EXTRACT_COUNTS" ;; esac' \
+        'fi' 'exit $rc' >"$SANDBOX/fakeawk/awk" && chmod 755 "$SANDBOX/fakeawk/awk" || return 1
+    stage_file a.txt one two
+    for mode in missing garbage; do
+        set_env PATH="$SANDBOX/fakeawk:$REAL_HOME/.local/bin:$TEST_BASE_PATH" GSG_TEST_COUNTS_MODE="$mode"
+        commit_cap "damaged counts $mode"
+        assert_rc 1 "$mode: blocked"
+        assert_contains "$ERR" "nothing was scanned" "$mode: says nothing was scanned"
+        assert_not_contains "$ERR" "no added lines to scan" "$mode: never the empty-commit message"
+        assert_not_contains "$ERR" "scanned 0" "$mode: never zeros"
+        assert_eq "$(tf_runs)$(gl_runs)" 00 "$mode: no scanner started"
+    done
+    assert_no_commit
+}
+
 test_binary_only_commit_starts_no_scanner() {
     begin binonly || return 1
     printf '\000\001%s\000\377' "$MARKER" >blob.bin
     gitx add blob.bin
     commit_cap "bin"
     assert_rc 0 commit
+    assert_eq "$ERR" "git-secret-guard: no added lines to scan" "one line says nothing was there to scan"
     assert_eq "$(tf_runs)$(gl_runs)" 00 "nothing textual to scan"
 }
 
@@ -550,7 +645,8 @@ test_a_git_client_with_the_system_bash_first_on_PATH_still_scans() {
     run_cap env -i HOME="$SANDBOX/home" PATH="/usr/bin:/bin" TMPDIR="$SANDBOX/tmp" GIT_CONFIG_GLOBAL="$SANDBOX/gitconfig" \
         GIT_CONFIG_NOSYSTEM=1 STUB_LOG="$CALLS" "$GIT" commit -q -m gui
     assert_rc 0 "commit under a GUI-style PATH"
-    assert_empty "$OUT$ERR" "nothing is printed on success"
+    assert_empty "$OUT" "stdout stays empty"
+    assert_pass_line_only "$ERR" "only the pass line is printed"
     assert_eq "$(tf_runs)$(gl_runs)" 11 "both scanners ran"
     assert_empty "$(workdirs)" "private temp dir removed"
 }

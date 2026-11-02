@@ -6,6 +6,8 @@ GSG_NAME="${GSG_NAME:-git-secret-guard}"
 BREW_HOMEBREW_URL=https://brew.sh
 BREW_BASH_MIN_MAJOR=4
 BREW_BASH_MIN_MINOR=4
+BREW_SETTINGS_MAX_LINES=500
+BREW_REEXEC_MAX=2
 
 brew_is_macos() { [ "$(uname -s)" = Darwin ]; }
 
@@ -163,6 +165,68 @@ brew_use_gnubin() {
     return 1
 }
 
+# ^ external bug #10, an installed copy started by /bin/bash 3.2 with no brew on PATH still has the bash install recorded in its own settings file
+# ^ security the settings file is read as data, never sourced; only a plain absolute path of safe characters is believed, anything else is ignored
+# ^ invariant rc 0 sets BREW_RECORDED to a usable bash; rc 1 sets BREW_RECORDED_NOTE to the reason, empty when nothing was recorded; the last BASH_BIN line wins
+brew_recorded_bash() {
+    local file="${GSG_ROOT:-}/settings" line value="" shown="" reason="" seen=0 n=0
+    BREW_RECORDED="" BREW_RECORDED_NOTE=""
+    if [ -z "${GSG_ROOT:-}" ] || [ ! -f "$file" ]; then return 1; fi
+    if [ ! -r "$file" ]; then
+        BREW_RECORDED_NOTE="the settings file $file cannot be read"
+        return 1
+    fi
+    while IFS= read -r line || [ -n "$line" ]; do
+        n=$((n + 1))
+        if [ "$n" -gt "$BREW_SETTINGS_MAX_LINES" ]; then
+            BREW_RECORDED_NOTE="the settings file $file has more than $BREW_SETTINGS_MAX_LINES lines and was not read"
+            return 1
+        fi
+        case "$line" in
+            BASH_BIN=*)
+                value="${line#BASH_BIN=}"
+                seen=1
+                ;;
+        esac
+    done <"$file"
+    if [ "$seen" -eq 0 ]; then return 1; fi
+    shown="$value"
+    if [ -z "$value" ]; then
+        reason="is empty"
+    elif [ -n "${value//[A-Za-z0-9._\/+@%-]/}" ]; then
+        shown=""
+        reason="is not a plain path (shell quoting and expansion are not read under bash $BASH_VERSION)"
+    elif [ "${value#/}" = "$value" ]; then
+        reason="is not an absolute path"
+    elif [ ! -f "$value" ] || [ ! -x "$value" ]; then
+        reason="is not an executable file"
+    elif ! brew_bash_ok "$value"; then
+        reason="does not report bash $BREW_BASH_MIN_MAJOR.$BREW_BASH_MIN_MINOR or newer"
+    fi
+    if [ -z "$reason" ]; then
+        BREW_RECORDED="$value"
+        return 0
+    fi
+    BREW_RECORDED_NOTE="the BASH_BIN recorded in $file ${shown:+($shown) }$reason"
+    return 1
+}
+
+# ^ invariant quiet lookup for commands other than install; true only when brew is on PATH and its bash is usable, sets BREW_BIN and BREW_BASH
+brew_have_brew_bash() {
+    BREW_BIN="$(type -P brew)" || return 1
+    if [ -z "$BREW_BIN" ] || [ "${BREW_BIN#/}" = "$BREW_BIN" ]; then return 1; fi
+    brew_paths 2>/dev/null || return 1
+    brew_bash_ok "$BREW_BASH"
+}
+
+# ^ invariant arg 1 is the command; says what is missing and how to fix it, never install wording and never a claim about changes
+brew_refuse_old_bash() {
+    local cmd="this command"
+    if [ -n "${1:-}" ]; then cmd="the $1 command"; fi
+    printf '%s: %s needs bash %s.%s or newer and this is bash %s; %sput the Homebrew bash first on PATH, or get it with: brew install bash\n' \
+        "$GSG_NAME" "$cmd" "$BREW_BASH_MIN_MAJOR" "$BREW_BASH_MIN_MINOR" "${BASH_VERSION:-unknown}" "${BREW_RECORDED_NOTE:+$BREW_RECORDED_NOTE; }" >&2
+}
+
 # ^ invariant true when the running bash is the minimum or newer; plain bash 3.2 syntax
 brew_running_bash_ok() {
     [ "${BASH_VERSINFO[0]:-0}" -gt "$BREW_BASH_MIN_MAJOR" ] \
@@ -173,12 +237,19 @@ brew_running_bash_ok() {
 # ^ order --with-timer is refused before any brew call; install runs brew install bash alone, and only without a Homebrew bash
 # ^ invariant GSG_BREW_BOOTSTRAPPED=<pid>:<formulae> carries the install across the re-exec; exec keeps the pid, a stale shell value is ignored
 brew_cli_bootstrap() {
-    local self="$1" arg timer=0 minimum="$BREW_BASH_MIN_MAJOR.$BREW_BASH_MIN_MINOR"
+    local self="$1" arg timer=0 reexeced=0 depth="${GSG_BREW_REEXEC_DEPTH-0}" minimum="$BREW_BASH_MIN_MAJOR.$BREW_BASH_MIN_MINOR"
     shift
     case "${GSG_BREW_BOOTSTRAPPED:-}" in
-        "$$:"*) BREW_INSTALLED="${GSG_BREW_BOOTSTRAPPED#*:}" ;;
+        "$$:"*)
+            BREW_INSTALLED="${GSG_BREW_BOOTSTRAPPED#*:}"
+            reexeced=1
+            ;;
     esac
-    unset GSG_BREW_BOOTSTRAPPED
+    unset GSG_BREW_BOOTSTRAPPED GSG_BREW_REEXEC_DEPTH
+    # ^ invariant an empty or non-digit depth counts as already at the bound => an inherited odd value refuses, never loops
+    case "$depth" in
+        "" | *[!0-9]*) depth="$BREW_REEXEC_MAX" ;;
+    esac
     if brew_running_bash_ok; then return 0; fi
     if ! brew_is_macos; then
         printf '%s: bash %s or newer is required, this is bash %s\n' "$GSG_NAME" "$minimum" "${BASH_VERSION:-unknown}" >&2
@@ -188,23 +259,36 @@ brew_cli_bootstrap() {
         if [ "$arg" = --with-timer ]; then timer=1; fi
     done
     brew_refuse_timer "$timer" || return 1
-    brew_find || return 1
-    brew_paths || return 1
-    if ! brew_bash_ok "$BREW_BASH"; then
-        if [ "${1:-}" != install ]; then
-            printf '%s: bash %s or newer is required and this is bash %s; get it with: brew install bash\n' "$GSG_NAME" "$minimum" "${BASH_VERSION:-unknown}" >&2
+    # ^ invariant two bounds stop a loop, the pid-bound marker and an environment depth counter; a wrapper running bash as a child gets a new pid
+    # ^ invariant either one means the bash we started is still old; refuse, never exec again
+    if [ "$reexeced" -eq 1 ] || [ "$depth" -ge "$BREW_REEXEC_MAX" ]; then
+        printf '%s: the CLI was started again under a bash that still reports bash %s; it needs bash %s or newer; put the Homebrew bash first on PATH, or get it with: brew install bash\n' \
+            "$GSG_NAME" "${BASH_VERSION:-unknown}" "$minimum" >&2
+        return 1
+    fi
+    if brew_recorded_bash; then
+        GSG_BREW_BOOTSTRAPPED="$$:$BREW_INSTALLED" GSG_BREW_REEXEC_DEPTH=$((depth + 1)) exec "$BREW_RECORDED" "$self" "$@"
+    fi
+    if [ "${1:-}" != install ]; then
+        if ! brew_have_brew_bash; then
+            brew_refuse_old_bash "${1:-}"
             return 1
         fi
-        brew_run_install bash || return 1
+    else
+        brew_find || return 1
+        brew_paths || return 1
         if ! brew_bash_ok "$BREW_BASH"; then
-            printf '%s: brew install bash finished but %s is not a bash %s or newer; install refused, %s\n' \
-                "$GSG_NAME" "$BREW_BASH" "$minimum" "$(brew_unchanged_text)" >&2
-            return 1
+            brew_run_install bash || return 1
+            if ! brew_bash_ok "$BREW_BASH"; then
+                printf '%s: brew install bash finished but %s is not a bash %s or newer; install refused, %s\n' \
+                    "$GSG_NAME" "$BREW_BASH" "$minimum" "$(brew_unchanged_text)" >&2
+                return 1
+            fi
         fi
     fi
     if [ ! -x "$BREW_BASH" ]; then
         printf '%s: cannot start %s\n' "$GSG_NAME" "$BREW_BASH" >&2
         return 1
     fi
-    GSG_BREW_BOOTSTRAPPED="$$:$BREW_INSTALLED" exec "$BREW_BASH" "$self" "$@"
+    GSG_BREW_BOOTSTRAPPED="$$:$BREW_INSTALLED" GSG_BREW_REEXEC_DEPTH=$((depth + 1)) exec "$BREW_BASH" "$self" "$@"
 }

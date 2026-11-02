@@ -63,6 +63,7 @@ function finish_file() {
 function start_file(    slash, d) {
     if (path in seen) die("file appears twice in the diff: " clean(path))
     seen[path] = 1
+    nfiles++
     out = root "/" path
     outline = 0
     slash = match(path, /\/[^\/]*$/)
@@ -82,6 +83,7 @@ function add_line(text) {
     while (outline < lineno - 1) { print "" > out; outline++ }
     print text > out
     outline++
+    nlines++
 }
 
 BEGIN {
@@ -129,4 +131,10 @@ BEGIN {
 END {
     if (!failed && (old > 0 || new > 0)) die("diff ended inside a hunk")
     if (!failed) finish_file()
+    # ^ coupled lib/extract.sh:extract_added_lines reads this file; written only after every scan file closed cleanly
+    counts = ENVIRON["GSG_EXTRACT_COUNTS"]
+    if (!failed && counts != "") {
+        print nfiles + 0, nlines + 0 > counts
+        if (close(counts) != 0) die("write error on the count file")
+    }
 }

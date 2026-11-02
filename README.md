@@ -37,8 +37,17 @@ git-secret-guard doctor                 # which repositories under ~/Dev are not
 git-secret-guard uninstall              # restore what was there before (--remove-tools: also the scanners it downloaded)
 ```
 
-A blocked commit lists the scanner, rule, file and line of each finding, never the secret itself. A clean commit
-prints nothing, apart from one-line notices about the exemption files in use.
+A blocked commit lists the scanner, rule, file and line of each finding, never the secret itself. A passing commit prints
+one line, so a clean scan can be told from a hook that never ran:
+
+```
+git-secret-guard: scanned 3 files, 214 added lines (trufflehog 3.99.2, gitleaks 8.30.1): no findings, 1s
+git-secret-guard: no added lines to scan                      # only deletions, binary files, mode changes, an empty commit
+git-secret-guard: scanned 3 files, ..., no findings, 2 files exempted, 1s   # .secret-scan-ignore excluded staged files
+```
+
+No line at all on a commit means the hook did not run (see `docs/scan.md`). The counts come from the extraction, the line
+holds no path or value, and there is no switch to turn it off.
 
 ## False positives
 

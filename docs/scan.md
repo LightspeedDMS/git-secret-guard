@@ -25,12 +25,28 @@
    to their message words.
 5. Any finding, any scanner error (unexpected exit status, timeout, unreadable report, error-level log line, skipped
    file, an oversized gitleaks log, or trufflehog exiting 0 without its `finished scanning` line with `chunks >= 1`)
-   blocks with exit 1 and the hint `git commit --no-verify`. A clean scan prints nothing.
+   blocks with exit 1 and the hint `git commit --no-verify`.
+6. A passing commit prints one line on stderr, so a clean scan can be told from a hook that never ran (a repository-local
+   `hook.git-secret-guard.enabled=false`, a leftover `core.hooksPath`, a git older than 2.54 that ignores config hooks):
+   - **Scanned:** `git-secret-guard: scanned 3 files, 214 added lines (trufflehog 3.99.2, gitleaks 8.30.1): no findings, 1s`.
+   - **Nothing to scan** (only deletions, binary files, mode changes, an empty commit): `git-secret-guard: no added lines to scan`.
+   - **Exemptions:** when `.secret-scan-ignore` at HEAD excluded staged files with added lines, the scanned line adds
+     `, 2 files exempted` before the time, and a commit whose files are all exempted says
+     `git-secret-guard: no added lines to scan (2 files exempted)`. The existing `N staged file(s) excluded` line stays.
+
+   The file and line counts come from the extraction (the scan tree), never from scanner output. The versions are the pinned
+   ones `install` verified and recorded in the settings file; the hook never runs `--version`, and a settings file from an older
+   install (or a value that is not digits and dots) prints the tool names without versions. The time is whole seconds
+   (`$SECONDS`, because bash 4.4 and BSD `date` have no sub-second clock), so it can be off by one. The line holds no path, no
+   candidate value and no scanner text. The counts are what was handed to both scanners; gitleaks' default config still skips some
+   paths itself (`node_modules/`, lockfiles, `go.sum`, ...), see "Gitleaks' default config skips whole paths" under Limits. Findings and every block keep their output and print no pass line. There is no switch
+   to silence it: `settings` is rewritten by every install, so a hand edit would be lost.
 
 ## The settings file
 
 The hook reads `<share>/settings` (`<share>` = two levels above the resolved script path), written by `install`:
-absolute `TRUFFLEHOG_BIN`, `GITLEAKS_BIN`, `JQ_BIN`, `SETSID_BIN`, `TIMEOUT_BIN` and `SCAN_TIMEOUT_SECONDS`. A missing,
+absolute `TRUFFLEHOG_BIN`, `GITLEAKS_BIN`, `JQ_BIN`, `SETSID_BIN`, `TIMEOUT_BIN`, the pinned `TRUFFLEHOG_VERSION` and
+`GITLEAKS_VERSION` (shown on the pass line only) and `SCAN_TIMEOUT_SECONDS`. A missing,
 relative or non-executable entry blocks the commit and says nothing was scanned; an inherited environment variable of
 the same name is discarded before the file is read.
 Skip once with `git commit --no-verify`; automation can disable only this hook with
@@ -77,7 +93,7 @@ tests also need `/usr/local/bin/git` (>= 2.54), `shellcheck`, `pre-commit`, and 
   `GIT_CONFIG_PARAMETERS="'hook.git-secret-guard.enabled'='false'"`.
 - **Only added lines of text files.** Anything git treats as binary is not scanned, because git shows no content for
   it. That includes **UTF-16 text** (with or without a BOM, e.g. a file saved by Windows tools) and any file that
-  contains a NUL byte: a UTF-16LE file holding a credential commits silently and unscanned
+  contains a NUL byte: a UTF-16LE file holding a credential commits unscanned (the hook says `no added lines to scan`, because git treats the file as binary)
   (`test_real_utf16_and_nul_byte_files_commit_unscanned_a_documented_limit`). Convert such files to UTF-8 first. Pure
   renames and mode changes add no lines.
 - **Attributes: committed and user ones cannot hide text, two machine-local files can.** The diff runs with

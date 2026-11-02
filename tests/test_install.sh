@@ -330,6 +330,22 @@ test_install_writes_the_settings_the_hook_reads_with_absolute_tool_paths() {
     assert_contains "$OUT" "SCAN_TIMEOUT_SECONDS=300" "default timeout"
 }
 
+test_install_records_the_pinned_scanner_versions_in_the_settings() {
+    fresh_install
+    assert_rc 0 "fresh install"
+    assert_eq "$(grep -c '^TRUFFLEHOG_VERSION=' "$LC_DATA/settings")" 1 "one trufflehog version line"
+    # shellcheck disable=SC2016
+    run_cap env -i "${GSG_ENV[@]}" TRUFFLEHOG_VERSION=0.0.1 bash -c '
+        source "$1/lib/common.sh" && load_settings "$1/settings" || exit 10
+        printf "tf=%s gl=%s\n" "$TRUFFLEHOG_VERSION" "$GITLEAKS_VERSION"
+        grep -v _VERSION= "$1/settings" >"$1/settings.bare"
+        load_settings "$1/settings.bare" || exit 11
+        printf "bare=[%s]\n" "${TRUFFLEHOG_VERSION:-}"' _ "$LC_DATA"
+    assert_rc 0 "settings load"
+    assert_contains "$OUT" "tf=3.99.2 gl=8.30.1" "the pinned versions the install verified"
+    assert_contains "$OUT" "bare=[]" "an inherited version cannot fill a file without it"
+}
+
 cfg_count() { gitx config --global --get-all "$1" 2>/dev/null | wc -l; }
 
 test_fresh_install_sets_exactly_one_event_and_one_absolute_command() {

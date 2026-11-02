@@ -81,6 +81,11 @@ bin/git-secret-guard install        # lists what is missing, installs it with br
   client that starts with `/usr/bin:/bin` (and `/bin/bash` 3.2 first) still runs the hook under the recorded bash. A hook started any
   other way under bash older than 4.4 blocks with `nothing was scanned` before it reads another line. The CLI behaves the same: started
   by bash 3.2 it re-executes under the Homebrew bash (`install` first runs `brew install bash` alone when none exists), or refuses.
+  An installed copy started that way with no `brew` on `PATH` (`env -i PATH=/usr/bin:/bin /bin/bash ~/.local/bin/git-secret-guard status`)
+  reads `BASH_BIN` from its own `settings` as data (never sourced under 3.2; only a plain absolute path of letters, digits and
+  `._/+@%-` is believed, so a value that needs shell quoting is ignored), checks that it is executable and reports bash 4.4 or
+  newer, and re-executes under it once. If that fails it refuses with a message that names the command, the unusable `BASH_BIN`
+  and what to do (put the Homebrew bash first on `PATH`, or `brew install bash`), never the install wording.
 - **`install --with-timer` is refused** on macOS (`launchd is not supported yet`) and changes nothing; the weekly doctor timer is
   systemd only for now. `doctor` and `status` work and check `BASH_BIN` like the other recorded tools.
 - **GNU flags and their answers.** `realpath -m`, `mktemp --suffix`, `mv -T`/`-n`, `install -T`, `chmod 700 -- DIR` and `sort -z` run from

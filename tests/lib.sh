@@ -60,6 +60,10 @@ if [ "$TEST_OS" = Darwin ]; then
     }
 fi
 
+# ^ why versions unlike any pin, not the pinned ones; the printed line proves the settings are read, not tools.lock
+TEST_TF_VERSION=1.2.3
+TEST_GL_VERSION=4.5.6
+
 SANDBOX=""
 SHARE=""
 GSG_ENV=()
@@ -117,6 +121,8 @@ write_settings() {
         printf 'JQ_BIN=%q\n' "$3"
         printf 'SETSID_BIN=%q\n' "$TEST_SETSID"
         printf 'TIMEOUT_BIN=%q\n' "$TEST_TIMEOUT"
+        printf 'TRUFFLEHOG_VERSION=%q\n' "$TEST_TF_VERSION"
+        printf 'GITLEAKS_VERSION=%q\n' "$TEST_GL_VERSION"
         if [ -n "$TEST_BASH" ]; then
             printf 'BASH_BIN=%q\n' "$TEST_BASH"
             printf 'GNUBIN_DIR=%q\n' "$TEST_GNUBIN"
@@ -223,6 +229,8 @@ assert_rc() { [ "$RC" -eq "$1" ] || fail "${2:-rc}: expected exit $1 got $RC (st
 assert_contains() { case "$1" in *"$2"*) return 0 ;; esac; fail "${3:-assert_contains}: missing [$2] in [${1:0:400}]"; }
 assert_not_contains() { case "$1" in *"$2"*) fail "${3:-assert_not_contains}: unexpected [$2]"; return 1 ;; esac; }
 assert_empty() { [ -z "$1" ] || fail "${2:-assert_empty}: got [${1:0:300}]"; }
+PASS_LINE_RE='^git-secret-guard: scanned ([0-9]+) files?, ([0-9]+) added lines? \(([^)]*)\): no findings(, [0-9]+ files? exempted)?, [0-9]+s$'
+assert_pass_line_only() { [[ $1 =~ $PASS_LINE_RE ]] || fail "${2:-assert_pass_line_only}: expected exactly the pass line, got [${1:0:300}]"; }
 assert_file() { [ -e "$1" ] || fail "${2:-assert_file}: missing $1"; }
 assert_no_file() { [ ! -e "$1" ] || fail "${2:-assert_no_file}: unexpected $1"; }
 

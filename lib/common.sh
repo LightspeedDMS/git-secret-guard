@@ -21,7 +21,8 @@ GSG_JQ_CLEAN='def clean: tostring | gsub("[\u0000-\u001f\u007f]"; "?"); '
 # ^ security unset before source => an inherited TRUFFLEHOG_BIN/GITLEAKS_BIN/JQ_BIN/SETSID_BIN/TIMEOUT_BIN/BASH_BIN/GNUBIN_DIR cannot fill a gap (silent bypass)
 load_settings() {
     local file="$1"
-    unset TRUFFLEHOG_BIN GITLEAKS_BIN JQ_BIN SETSID_BIN TIMEOUT_BIN SYSTEMCTL_BIN BASH_BIN GNUBIN_DIR SCAN_TIMEOUT_SECONDS DOCTOR_TIMEOUT_SECONDS
+    unset TRUFFLEHOG_BIN GITLEAKS_BIN JQ_BIN SETSID_BIN TIMEOUT_BIN SYSTEMCTL_BIN BASH_BIN GNUBIN_DIR SCAN_TIMEOUT_SECONDS DOCTOR_TIMEOUT_SECONDS \
+        TRUFFLEHOG_VERSION GITLEAKS_VERSION
     if [ ! -f "$file" ] || [ ! -r "$file" ]; then
         printf 'settings file is missing or unreadable: %s\n' "$file" >&2
         return 1

@@ -97,7 +97,8 @@ printf 'nothing secret here\n' >"$WORK/repo/clean.txt" || exit 2
 git -C "$WORK/repo" add clean.txt || exit 2
 commit_in "$WORK/repo" clean
 check_rc 0 "a clean commit passes through the installed hook"
-check_eq "$(wc -c <"$LOGS/clean.err")" 0 "and says nothing"
+check_eq "$(sed -E 's/, [0-9]+s$/, Ns/' "$LOGS/clean.err")" \
+    "git-secret-guard: scanned 1 file, 1 added line (trufflehog $(pinned trufflehog), gitleaks $(pinned gitleaks)): no findings, Ns" "and prints exactly the pass line"
 
 printf 'one\ntoken = "%s"\n' "$(fake_token)" >"$WORK/repo/leak.txt" || exit 2
 git -C "$WORK/repo" add leak.txt || exit 2

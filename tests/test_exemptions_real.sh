@@ -126,7 +126,8 @@ test_real_both_markers_on_one_line_let_the_commit_succeed_in_either_order() {
         stage_file f.txt "$(token_line "$markers")"
         commit_cap "both markers"
         assert_rc 0 "[$markers] neither tool reports"
-        assert_empty "$OUT$ERR" "silent"
+        assert_empty "$OUT" "stdout stays empty"
+        assert_pass_line_only "$ERR" "only the pass line"
     done
 }
 

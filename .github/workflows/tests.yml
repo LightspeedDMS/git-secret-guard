@@ -171,6 +171,8 @@ jobs:
           Write-Host $out
           if ($LASTEXITCODE -eq 0) { throw 'the commit with a leaked token was NOT blocked' }
           if ($out -notmatch 'github-pat') { throw 'the commit was blocked, but not by the expected finding' }
+          # the step wrapper exits with the last native exit code; the blocked commit was the expected outcome
+          $global:LASTEXITCODE = 0
 
       - name: A clean commit passes and nothing is left behind
         shell: pwsh

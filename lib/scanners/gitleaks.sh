@@ -10,12 +10,13 @@ scan_gitleaks() {
     local rows="$out/gitleaks.rows" errs="$out/gitleaks.errors"
     local report="$out/gitleaks.json" log="$out/gitleaks.log"
     local conf="$out/gitleaks.toml" ignore_dir="$out/gitleaks-ignore"
-    local rc problem nrows gl_tree
+    local rc problem nrows gl_tree windows=0
     # ^ invariant out and scan dirs absolute => the cd below cannot invalidate the config/report/ignore paths
     case "$out" in /*) ;; *) return 1 ;; esac
     case "$scan_dir" in /*) ;; *) return 1 ;; esac
     [ -d "$scan_dir" ] || return 1
     : >"$rows" && : >"$errs" || return 1
+    if gsg_is_windows; then windows=1; fi
 
     if problem="$(tool_unusable gitleaks "${GITLEAKS_BIN:-}")" || problem="$(tool_unusable timeout "${TIMEOUT_BIN:-}")"; then
         printf 'gitleaks: %s; nothing was scanned\n' "$problem" >"$errs" || return 1
@@ -58,13 +59,14 @@ scan_gitleaks() {
         printf 'gitleaks: scan failed (exit %s)\n' "$rc" >>"$errs" || return 1
     elif [ ! -s "$report" ]; then
         printf 'gitleaks: no report was written (exit %s); failing closed\n' "$rc" >>"$errs" || return 1
+    # ^ external gitleaks.exe writes backslashes into File on Windows => they become "/" before the prefix is trimmed, like Linux names
     # ^ security jq stderr dropped => parse errors quote the input
-    elif ! "$JQ_BIN" -r --arg prefix "$scan_dir/" --arg renamed "$GSG_GITLEAKS_RENAMED" "$GSG_JQ_CLEAN"'
+    elif ! "$JQ_BIN" -r --arg prefix "$scan_dir/" --arg renamed "$GSG_GITLEAKS_RENAMED" --arg windows "$windows" "$GSG_JQ_CLEAN"'
             (if type == "array" then .[] else error("not an array") end)
             | (if type == "object" then . else error("not an object") end)
             | (.StartLine // 0) as $line
             | ["gitleaks", (.RuleID // "?" | clean), "finding",
-               (.File // "?" | ltrimstr($prefix) | (if . == $renamed then ".gitleaksignore" else . end) | clean),
+               (.File // "?" | (if $windows == "1" then gsub("\\\\"; "/") else . end) | ltrimstr($prefix) | (if . == $renamed then ".gitleaksignore" else . end) | clean),
                (if ($line | type) == "number" and $line >= 1 then ($line | floor | tostring) else "?" end)]
             | @tsv' "$report" >"$rows" 2>/dev/null; then
         : >"$rows"

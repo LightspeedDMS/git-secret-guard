@@ -66,6 +66,13 @@ install_os_family() {
 
 # ^ invariant prints the end of a "was not found" message for package $1; apt on Ubuntu and Debian, the package manager elsewhere
 install_fix_hint() {
+    if tools_is_windows; then
+        case "$1" in
+            jq) printf 'install it with: winget install jqlang.jq' ;;
+            *) printf 'it comes with Windows or Git for Windows, so check that PATH holds their directories' ;;
+        esac
+        return 0
+    fi
     install_os_family
     case "$REPLY" in
         ubuntu | debian) printf 'install it with: sudo apt install %s' "$1" ;;
@@ -75,6 +82,10 @@ install_fix_hint() {
 
 # ^ external ppa:git-core/ppa carries git >= 2.54 for Ubuntu only; Ubuntu 24.04 ships 2.43; the build path is in docs/platforms.md
 install_git_hint() {
+    if tools_is_windows; then
+        printf '%s: update Git for Windows to git >= 2.54 with: winget upgrade Git.Git, then open a new terminal\n' "$GSG_NAME" >&2
+        return 0
+    fi
     install_os_family
     case "$REPLY" in
         ubuntu)
@@ -142,8 +153,11 @@ install_warn_other_gits() {
 # ^ security absolute paths found now are written to settings => the hook never resolves jq, setsid or timeout through PATH
 install_resolve_bins() {
     local name path bad=0
-    local -A package=([jq]=jq [setsid]=util-linux [timeout]=coreutils)
-    for name in jq setsid timeout; do
+    local -A package=([jq]=jq [setsid]=util-linux [taskkill]=taskkill [timeout]=coreutils)
+    local -a names=(jq setsid timeout)
+    INSTALL_SETSID_BIN="" INSTALL_TASKKILL_BIN="" INSTALL_JQ_WRAPPER=""
+    if tools_is_windows; then names=(jq taskkill timeout); fi
+    for name in "${names[@]}"; do
         path="$(type -P "$name")" || {
             printf '%s: %s is required but was not found on PATH; %s\n' "$GSG_NAME" "$name" "$(install_fix_hint "${package[$name]}")" >&2
             bad=$((bad + 1))
@@ -157,10 +171,23 @@ install_resolve_bins() {
         case "$name" in
             jq) INSTALL_JQ_BIN="$path" ;;
             setsid) INSTALL_SETSID_BIN="$path" ;;
+            taskkill) INSTALL_TASKKILL_BIN="$path" ;;
             timeout) INSTALL_TIMEOUT_BIN="$path" ;;
         esac
     done
+    if tools_is_windows && [ -n "${INSTALL_JQ_BIN:-}" ]; then INSTALL_JQ_WRAPPER="$GSG_SHARE/jq"; fi
     return "$bad"
+}
+
+# ^ external a native jq.exe writes CRLF unless given -b => rows end in a carriage return; on Windows JQ_BIN is this wrapper adding -b
+# ^ security the wrapper holds the absolute jq path found at install time, quoted with printf %q => it never looks jq up on PATH
+install_write_jq_wrapper() {
+    local file="$1" real="$2"
+    {
+        printf '#!/usr/bin/env bash\n'
+        printf 'exec %q -b "$@"\n' "$real"
+    } >"$file" || return 1
+    chmod 755 -- "$file"
 }
 
 # ^ invariant macOS only, detection only; rc 0 = Homebrew and the paths are known and the missing formulae are listed, rc 1 = refused with a message
@@ -210,14 +237,14 @@ install_downloads_needed() {
     for tool in "${GSG_TOOL_NAMES[@]}"; do
         plat="$(tools_platform_key "$tool" "$os" "$arch" 2>/dev/null)" || return 1
         row="$(tools_lock_lookup "$(tools_lock_path)" "$tool" "$plat" 2>/dev/null)" || return 1
-        if ! tools_has_version "$GSG_BIN_DIR/$tool" "${row%% *}" "$INSTALL_TIMEOUT_BIN"; then return 0; fi
+        if ! tools_has_version "$GSG_BIN_DIR/$(tools_binary_name "$tool")" "${row%% *}" "$INSTALL_TIMEOUT_BIN"; then return 0; fi
     done
     return 1
 }
 
 # ^ order every prerequisite is checked and reported before any change => one refusal names them all; test:test_every_missing_prerequisite_is_named_at_once
 install_check_prerequisites() {
-    local timer="$1" bad=0
+    local timer="$1" bad=0 claim
     INSTALL_TIMEOUT_BIN="" INSTALL_BASH_BIN="" INSTALL_GNUBIN_DIR=""
     if install_require_git; then
         install_warn_other_gits || bad=$((bad + 1))
@@ -231,7 +258,12 @@ install_check_prerequisites() {
     fi
     if install_downloads_needed; then install_require_curl || bad=$((bad + 1)); fi
     # ^ order systemctl check after every other check; bad > 1 => the count line follows and carries the claim of what changed
-    if [ "$timer" -eq 1 ]; then
+    if [ "$timer" -eq 1 ] && tools_is_windows; then
+        claim="; $(brew_unchanged_text)"
+        if [ "$bad" -gt 0 ]; then claim=""; fi
+        printf '%s: --with-timer needs systemd, which Windows does not have%s\n' "$GSG_NAME" "$claim" >&2
+        bad=$((bad + 1))
+    elif [ "$timer" -eq 1 ]; then
         if [ "$bad" -gt 0 ]; then install_find_systemctl counted >/dev/null || bad=$((bad + 1)); else install_find_systemctl >/dev/null || bad=$((bad + 1)); fi
     fi
     if [ "$bad" -gt 1 ]; then printf '%s: %s prerequisites are missing; install refused, %s\n' "$GSG_NAME" "$bad" "$(brew_unchanged_text)" >&2; fi
@@ -382,8 +414,9 @@ install_placed_hashes() {
 
 # ^ invariant true only for a regular file whose SHA-256 is ANY hash install recorded for the tool => install's own file, never a user's
 install_owns_file() {
-    local path="$GSG_BIN_DIR/$1" got h
+    local path got h
     local -a want=()
+    path="$GSG_BIN_DIR/$(tools_binary_name "$1")"
     read -r -a want <<<"$(install_placed_hashes "$1")"
     if [ "${#want[@]}" -eq 0 ] || [ -L "$path" ] || [ ! -f "$path" ]; then return 1; fi
     got="$(sha256sum -- "$path" | cut -d' ' -f1)"
@@ -435,14 +468,14 @@ install_plan_tools() {
     for i in "${!GSG_TOOL_NAMES[@]}"; do
         tool="${GSG_TOOL_NAMES[$i]}"
         aside=""
-        if tools_has_version "$GSG_BIN_DIR/$tool" "${GSG_TOOL_VER[$i]}" "$INSTALL_TIMEOUT_BIN"; then
+        if tools_has_version "$GSG_BIN_DIR/$(tools_binary_name "$tool")" "${GSG_TOOL_VER[$i]}" "$INSTALL_TIMEOUT_BIN"; then
             GSG_TOOL_NEED+=(0)
         else
             GSG_TOOL_NEED+=(1)
-            if { [ -e "$GSG_BIN_DIR/$tool" ] || [ -L "$GSG_BIN_DIR/$tool" ]; } && ! install_owns_file "$tool"; then aside="$tool.gsg-replaced-$stamp"; fi
+            if { [ -e "$GSG_BIN_DIR/$(tools_binary_name "$tool")" ] || [ -L "$GSG_BIN_DIR/$(tools_binary_name "$tool")" ]; } && ! install_owns_file "$tool"; then aside="$tool.gsg-replaced-$stamp"; fi
         fi
         if [ -n "$aside" ] && { [ -e "$GSG_BIN_DIR/$aside" ] || [ -L "$GSG_BIN_DIR/$aside" ]; }; then
-            printf '%s: %s already exists, so %s cannot be moved there; %s\n' "$GSG_NAME" "$GSG_BIN_DIR/$aside" "$GSG_BIN_DIR/$tool" "$(brew_unchanged_text)" >&2
+            printf '%s: %s already exists, so %s cannot be moved there; %s\n' "$GSG_NAME" "$GSG_BIN_DIR/$aside" "$GSG_BIN_DIR/$(tools_binary_name "$tool")" "$(brew_unchanged_text)" >&2
             return 1
         fi
         GSG_TOOL_ASIDE+=("$aside")
@@ -475,8 +508,8 @@ install_stage_tools() {
         tool="${GSG_TOOL_NAMES[$i]}"
         tarball="$(tools_fetch_verified "$tool" "${GSG_TOOL_VER[$i]}" "${GSG_TOOL_PLAT[$i]}" "${GSG_TOOL_SHA[$i]}" "$GSG_STAGE")" || install_stage_refused || return 1
         tools_extract_binary "$tarball" "$tool" "$GSG_STAGE/out" || install_stage_refused || return 1
-        if ! tools_has_version "$GSG_STAGE/out/$tool" "${GSG_TOOL_VER[$i]}" "$INSTALL_TIMEOUT_BIN"; then
-            out="$("$INSTALL_TIMEOUT_BIN" "$GSG_VERSION_PROBE_SECONDS" "$GSG_STAGE/out/$tool" --version 2>&1 | head -c 200)"
+        if ! tools_has_version "$GSG_STAGE/out/$(tools_binary_name "$tool")" "${GSG_TOOL_VER[$i]}" "$INSTALL_TIMEOUT_BIN"; then
+            out="$("$INSTALL_TIMEOUT_BIN" "$GSG_VERSION_PROBE_SECONDS" "$GSG_STAGE/out/$(tools_binary_name "$tool")" --version 2>&1 | head -c 200)"
             printf '%s: the extracted %s does not report version %s (it said: %s)\n' "$GSG_NAME" "$tool" "${GSG_TOOL_VER[$i]}" "${out//[^[:print:]]/?}" >&2
             install_stage_refused || return 1
         fi
@@ -511,7 +544,7 @@ install_hash_staged() {
         GSG_TOOL_NEWSHA+=("")
         if [ "${GSG_TOOL_NEED[$i]}" -ne 1 ]; then continue; fi
         tool="${GSG_TOOL_NAMES[$i]}"
-        sha="$(sha256sum -- "$GSG_STAGE/out/$tool" | cut -d' ' -f1)"
+        sha="$(sha256sum -- "$GSG_STAGE/out/$(tools_binary_name "$tool")" | cut -d' ' -f1)"
         if [ -z "$sha" ]; then
             printf '%s: cannot hash the staged %s\n' "$GSG_NAME" "$tool" >&2
             install_stage_refused || return 1
@@ -528,12 +561,12 @@ install_commit_tools() {
     for i in "${!GSG_TOOL_NAMES[@]}"; do
         if [ "${GSG_TOOL_NEED[$i]}" -ne 1 ]; then continue; fi
         tool="${GSG_TOOL_NAMES[$i]}"
-        target="$GSG_BIN_DIR/$tool"
+        target="$GSG_BIN_DIR/$(tools_binary_name "$tool")"
         aside="${GSG_TOOL_ASIDE[$i]}"
         new="$GSG_BIN_DIR/.$tool.gsg-new"
         # ^ why install -T, not a plain destination; a directory at $new would take the file inside it and the cleanup rm -f would add "Is a directory"
         # ^ why capture install's stderr, not let it through; coreutils prints its own line before ours, and the reason belongs inside the one message
-        err="$(install -m 755 -T -- "$GSG_STAGE/out/$tool" "$new" 2>&1)" || {
+        err="$(install -m 755 -T -- "$GSG_STAGE/out/$(tools_binary_name "$tool")" "$new" 2>&1)" || {
             err="${err%%$'\n'*}"
             err="${err#install: }"
             err="${err//[[:cntrl:]]/?}"
@@ -573,10 +606,11 @@ install_write_settings() {
     local i
     {
         printf '# generated by git-secret-guard install; every install rewrites this file\n'
-        printf 'TRUFFLEHOG_BIN=%q\n' "$GSG_BIN_DIR/trufflehog"
-        printf 'GITLEAKS_BIN=%q\n' "$GSG_BIN_DIR/gitleaks"
-        printf 'JQ_BIN=%q\n' "$INSTALL_JQ_BIN"
-        printf 'SETSID_BIN=%q\n' "$INSTALL_SETSID_BIN"
+        printf 'TRUFFLEHOG_BIN=%q\n' "$GSG_BIN_DIR/$(tools_binary_name trufflehog)"
+        printf 'GITLEAKS_BIN=%q\n' "$GSG_BIN_DIR/$(tools_binary_name gitleaks)"
+        printf 'JQ_BIN=%q\n' "${INSTALL_JQ_WRAPPER:-$INSTALL_JQ_BIN}"
+        if [ -n "${INSTALL_SETSID_BIN:-}" ]; then printf 'SETSID_BIN=%q\n' "$INSTALL_SETSID_BIN"; fi
+        if [ -n "${INSTALL_TASKKILL_BIN:-}" ]; then printf 'TASKKILL_BIN=%q\n' "$INSTALL_TASKKILL_BIN"; fi
         printf 'TIMEOUT_BIN=%q\n' "$INSTALL_TIMEOUT_BIN"
         # ^ invariant every tool reported its pinned version (tools_has_version) before this file is written; the hook prints these and never runs --version
         for i in "${!GSG_TOOL_NAMES[@]}"; do
@@ -600,6 +634,7 @@ install_copy_share() {
         cp -a -- "$GSG_ROOT/$item" "$GSG_SHARE_NEW/" || return 1
     done
     install_write_settings "$GSG_SHARE_NEW/settings" || return 1
+    if [ -n "${INSTALL_JQ_WRAPPER:-}" ]; then install_write_jq_wrapper "$GSG_SHARE_NEW/jq" "$INSTALL_JQ_BIN" || return 1; fi
     if [ -e "$GSG_SHARE" ]; then
         old="$(mktemp -d "$GSG_SHARE.old.XXXXXX")" || return 1
         mv -- "$GSG_SHARE" "$old/previous" || {
@@ -622,8 +657,22 @@ install_copy_share() {
     fi
 }
 
+# ^ external Git Bash ln -s copies the file instead of linking (probed) => on Windows the CLI entry is a wrapper script running the share copy with exec
+install_cli_wrapper_text() {
+    printf '#!/usr/bin/env bash\n'
+    printf 'exec %q "$@"\n' "$GSG_SHARE/bin/git-secret-guard"
+}
+
+# ^ invariant on Windows only a file written by install_cli_wrapper_text counts as ours, whatever share path it names => any other file is refused
 install_check_cli_link() {
     local link="$GSG_BIN_DIR/git-secret-guard"
+    if tools_is_windows; then
+        if [ -e "$link" ] && [[ "$(<"$link")" != "#!/usr/bin/env bash"$'\n'"exec "*"/bin/git-secret-guard "'"$@"' ]]; then
+            printf '%s: %s exists and is not the wrapper install writes; remove it and run install again\n' "$GSG_NAME" "$link" >&2
+            return 1
+        fi
+        return 0
+    fi
     if [ -e "$link" ] && [ ! -L "$link" ]; then
         printf '%s: %s exists and is not a symlink; remove it and run install again\n' "$GSG_NAME" "$link" >&2
         return 1
@@ -641,8 +690,19 @@ install_check_config_writable() {
 }
 
 install_link_cli() {
+    local link="$GSG_BIN_DIR/git-secret-guard" tmp
     mkdir -p -- "$GSG_BIN_DIR" || return 1
-    ln -sfn -- "$GSG_SHARE/bin/git-secret-guard" "$GSG_BIN_DIR/git-secret-guard"
+    if tools_is_windows; then
+        tmp="$link.gsg-new"
+        install_cli_wrapper_text >"$tmp" || return 1
+        chmod 755 -- "$tmp" || {
+            rm -f -- "$tmp"
+            return 1
+        }
+        mv -T -f -- "$tmp" "$link"
+        return
+    fi
+    ln -sfn -- "$GSG_SHARE/bin/git-secret-guard" "$link"
 }
 
 GSG_BACKUP_MAX_BYTES=52428800
@@ -754,8 +814,9 @@ install_unset_hooks_path() {
 
 # ^ invariant prints the "<tool>:<sha256>" words of one tool; several words and one matching the file on disk => the match stays alone
 install_tool_placed_words() {
-    local tool="$1" w got path="$GSG_BIN_DIR/$1"
+    local tool="$1" w got path
     local -a words=() mine=()
+    path="$GSG_BIN_DIR/$(tools_binary_name "$tool")"
     read -r -a words <<<"$ST_PLACED"
     for w in "${words[@]}"; do
         if [ "${w%%:*}" = "$tool" ]; then mine+=("$w"); fi
@@ -833,9 +894,9 @@ install_summary() {
     for i in "${!GSG_TOOL_NAMES[@]}"; do
         tool="${GSG_TOOL_NAMES[$i]}"
         if [ "${GSG_TOOL_NEED[$i]}" -eq 1 ]; then
-            printf '%s: %s %s: downloaded, verified against tools.lock and installed to %s\n' "$GSG_NAME" "$tool" "${GSG_TOOL_VER[$i]}" "$GSG_BIN_DIR/$tool"
+            printf '%s: %s %s: downloaded, verified against tools.lock and installed to %s\n' "$GSG_NAME" "$tool" "${GSG_TOOL_VER[$i]}" "$GSG_BIN_DIR/$(tools_binary_name "$tool")"
         else
-            printf '%s: %s %s: kept %s (already at the pinned version)\n' "$GSG_NAME" "$tool" "${GSG_TOOL_VER[$i]}" "$GSG_BIN_DIR/$tool"
+            printf '%s: %s %s: kept %s (already at the pinned version)\n' "$GSG_NAME" "$tool" "${GSG_TOOL_VER[$i]}" "$GSG_BIN_DIR/$(tools_binary_name "$tool")"
         fi
     done
 }

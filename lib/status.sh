@@ -77,7 +77,7 @@ status_tools() {
         bin="$(settings_tool_bin "$tool")" || return 1
         status_tool "$tool" "$bin" "${row%% *}"
     done
-    for tool in jq setsid timeout; do
+    for tool in jq "$(gsg_proc_tool_name)" timeout; do
         bin="$(settings_tool_bin "$tool")" || return 1
         if tool_unusable "$tool" "$bin" >/dev/null; then
             status_line "$tool" "$bin (MISSING or not executable)"

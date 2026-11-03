@@ -1,0 +1,187 @@
+name: tests
+
+on:
+  pull_request:
+  push:
+    branches: [main, 'feat/**']
+  workflow_dispatch:
+    inputs:
+      base:
+        description: Branch or commit to compare against
+        default: main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      targets: ${{ steps.p.outputs.targets }}
+      base_ref: ${{ steps.p.outputs.base_ref }}
+    steps:
+      - id: p
+        env:
+          EVENT: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          INPUT_BASE: ${{ inputs.base }}
+        run: |
+          # a pull request and a manual run compare the head with a base; so does a push to a feature branch (against the default branch)
+          if [ "$EVENT" = pull_request ]; then
+            targets='["head","base"]'
+            base_ref="$PR_BASE"
+          elif [ "$EVENT" = workflow_dispatch ]; then
+            targets='["head","base"]'
+            base_ref="${INPUT_BASE:-main}"
+          elif [ "$REF_NAME" != "$DEFAULT_BRANCH" ]; then
+            targets='["head","base"]'
+            base_ref="$DEFAULT_BRANCH"
+          else
+            targets='["head"]'
+            base_ref=""
+          fi
+          echo "targets=$targets" >>"$GITHUB_OUTPUT"
+          echo "base_ref=$base_ref" >>"$GITHUB_OUTPUT"
+
+  # The supported platform (docs/platforms.md): Ubuntu 24.04 with a git from the git-core PPA.
+  # The suite runs on the head and, for pull requests, on the base, so a failure that exists already is not blamed on the change.
+  suite:
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(needs.plan.outputs.targets) }}
+    env:
+      TARGET: ${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.target == 'base' && needs.plan.outputs.base_ref || github.event.pull_request.head.sha || github.sha }}
+
+      - name: Install the prerequisites of docs/platforms.md
+        run: |
+          sudo add-apt-repository -y ppa:git-core/ppa
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends git jq curl ca-certificates gawk mawk dbus systemd pre-commit pipx
+          sudo update-alternatives --set awk /usr/bin/mawk
+          pipx install shellcheck-py==0.11.0.1
+          echo "$HOME/.local/bin" >>"$GITHUB_PATH"
+
+      - name: Check the tool versions the suite needs
+        run: |
+          git --version
+          read -r major minor < <(git --version | sed -E 's/^git version ([0-9]+)\.([0-9]+).*/\1 \2/')
+          if [ "$major" -lt 2 ] || { [ "$major" -eq 2 ] && [ "$minor" -lt 54 ]; }; then
+            echo "::error::git >= 2.54 is required and the PPA has not reached it; build it from source as docs/platforms.md describes"
+            exit 1
+          fi
+          echo "GSG_TEST_GIT=$(command -v git)" >>"$GITHUB_ENV"
+          echo "GSG_TEST_SHELLCHECK=$HOME/.local/bin/shellcheck" >>"$GITHUB_ENV"
+          "$HOME/.local/bin/shellcheck" --version | sed -n 's/^version: /shellcheck /p'
+          awk --version 2>&1 | head -1 || true
+
+      # Tests that need the real scanners skip without them. The global hook is removed again: the suite builds its own sandboxes.
+      - name: Install the pinned scanners
+        continue-on-error: true
+        run: |
+          bin/git-secret-guard install
+          git config --global --unset-all hook.git-secret-guard.event || true
+          git config --global --unset-all hook.git-secret-guard.command || true
+
+      # A failing suite does not fail this step: the compare job decides, so a failure that is already on the base is not a regression.
+      - name: Run the suite
+        env:
+          GSG_TEST_FILE_TIMEOUT: "900"
+        run: |
+          set -o pipefail
+          tests/run.sh 2>&1 | tee "$RUNNER_TEMP/$TARGET.log" || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: log-${{ matrix.target }}
+          path: ${{ runner.temp }}/${{ matrix.target }}.log
+          if-no-files-found: error
+
+  compare:
+    needs: [plan, suite]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: logs
+          pattern: log-*
+          merge-multiple: true
+      - name: Compare the head with the base
+        run: |
+          base=""
+          if [ -f logs/base.log ]; then base=logs/base.log; fi
+          bash .github/scripts/compare-test-logs.sh logs/head.log "$base"
+
+  # First draft: proves on a clean Windows machine what was checked by hand (install, a leak is blocked, a clean commit passes, no leftovers).
+  # It is marked continue-on-error until it has run green once; remove that line afterwards.
+  windows:
+    runs-on: windows-2025
+    timeout-minutes: 25
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prerequisites (git >= 2.54, jq)
+        shell: bash
+        run: |
+          git --version
+          read -r major minor < <(git --version | sed -E 's/^git version ([0-9]+)\.([0-9]+).*/\1 \2/')
+          if [ "$major" -lt 2 ] || { [ "$major" -eq 2 ] && [ "$minor" -lt 54 ]; }; then
+            echo "::error::git >= 2.54 is required; this runner image has $major.$minor"
+            exit 1
+          fi
+          command -v jq >/dev/null || choco install jq -y --no-progress
+
+      - name: Install
+        shell: bash
+        run: bin/git-secret-guard install
+
+      - name: Status
+        shell: bash
+        run: bin/git-secret-guard status
+
+      - name: A leaked token is blocked by the hook, through PowerShell git
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP 'gsg-e2e'
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          Set-Location $dir
+          git init -q
+          git config user.email ci@example.com
+          git config user.name ci
+          $r = -join ((48..57) + (65..90) + (97..122) | Get-Random -Count 36 | ForEach-Object { [char]$_ })
+          ('token = ghp_' + $r) | Set-Content leak.txt
+          git add leak.txt
+          $out = git commit -m 'must be blocked' 2>&1 | Out-String
+          Write-Host $out
+          if ($LASTEXITCODE -eq 0) { throw 'the commit with a leaked token was NOT blocked' }
+          if ($out -notmatch 'github-pat') { throw 'the commit was blocked, but not by the expected finding' }
+          # the step wrapper exits with the last native exit code; the blocked commit was the expected outcome
+          $global:LASTEXITCODE = 0
+
+      - name: A clean commit passes and nothing is left behind
+        shell: pwsh
+        run: |
+          Set-Location (Join-Path $env:RUNNER_TEMP 'gsg-e2e')
+          git reset -q
+          'hello' | Set-Content ok.txt
+          git add ok.txt
+          git commit -m 'clean'
+          if ($LASTEXITCODE -ne 0) { throw 'a clean commit was blocked' }
+          $left = Get-ChildItem (Join-Path $HOME '.tmp') -Filter 'git-secret-guard.*' -ErrorAction SilentlyContinue
+          if ($left) { throw "scan directories were left behind: $($left.FullName -join ', ')" }

@@ -106,6 +106,8 @@ test_the_service_carries_the_xdg_and_git_config_variables_set_at_install_time() 
     assert_contains "$svc" $'\nEnvironment="GIT_CONFIG_GLOBAL='"$SANDBOX"$'/gitconfig"\n' "the global git config"
     assert_not_contains "$svc" "XDG_CONFIG_HOME" "a variable that was not set is not written"
     mapfile -t unit_env < <(sed -n 's/^Environment="\(.*\)"$/\1/p' "$(unit_dir)/$SERVICE") || return 1
+    # ^ external a Mac has no systemd and the unit's Linux PATH holds no bash >= 4.4; the XDG and git variables this test is about stay as the unit wrote them
+    if [ "$TEST_OS" = Darwin ]; then unit_env+=(PATH="$SANDBOX/pathbin:$TEST_BASE_PATH"); fi
     mkdir -p -- "$SANDBOX/emptyroot" || return 1
     run_cap env -i HOME="$LC_HOME" "${unit_env[@]}" "$LC_DATA/bin/git-secret-guard" doctor --roots "$SANDBOX/emptyroot"
     assert_contains "$OUT" "ok       installed: version " "the unit's own environment finds the install"

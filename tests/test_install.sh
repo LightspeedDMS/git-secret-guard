@@ -14,7 +14,7 @@ assert_untouched() {
 # ^ external a socket on stdin makes bash -c read ~/.bashrc even under env -i; its PATH edits gave /bin/jq against the /usr/bin/jq install found
 lc_which() {
     # shellcheck disable=SC2016
-    env -i PATH="$SANDBOX/pathbin:/usr/local/bin:/usr/bin:/bin" bash -c 'type -P "$1"' _ "$1" </dev/null
+    env -i PATH="$SANDBOX/pathbin:$TEST_BASE_PATH" bash -c 'type -P "$1"' _ "$1" </dev/null
 }
 
 GITCONFIG_BEFORE=""
@@ -58,11 +58,10 @@ test_install_refuses_an_unsupported_platform() {
         snapshot_config
         gsg install
         assert_rc 1 "$os $arch"
-        assert_contains "$ERR" "only Linux on x86_64 or arm64 is supported, got $os on $arch" "says what is supported"
+        assert_contains "$ERR" "only Linux and macOS on x86_64 or arm64, or Git for Windows on x86_64, are supported, got $os on $arch" "says what is supported"
         assert_untouched "$os $arch"
     done <<'EOF'
-Darwin arm64
-Darwin x86_64
+Darwin i386
 Linux riscv64
 FreeBSD amd64
 EOF
@@ -114,7 +113,7 @@ test_install_downloads_verifies_and_extracts_both_tools_when_missing() {
     gsg install
     assert_rc 0 "install with fixtures"
     assert_contains "$ERR" "GSG_TOOLS_BASE_URL" "the test override is announced, never silent"
-    assert_eq "$(find "$LC_BIN" -mindepth 1 -printf '%f\n' | LC_ALL=C sort | tr '\n' ' ')" "git-secret-guard gitleaks trufflehog " "the CLI link and the two binaries; no LICENSE, README or leftovers"
+    assert_eq "$(find "$LC_BIN" -mindepth 1 -maxdepth 1 -exec basename {} \; | LC_ALL=C sort | tr '\n' ' ')" "git-secret-guard gitleaks trufflehog " "the CLI link and the two binaries; no LICENSE, README or leftovers"
     [ -x "$LC_BIN/trufflehog" ] && [ -x "$LC_BIN/gitleaks" ] || fail "tools are not executable"
     assert_eq "$("$LC_BIN/trufflehog" --version)" "trufflehog 3.99.2" "trufflehog is the downloaded one"
     assert_eq "$("$LC_BIN/gitleaks" --version)" "gitleaks version 8.30.1" "gitleaks is the downloaded one"
@@ -331,6 +330,22 @@ test_install_writes_the_settings_the_hook_reads_with_absolute_tool_paths() {
     assert_contains "$OUT" "SCAN_TIMEOUT_SECONDS=300" "default timeout"
 }
 
+test_install_records_the_pinned_scanner_versions_in_the_settings() {
+    fresh_install
+    assert_rc 0 "fresh install"
+    assert_eq "$(grep -c '^TRUFFLEHOG_VERSION=' "$LC_DATA/settings")" 1 "one trufflehog version line"
+    # shellcheck disable=SC2016
+    run_cap env -i "${GSG_ENV[@]}" TRUFFLEHOG_VERSION=0.0.1 bash -c '
+        source "$1/lib/common.sh" && load_settings "$1/settings" || exit 10
+        printf "tf=%s gl=%s\n" "$TRUFFLEHOG_VERSION" "$GITLEAKS_VERSION"
+        grep -v _VERSION= "$1/settings" >"$1/settings.bare"
+        load_settings "$1/settings.bare" || exit 11
+        printf "bare=[%s]\n" "${TRUFFLEHOG_VERSION:-}"' _ "$LC_DATA"
+    assert_rc 0 "settings load"
+    assert_contains "$OUT" "tf=3.99.2 gl=8.30.1" "the pinned versions the install verified"
+    assert_contains "$OUT" "bare=[]" "an inherited version cannot fill a file without it"
+}
+
 cfg_count() { gitx config --global --get-all "$1" 2>/dev/null | wc -l; }
 
 test_fresh_install_sets_exactly_one_event_and_one_absolute_command() {
@@ -490,6 +505,23 @@ test_replace_hooks_path_refuses_the_home_dir_and_directories_over_the_backup_bou
     assert_untouched "too many files"
 }
 
+# ^ external find -ls prints owner and group as separate words; a name with a space (AD, SSSD, directory-bound Macs) moves the size column
+# shellcheck disable=SC2016
+test_the_backup_bounds_do_not_depend_on_the_owner_columns_of_find_ls() {
+    local fake="$SANDBOX/fakefind" dir="$SANDBOX/bounded" real_find
+    lc_begin || return 1
+    real_find="$(type -P find)" || return 1
+    mkdir -p -- "$fake" "$dir" && head -c 11 /dev/zero >"$dir/f" || return 1
+    printf '#!/bin/sh\nfor a in "$@"; do\n    if [ "$a" = -ls ]; then echo "1 1 -rw-r--r-- 1 Domain Users staff 11 Nov 1 12:00 x"; exit 0; fi\ndone\nexec %s "$@"\n' "$real_find" >"$fake/find" || return 1
+    chmod 755 "$fake/find" || return 1
+    run_cap env -i "${LC_ENV[@]}" PATH="$fake:$SANDBOX/pathbin:$TEST_BASE_PATH" bash -c '
+        for l in common state tools hookspath install; do source "$1/lib/$l.sh" || exit 10; done
+        GSG_BACKUP_MAX_BYTES=10 GSG_BACKUP_MAX_FILES=100
+        install_check_backup_bounds "$2"' _ "$GSG_PROJECT" "$dir"
+    assert_rc 1 "an 11 byte file against a 10 byte bound"
+    assert_contains "$ERR" "larger than 10 bytes" "the bound is read from real sizes, not from the owner columns"
+}
+
 test_the_resolver_refuses_root_before_anything_could_back_it_up() {
     local value
     lc_begin || return 1
@@ -584,8 +616,8 @@ test_a_failed_swap_of_the_share_dir_rolls_back_to_the_old_tree() {
     assert_rc 0 "first install"
     before="$(tree_digest "$LC_DATA")"
     # shellcheck disable=SC2016
-    printf '#!/bin/sh\nfor a; do last=$a; case "$a" in *.new.*) isnew=1 ;; esac; done\nif [ "$last" = "%s" ] && [ -n "$isnew" ]; then echo "mv: injected failure" >&2; exit 1; fi\nexec /usr/bin/mv "$@"\n' \
-        "$LC_DATA" >"$SANDBOX/pathbin/mv" || return 1
+    printf '#!/bin/sh\nfor a; do last=$a; case "$a" in *.new.*) isnew=1 ;; esac; done\nif [ "$last" = "%s" ] && [ -n "$isnew" ]; then echo "mv: injected failure" >&2; exit 1; fi\nexec %s "$@"\n' \
+        "$LC_DATA" "$(type -P mv)" >"$SANDBOX/pathbin/mv" || return 1
     chmod 755 "$SANDBOX/pathbin/mv" || return 1
     gsg install
     assert_rc 1 "the new tree cannot be renamed onto the share dir"
@@ -699,7 +731,7 @@ test_install_warns_but_proceeds_for_other_reachable_old_gits() {
     printf '#!/bin/sh\necho "git version 2.52.0"\n' >"$SANDBOX/oldbin/git" || return 1
     printf '#!/bin/sh\necho "git version 2.30.2"\n' >"$SANDBOX/oldbin2/git" || return 1
     chmod 755 "$SANDBOX/oldbin/git" "$SANDBOX/oldbin2/git" || return 1
-    set_env PATH="${GIT%/*}:$SANDBOX/oldbin:/usr/local/bin:/usr/bin:/bin:$SANDBOX/oldbin2:$SANDBOX/oldbin"
+    set_env PATH="$SANDBOX/pathbin:$TEST_BASE_PATH:$SANDBOX/oldbin:$SANDBOX/oldbin2:$SANDBOX/oldbin"
     gsg install
     assert_rc 0 "install proceeds"
     assert_contains "$ERR" "warning: $SANDBOX/oldbin/git is git 2.52.0" "warns about the first old git"
@@ -783,7 +815,7 @@ test_install_refuses_when_git_is_missing_or_unreadable_or_a_tool_path_is_relativ
 
     lc_begin || return 1
     mkdir -p -- "$SANDBOX/rel" && printf '#!/bin/sh\nexit 0\n' >"$SANDBOX/rel/jq" && chmod 755 "$SANDBOX/rel/jq" || return 1
-    set_env PATH="rel:/usr/local/bin:/usr/bin:/bin"
+    set_env PATH="rel:$SANDBOX/pathbin:$TEST_BASE_PATH"
     snapshot_config
     gsg install
     assert_rc 1 "jq found through a relative PATH entry"
@@ -868,7 +900,7 @@ test_install_keeps_scanning_when_the_final_hooks_path_unset_fails() {
 
 test_without_xdg_variables_the_defaults_under_home_are_used() {
     lc_begin && lc_make_fixtures && lc_use_fixtures || return 1
-    LC_ENV=("${GSG_ENV[@]}" PATH="$SANDBOX/pathbin:/usr/local/bin:/usr/bin:/bin")
+    LC_ENV=("${GSG_ENV[@]}" PATH="$SANDBOX/pathbin:$TEST_BASE_PATH")
     gsg install
     assert_rc 0 "install with HOME only"
     assert_file "$LC_HOME/.local/share/git-secret-guard/hooks/secret-scan" "share dir under ~/.local/share"

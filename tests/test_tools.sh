@@ -63,7 +63,7 @@ test_lock_lookup_refuses_a_missing_empty_malformed_or_ambiguous_lock() {
     assert_contains "$ERR" "more than one row" "says why"
 }
 
-test_platform_keys_use_each_vendors_own_names_and_only_linux_is_supported() {
+test_platform_keys_use_each_vendors_own_names_and_only_linux_and_macos_are_supported() {
     local tool os arch want
     while read -r tool os arch want; do
         tl tools_platform_key "$tool" "$os" "$arch"
@@ -76,14 +76,17 @@ trufflehog Linux arm64 linux_arm64
 gitleaks Linux x86_64 linux_x64
 gitleaks Linux aarch64 linux_arm64
 gitleaks Linux arm64 linux_arm64
+trufflehog Darwin arm64 darwin_arm64
+trufflehog Darwin x86_64 darwin_amd64
+gitleaks Darwin arm64 darwin_arm64
+gitleaks Darwin x86_64 darwin_x64
 EOF
     while read -r os arch; do
         tl tools_platform_key gitleaks "$os" "$arch"
         assert_rc 1 "[$os $arch] is not supported"
-        assert_contains "$ERR" "only Linux on x86_64 or arm64 is supported" "says what is supported"
+        assert_contains "$ERR" "only Linux and macOS on x86_64 or arm64, or Git for Windows on x86_64, are supported" "says what is supported"
     done <<'EOF'
-Darwin x86_64
-Darwin arm64
+Darwin i386
 FreeBSD amd64
 Linux i686
 Linux riscv64

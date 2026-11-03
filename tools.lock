@@ -1,6 +1,6 @@
 # Pinned scanner releases. One row per line: <tool> <version> <platform> <sha256 of the release tarball>
 # Checksums are the vendor-published ones, fetched 2026-10-30. Platform names are the vendors' own (they differ).
-# The darwin rows are recorded for later; macOS is not tested and not claimed, install refuses it.
+# The darwin_arm64 rows are installed and tested on macOS 26.7.1; the darwin_amd64 and darwin_x64 rows are mapped but not tested.
 trufflehog 3.99.2 linux_amd64 3c7b0d1dc4278294269bfdd7594bca8bb28c78da0a4a06ad202ded37b48deca4
 trufflehog 3.99.2 linux_arm64 929b81efffca752eafd58bf6f17bf725d354f338636a7bbbee65c086d2f9ddf3
 trufflehog 3.99.2 darwin_amd64 c23a1b10522b8b84cfd04dc88a3a8819d3dc23b20f15e23540ba442b4b2fbeed

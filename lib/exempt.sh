@@ -202,14 +202,27 @@ _warn_if_catch_all() {
 # ^ why two passes, not one diff; pathspec excludes cannot be re-included => the ignore file gets its own diff and is scanned whatever a pattern says
 # ^ coupled with lib/extract.sh:staged_diff, extract_added_lines; the hook sources both
 exempt_extract_tree() {
-    local dir="$1"
+    local dir="$1" c1="$1.counts.1" c2="$1.counts.2"
     shift
+    GSG_EXTRACT_FILES=0 GSG_EXTRACT_LINES=0
     if [ "$#" -eq 0 ]; then
-        staged_diff | extract_added_lines "$dir"
+        staged_diff | extract_added_lines "$dir" "$c1" || return 1
+        _extract_add_counts "$c1"
         return
     fi
-    staged_diff -- "$GSG_IGNORE_LEFT_OUT" "$@" | extract_added_lines "$dir" || return 1
-    staged_diff -- "$GSG_IGNORE_ONLY" | extract_added_lines "$dir"
+    staged_diff -- "$GSG_IGNORE_LEFT_OUT" "$@" | extract_added_lines "$dir" "$c1" || return 1
+    staged_diff -- "$GSG_IGNORE_ONLY" | extract_added_lines "$dir" "$c2" || return 1
+    _extract_add_counts "$c1" || return 1
+    _extract_add_counts "$c2"
+}
+
+# ^ invariant adds "<files> <lines>" from one counts file to GSG_EXTRACT_FILES/LINES; the two passes cover disjoint paths, the sum has no overlap
+_extract_add_counts() {
+    local f l
+    { read -r f l <"$1"; } 2>/dev/null || return 1
+    if [[ ! $f =~ ^[0-9]+$ ]] || [[ ! $l =~ ^[0-9]+$ ]]; then return 1; fi
+    GSG_EXTRACT_FILES=$((GSG_EXTRACT_FILES + f))
+    GSG_EXTRACT_LINES=$((GSG_EXTRACT_LINES + l))
 }
 
 # ^ security fragments, never one literal => no credential-looking value in the tree; test:test_the_project_tree_holds_no_credential_looking_literals
@@ -271,9 +284,12 @@ gitleaks_config_preflight() {
 # ^ invariant a commit with every file excluded is announced; nothing about it is silent
 exempt_report_exclusions() {
     local all kept
+    GSG_EXEMPTED=0
     all="$(staged_added_file_count -- "$GSG_IGNORE_LEFT_OUT")" || return 1
     kept="$(staged_added_file_count -- "$GSG_IGNORE_LEFT_OUT" "$@")" || return 1
     if [ "$all" -le "$kept" ]; then return 0; fi
+    # shellcheck disable=SC2034
+    GSG_EXEMPTED=$((all - kept))
     printf '%s: %s staged file(s) excluded by %s\n' "$GSG_NAME" "$((all - kept))" "$GSG_IGNORE_FILE" >&2
     if [ "$kept" -eq 0 ]; then
         printf '%s: WARNING: every staged file with added lines is excluded by %s; nothing else in this commit was scanned\n' "$GSG_NAME" "$GSG_IGNORE_FILE" >&2

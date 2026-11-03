@@ -51,18 +51,31 @@ doctor_resolves_here() {
 }
 
 # ^ invariant rc 0 = every find stderr line (C locale) was "Permission denied" and a second find names the directories, added once to DR_UNREADABLE
-# ^ why a second find, not parsing the messages; a path may hold quotes or a newline, -readable and -executable name the directories exactly
-# ^ invariant the second find stops one level above the first (a directory at the depth limit is never opened); any other failure keeps exit 2
-doctor_unreadable() {
-    local line dir
-    local -a lines=() bad=()
-    mapfile -t lines <"$DR_WORK/find.err" || return 1
+# ^ invariant rc 0 only when FILE holds a line and every line ends in a colon, a space and the words Permission denied
+doctor_only_permission_denied() {
+    local line
+    local -a lines=()
+    mapfile -t lines <"$1" || return 1
     if [ "${#lines[@]}" -eq 0 ]; then return 1; fi
     for line in "${lines[@]}"; do
         if [[ $line != *": Permission denied" ]]; then return 1; fi
     done
-    mapfile -d '' -t bad < <(LC_ALL=C find "$1" -maxdepth "$((GSG_DOCTOR_FIND_DEPTH - 1))" -name node_modules -type d -prune -o -type d \( ! -readable -o ! -executable \) -print0 -prune 2>/dev/null)
-    wait "$!" || return 1
+}
+
+# ^ why a second find, not parsing the messages; a path may hold quotes or a newline, NUL-separated names and the shell's own -r and -x tests name it exactly
+# ^ external BSD find has no -readable or -executable; the same access(2) answers come from [ -r ] and [ -x ] on each directory find lists
+# ^ invariant the second find stops one level above the first (a directory at the depth limit is never opened); any other failure keeps exit 2
+doctor_unreadable() {
+    local dir rc
+    local -a dirs=() bad=()
+    doctor_only_permission_denied "$DR_WORK/find.err" || return 1
+    mapfile -d '' -t dirs < <(LC_ALL=C find "$1" -maxdepth "$((GSG_DOCTOR_FIND_DEPTH - 1))" -name node_modules -type d -prune -o -type d -print0 2>"$DR_WORK/find2.err")
+    wait "$!"
+    rc=$?
+    if [ "$rc" -ne 0 ]; then doctor_only_permission_denied "$DR_WORK/find2.err" || return 1; fi
+    for dir in "${dirs[@]}"; do
+        if [ ! -r "$dir" ] || [ ! -x "$dir" ]; then bad+=("$dir"); fi
+    done
     if [ "${#bad[@]}" -eq 0 ] || [ "${#bad[@]}" -gt "$GSG_DOCTOR_MAX_ENTRIES" ]; then return 1; fi
     for dir in "${bad[@]}"; do
         if [[ -z ${DR_BAD_SEEN[$dir]:-} ]]; then
@@ -142,7 +155,7 @@ doctor_discover() {
 # ^ external hook list line = name, "disabled<TAB>name" (enabled=false) or "event-disabled<TAB>name" (hook.pre-commit.enabled=false); git 2.56
 # ^ external a config origin inside the repository is shown relative to it (file:.git/config), see doctor_origin_text
 doctor_repo_hook() {
-    local line status="" rc i scope origin key want="$GSG_SHARE/hooks/secret-scan"
+    local line status="" rc i scope origin key want="$DR_HOOK_CMD"
     local -a lines=()
     local -A last_value=() last_scope=() last_origin=()
     mapfile -t lines < <("$GSG_GIT" hook list pre-commit 2>"$DR_WORK/hook.err")

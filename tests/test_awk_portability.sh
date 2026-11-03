@@ -9,10 +9,19 @@ MALFORMED_WANT=("unsafe path refused" "absolute path refused" "diff path without
     "added line outside any file" "empty path" "unsupported byte escape" "bad octal escape")
 
 # ^ external Ubuntu's default awk is mawk and RHEL's is gawk; code under test calls plain awk => a farm directory first on PATH picks the interpreter
+# ^ external macOS /usr/bin/awk is the one-true-awk (version 20200816 here), named bwk below; a Mac has no second awk of the family
+# ^ invariant awk_binary NAME prints the path of interpreter NAME; bwk exists on Darwin only, rc 1 when NAME is not installed
+awk_binary() {
+    case "$1" in
+        bwk) if [ "$TEST_OS" = Darwin ]; then printf '/usr/bin/awk'; else return 1; fi ;;
+        *) type -P "$1" ;;
+    esac
+}
+
 # ^ invariant awk_farm NAME prints a directory holding one entry, "awk", a link to the interpreter NAME; rc 1 when NAME is not installed
 awk_farm() {
     local bin dir="$SANDBOX/awkbin-$1"
-    bin="$(type -P "$1")" || return 1
+    bin="$(awk_binary "$1")" || return 1
     mkdir -p -- "$dir" && ln -sfn -- "$bin" "$dir/awk" && printf '%s' "$dir"
 }
 
@@ -55,7 +64,7 @@ extract_with() {
     farm="$(awk_farm "$1")" || return 1
     rm -rf -- "$2"
     # shellcheck disable=SC2016
-    run_cap env -i "${GSG_ENV[@]}" PATH="$farm:${GIT%/*}:/usr/bin:/bin" bash -c \
+    run_cap env -i "${GSG_ENV[@]}" PATH="$farm:${GIT%/*}:$TEST_BASE_PATH" bash -c \
         'set -o pipefail; cd "$1" && source "$2/lib/common.sh" && source "$2/lib/extract.sh" && staged_diff | extract_added_lines "$3"' _ "$CORPUS" "$GSG_PROJECT" "$2"
 }
 
@@ -79,7 +88,7 @@ check_tree() {
 }
 
 check_extraction_with() {
-    type -P "$1" >/dev/null || skip_test "$1 is not installed"
+    awk_binary "$1" >/dev/null || skip_test "$1 is not installed"
     build_corpus || return 1
     extract_with "$1" "$SANDBOX/tree-$1"
     assert_rc 0 "extraction under $1"
@@ -123,7 +132,7 @@ diff_case() {
 # ^ invariant malformed_report NAME writes "N rc=R err=TEXT" per case and for an unset GSG_SCAN_DIR, running lib/extract.awk under interpreter NAME
 malformed_report() {
     local bin n rc out="$SANDBOX/malformed-$1"
-    bin="$(type -P "$1")" || return 1
+    bin="$(awk_binary "$1")" || return 1
     : >"$out"
     for n in $(seq 1 14); do
         mkdir -p -- "$SANDBOX/malformed-scan-$1-$n" || return 1
@@ -137,7 +146,7 @@ malformed_report() {
 
 check_malformed_with() {
     local n
-    type -P "$1" >/dev/null || skip_test "$1 is not installed"
+    awk_binary "$1" >/dev/null || skip_test "$1 is not installed"
     malformed_report "$1" || return 1
     for n in $(seq 1 14); do
         assert_contains "$(<"$SANDBOX/malformed-$1")" "$n rc=2 err=extract: ${MALFORMED_WANT[$((n - 1))]}" "$1: malformed diff $n is refused with exit 2"
@@ -160,7 +169,7 @@ inline_run() {
     local farm script="$2"
     farm="$(awk_farm "$1")" || return 1
     shift 2
-    env -i "${GSG_ENV[@]}" PATH="$farm:${GIT%/*}:/usr/bin:/bin" bash -c "$script" "$@"
+    env -i "${GSG_ENV[@]}" PATH="$farm:${GIT%/*}:$TEST_BASE_PATH" bash -c "$script" "$@"
 }
 
 # ^ invariant bounds_case NAME LABEL NFILES SIZE MAXFILES MAXBYTES [sparse] prints the verdict of install_check_backup_bounds on a flat directory
@@ -244,7 +253,7 @@ EOF
 }
 
 check_inline_with() {
-    type -P "$1" >/dev/null || skip_test "$1 is not installed"
+    awk_binary "$1" >/dev/null || skip_test "$1 is not installed"
     inline_report "$1" || return 1
     inline_expected >"$SANDBOX/inline-want"
     run_cap diff "$SANDBOX/inline-want" "$SANDBOX/inline-$1"
@@ -266,11 +275,11 @@ test_mawk_and_gawk_agree_on_the_inline_awk_programs() {
 # shellcheck disable=SC2016
 check_awk_error_with() {
     local farm odd=$'a\e[31m\tb.txt' dir="$SANDBOX/l4-$1"
-    type -P "$1" >/dev/null || skip_test "$1 is not installed"
+    awk_binary "$1" >/dev/null || skip_test "$1 is not installed"
     farm="$(awk_farm "$1")" || return 1
     rm -rf -- "$dir" && mkdir -p -- "$dir/scan/$odd" || return 1
     printf '%s\n' "+++ b/$odd" '@@ -0,0 +1 @@' '+x' >"$dir/diff" || return 1
-    run_cap env -i "${GSG_ENV[@]}" PATH="$farm:${GIT%/*}:/usr/bin:/bin" bash -c \
+    run_cap env -i "${GSG_ENV[@]}" PATH="$farm:${GIT%/*}:$TEST_BASE_PATH" bash -c \
         'source "$1/lib/common.sh" && source "$1/lib/extract.sh" && extract_added_lines "$2" <"$3"' _ "$GSG_PROJECT" "$dir/scan" "$dir/diff"
     assert_rc 2 "$1: the write error ends the extraction"
     if [ -z "$ERR" ]; then fail "$1: no error was reported"; fi
@@ -280,5 +289,10 @@ check_awk_error_with() {
 
 test_an_awk_write_error_on_an_odd_path_is_sanitized_under_gawk() { check_awk_error_with gawk; }
 test_an_awk_write_error_on_an_odd_path_is_sanitized_under_mawk() { check_awk_error_with mawk; }
+
+test_extraction_under_bwk() { check_extraction_with bwk; }
+test_malformed_diffs_fail_the_same_way_under_bwk() { check_malformed_with bwk; }
+test_the_inline_awk_programs_give_the_expected_results_under_bwk() { check_inline_with bwk; }
+test_an_awk_write_error_on_an_odd_path_is_sanitized_under_bwk() { check_awk_error_with bwk; }
 
 run_file_tests

@@ -30,6 +30,11 @@ test_a_repo_that_disables_the_hook_locally_is_listed_with_the_config_file() {
 test_hook_pre_commit_enabled_false_is_reported_with_its_own_key() {
     dr_begin && dr_repo off || return 1
     gitx -C "$DR_ROOTS/off" config hook.pre-commit.enabled false || return 1
+    # ^ external Apple Git 2.54.0 (macOS) has no hook.<event>.enabled; the hook stays listed and runs, nothing to report
+    case "$(gitx -C "$DR_ROOTS/off" hook list pre-commit 2>/dev/null)" in
+        *event-disabled*) ;;
+        *) skip_test "this git does not implement hook.<event>.enabled" ;;
+    esac
     doctor
     assert_rc 1 "the event is switched off"
     assert_contains "$OUT" "PROBLEM  disabled in local config: hook.pre-commit.enabled=false ($DR_REAL/off/.git/config); remove that key to cover this repository" "the event key is named"
@@ -288,11 +293,11 @@ test_a_hung_hook_list_is_a_timed_out_finding() {
     assert_contains "$OUT" "PROBLEM  cannot read the hooks git runs (git hook list pre-commit exit 124: timed out after 1s)" "reported as a timeout, not a hang"
 }
 
+# ^ external macOS has no /proc; ps -axo works on both and the pattern travels in the environment; awk never matches itself
 procs_running() {
-    local p
-    for p in /proc/[0-9]*; do
-        if [ -r "$p/cmdline" ] && tr '\0' ' ' <"$p/cmdline" 2>/dev/null | grep -qF -- "$1"; then printf '%s\n' "${p#/proc/}"; fi
-    done
+    local listing
+    listing="$(ps -axo pid=,command=)" || return 1
+    printf '%s\n' "$listing" | PROCS_PATTERN="$1" awk 'index($0, ENVIRON["PROCS_PATTERN"]) { print $1 }'
 }
 
 # ^ hazard timeout --foreground in the doctor shim => only git is signalled, a process it started outlives the timeout
@@ -308,7 +313,7 @@ test_a_timed_out_doctor_run_leaves_no_process_behind() {
     doctor
     assert_rc 1 "git hook list does not finish"
     assert_contains "$OUT" "PROBLEM  cannot read the hooks git runs (git hook list pre-commit exit 124: timed out after 1s)" "git was stopped by the limit"
-    stray="$(procs_running "$sleeper")"
+    stray="$(procs_running "$sleeper")" || return 1
     # shellcheck disable=SC2086
     if [ -n "$stray" ]; then kill $stray 2>/dev/null; fi
     assert_empty "$stray" "no process git started is left running after the timeout"

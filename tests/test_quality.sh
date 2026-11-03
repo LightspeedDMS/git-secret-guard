@@ -3,6 +3,20 @@
 source "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
 
 SHELLCHECK="${GSG_TEST_SHELLCHECK:-$REAL_HOME/.local/bin/shellcheck}"
+if [ ! -x "$SHELLCHECK" ]; then SHELLCHECK="$(command -v shellcheck || true)"; fi
+
+GSG_SHELLCHECK_PIN=0.11.0
+
+# ^ invariant prints why the gate cannot run with shellcheck BIN (its version is not the pin, or it does not answer), nothing when it can
+shellcheck_gate_skip_reason() {
+    local out ver
+    out="$("$1" --version 2>/dev/null)" || {
+        printf 'cannot read the version of %s' "$1"
+        return 0
+    }
+    ver="$(printf '%s\n' "$out" | sed -n 's/^version: //p')"
+    if [ "$ver" != "$GSG_SHELLCHECK_PIN" ]; then printf 'shellcheck %s found at %s, the gate is pinned to %s' "${ver:-of unknown version}" "$1" "$GSG_SHELLCHECK_PIN"; fi
+}
 
 # ^ why project_scripts omits tests/fixtures/husky/h, not shellcheck it; verbatim third-party sh script
 project_scripts() {
@@ -12,6 +26,9 @@ project_scripts() {
 
 test_shellcheck_reports_nothing_on_every_script() {
     [ -x "$SHELLCHECK" ] || skip_test "shellcheck not found at $SHELLCHECK"
+    local reason
+    reason="$(shellcheck_gate_skip_reason "$SHELLCHECK")"
+    if [ -n "$reason" ]; then skip_test "$reason"; fi
     local -a files
     mapfile -t files < <(project_scripts)
     [ "${#files[@]}" -ge 10 ] || fail "only ${#files[@]} scripts found"
@@ -19,6 +36,21 @@ test_shellcheck_reports_nothing_on_every_script() {
     run_cap "$SHELLCHECK" -x -s bash "${files[@]}"
     assert_rc 0 shellcheck
     assert_empty "$OUT$ERR" "zero warnings, including info"
+}
+
+test_the_shellcheck_gate_skips_with_the_version_found_when_it_is_not_pinned() {
+    local old="$SANDBOX/shellcheck-old" pinned="$SANDBOX/shellcheck-pinned" reason
+    printf '#!/bin/sh\nprintf "ShellCheck - shell script analysis tool\\nversion: 0.9.0\\n"\n' >"$old" || return 1
+    printf '#!/bin/sh\nprintf "ShellCheck - shell script analysis tool\\nversion: %s\\n"\n' "$GSG_SHELLCHECK_PIN" >"$pinned" || return 1
+    chmod 755 "$old" "$pinned" || return 1
+    reason="$(shellcheck_gate_skip_reason "$old")"
+    assert_contains "$reason" "0.9.0" "names the version found"
+    assert_contains "$reason" "$GSG_SHELLCHECK_PIN" "names the pinned version"
+    reason="$(shellcheck_gate_skip_reason "$pinned")"
+    assert_eq "$reason" "" "the pinned version runs the gate"
+    printf '#!/bin/sh\nexit 3\n' >"$old" || return 1
+    reason="$(shellcheck_gate_skip_reason "$old")"
+    assert_contains "$reason" "cannot read the version" "a shellcheck that does not answer is skipped with a reason, not passed"
 }
 
 test_every_comment_follows_the_coded_comments_rules() {
@@ -185,9 +217,23 @@ test_the_docs_have_a_supported_platforms_chapter() {
     # shellcheck disable=SC2016
     for needle in '# Supported platforms' 'RHEL 9' 'Ubuntu 24.04' 'tests/platform/ubuntu.sh' 'ppa:git-core/ppa' \
         'sudo add-apt-repository ppa:git-core/ppa && sudo apt install git' 'sudo apt install jq' 'git-2.56.0.tar.xz' \
-        '26c56c296b38c0695b26fa95f475f1d01704d2d38e73465ca30b0b2f5dc789d3' 'NO_RUST=1' 'mawk' 'gawk' 'macOS is not supported yet'; do
+        '26c56c296b38c0695b26fa95f475f1d01704d2d38e73465ca30b0b2f5dc789d3' 'NO_RUST=1' 'mawk' 'gawk' 'macOS arm64'; do
         grep -qF -- "$needle" docs/platforms.md || fail "docs/platforms.md does not mention [$needle] in its supported platforms"
     done
+}
+
+test_the_docs_state_exactly_what_macos_support_means() {
+    cd -- "$GSG_PROJECT" || return 1
+    local needle
+    for needle in '# macOS (Homebrew)' 'macOS 26.7.1' 'x86_64' 'not tested' 'brew install' 'coreutils' 'util-linux' 'bash 4.4' 'launchd' \
+        'BASH_BIN' 'GNUBIN_DIR' 'never installed with brew'; do
+        grep -qF -- "$needle" docs/platforms.md || fail "docs/platforms.md does not state [$needle] for macOS"
+    done
+    for needle in README.md docs/install.md; do
+        grep -qF -- 'Homebrew' "$needle" || fail "$needle does not mention Homebrew"
+        if grep -qiF 'install` refuses it' "$needle"; then fail "$needle still says install refuses macOS"; fi
+    done
+    grep -qF -- 'macOS arm64' README.md || fail "README.md does not list macOS arm64"
 }
 
 test_the_docs_state_the_platform_test_trust_decisions() {
@@ -309,7 +355,7 @@ test_the_markdown_link_check_flags_planted_breakage() {
     assert_contains "$OUT" "[b.md#missing] has no heading #missing" "missing anchor in another file"
     assert_contains "$OUT" "[#nowhere] has no heading #nowhere" "missing anchor in the same file"
     assert_eq "$(printf '%s\n' "$OUT" | grep -c .)" 3 "only the three planted breaks; ok, repeated heading, web and fenced links pass"
-    assert_eq "$(md_link_targets "$SANDBOX/md/a.md" | wc -l)" 6 "six links outside fences are counted, the fenced one is not"
+    assert_eq "$(md_link_targets "$SANDBOX/md/a.md" | wc -l | tr -d ' ')" 6 "six links outside fences are counted, the fenced one is not"
     printf '# C\n\n  ```\n  [x](y.md)\n  ```\n' >"$SANDBOX/md/indented.md"
     printf '# D\n\n~~~\n[x](y.md)\n~~~\n' >"$SANDBOX/md/tilde.md"
     for f in indented tilde; do
@@ -330,11 +376,11 @@ test_the_hook_never_looks_tools_up_on_PATH() {
     local -a files=(bin/git-secret-guard lib/scanners/*.sh)
     local f rc
     for f in hooks/secret-scan lib/*.sh; do
-        if [ "$f" != lib/install.sh ]; then files+=("$f"); fi
+        if [ "$f" != lib/install.sh ] && [ "$f" != lib/brew.sh ]; then files+=("$f"); fi
     done
     grep -nE '(^|[;&|(`]|\$\()[[:space:]]*(command -v|which |type -P)' "${files[@]}"
     rc=$?
-    assert_eq "$rc" 1 "no PATH lookup of a tool outside lib/install.sh (grep exit 1 = no match; 0 = found one, 2 = grep failed)"
+    assert_eq "$rc" 1 "no PATH lookup of a tool outside lib/install.sh and lib/brew.sh (grep exit 1 = no match; 0 = found one, 2 = grep failed)"
 }
 
 test_the_hook_never_loads_the_install_time_libraries() {
@@ -343,7 +389,7 @@ test_the_hook_never_loads_the_install_time_libraries() {
     local rc
     mapfile -t files < <(hook_load_path)
     [ "${#files[@]}" -ge 8 ] || fail "only ${#files[@]} hook files found"
-    grep -nE '(install|uninstall|status|state|tools|hookspath)\.sh|usage\.md' "${files[@]}"
+    grep -nE '(install|uninstall|status|state|tools|hookspath|brew)\.sh|usage\.md' "${files[@]}"
     rc=$?
     assert_eq "$rc" 1 "the hook's load path never reaches a lifecycle library (grep exit 1 = no match)"
 }
@@ -368,9 +414,12 @@ test_systemctl_is_looked_up_only_in_lib_install_sh() {
 test_the_project_tree_holds_no_credential_looking_literals() {
     [ -x "$REAL_GITLEAKS" ] || skip_test "gitleaks not found at $REAL_GITLEAKS"
     [ -x "$REAL_TRUFFLEHOG" ] || skip_test "trufflehog not found at $REAL_TRUFFLEHOG"
-    local copy="$SANDBOX/tree-copy" report="$SANDBOX/tree-report.json"
+    local copy="$SANDBOX/tree-copy" report="$SANDBOX/tree-report.json" listing="$SANDBOX/tree-files.z"
     mkdir -p -- "$copy"
-    (cd -- "$GSG_PROJECT" && tar --exclude=./.git -cf - .) | tar -xf - -C "$copy" || return 1
+    # ^ why the files git lists, not the whole directory; gitignored tool data such as .code-indexer/ belongs to no commit
+    (cd -- "$GSG_PROJECT" && gitx ls-files -z -co --exclude-standard) >"$listing" || return 1
+    (cd -- "$GSG_PROJECT" && tar -cf - --null -T "$listing") | tar -xf - -C "$copy" || return 1
+    [ -n "$(ls -A -- "$copy")" ] || { fail "the project tree copy is empty"; return 1; }
     run_cap "$REAL_GITLEAKS" dir "$copy" --redact --report-format json --report-path "$report" --no-banner --no-color
     assert_rc 0 "gitleaks over the project tree"
     run_cap env HTTPS_PROXY=http://127.0.0.1:9 HTTP_PROXY=http://127.0.0.1:9 \

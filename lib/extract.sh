@@ -40,9 +40,9 @@ _extract_clean_stderr() {
 # ^ why env, not awk -v; -v would interpret backslash escapes in the path
 # ^ invariant lib/extract.awk prints only to files and /dev/stderr => 2>&1 into the sanitizer loses nothing; the status returned is awk's own
 extract_added_lines() {
-    local dir="$1" rc
+    local dir="$1" counts="${2:-}" rc
     mkdir -p -- "$dir" || return 2
-    GSG_SCAN_DIR="$dir" LC_ALL=C awk -f "$GSG_EXTRACT_AWK" 2>&1 | _extract_clean_stderr
+    GSG_SCAN_DIR="$dir" GSG_EXTRACT_COUNTS="$counts" LC_ALL=C awk -f "$GSG_EXTRACT_AWK" 2>&1 | _extract_clean_stderr
     rc="${PIPESTATUS[0]}"
     return "$rc"
 }

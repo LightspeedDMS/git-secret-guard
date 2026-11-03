@@ -16,12 +16,17 @@ has_head() { gitx rev-parse -q --verify HEAD >/dev/null 2>&1; }
 assert_no_commit() { if has_head; then fail "a commit was created"; fi; }
 workdirs() { find "$SANDBOX/tmp" -maxdepth 1 -name 'git-secret-guard.*' 2>/dev/null; }
 
-test_clean_commit_passes_quietly_and_runs_both_tools() {
+test_clean_commit_prints_one_summary_line_and_runs_both_tools() {
     begin clean || return 1
     stage_file src/app.txt one two three
     commit_cap "clean"
     assert_rc 0 commit
-    assert_empty "$OUT$ERR" "nothing is printed on success"
+    assert_empty "$OUT" "stdout stays empty"
+    [[ $ERR =~ $PASS_LINE_RE ]] || fail "stderr is not exactly the pass line: [$ERR]"
+    assert_eq "${BASH_REMATCH[1]}" 1 "one file"
+    assert_eq "${BASH_REMATCH[2]}" 3 "three added lines"
+    assert_eq "${BASH_REMATCH[3]}" "trufflehog 1.2.3, gitleaks 4.5.6" "versions come from the settings"
+    assert_eq "$(wc -l <<<"$ERR" | tr -d ' ')" 1 "exactly one line"
     assert_eq "$(tf_runs)" 1 "trufflehog ran once"
     assert_eq "$(gl_runs)" 1 "gitleaks ran once"
     has_head || fail "commit was not created"
@@ -201,7 +206,7 @@ test_missing_jq_blocks_naming_the_tool() {
 
 test_a_trufflehog_that_exits_0_silently_blocks_like_a_missing_gitleaks_report() {
     begin silenttf || return 1
-    write_settings /bin/true "$STUBS_DIR/gitleaks" "$TEST_JQ"
+    write_settings "$TEST_TRUE" "$STUBS_DIR/gitleaks" "$TEST_JQ"
     stage_file a.txt one
     commit_cap "x"
     assert_rc 1 "blocked"
@@ -265,6 +270,7 @@ test_empty_commit_starts_no_scanner_and_succeeds() {
     begin empty || return 1
     commit_cap "empty" --allow-empty
     assert_rc 0 commit
+    assert_eq "$ERR" "git-secret-guard: no added lines to scan" "one line says nothing was there to scan"
     assert_eq "$(tf_runs)$(gl_runs)" 00 "no scanner started"
     has_head || fail "commit was not created"
 }
@@ -275,6 +281,7 @@ test_deletion_only_commit_starts_no_scanner_and_succeeds() {
     gitx rm -q -- gone.txt
     commit_cap "delete"
     assert_rc 0 commit
+    assert_eq "$ERR" "git-secret-guard: no added lines to scan" "one line says nothing was there to scan"
     assert_eq "$(tf_runs)$(gl_runs)" 00 "no scanner started"
 }
 
@@ -294,12 +301,100 @@ test_binary_content_is_never_passed_to_the_scanners() {
     done
 }
 
+drop_versions() {
+    grep -v '_VERSION=' "$SHARE/settings" >"$SHARE/settings.new" && mv -- "$SHARE/settings.new" "$SHARE/settings"
+}
+
+test_the_pass_line_counts_files_and_added_lines_from_the_extraction() {
+    begin counts || return 1
+    stage_file a.txt one ''
+    stage_file deep/b.txt x y z
+    commit_cap "two files"
+    assert_rc 0 commit
+    [[ $ERR =~ $PASS_LINE_RE ]] || fail "not the pass line: [$ERR]"
+    assert_eq "${BASH_REMATCH[1]}" 2 "two files"
+    assert_eq "${BASH_REMATCH[2]}" 5 "five added lines, the blank one included"
+    assert_not_contains "$ERR" "a.txt" "no path in the line"
+}
+
+test_settings_without_versions_print_the_line_without_versions() {
+    begin nover || return 1
+    drop_versions || return 1
+    stage_file a.txt one
+    commit_cap "old settings"
+    assert_rc 0 "an older install still commits"
+    assert_pass_line_only "$ERR" "still the pass line"
+    assert_contains "$ERR" "(trufflehog, gitleaks)" "tool names without versions"
+}
+
+test_a_version_that_is_not_digits_and_dots_is_dropped_from_the_line() {
+    begin badver || return 1
+    use_stubs "TRUFFLEHOG_VERSION='9.9 FORGED all clear'"
+    stage_file a.txt one
+    commit_cap "forged"
+    assert_rc 0 commit
+    assert_pass_line_only "$ERR" "still one pass line"
+    assert_contains "$ERR" "(trufflehog, gitleaks 4.5.6)" "only the sane version is shown"
+    assert_not_contains "$ERR" "FORGED" "the odd text never reaches the terminal"
+}
+
+test_an_inherited_version_variable_cannot_fill_a_version_the_settings_omit() {
+    begin inherit || return 1
+    drop_versions || return 1
+    set_env TRUFFLEHOG_VERSION=7.7.7 GITLEAKS_VERSION=8.8.8
+    stage_file a.txt one
+    commit_cap "inherited"
+    assert_rc 0 commit
+    assert_contains "$ERR" "(trufflehog, gitleaks)" "no inherited version"
+}
+
+test_findings_and_blocks_print_no_pass_line() {
+    begin nopass || return 1
+    stage_file a.txt one two
+    set_env STUB_TF_FINDINGS="AWS|true|a.txt|2"
+    commit_cap "finding"
+    assert_rc 1 "blocked by the finding"
+    assert_not_contains "$ERR" "no findings" "no pass line with a finding"
+    assert_not_contains "$ERR" "scanned " "no pass line with a finding"
+    set_env STUB_TF_FINDINGS=
+    use_stubs "GITLEAKS_BIN=/nonexistent/gitleaks"
+    commit_cap "blocked"
+    assert_rc 1 "blocked by the missing tool"
+    assert_contains "$ERR" "nothing was scanned" "the existing block text"
+    assert_not_contains "$ERR" "no findings" "no pass line on a block"
+}
+
+# ^ external the hook resolves awk through PATH; the wrapper runs the real awk and afterwards damages the counts file it was told to write
+test_a_missing_or_garbage_counts_file_blocks_and_never_reports_zero() {
+    begin badcounts || return 1
+    local real_awk mode
+    real_awk="$(command -v awk)" || return 1
+    mkdir -p -- "$SANDBOX/fakeawk" || return 1
+    # shellcheck disable=SC2016
+    printf '%s\n' '#!/bin/bash' "\"$real_awk\" \"\$@\"" 'rc=$?' \
+        'if [ -n "${GSG_EXTRACT_COUNTS:-}" ]; then' \
+        '  case "${GSG_TEST_COUNTS_MODE:-}" in missing) rm -f -- "$GSG_EXTRACT_COUNTS" ;; garbage) printf "x y\n" >"$GSG_EXTRACT_COUNTS" ;; esac' \
+        'fi' 'exit $rc' >"$SANDBOX/fakeawk/awk" && chmod 755 "$SANDBOX/fakeawk/awk" || return 1
+    stage_file a.txt one two
+    for mode in missing garbage; do
+        set_env PATH="$SANDBOX/fakeawk:$REAL_HOME/.local/bin:$TEST_BASE_PATH" GSG_TEST_COUNTS_MODE="$mode"
+        commit_cap "damaged counts $mode"
+        assert_rc 1 "$mode: blocked"
+        assert_contains "$ERR" "nothing was scanned" "$mode: says nothing was scanned"
+        assert_not_contains "$ERR" "no added lines to scan" "$mode: never the empty-commit message"
+        assert_not_contains "$ERR" "scanned 0" "$mode: never zeros"
+        assert_eq "$(tf_runs)$(gl_runs)" 00 "$mode: no scanner started"
+    done
+    assert_no_commit
+}
+
 test_binary_only_commit_starts_no_scanner() {
     begin binonly || return 1
     printf '\000\001%s\000\377' "$MARKER" >blob.bin
     gitx add blob.bin
     commit_cap "bin"
     assert_rc 0 commit
+    assert_eq "$ERR" "git-secret-guard: no added lines to scan" "one line says nothing was there to scan"
     assert_eq "$(tf_runs)$(gl_runs)" 00 "nothing textual to scan"
 }
 
@@ -382,7 +477,7 @@ test_hook_outside_a_repository_blocks_instead_of_passing() {
 
 test_hook_blocks_when_neither_tmpdir_nor_home_is_set() {
     begin nohome || return 1
-    run_cap env -i PATH="/usr/local/bin:/usr/bin:/bin" "$SHARE/hooks/secret-scan"
+    run_cap env -i PATH="$TEST_BASE_PATH" "$SHARE/hooks/secret-scan"
     assert_rc 1 "blocked"
     assert_contains "$ERR" "TMPDIR nor HOME" "names the problem"
     assert_contains "$ERR" "nothing was scanned" "says nothing was scanned"
@@ -440,7 +535,13 @@ test_term_signal_stops_the_scanners_and_removes_the_private_temp_dir() { signal_
 test_int_signal_stops_the_scanners_and_removes_the_private_temp_dir() { signal_test int INT; }
 test_a_scanner_that_ignores_term_is_killed_before_the_temp_dir_is_removed() { signal_test stubborn TERM STUB_TF_STUBBORN=1; }
 
-proc_alive() { [ -r "/proc/$1/stat" ] && [ "$(awk '{print $3}' "/proc/$1/stat")" != Z ]; }
+# ^ external macOS has no /proc; ps -p reports the state letter on both, Z (zombie) counts as gone
+proc_alive() {
+    local st
+    st="$(ps -p "$1" -o stat= 2>/dev/null)" || return 1
+    st="${st//[[:space:]]/}"
+    [ -n "$st" ] && [ "${st:0:1}" != Z ]
+}
 
 test_scanner_process_detection_ignores_look_alikes_from_other_sandboxes() {
     begin decoy || return 1
@@ -492,16 +593,18 @@ test_the_hook_blocks_when_setsid_or_timeout_is_not_a_usable_absolute_path() {
 test_the_hook_takes_setsid_and_timeout_from_settings_never_from_PATH() {
     begin fromsettings || return 1
     mkdir -p -- "$SANDBOX/poison" "$SANDBOX/wrap"
-    local tool
+    local tool real
     for tool in setsid timeout; do
+        real="$TEST_SETSID"
+        if [ "$tool" = timeout ]; then real="$TEST_TIMEOUT"; fi
         printf '#!/bin/bash\necho PATH-USED >>"%s/poison.log"\nexit 99\n' "$SANDBOX" >"$SANDBOX/poison/$tool"
         # shellcheck disable=SC2016
-        printf '#!/bin/bash\necho "$0" >>"%s/wrap.log"\nexec /bin/%s "$@"\n' "$SANDBOX" "$tool" >"$SANDBOX/wrap/$tool"
+        printf '#!/bin/bash\necho "$0" >>"%s/wrap.log"\nexec %s "$@"\n' "$SANDBOX" "$real" >"$SANDBOX/wrap/$tool"
         chmod +x "$SANDBOX/poison/$tool" "$SANDBOX/wrap/$tool"
     done
     use_stubs "SETSID_BIN=$SANDBOX/wrap/setsid
 TIMEOUT_BIN=$SANDBOX/wrap/timeout"
-    set_env PATH="$SANDBOX/poison:/usr/local/bin:/usr/bin:/bin"
+    set_env PATH="$SANDBOX/poison:$TEST_BASE_PATH"
     stage_file a.txt one
     commit_cap "x"
     assert_rc 0 "scan completes with PATH poisoned"
@@ -514,7 +617,7 @@ TIMEOUT_BIN=$SANDBOX/wrap/timeout"
 test_a_signal_before_the_runner_has_its_own_group_does_not_wait_for_the_scan() {
     begin earlysig || return 1
     mkdir -p -- "$SANDBOX/fakebin"
-    printf '#!/bin/bash\nsleep 1.5\nexec /bin/setsid "$@"\n' >"$SANDBOX/fakebin/setsid"
+    printf '#!/bin/bash\nsleep 1.5\nexec %s "$@"\n' "$TEST_SETSID" >"$SANDBOX/fakebin/setsid"
     chmod +x "$SANDBOX/fakebin/setsid"
     use_stubs "SETSID_BIN=$SANDBOX/fakebin/setsid"
     set_env STUB_TF_SLEEP=4 STUB_GL_SLEEP=4
@@ -532,6 +635,65 @@ test_a_signal_before_the_runner_has_its_own_group_does_not_wait_for_the_scan() {
     assert_empty "$(workdirs)" "work dir removed"
     sleep 3
     assert_eq "$(tf_runs)$(gl_runs)" 00 "no scanner started after the hook was gone"
+}
+
+# ^ external a GUI git client on macOS starts with /usr/bin:/bin; /bin/bash 3.2 and the BSD tools come first, the recorded bash and GNU directory must win
+test_a_git_client_with_the_system_bash_first_on_PATH_still_scans() {
+    [ -n "$TEST_BASH" ] || skip_test "the recorded bash and GNU directory exist on macOS only"
+    begin guipath || return 1
+    stage_file a.txt one two
+    run_cap env -i HOME="$SANDBOX/home" PATH="/usr/bin:/bin" TMPDIR="$SANDBOX/tmp" GIT_CONFIG_GLOBAL="$SANDBOX/gitconfig" \
+        GIT_CONFIG_NOSYSTEM=1 STUB_LOG="$CALLS" "$GIT" commit -q -m gui
+    assert_rc 0 "commit under a GUI-style PATH"
+    assert_empty "$OUT" "stdout stays empty"
+    assert_pass_line_only "$ERR" "only the pass line is printed"
+    assert_eq "$(tf_runs)$(gl_runs)" 11 "both scanners ran"
+    assert_empty "$(workdirs)" "private temp dir removed"
+}
+
+# ^ external macOS /bin/bash is 3.2; any other host with a bash >= 4.4 there has nothing to test here
+old_system_bash() {
+    [ -x /bin/bash ] && /bin/bash -c '[ "${BASH_VERSINFO[0]}" -lt 4 ] || { [ "${BASH_VERSINFO[0]}" -eq 4 ] && [ "${BASH_VERSINFO[1]}" -lt 4 ]; }'
+}
+
+test_a_gnu_directory_in_the_settings_that_is_relative_or_missing_blocks_the_commit() {
+    [ -n "$TEST_BASH" ] || skip_test "GNUBIN_DIR exists on macOS only"
+    local bad
+    begin badgnu || return 1
+    for bad in "relative/gnubin" "$SANDBOX/no-such-gnubin"; do
+        use_stubs "GNUBIN_DIR=$bad"
+        stage_file a.txt one
+        commit_cap "x"
+        assert_rc 1 "GNUBIN_DIR=[$bad] blocks"
+        assert_contains "$ERR" "GNUBIN_DIR" "names the setting for [$bad]"
+        assert_contains "$ERR" "nothing was scanned" "says nothing was scanned for [$bad]"
+        assert_no_commit
+        assert_eq "$(tf_runs)$(gl_runs)" 00 "no scanner started for [$bad]"
+    done
+}
+
+test_the_hook_blocks_under_a_bash_older_than_4_4_instead_of_scanning() {
+    old_system_bash || skip_test "/bin/bash is 4.4 or newer on this host"
+    begin oldbash || return 1
+    stage_file a.txt one
+    run_cap env -i HOME="$SANDBOX/home" PATH="/usr/bin:/bin" TMPDIR="$SANDBOX/tmp" STUB_LOG="$CALLS" /bin/bash "$SHARE/hooks/secret-scan"
+    assert_rc 1 "the hook under bash 3.2"
+    assert_contains "$ERR" "bash 4.4" "names the bash it needs"
+    assert_contains "$ERR" "nothing was scanned" "says nothing was scanned"
+    assert_eq "$(tf_runs)$(gl_runs)" 00 "no scanner started"
+}
+
+test_a_commit_through_a_bare_hook_command_under_the_system_bash_is_blocked() {
+    old_system_bash || skip_test "/bin/bash is 4.4 or newer on this host"
+    begin barecmd || return 1
+    gitx config --global "hook.$HOOK_NAME.command" "$SHARE/hooks/secret-scan" || return 1
+    stage_file a.txt one
+    run_cap env -i HOME="$SANDBOX/home" PATH="/usr/bin:/bin" TMPDIR="$SANDBOX/tmp" GIT_CONFIG_GLOBAL="$SANDBOX/gitconfig" \
+        GIT_CONFIG_NOSYSTEM=1 STUB_LOG="$CALLS" "$GIT" commit -q -m bare
+    assert_rc 1 "the commit is blocked"
+    assert_contains "$ERR" "nothing was scanned" "says nothing was scanned"
+    assert_no_commit
+    assert_eq "$(tf_runs)$(gl_runs)" 00 "no scanner started"
 }
 
 run_file_tests

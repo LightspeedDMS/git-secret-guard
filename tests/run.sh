@@ -5,6 +5,17 @@ set -o pipefail
 TESTS_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)" || exit 2
 FILE_TIMEOUT_SECONDS="${GSG_TEST_FILE_TIMEOUT:-900}"
 
+# ^ external macOS ships bash 3.2 and BSD tools; Homebrew's bash and the GNU coreutils directory must come first for timeout and env --default-signal
+if [ "$(uname -s)" = Darwin ]; then
+    brew_prefix="$(brew --prefix 2>/dev/null)" || brew_prefix=""
+    if [ -z "$brew_prefix" ]; then
+        printf 'FAIL    the tests need Homebrew on macOS (brew --prefix printed nothing)\n'
+        exit 2
+    fi
+    PATH="$brew_prefix/bin:$brew_prefix/opt/coreutils/libexec/gnubin:$PATH"
+    export PATH
+fi
+
 files=()
 if [ "$#" -gt 0 ]; then
     files=("$@")

@@ -105,7 +105,7 @@ assert_no_markers() {
     assert_empty "$(find "$SANDBOX/markers" -type f 2>/dev/null)" "${1:-no repository-configured command ran}"
 }
 
-objects_listing() { (cd -- "$1/.git/objects" && find . -type f -printf '%p %s\n' | LC_ALL=C sort); }
+objects_listing() { (cd -- "$1/.git/objects" && find . -type f -exec stat -c '%n %s' -- {} + | LC_ALL=C sort); }
 
 test_doctor_runs_no_command_a_repository_configures() {
     local hook before after

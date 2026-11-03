@@ -61,9 +61,11 @@ tools_platform_key() {
     esac
     case "$os:$arch" in
         Linux:x86_64) cpu=amd64; [ "$tool" = gitleaks ] && cpu=x64 ;;
+        Darwin:x86_64) prefix=darwin; cpu=amd64; [ "$tool" = gitleaks ] && cpu=x64 ;;
         Linux:aarch64 | Linux:arm64) cpu=arm64 ;;
+        Darwin:arm64) prefix=darwin; cpu=arm64 ;;
         MINGW64_NT-*:x86_64) prefix=windows; cpu=amd64; [ "$tool" = gitleaks ] && cpu=x64 ;;
-        *) printf '%s: only Linux on x86_64 or arm64, or Git for Windows on x86_64, is supported, got %s on %s\n' "$GSG_NAME" "$os" "$arch" >&2; return 1 ;;
+        *) printf '%s: only Linux and macOS on x86_64 or arm64, or Git for Windows on x86_64, are supported, got %s on %s\n' "$GSG_NAME" "$os" "$arch" >&2; return 1 ;;
     esac
     printf '%s_%s\n' "$prefix" "$cpu"
 }
@@ -119,7 +121,7 @@ tools_fetch_verified() {
     got="$(sha256sum -- "$file" | cut -d' ' -f1)" || { rm -f -- "$file"; return 1; }
     if [ "$got" != "$want" ]; then
         rm -f -- "$file" || return 1
-        printf '%s: SHA-256 mismatch for %s: expected %s got %s; download removed, nothing installed\n' "$GSG_NAME" "$name" "$want" "$got" >&2
+        printf '%s: SHA-256 mismatch for %s: expected %s got %s; download removed\n' "$GSG_NAME" "$name" "$want" "$got" >&2
         return 1
     fi
     printf '%s\n' "$file"

@@ -131,7 +131,7 @@ test_a_missing_or_unreadable_os_release_prints_no_raw_shell_error() {
 
 os_field() {
     # shellcheck disable=SC2016
-    run_cap env -i PATH="/usr/local/bin:/usr/bin:/bin" bash -c 'source "$1/lib/install.sh" && install_os_release_field "$2" "$3" && printf "%s" "$REPLY"' _ "$GSG_PROJECT" "$1" "$2"
+    run_cap env -i PATH="$TEST_BASE_PATH" bash -c 'source "$1/lib/install.sh" && install_os_release_field "$2" "$3" && printf "%s" "$REPLY"' _ "$GSG_PROJECT" "$1" "$2"
 }
 
 test_os_release_fields_are_read_as_data() {
@@ -187,7 +187,7 @@ test_an_old_git_and_a_missing_jq_are_both_named_in_one_refusal() {
 # shellcheck disable=SC2016
 test_a_failing_realpath_of_the_git_on_path_refuses_with_a_message_and_changes_nothing() {
     lc_begin && lc_git_wrapper false && ubuntu_release || return 1
-    printf '%s\n' '#!/bin/sh' 'for a in "$@"; do case "$a" in */pathbin/git) exit 1 ;; esac; done' 'exec /usr/bin/realpath "$@"' >"$SANDBOX/pathbin/realpath" || return 1
+    printf '%s\n' '#!/bin/sh' 'for a in "$@"; do case "$a" in */pathbin/git) exit 1 ;; esac; done' "exec $(type -P realpath) \"\$@\"" >"$SANDBOX/pathbin/realpath" || return 1
     chmod 755 "$SANDBOX/pathbin/realpath"
     gsg install
     assert_rc 1 "the git on PATH cannot be resolved"

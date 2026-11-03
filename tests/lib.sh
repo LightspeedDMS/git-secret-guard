@@ -5,13 +5,64 @@
 set -u
 
 GSG_PROJECT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)" || exit 2
-GIT="${GSG_TEST_GIT:-/usr/local/bin/git}"
 STUBS_DIR="$GSG_PROJECT/tests/stubs"
 REAL_HOME="$HOME"
-REAL_TRUFFLEHOG="${GSG_TEST_TRUFFLEHOG:-$REAL_HOME/.local/bin/trufflehog}"
-REAL_GITLEAKS="${GSG_TEST_GITLEAKS:-/home/linuxbrew/.linuxbrew/bin/gitleaks}"
-TEST_JQ="${GSG_TEST_JQ:-/bin/jq}"
 HOOK_NAME=git-secret-guard
+
+# ^ external Linux keeps its old defaults byte for byte; macOS needs Homebrew's bash >= 4.4, GNU coreutils and util-linux (all keg paths from brew --prefix)
+# ^ external the macOS real-scanner binaries are the pinned ones fetched by tests/fetch-test-tools.sh, never brew's latest release
+# ^ external Apple's /usr/bin/git is 2.54.0 on macOS 26 and honours hook.<name>.command (probed); an older Apple git would ignore it; use GSG_TEST_GIT there
+TEST_OS="$(uname -s)"
+TEST_BREW_PREFIX=""
+TEST_BASH="" TEST_GNUBIN=""
+# shellcheck disable=SC2034
+case "$TEST_OS" in
+    Darwin)
+        TEST_BREW_PREFIX="${GSG_TEST_BREW_PREFIX:-$(brew --prefix 2>/dev/null)}"
+        if [ -z "$TEST_BREW_PREFIX" ]; then
+            printf 'tests need Homebrew on macOS (brew not on PATH); install it or set GSG_TEST_BREW_PREFIX\n' >&2
+            exit 2
+        fi
+        TEST_BASH="$TEST_BREW_PREFIX/bin/bash"
+        TEST_GNUBIN="$TEST_BREW_PREFIX/opt/coreutils/libexec/gnubin"
+        TEST_BASE_PATH="$TEST_BREW_PREFIX/bin:$TEST_GNUBIN:/usr/bin:/bin:/usr/sbin:/sbin:$TEST_BREW_PREFIX/opt/util-linux/bin"
+        TEST_TOOLS_CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/git-secret-guard-test-tools"
+        GIT="${GSG_TEST_GIT:-/usr/bin/git}"
+        REAL_TRUFFLEHOG="${GSG_TEST_TRUFFLEHOG:-$TEST_TOOLS_CACHE/trufflehog}"
+        REAL_GITLEAKS="${GSG_TEST_GITLEAKS:-$TEST_TOOLS_CACHE/gitleaks}"
+        TEST_JQ="${GSG_TEST_JQ:-/usr/bin/jq}"
+        if [ ! -x "$TEST_JQ" ]; then TEST_JQ="${GSG_TEST_JQ:-$TEST_BREW_PREFIX/bin/jq}"; fi
+        TEST_SETSID="${GSG_TEST_SETSID:-$TEST_BREW_PREFIX/opt/util-linux/bin/setsid}"
+        TEST_TIMEOUT="${GSG_TEST_TIMEOUT:-$TEST_GNUBIN/timeout}"
+        TEST_TRUE="${GSG_TEST_TRUE:-/usr/bin/true}"
+        ;;
+    *)
+        TEST_BASE_PATH="/usr/local/bin:/usr/bin:/bin"
+        GIT="${GSG_TEST_GIT:-/usr/local/bin/git}"
+        REAL_TRUFFLEHOG="${GSG_TEST_TRUFFLEHOG:-$REAL_HOME/.local/bin/trufflehog}"
+        REAL_GITLEAKS="${GSG_TEST_GITLEAKS:-/home/linuxbrew/.linuxbrew/bin/gitleaks}"
+        TEST_JQ="${GSG_TEST_JQ:-/bin/jq}"
+        TEST_SETSID="${GSG_TEST_SETSID:-/bin/setsid}"
+        TEST_TIMEOUT="${GSG_TEST_TIMEOUT:-/bin/timeout}"
+        TEST_TRUE="${GSG_TEST_TRUE:-/bin/true}"
+        ;;
+esac
+
+# ^ external BSD sed wants a suffix argument after -i where GNU sed takes none; the suites use the GNU spelling and only this wrapper adapts it
+if [ "$TEST_OS" = Darwin ]; then
+    sed() {
+        if [ "${1:-}" = -i ]; then
+            shift
+            command sed -i '' "$@"
+        else
+            command sed "$@"
+        fi
+    }
+fi
+
+# ^ why versions unlike any pin, not the pinned ones; the printed line proves the settings are read, not tools.lock
+TEST_TF_VERSION=1.2.3
+TEST_GL_VERSION=4.5.6
 
 SANDBOX=""
 SHARE=""
@@ -32,7 +83,7 @@ sandbox_create() {
         GIT_CONFIG_GLOBAL="$SANDBOX/gitconfig"
         GIT_CONFIG_NOSYSTEM=1
         TMPDIR="$SANDBOX/tmp"
-        PATH="$REAL_HOME/.local/bin:/usr/local/bin:/usr/bin:/bin"
+        PATH="$REAL_HOME/.local/bin:$TEST_BASE_PATH"
         LC_ALL=C
         GIT_TERMINAL_PROMPT=0
         PYTHONUSERBASE="$REAL_HOME/.local"
@@ -49,8 +100,10 @@ sandbox_create() {
 }
 
 configure_hook() {
+    local cmd="$SHARE/hooks/secret-scan"
+    if [ -n "$TEST_BASH" ]; then cmd="'$TEST_BASH' '$cmd'"; fi
     env -i "${GSG_ENV[@]}" "$GIT" config --global "hook.$HOOK_NAME.event" pre-commit || exit 2
-    env -i "${GSG_ENV[@]}" "$GIT" config --global "hook.$HOOK_NAME.command" "$SHARE/hooks/secret-scan" || exit 2
+    env -i "${GSG_ENV[@]}" "$GIT" config --global "hook.$HOOK_NAME.command" "$cmd" || exit 2
 }
 
 sandbox_destroy() {
@@ -60,9 +113,6 @@ sandbox_destroy() {
     fi
 }
 
-TEST_SETSID="${GSG_TEST_SETSID:-/bin/setsid}"
-TEST_TIMEOUT="${GSG_TEST_TIMEOUT:-/bin/timeout}"
-
 # ^ coupled lib/install.sh:install_write_settings writes the same keys; the extra line (arg 4) may override SETSID_BIN/TIMEOUT_BIN
 write_settings() {
     {
@@ -71,6 +121,12 @@ write_settings() {
         printf 'JQ_BIN=%q\n' "$3"
         printf 'SETSID_BIN=%q\n' "$TEST_SETSID"
         printf 'TIMEOUT_BIN=%q\n' "$TEST_TIMEOUT"
+        printf 'TRUFFLEHOG_VERSION=%q\n' "$TEST_TF_VERSION"
+        printf 'GITLEAKS_VERSION=%q\n' "$TEST_GL_VERSION"
+        if [ -n "$TEST_BASH" ]; then
+            printf 'BASH_BIN=%q\n' "$TEST_BASH"
+            printf 'GNUBIN_DIR=%q\n' "$TEST_GNUBIN"
+        fi
         if [ -n "${4:-}" ]; then printf '%s\n' "$4"; fi
     } >"$SHARE/settings"
 }
@@ -173,6 +229,8 @@ assert_rc() { [ "$RC" -eq "$1" ] || fail "${2:-rc}: expected exit $1 got $RC (st
 assert_contains() { case "$1" in *"$2"*) return 0 ;; esac; fail "${3:-assert_contains}: missing [$2] in [${1:0:400}]"; }
 assert_not_contains() { case "$1" in *"$2"*) fail "${3:-assert_not_contains}: unexpected [$2]"; return 1 ;; esac; }
 assert_empty() { [ -z "$1" ] || fail "${2:-assert_empty}: got [${1:0:300}]"; }
+PASS_LINE_RE='^git-secret-guard: scanned ([0-9]+) files?, ([0-9]+) added lines? \(([^)]*)\): no findings(, [0-9]+ files? exempted)?, [0-9]+s$'
+assert_pass_line_only() { [[ $1 =~ $PASS_LINE_RE ]] || fail "${2:-assert_pass_line_only}: expected exactly the pass line, got [${1:0:300}]"; }
 assert_file() { [ -e "$1" ] || fail "${2:-assert_file}: missing $1"; }
 assert_no_file() { [ ! -e "$1" ] || fail "${2:-assert_no_file}: unexpected $1"; }
 
@@ -198,8 +256,13 @@ run_file_tests() {
         EXTRA_ENV=()
         configure_hook
         use_stubs
-        (cd -- "$SANDBOX" && "$fn") >"$SANDBOX/.testout" 2>&1
-        status=$?
+        if [ -n "${FILE_SKIP_REASON:-}" ]; then
+            printf '%s\n' "$FILE_SKIP_REASON" >"$SANDBOX/.skip"
+            status=0
+        else
+            (cd -- "$SANDBOX" && "$fn") >"$SANDBOX/.testout" 2>&1
+            status=$?
+        fi
         if [ -s "$SANDBOX/.skip" ]; then
             printf 'SKIPPED %s (%s)\n' "$name" "$(<"$SANDBOX/.skip")"
             skipped=$((skipped + 1))

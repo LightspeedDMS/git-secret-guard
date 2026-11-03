@@ -29,7 +29,7 @@ case "$TEST_OS" in
         TEST_TOOLS_CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/git-secret-guard-test-tools"
         GIT="${GSG_TEST_GIT:-/usr/bin/git}"
         REAL_TRUFFLEHOG="${GSG_TEST_TRUFFLEHOG:-$TEST_TOOLS_CACHE/trufflehog}"
-        REAL_GITLEAKS="${GSG_TEST_GITLEAKS:-$TEST_TOOLS_CACHE/gitleaks}"
+        REAL_BETTERLEAKS="${GSG_TEST_BETTERLEAKS:-$TEST_TOOLS_CACHE/betterleaks}"
         TEST_JQ="${GSG_TEST_JQ:-/usr/bin/jq}"
         if [ ! -x "$TEST_JQ" ]; then TEST_JQ="${GSG_TEST_JQ:-$TEST_BREW_PREFIX/bin/jq}"; fi
         TEST_SETSID="${GSG_TEST_SETSID:-$TEST_BREW_PREFIX/opt/util-linux/bin/setsid}"
@@ -40,7 +40,7 @@ case "$TEST_OS" in
         TEST_BASE_PATH="/usr/local/bin:/usr/bin:/bin"
         GIT="${GSG_TEST_GIT:-/usr/local/bin/git}"
         REAL_TRUFFLEHOG="${GSG_TEST_TRUFFLEHOG:-$REAL_HOME/.local/bin/trufflehog}"
-        REAL_GITLEAKS="${GSG_TEST_GITLEAKS:-/home/linuxbrew/.linuxbrew/bin/gitleaks}"
+        REAL_BETTERLEAKS="${GSG_TEST_BETTERLEAKS:-/home/linuxbrew/.linuxbrew/bin/betterleaks}"
         TEST_JQ="${GSG_TEST_JQ:-/bin/jq}"
         TEST_SETSID="${GSG_TEST_SETSID:-/bin/setsid}"
         TEST_TIMEOUT="${GSG_TEST_TIMEOUT:-/bin/timeout}"
@@ -117,12 +117,12 @@ sandbox_destroy() {
 write_settings() {
     {
         printf 'TRUFFLEHOG_BIN=%q\n' "$1"
-        printf 'GITLEAKS_BIN=%q\n' "$2"
+        printf 'BETTERLEAKS_BIN=%q\n' "$2"
         printf 'JQ_BIN=%q\n' "$3"
         printf 'SETSID_BIN=%q\n' "$TEST_SETSID"
         printf 'TIMEOUT_BIN=%q\n' "$TEST_TIMEOUT"
         printf 'TRUFFLEHOG_VERSION=%q\n' "$TEST_TF_VERSION"
-        printf 'GITLEAKS_VERSION=%q\n' "$TEST_GL_VERSION"
+        printf 'BETTERLEAKS_VERSION=%q\n' "$TEST_GL_VERSION"
         if [ -n "$TEST_BASH" ]; then
             printf 'BASH_BIN=%q\n' "$TEST_BASH"
             printf 'GNUBIN_DIR=%q\n' "$TEST_GNUBIN"
@@ -131,8 +131,8 @@ write_settings() {
     } >"$SHARE/settings"
 }
 
-use_stubs() { write_settings "$STUBS_DIR/trufflehog" "$STUBS_DIR/gitleaks" "$TEST_JQ" "${1:-}"; }
-use_real_tools() { write_settings "$REAL_TRUFFLEHOG" "$REAL_GITLEAKS" "$TEST_JQ" "${1:-}"; }
+use_stubs() { write_settings "$STUBS_DIR/trufflehog" "$STUBS_DIR/betterleaks" "$TEST_JQ" "${1:-}"; }
+use_real_tools() { write_settings "$REAL_TRUFFLEHOG" "$REAL_BETTERLEAKS" "$TEST_JQ" "${1:-}"; }
 
 set_env() { EXTRA_ENV+=("$@"); }
 
@@ -218,10 +218,13 @@ commit_ignore_file() {
 # ^ security fake credentials are built from fragments => no committed file holds a credential-looking literal
 # ^ see test:test_the_project_tree_holds_no_credential_looking_literals
 fake_aws_key() { printf '%s%s' "AKI""A" "Q7XK2MWB4HZ5NR3T"; }
+# ^ security generated per call, never a literal => nothing in the tree looks like a credential; 40 random alphanumerics clear the entropy filter
+# ^ why || true, not a bare pipe; head closes it, tr gets SIGPIPE, pipefail would fail the call
+fake_aws_secret() { LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 40 || true; }
 fake_github_token() { printf '%s%s' "ghp""_" "aB3dE6gH9jK2mN5pQ8sT1vW4yZ7bC0eF3hJ6"; }
 new_marker() { printf 'LEAKMARKER%s%s' "$$" "$RANDOM$RANDOM"; }
-# ^ coupled lib/exempt.sh:gitleaks_probe_secret is the pre-flight probe value; the hook must never print it
-probe_secret() { (source "$GSG_PROJECT/lib/common.sh" && source "$GSG_PROJECT/lib/exempt.sh" && gitleaks_probe_secret); }
+# ^ coupled lib/exempt.sh:betterleaks_probe_secret is the pre-flight probe value; the hook must never print it
+probe_secret() { (source "$GSG_PROJECT/lib/common.sh" && source "$GSG_PROJECT/lib/exempt.sh" && betterleaks_probe_secret); }
 
 fail() { printf '%s\n' "$*" >>"$SANDBOX/.fails"; return 1; }
 assert_eq() { [ "$1" = "$2" ] || fail "${3:-assert_eq}: expected [$2] got [$1]"; }

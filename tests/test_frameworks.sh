@@ -33,7 +33,7 @@ test_husky_clean_commit_runs_the_scan_and_the_husky_hook() {
     stage_file a.txt one
     commit_cap "a"
     assert_rc 0 commit
-    assert_eq "$(count_calls trufflehog)$(count_calls gitleaks)" 11 "both tools ran"
+    assert_eq "$(count_calls trufflehog)$(count_calls betterleaks)" 11 "both tools ran"
     assert_file "$SANDBOX/husky-ran" "the husky pre-commit hook ran"
 }
 
@@ -76,7 +76,7 @@ test_scan_runs_when_repo_hooks_path_points_at_a_missing_directory() {
     stage_file a.txt one
     commit_cap "a"
     assert_rc 0 commit
-    assert_eq "$(count_calls trufflehog)$(count_calls gitleaks)" 11 "both tools ran"
+    assert_eq "$(count_calls trufflehog)$(count_calls betterleaks)" 11 "both tools ran"
 }
 
 test_pre_commit_framework_installs_and_both_its_checks_and_the_scan_run() {
@@ -102,7 +102,7 @@ EOF
     commit_cap "a"
     assert_rc 0 commit
     assert_file "$SANDBOX/framework-ran" "the framework check ran"
-    assert_eq "$(count_calls trufflehog)$(count_calls gitleaks)" 11 "both tools ran"
+    assert_eq "$(count_calls trufflehog)$(count_calls betterleaks)" 11 "both tools ran"
 }
 
 test_pre_commit_framework_repo_finding_is_blocked_by_the_scan() {
@@ -129,7 +129,7 @@ test_service_environment_reaches_both_scanners_and_is_decided_by_findings() {
     stage_file a.txt one
     run_cap env -i "${SVC_ENV[@]}" git commit -q -m clean
     assert_rc 0 "clean commit in the service environment"
-    assert_eq "$(count_calls trufflehog)$(count_calls gitleaks)" 11 "both scanners reached"
+    assert_eq "$(count_calls trufflehog)$(count_calls betterleaks)" 11 "both scanners reached"
     stage_file b.txt two
     set_env STUB_GL_FINDINGS="generic-api-key|b.txt|1"
     service_env

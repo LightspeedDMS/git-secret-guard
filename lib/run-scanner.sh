@@ -6,7 +6,7 @@ set -o pipefail
 LIBDIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)" || exit 1
 name="${1:-}"
 case "$name" in
-    trufflehog | gitleaks) ;;
+    trufflehog | betterleaks) ;;
     *) printf 'run-scanner: unknown scanner [%s]\n' "$name" >&2; exit 2 ;;
 esac
 [ "$#" -eq 3 ] || { printf 'run-scanner: expected 3 arguments, got %s\n' "$#" >&2; exit 2; }

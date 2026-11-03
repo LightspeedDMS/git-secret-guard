@@ -129,7 +129,7 @@ uninstall_read_placed() {
     declare -gA UN_PLACED=()
     read -r -a words <<<"$ST_PLACED"
     for w in "${words[@]}"; do
-        if [[ $w =~ ^([a-z][a-z0-9-]*):([0-9a-f]{64})$ ]] && [[ " ${GSG_TOOL_NAMES[*]} " == *" ${BASH_REMATCH[1]} "* ]]; then
+        if [[ $w =~ ^([a-z][a-z0-9-]*):([0-9a-f]{64})$ ]] && [[ " ${GSG_STATE_TOOL_NAMES[*]} " == *" ${BASH_REMATCH[1]} "* ]]; then
             UN_PLACED[${BASH_REMATCH[1]}]+="${UN_PLACED[${BASH_REMATCH[1]}]:+ }${BASH_REMATCH[2]}"
         else
             printf '%s: invalid tools_placed entry [%s] in the state file; ignored\n' "$GSG_NAME" "${w:0:80}" >&2
@@ -164,7 +164,7 @@ uninstall_restore_replaced() {
         sha="${entry##*:}"
         tool="${aside%%.gsg-replaced-*}"
         if [[ $entry != *:* ]] || [[ ! $aside =~ $GSG_ASIDE_RE ]] || [[ ! $sha =~ ^[0-9a-f]{64}$ ]] \
-            || [[ " ${GSG_TOOL_NAMES[*]} " != *" $tool "* ]]; then
+            || [[ " ${GSG_STATE_TOOL_NAMES[*]} " != *" $tool "* ]]; then
             printf '%s: invalid tools_replaced entry [%s] in the state file; ignored\n' "$GSG_NAME" "${entry:0:80}" >&2
             continue
         fi
@@ -208,7 +208,7 @@ uninstall_tools() {
     fi
     read -r -a words <<<"$ST_TOOLS"
     for name in "${words[@]}"; do
-        if [[ " ${GSG_TOOL_NAMES[*]} " != *" $name "* ]]; then
+        if [[ " ${GSG_STATE_TOOL_NAMES[*]} " != *" $name "* ]]; then
             printf '%s: unknown tool [%s] in the state file; not removed\n' "$GSG_NAME" "$name" >&2
             continue
         fi

@@ -65,7 +65,7 @@ run_matrix() {
         apply_config "$form" "$key" "$value"
         commit_cap "$key=$value"
         assert_rc 0 "[$form $key=$value] commit"
-        grep -qF -- "payload $MARKER $i" "$SANDBOX/record-matrix-$form.gitleaks" || fail "[$form $key=$value] the added line never reached the scanner"
+        grep -qF -- "payload $MARKER $i" "$SANDBOX/record-matrix-$form.betterleaks" || fail "[$form $key=$value] the added line never reached the scanner"
         if [ "$form" = repo ]; then gitx config --unset-all "$key"; fi
     done
 }

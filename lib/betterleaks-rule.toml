@@ -1,0 +1,9 @@
+[[rules]]
+id = "aws-access-key-id"
+description = "AWS access key ID on its own"
+regex = '''\b((?:A3T[A-Z0-9]|AKIA|ASIA|ABIA|ACCA)[A-Z2-7]{16})\b'''
+entropy = 3
+keywords = ["a3t", "akia", "asia", "abia", "acca"]
+
+[[rules.allowlists]]
+regexes = ['''.+EXAMPLE$''']

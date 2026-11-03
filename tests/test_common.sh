@@ -24,7 +24,7 @@ test_trunc_text_marks_a_cut_and_leaves_a_fitting_value_alone() {
 
 test_load_settings_reads_the_three_tools_and_defaults_the_timeout() {
     write_settings /a/t /a/g /a/j
-    in_common "load_settings '$SHARE/settings' && printf '%s %s %s %s' \"\$TRUFFLEHOG_BIN\" \"\$GITLEAKS_BIN\" \"\$JQ_BIN\" \"\$SCAN_TIMEOUT_SECONDS\""
+    in_common "load_settings '$SHARE/settings' && printf '%s %s %s %s' \"\$TRUFFLEHOG_BIN\" \"\$BETTERLEAKS_BIN\" \"\$JQ_BIN\" \"\$SCAN_TIMEOUT_SECONDS\""
     assert_rc 0 load_settings
     assert_eq "$OUT" "/a/t /a/g /a/j 300" "values and default timeout"
 }
@@ -37,9 +37,16 @@ test_load_settings_takes_an_explicit_timeout() {
 
 test_load_settings_ignores_inherited_tool_variables() {
     printf 'JQ_BIN=/a/j\n' >"$SHARE/settings"
-    set_env TRUFFLEHOG_BIN=/env/t GITLEAKS_BIN=/env/g SCAN_TIMEOUT_SECONDS=1
-    in_common "load_settings '$SHARE/settings' && printf '[%s][%s][%s]' \"\${TRUFFLEHOG_BIN:-}\" \"\${GITLEAKS_BIN:-}\" \"\$SCAN_TIMEOUT_SECONDS\""
+    set_env TRUFFLEHOG_BIN=/env/t BETTERLEAKS_BIN=/env/g SCAN_TIMEOUT_SECONDS=1
+    in_common "load_settings '$SHARE/settings' && printf '[%s][%s][%s]' \"\${TRUFFLEHOG_BIN:-}\" \"\${BETTERLEAKS_BIN:-}\" \"\$SCAN_TIMEOUT_SECONDS\""
     assert_eq "$OUT" "[][][300]" "environment values are discarded"
+}
+
+test_load_settings_discards_the_old_gitleaks_names() {
+    printf 'JQ_BIN=/a/j\n' >"$SHARE/settings"
+    set_env GITLEAKS_BIN=/env/g GITLEAKS_VERSION=8.30.1
+    in_common "load_settings '$SHARE/settings' && printf '[%s][%s]' \"\${GITLEAKS_BIN:-}\" \"\${GITLEAKS_VERSION:-}\""
+    assert_eq "$OUT" "[][]" "the names of the scanner this build replaced are cleared too"
 }
 
 test_load_settings_discards_an_inherited_doctor_time_limit() {
@@ -116,7 +123,7 @@ test_run_scanner_refuses_bad_arguments_and_missing_settings() {
     assert_rc 2 "missing argument"
     assert_contains "$ERR" "expected 3 arguments" "says why"
     rm -f -- "$SHARE/settings"
-    run_cap env -i "${GSG_ENV[@]}" bash "$SHARE/lib/run-scanner.sh" gitleaks "$SANDBOX" "$SANDBOX"
+    run_cap env -i "${GSG_ENV[@]}" bash "$SHARE/lib/run-scanner.sh" betterleaks "$SANDBOX" "$SANDBOX"
     assert_rc 1 "unreadable settings stop the runner"
 }
 

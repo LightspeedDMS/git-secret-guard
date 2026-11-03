@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # shellcheck shell=bash
-# ^ external the real-scanner suites pin trufflehog and gitleaks behaviour per version; a package manager only has the latest release
+# ^ external the real-scanner suites pin trufflehog and betterleaks behaviour per version; a package manager only has the latest release
 # ^ security every tarball goes through tools_fetch_verified => the SHA-256 in tools.lock decides, same as install
 # ^ external usage is tests/fetch-test-tools.sh [DIR]; DIR defaults to $XDG_CACHE_HOME/git-secret-guard-test-tools and never to ~/.local/bin
 set -u

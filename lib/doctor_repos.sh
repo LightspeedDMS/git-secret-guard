@@ -263,9 +263,9 @@ doctor_repo_ignore() {
     doctor_findings_from WARNING "$DR_WORK/warn.err"
 }
 
-# ^ invariant gitleaks_config_preflight rc 0 = probe reported, 2 = built-in rules off, 1 = does not load; one work dir per repo
+# ^ invariant betterleaks_config_preflight rc 0 = probe reported, 2 = built-in rules off, 1 = does not load; one work dir per repo
 # ^ coupled with lib/exempt.sh:_load_gitleaks_files; the same pre-flight and the same sentence
-doctor_repo_gitleaks() {
+doctor_repo_betterleaks() {
     local conf="$DR_WORK/repo-gitleaks.toml" work="$DR_WORK/pf-$DR_REPO_TOTAL" rc limit
     exempt_head_blob .gitleaks.toml "$conf"
     rc=$?
@@ -281,8 +281,8 @@ doctor_repo_gitleaks() {
             return 0
             ;;
     esac
-    if [ "$DR_GITLEAKS_OK" -ne 1 ]; then
-        doctor_repo_finding WARNING ".gitleaks.toml at HEAD was not checked: gitleaks or timeout is unusable (see the machine section)"
+    if [ "$DR_BETTERLEAKS_OK" -ne 1 ]; then
+        doctor_repo_finding WARNING ".gitleaks.toml at HEAD was not checked: betterleaks or timeout is unusable (see the machine section)"
         return 0
     fi
     if ! mkdir -p -- "$work"; then
@@ -292,16 +292,16 @@ doctor_repo_gitleaks() {
     # ^ why the smaller of the two limits, not SCAN_TIMEOUT_SECONDS alone; doctor visits every repository, the hook serves one commit
     limit="$SCAN_TIMEOUT_SECONDS"
     if [ "$DR_LIMIT" -lt "$limit" ]; then limit="$DR_LIMIT"; fi
-    gitleaks_config_preflight "$conf" "$work" "$limit" 2>"$DR_WORK/pf.err"
+    betterleaks_config_preflight "$conf" "$work" "$limit" 2>"$DR_WORK/pf.err"
     rc=$?
     case "$rc" in
         0) ;;
         2) doctor_repo_finding WARNING "$GSG_MSG_BUILTIN_RULES_OFF" ;;
         *)
             first_message "$DR_WORK/pf.err"
-            # ^ coupled with lib/exempt.sh:gitleaks_config_preflight; its timeout sentence starts with "gitleaks did not finish loading"
-            if [ "$limit" -lt "$SCAN_TIMEOUT_SECONDS" ] && [[ $REPLY == "gitleaks did not finish loading"* ]]; then
-                doctor_repo_finding PROBLEM "gitleaks timed out after ${limit}s loading .gitleaks.toml at HEAD (doctor's limit; the hook allows ${SCAN_TIMEOUT_SECONDS}s), so doctor could not judge it"
+            # ^ coupled with lib/exempt.sh:betterleaks_config_preflight; its timeout sentence starts with "betterleaks did not finish loading"
+            if [ "$limit" -lt "$SCAN_TIMEOUT_SECONDS" ] && [[ $REPLY == "betterleaks did not finish loading"* ]]; then
+                doctor_repo_finding PROBLEM "betterleaks timed out after ${limit}s loading .gitleaks.toml at HEAD (doctor's limit; the hook allows ${SCAN_TIMEOUT_SECONDS}s), so doctor could not judge it"
             else
                 doctor_findings_from PROBLEM "$DR_WORK/pf.err"
             fi
@@ -382,7 +382,7 @@ doctor_check_repo() {
         return 0
     }
     doctor_repo_ignore
-    doctor_repo_gitleaks
+    doctor_repo_betterleaks
     doctor_repo_info "$key"
 }
 

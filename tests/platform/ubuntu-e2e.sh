@@ -62,7 +62,7 @@ commit_in() {
 check_blocked_by_both() {
     check_rc 1 "$2: the commit is blocked"
     check_has "$LOGS/$1.err" "  trufflehog " "$2: trufflehog reported it"
-    check_has "$LOGS/$1.err" "  gitleaks " "$2: gitleaks reported it"
+    check_has "$LOGS/$1.err" "  betterleaks " "$2: betterleaks reported it"
 }
 
 # shellcheck source=lib/install.sh
@@ -75,13 +75,13 @@ git config --global user.name "E2E User" && git config --global user.email "e2e@
 run install "$CLI" install
 check_rc 0 "install with real downloads"
 check_has "$LOGS/install.out" "trufflehog $(pinned trufflehog): downloaded, verified against tools.lock and installed to $HOME/.local/bin/trufflehog" "trufflehog was downloaded and verified"
-check_has "$LOGS/install.out" "gitleaks $(pinned gitleaks): downloaded, verified against tools.lock and installed to $HOME/.local/bin/gitleaks" "gitleaks was downloaded and verified"
+check_has "$LOGS/install.out" "betterleaks $(pinned betterleaks): downloaded, verified against tools.lock and installed to $HOME/.local/bin/betterleaks" "betterleaks was downloaded and verified"
 # shellcheck disable=SC2016
 run tver bash -c '"$1" --version 2>&1' _ "$HOME/.local/bin/trufflehog"
 check_has "$LOGS/tver.out" "$(pinned trufflehog)" "the installed trufflehog reports the pin"
 # shellcheck disable=SC2016
-run gver bash -c '"$1" version 2>&1' _ "$HOME/.local/bin/gitleaks"
-check_has "$LOGS/gver.out" "$(pinned gitleaks)" "the installed gitleaks reports the pin"
+run gver bash -c '"$1" version 2>&1' _ "$HOME/.local/bin/betterleaks"
+check_has "$LOGS/gver.out" "$(pinned betterleaks)" "the installed betterleaks reports the pin"
 check_eq "$(git config --global --get hook.git-secret-guard.event)" pre-commit "the pre-commit event is configured"
 check_eq "$(git config --global --get hook.git-secret-guard.command)" "$HOME/.local/share/git-secret-guard/hooks/secret-scan" "with the installed hook"
 check_eq "$(grep -cE '^(JQ|SETSID|TIMEOUT)_BIN=/' "$HOME/.local/share/git-secret-guard/settings")" 3 "jq, setsid and timeout are recorded as absolute paths"
@@ -98,7 +98,7 @@ git -C "$WORK/repo" add clean.txt || exit 2
 commit_in "$WORK/repo" clean
 check_rc 0 "a clean commit passes through the installed hook"
 check_eq "$(sed -E 's/, [0-9]+s$/, Ns/' "$LOGS/clean.err")" \
-    "git-secret-guard: scanned 1 file, 1 added line (trufflehog $(pinned trufflehog), gitleaks $(pinned gitleaks)): no findings, Ns" "and prints exactly the pass line"
+    "git-secret-guard: scanned 1 file, 1 added line (trufflehog $(pinned trufflehog), betterleaks $(pinned betterleaks)): no findings, Ns" "and prints exactly the pass line"
 
 printf 'one\ntoken = "%s"\n' "$(fake_token)" >"$WORK/repo/leak.txt" || exit 2
 git -C "$WORK/repo" add leak.txt || exit 2
@@ -111,7 +111,7 @@ run upgrade "$WORK/newer/bin/git-secret-guard" install
 check_rc 0 "upgrade from a newer checkout"
 check_has "$LOGS/upgrade.out" "installed git-secret-guard 9.9.9" "the new version is installed"
 check_has "$LOGS/upgrade.out" "kept $HOME/.local/bin/trufflehog (already at the pinned version)" "trufflehog was not downloaded again"
-check_has "$LOGS/upgrade.out" "kept $HOME/.local/bin/gitleaks (already at the pinned version)" "gitleaks was not downloaded again"
+check_has "$LOGS/upgrade.out" "kept $HOME/.local/bin/betterleaks (already at the pinned version)" "betterleaks was not downloaded again"
 run version "$INSTALLED" version
 check_eq "$(<"$LOGS/version.out")" "git-secret-guard 9.9.9" "the CLI link reports the new version"
 commit_in "$WORK/repo" leak2 "${DEAD_PROXY[@]}"

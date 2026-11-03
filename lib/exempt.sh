@@ -2,8 +2,8 @@
 
 GSG_IGNORE_FILE=.secret-scan-ignore
 GSG_IGNORE_MAX_LINES=1000
-# ^ coupled with lib/doctor_repos.sh:doctor_repo_gitleaks; the hook and doctor print this sentence for gitleaks_config_preflight rc 2
-GSG_MSG_BUILTIN_RULES_OFF='with .gitleaks.toml at HEAD, gitleaks does not detect its own built-in rules (e.g. AWS access keys): either [extend] useDefault = true is missing, or an allowlist or disabledRules turns them off; trufflehog still runs'
+# ^ coupled with lib/doctor_repos.sh:doctor_repo_betterleaks; the hook and doctor print this sentence for betterleaks_config_preflight rc 2
+GSG_MSG_BUILTIN_RULES_OFF='with .gitleaks.toml at HEAD, betterleaks does not detect its own built-in rules (e.g. GitHub tokens): either [extend] useDefault = true is missing, or an allowlist or disabledRules turns them off; trufflehog and the AWS access key ID rule of git-secret-guard still run'
 
 # ^ invariant scan_ignore_parse is the only reader of the .secret-scan-ignore format => hook and doctor share one validation
 
@@ -116,7 +116,7 @@ _head_file() {
     return "$rc"
 }
 
-# ^ invariant exempt_load fills GSG_EXCLUDES and the work dir copies of HEAD's gitleaks files; rc 1 = block, message already printed
+# ^ invariant exempt_load fills GSG_EXCLUDES and the work dir copies of HEAD's betterleaks files; rc 1 = block, message already printed
 exempt_load() {
     local work="$1"
     GSG_EXCLUDES=()
@@ -150,17 +150,17 @@ exempt_warn_rows() {
     if [ "$GSG_WHOLE_WARNED" -eq 0 ]; then _warn_if_union_covers_tree "${GSG_EXCLUDES[@]}"; fi
 }
 
-# ^ invariant an applied repo gitleaks file is always announced in one line; exemptions are never silent
+# ^ invariant an applied repo betterleaks file is always announced in one line; exemptions are never silent
 _load_gitleaks_files() {
     local work="$1" rc
     _head_file .gitleaks.toml "$work/$GSG_REPO_GITLEAKS_TOML"
     rc=$?
     if [ "$rc" -ge 2 ]; then return 1; fi
     if [ "$rc" -eq 0 ]; then
-        gitleaks_config_preflight "$work/$GSG_REPO_GITLEAKS_TOML" "$work" "${SCAN_TIMEOUT_SECONDS:-}"
+        betterleaks_config_preflight "$work/$GSG_REPO_GITLEAKS_TOML" "$work" "${SCAN_TIMEOUT_SECONDS:-}"
         rc=$?
         if [ "$rc" -eq 1 ]; then return 1; fi
-        printf '%s: using .gitleaks.toml from HEAD (this repository'"'"'s gitleaks rules and allowlists apply)\n' "$GSG_NAME" >&2
+        printf '%s: using .gitleaks.toml from HEAD (this repository'"'"'s betterleaks rules and allowlists apply)\n' "$GSG_NAME" >&2
         if [ "$rc" -eq 2 ]; then
             printf '%s: WARNING: %s\n' "$GSG_NAME" "$GSG_MSG_BUILTIN_RULES_OFF" >&2
         fi
@@ -169,7 +169,7 @@ _load_gitleaks_files() {
     rc=$?
     if [ "$rc" -ge 2 ]; then return 1; fi
     if [ "$rc" -eq 0 ]; then
-        printf '%s: using .gitleaksignore from HEAD (its fingerprints suppress gitleaks findings)\n' "$GSG_NAME" >&2
+        printf '%s: using .gitleaksignore from HEAD (its fingerprints suppress betterleaks findings)\n' "$GSG_NAME" >&2
     fi
     return 0
 }
@@ -226,23 +226,24 @@ _extract_add_counts() {
 }
 
 # ^ security fragments, never one literal => no credential-looking value in the tree; test:test_the_project_tree_holds_no_credential_looking_literals
-# ^ external only gitleaks' built-in aws-access-token rule detects this shape (8.30.1); a bare key ID is enough, no key= context needed
-gitleaks_probe_secret() {
-    printf '%s%s' "AKI""A" "Q7XK2MWB4HZ5NR3T"
+# ^ external only betterleaks' built-in github-pat rule detects this shape (1.9.0); a bare token is enough and no generic-api-key line context fires
+# ^ why a GitHub token, not an AWS key ID; aws-access-token needs the secret within 5 lines, and our own rule hides configs dropping built-ins
+betterleaks_probe_secret() {
+    printf '%s%s' "ghp""_" "aB3dE6gH9jK2mN5pQ8sT1vW4yZ7bC0eF3hJ6"
 }
 
 # ^ external the probe name has no extension => an ordinary allowlist misses it; a global allowlist matching it makes the warning true
 GSG_PROBE_FILE=gsg-probe-builtin-rule
 
-# ^ why a real gitleaks run, not a regex over the TOML; no line scan is sound against TOML spellings (case, strings, escapes, inline and dotted tables)
+# ^ why a real betterleaks run, not a regex over the TOML; no line scan is sound against TOML spellings (case, strings, escapes, inline and dotted tables)
 # ^ security cwd is an EMPTY dir, the probe dir is the target => a relative extend.path cannot open; test:test_real_every_spelling_of_extend_path_is_refused
 # ^ hazard an absolute extend.path to an existing file still loads => accepted, it is local config reviewed at HEAD
-gitleaks_config_preflight() {
+betterleaks_config_preflight() {
     local conf="$1" base="$2/preflight" log="$2/preflight.log" limit="${3:-}" rc line msg=""
     local empty="$base/empty" probe="$base/probe" problem
     local -a lines=()
     if [[ ! $limit =~ ^[1-9][0-9]*$ ]]; then
-        printf '%s: gitleaks_config_preflight needs a timeout in seconds (a positive integer); commit blocked, nothing was scanned.\n' "$GSG_NAME" >&2
+        printf '%s: betterleaks_config_preflight needs a timeout in seconds (a positive integer); commit blocked, nothing was scanned.\n' "$GSG_NAME" >&2
         return 1
     fi
     if problem="$(tool_unusable timeout "${TIMEOUT_BIN:-}")"; then
@@ -250,19 +251,19 @@ gitleaks_config_preflight() {
         return 1
     fi
     mkdir -p -- "$empty" "$probe" || return 1
-    { gitleaks_probe_secret && printf '\n'; } >"$probe/$GSG_PROBE_FILE" || return 1
-    # ^ why the probe shares this run, not a third gitleaks process; load check and built-in-rule check cost one process start
+    { betterleaks_probe_secret && printf '\n'; } >"$probe/$GSG_PROBE_FILE" || return 1
+    # ^ why the probe shares this run, not a third betterleaks process; load check and built-in-rule check cost one process start
     (
         cd -- "$empty" || exit 2
-        exec "$TIMEOUT_BIN" --foreground -k 5 "$limit" "$GITLEAKS_BIN" dir "$probe" --config "$conf" --no-banner --no-color --redact \
-            --exit-code "$GSG_GITLEAKS_LEAK_RC" >/dev/null 2>"$log"
+        exec "$TIMEOUT_BIN" --foreground -k 5 "$limit" "$BETTERLEAKS_BIN" dir "$probe" --config "$conf" --no-banner --no-color --redact \
+            --exit-code "$GSG_BETTERLEAKS_LEAK_RC" >/dev/null 2>"$log"
     )
     rc=$?
     # ^ invariant rc 0 = probe reported; rc 2 = loads, probe not reported (caller warns); rc 1 = block; a repo rule matching the probe counts as reported
-    if [ "$rc" -eq "$GSG_GITLEAKS_LEAK_RC" ]; then return 0; fi
+    if [ "$rc" -eq "$GSG_BETTERLEAKS_LEAK_RC" ]; then return 0; fi
     if [ "$rc" -eq 0 ]; then return 2; fi
     if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
-        printf '%s: gitleaks did not finish loading .gitleaks.toml at HEAD within %ss; commit blocked, nothing was scanned.\n' "$GSG_NAME" "$limit" >&2
+        printf '%s: betterleaks did not finish loading .gitleaks.toml at HEAD within %ss; commit blocked, nothing was scanned.\n' "$GSG_NAME" "$limit" >&2
         return 1
     fi
     mapfile -t -n 200 lines <"$log" || lines=()
@@ -275,7 +276,7 @@ gitleaks_config_preflight() {
     done
     msg="${msg//[^[:print:]]/?}"
     trunc_text "$msg" 200
-    printf '%s: .gitleaks.toml at HEAD does not load on its own (gitleaks said: %s); a base config reached through [extend] path must be inlined; commit blocked, nothing was scanned.\n' \
+    printf '%s: .gitleaks.toml at HEAD does not load on its own (betterleaks said: %s); a base config reached through [extend] path must be inlined; commit blocked, nothing was scanned.\n' \
         "$GSG_NAME" "$REPLY" >&2
     return 1
 }

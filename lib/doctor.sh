@@ -5,7 +5,7 @@ DR_WARNINGS=0
 DR_REPO_TOTAL=0
 DR_REPO_COVERED=0
 DR_WORK=""
-DR_GITLEAKS_OK=0
+DR_BETTERLEAKS_OK=0
 DR_TIMEOUT_OK=0
 DR_LIMIT=""
 GSG_DOCTOR_TIMEOUT_DEFAULT=30
@@ -120,7 +120,7 @@ doctor_check_state_records() {
     local -A hashes=()
     read -r -a words <<<"$ST_TOOLS"
     for w in "${words[@]}"; do
-        if [[ " ${GSG_TOOL_NAMES[*]} " != *" $w "* ]]; then
+        if [[ " ${GSG_STATE_TOOL_NAMES[*]} " != *" $w "* ]]; then
             trunc_text "$w" 80
             doctor_machine_line PROBLEM "state: tools_installed_by_us names [$REPLY], not a tool install manages"
             flagged=1
@@ -128,7 +128,7 @@ doctor_check_state_records() {
     done
     read -r -a words <<<"$ST_PLACED"
     for w in "${words[@]}"; do
-        if [[ $w =~ ^([a-z][a-z0-9-]*):([0-9a-f]{64})$ ]] && [[ " ${GSG_TOOL_NAMES[*]} " == *" ${BASH_REMATCH[1]} "* ]]; then
+        if [[ $w =~ ^([a-z][a-z0-9-]*):([0-9a-f]{64})$ ]] && [[ " ${GSG_STATE_TOOL_NAMES[*]} " == *" ${BASH_REMATCH[1]} "* ]]; then
             tool="${BASH_REMATCH[1]}" hash="${BASH_REMATCH[2]}"
             if [[ " ${hashes[$tool]:-} " != *" $hash "* ]]; then
                 hashes[$tool]+="${hashes[$tool]:+ }$hash"
@@ -150,7 +150,7 @@ doctor_check_state_records() {
     read -r -a words <<<"$ST_REPLACED"
     for w in "${words[@]}"; do
         aside="${w%:*}" sha="${w##*:}" tool="${aside%%.gsg-replaced-*}"
-        if [[ $w != *:* ]] || [[ ! $aside =~ $GSG_ASIDE_RE ]] || [[ ! $sha =~ ^[0-9a-f]{64}$ ]] || [[ " ${GSG_TOOL_NAMES[*]} " != *" $tool "* ]]; then
+        if [[ $w != *:* ]] || [[ ! $aside =~ $GSG_ASIDE_RE ]] || [[ ! $sha =~ ^[0-9a-f]{64}$ ]] || [[ " ${GSG_STATE_TOOL_NAMES[*]} " != *" $tool "* ]]; then
             trunc_text "$w" 80
             doctor_machine_line PROBLEM "state: tools_replaced entry [$REPLY] is invalid"
             flagged=1
@@ -244,7 +244,7 @@ doctor_pinned() {
 
 doctor_check_tools() {
     local tool bin msg pinned timeout_ok=0
-    DR_GITLEAKS_OK=0 DR_TIMEOUT_OK=0 DR_LIMIT=""
+    DR_BETTERLEAKS_OK=0 DR_TIMEOUT_OK=0 DR_LIMIT=""
     if ! load_settings "$GSG_SHARE/settings" 2>"$DR_WORK/settings.err"; then
         first_message "$DR_WORK/settings.err"
         doctor_machine_line PROBLEM "settings: ${REPLY:-$GSG_SHARE/settings is invalid}; run git-secret-guard install"
@@ -252,7 +252,7 @@ doctor_check_tools() {
     fi
     if ! tool_unusable timeout "$(settings_tool_bin timeout)" >/dev/null; then timeout_ok=1; fi
     DR_TIMEOUT_OK="$timeout_ok"
-    # ^ invariant DR_LIMIT = seconds per git call and per gitleaks pre-flight, empty = invalid setting; the shim also needs DR_TIMEOUT_OK=1 or runs no git
+    # ^ invariant DR_LIMIT = seconds per git call and per betterleaks pre-flight, empty = invalid setting; the shim also needs DR_TIMEOUT_OK=1 or runs no git
     DR_LIMIT="${DOCTOR_TIMEOUT_SECONDS-$GSG_DOCTOR_TIMEOUT_DEFAULT}"
     if [[ ! $DR_LIMIT =~ ^[1-9][0-9]{0,5}$ ]]; then
         trunc_text "$DR_LIMIT" 40
@@ -290,7 +290,7 @@ doctor_check_tools() {
             doctor_machine_line ok "bash: $BASH_BIN"
         fi
     fi
-    if [ "$timeout_ok" -eq 1 ] && [ -n "$DR_LIMIT" ] && ! tool_unusable gitleaks "$GITLEAKS_BIN" >/dev/null; then DR_GITLEAKS_OK=1; fi
+    if [ "$timeout_ok" -eq 1 ] && [ -n "$DR_LIMIT" ] && ! tool_unusable betterleaks "$BETTERLEAKS_BIN" >/dev/null; then DR_BETTERLEAKS_OK=1; fi
 }
 
 # ^ invariant read-only; systemctl is judged like the hook's tools and never run, a run inside the user manager cannot fail on a bus

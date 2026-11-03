@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 
-GSG_SCANNERS=(trufflehog gitleaks)
+GSG_SCANNERS=(trufflehog betterleaks)
 
 # ^ security only rows (scanner, detector, status, file, line) and error messages are ever printed => adapters never write a value into these files
 collect() {
@@ -40,7 +40,7 @@ report_pass_line() {
     local exempt=""
     if [ "$3" -gt 0 ]; then exempt=", $(_report_count "$3" file) exempted"; fi
     printf '%s: scanned %s, %s (%s, %s): no findings%s, %ss\n' "$GSG_NAME" "$(_report_count "$1" file)" "$(_report_count "$2" "added line")" \
-        "$(_report_tool_label trufflehog "${TRUFFLEHOG_VERSION:-}")" "$(_report_tool_label gitleaks "${GITLEAKS_VERSION:-}")" "$exempt" "$4" >&2
+        "$(_report_tool_label trufflehog "${TRUFFLEHOG_VERSION:-}")" "$(_report_tool_label betterleaks "${BETTERLEAKS_VERSION:-}")" "$exempt" "$4" >&2
 }
 
 # ^ invariant arg = exempted files; the scan tree held no file, no scanner ran
@@ -73,7 +73,7 @@ report_results() {
         # ^ external BSD wc pads the count with spaces and GNU wc does not; the printed line is the same on both
         n="${n//[[:space:]]/}"
         printf '%s: %s potential secret(s) in lines this commit adds:\n' "$GSG_NAME" "$n" >&2
-        awk -F'\t' '{ printf "  %-10s %s (%s)  %s:%s\n", $1, $2, $3, $4, $5 }' "$rows" >&2
+        awk -F'\t' '{ printf "  %-11s %s (%s)  %s:%s\n", $1, $2, $3, $4, $5 }' "$rows" >&2
         printf '  (values are not shown; remove them and rotate any real credential)\n' >&2
     fi
     if [ -s "$errs" ] || [ -s "$rows" ]; then

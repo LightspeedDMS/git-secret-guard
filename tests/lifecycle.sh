@@ -170,17 +170,17 @@ lc_platform() {
 
 # ^ security the fakes print the version and nothing else => a passing test never needed the real tool
 lc_make_fixtures() {
-    local tv="${1:-3.99.2}" gv="${2:-8.30.1}" tool ver plat dir tar sha
+    local tv="${1:-3.99.2}" gv="${2:-1.9.0}" tool ver plat dir tar sha
     mkdir -p -- "$LC_FIX/src" || return 1
     : >"$LC_FIX/fixture.lock" || return 1
-    for tool in trufflehog gitleaks; do
+    for tool in trufflehog betterleaks; do
         ver="$tv"
-        if [ "$tool" = gitleaks ]; then ver="$gv"; fi
+        if [ "$tool" = betterleaks ]; then ver="$gv"; fi
         plat="$(lc_platform "$tool")" || return 1
         dir="$LC_FIX/src/$tool"
         mkdir -p -- "$dir" || return 1
-        if [ "$tool" = gitleaks ]; then
-            printf '#!/bin/sh\necho "gitleaks version %s"\n' "$ver" >"$dir/$tool" || return 1
+        if [ "$tool" = betterleaks ]; then
+            printf '#!/bin/sh\necho "betterleaks version %s"\n' "$ver" >"$dir/$tool" || return 1
         else
             printf '#!/bin/sh\necho "trufflehog %s"\n' "$ver" >"$dir/$tool" || return 1
         fi
@@ -215,7 +215,7 @@ lc_path_without() {
 lc_seed_real_tools() {
     mkdir -p -- "$LC_BIN" || return 1
     ln -s "$REAL_TRUFFLEHOG" "$LC_BIN/trufflehog" || return 1
-    ln -s "$REAL_GITLEAKS" "$LC_BIN/gitleaks" || return 1
+    ln -s "$REAL_BETTERLEAKS" "$LC_BIN/betterleaks" || return 1
 }
 
 lc_fake_git() {

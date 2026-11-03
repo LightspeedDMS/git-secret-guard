@@ -1,34 +1,35 @@
 #!/usr/bin/env bash
-# ^ external mirrors gitleaks 8.30.1 => leaks exit --exit-code with a JSON array, clean exits 0 with [], fatal exits 1 without a report
-# ^ see test:test_real_gitleaks_exit_code_semantics_8_30_1
+# ^ external mirrors betterleaks 1.9.0 => leaks exit --exit-code with a JSON array, clean exits 0 with [], fatal exits 1 without a report
+# ^ see test:test_real_betterleaks_exit_code_semantics_1_9_0
 set -u
 marker="${STUB_MARKER:-NOMARKER}"
-[ -n "${STUB_LOG:-}" ] && printf 'gitleaks %s\n' "$*" >>"$STUB_LOG"
+[ -n "${STUB_LOG:-}" ] && printf 'betterleaks %s\n' "$*" >>"$STUB_LOG"
 scan_dir="${2:-}"
-report="" leak_rc=1 config="" ignore=""
+report="" leak_rc=1 config="" ignore="" enable_rule=""
 args=("$@")
 for ((i = 0; i < ${#args[@]}; i++)); do
     case "${args[$i]}" in
         --report-path) report="${args[$((i + 1))]:-}" ;;
         --exit-code) leak_rc="${args[$((i + 1))]:-1}" ;;
         --config) config="${args[$((i + 1))]:-}" ;;
+        --enable-rule) enable_rule="${args[$((i + 1))]:-}" ;;
         --gitleaks-ignore-path) ignore="${args[$((i + 1))]:-}" ;;
     esac
 done
 if [ -n "${STUB_LOG:-}" ]; then
-    printf 'gitleaks-config=%s ignore=%s cwd=%s\n' "$config" "$ignore" "$PWD" >>"$STUB_LOG"
-    if [ -f "$config" ]; then sed 's/^/gitleaks-config-line: /' "$config" >>"$STUB_LOG"; fi
-    if [ -f "$ignore/.gitleaksignore" ]; then sed 's/^/gitleaks-ignore-line: /' "$ignore/.gitleaksignore" >>"$STUB_LOG"; fi
+    printf 'betterleaks-config=%s ignore=%s cwd=%s\n' "$config" "$ignore" "$PWD" >>"$STUB_LOG"
+    if [ -f "$config" ]; then sed 's/^/betterleaks-config-line: /' "$config" >>"$STUB_LOG"; fi
+    if [ -f "$ignore/.gitleaksignore" ]; then sed 's/^/betterleaks-ignore-line: /' "$ignore/.gitleaksignore" >>"$STUB_LOG"; fi
 fi
 # ^ external the pre-flight (no --report-path) scans a probe holding a built-in-rule secret => exit --exit-code if the config keeps built-in rules, else 0
-# ^ why sense a "useDefault = true" line, not parse the TOML; only the real-gitleaks tests settle what a config means
+# ^ why sense a "useDefault = true" line, not parse the TOML; only the real-betterleaks tests settle what a config means
 if [ -z "$report" ]; then
     if [ -n "${STUB_GL_PREFLIGHT_SLEEP:-}" ]; then exec sleep "$STUB_GL_PREFLIGHT_SLEEP"; fi
     if [ -n "${STUB_GL_PREFLIGHT_ERROR:-}" ]; then printf '1:00AM FTL %s\n' "$STUB_GL_PREFLIGHT_ERROR" >&2; fi
     if [ -n "${STUB_LOG:-}" ] && [ -d "$scan_dir" ]; then
         while IFS= read -r f; do
-            printf 'gitleaks-target-file: %s\n' "${f#"$scan_dir"/}" >>"$STUB_LOG"
-            sed 's/^/gitleaks-target-line: /' "$f" >>"$STUB_LOG"
+            printf 'betterleaks-target-file: %s\n' "${f#"$scan_dir"/}" >>"$STUB_LOG"
+            sed 's/^/betterleaks-target-line: /' "$f" >>"$STUB_LOG"
         done < <(find "$scan_dir" -type f | LC_ALL=C sort)
     fi
     if [ -n "${STUB_GL_PREFLIGHT_RC:-}" ]; then exit "$STUB_GL_PREFLIGHT_RC"; fi
@@ -37,20 +38,23 @@ if [ -z "$report" ]; then
 fi
 if [ -n "${STUB_RECORD:-}" ] && [ -d "$scan_dir" ]; then
     while IFS= read -r f; do
-        printf '== %s\n' "${f#"$scan_dir"/}" >>"$STUB_RECORD.gitleaks"
-        cat -- "$f" >>"$STUB_RECORD.gitleaks"
+        printf '== %s\n' "${f#"$scan_dir"/}" >>"$STUB_RECORD.betterleaks"
+        cat -- "$f" >>"$STUB_RECORD.betterleaks"
     done < <(find "$scan_dir" -type f | LC_ALL=C sort)
 fi
 [ -n "${STUB_GL_SLEEP:-}" ] && sleep "$STUB_GL_SLEEP"
 [ -n "${STUB_GL_STDERR:-}" ] && printf '%s\n' "$STUB_GL_STDERR" >&2
-if [ -n "${STUB_GL_RC:-}" ]; then exit "$STUB_GL_RC"; fi
+rc_override="${STUB_GL_RC:-}" findings="${STUB_GL_FINDINGS:-}"
+# ^ external the adapter's rule-only run passes --enable-rule => it has its own status and findings variables
+if [ -n "$enable_rule" ]; then rc_override="${STUB_GL_EXTRA_RC:-}" findings="${STUB_GL_EXTRA_FINDINGS:-}"; fi
+if [ -n "$rc_override" ]; then exit "$rc_override"; fi
 
 if [ -n "${STUB_GL_BADREPORT:-}" ]; then
     printf '%s\n' "$STUB_GL_BADREPORT" >"$report"
     exit "$leak_rc"
 fi
-if [ -n "${STUB_GL_FINDINGS:-}" ]; then
-    IFS=';' read -ra entries <<<"$STUB_GL_FINDINGS"
+if [ -n "$findings" ]; then
+    IFS=';' read -ra entries <<<"$findings"
     for e in "${entries[@]}"; do
         IFS='|' read -r rule rel line <<<"$e"
         file="$rel"

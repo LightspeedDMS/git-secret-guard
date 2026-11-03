@@ -9,7 +9,7 @@ git-secret-guard doctor --roots ~/Dev ~/work     # other roots (several allowed)
 ```
 
 **It is read-only.** It runs `git config`, `git hook list pre-commit`, `git rev-parse`, `git ls-tree`, `git cat-file`,
-`git ls-files`, `<tool> --version` and, for a repository with a `.gitleaks.toml` at HEAD, the same gitleaks pre-flight the
+`git ls-files`, `<tool> --version` and, for a repository with a `.gitleaks.toml` at HEAD, the same betterleaks pre-flight the
 hook runs. It writes nothing: no file, no git config, no state. Its only scratch space is one private directory under
 `$TMPDIR` (or `/tmp`), removed on exit. `tests/test_doctor_readonly.sh` checksums every file of a sandbox (hashes, modes,
 sizes, modification times: config files, repositories, state and share dirs) before and after a run over repositories
@@ -33,8 +33,8 @@ marker-writing `uploadpack`, and requires no marker file and an unchanged object
 **It is time-bounded.** Every git call of the repository phase runs under the settings' `timeout`, limited by
 `DOCTOR_TIMEOUT_SECONDS` in the settings file (default 30, a positive integer; an invalid value is a machine PROBLEM). A
 repository whose config makes git block (an `include.path` pointing at a FIFO, say) becomes `cannot be inspected: timed out
-after 30s` or `cannot read the hooks git runs (... exit 124: timed out after 30s)`, and the run goes on. The gitleaks
-pre-flight uses the smaller of that value and `SCAN_TIMEOUT_SECONDS`; its timeout reads `gitleaks timed out after Ns loading
+after 30s` or `cannot read the hooks git runs (... exit 124: timed out after 30s)`, and the run goes on. The betterleaks
+pre-flight uses the smaller of that value and `SCAN_TIMEOUT_SECONDS`; its timeout reads `betterleaks timed out after Ns loading
 .gitleaks.toml at HEAD (doctor's limit; the hook allows 300s)`. If `timeout` itself is unusable no git is run in the
 repository phase and every repository is listed as not inspected. The timer's service adds `TimeoutStartSec=1h` as the
 outer bound.
@@ -46,7 +46,7 @@ outer bound.
 | Installed | no state file (`not installed`) or an unreadable one |
 | State records | `tools_installed_by_us`, `tools_placed` or `tools_replaced` hold an invalid word or a tool install does not manage (PROBLEM); two hashes for one tool (an install did not finish placing it) or an aside file recorded in `tools_replaced` that is gone (WARNING) |
 | Hook config | `hook.git-secret-guard.event` is not exactly one `pre-commit`, `.command` is not exactly one value equal to the installed `hooks/secret-scan`, that file is missing or not executable, or `enabled` is false in the global or system config. A wrong count is reported as `has 2 values (global <file>; global <file>), 1 of them the installed hook`: **never the values**, a global command can hold a token and the timer writes this output to the journal |
-| Tools | the settings file is missing, or `TRUFFLEHOG_BIN`, `GITLEAKS_BIN`, `JQ_BIN`, `SETSID_BIN`, `TIMEOUT_BIN` is not an absolute executable, or a scanner does not report the version `tools.lock` pins (judged exactly like `install` and `status`) |
+| Tools | the settings file is missing, or `TRUFFLEHOG_BIN`, `BETTERLEAKS_BIN`, `JQ_BIN`, `SETSID_BIN`, `TIMEOUT_BIN` is not an absolute executable, or a scanner does not report the version `tools.lock` pins (judged exactly like `install` and `status`) |
 | `core.hooksPath` | any global value is left, including one in the XDG config or in an included file (the file is named) |
 | git | WARNING for every reachable git older than 2.54: all `git` on `PATH` plus `/usr/bin/git` (2.52 on this machine), by path and version. Such a git ignores config hooks silently, so commits made with it are **not scanned**. Doctor itself needs the git first on `PATH` to be 2.54 or newer (otherwise it exits 2) |
 | Timer | only when the state says a timer is installed: both unit files exist, were written by install, and `SYSTEMCTL_BIN` in the settings is usable |
@@ -72,7 +72,7 @@ parent is judged on its own). Bare repositories have no `.git` entry and are not
 | Is the hook effective? | `git-secret-guard` must be listed, with no prefix, by `git hook list pre-commit`. A `disabled` or `event-disabled` line means `hook.git-secret-guard.enabled=false` or `hook.pre-commit.enabled=false`; the report says `disabled in local config: <key>=<value> (<file>)` and names the scope that holds the key (local, global, worktree, command) and the file git read it from (`--show-origin`, also an included file). Not listed at all means no `hook.git-secret-guard.event=pre-commit` reaches the repository; an event without its command (git refuses) reads `hook not reached: the global hook config is incomplete (see machine section)`. **This check runs in the main checkout and in every linked worktree**: with `extensions.worktreeConfig=true` a worktree can switch the hook off in its own `config.worktree`, and the finding is shown under the main repository as `worktree <path>: disabled in worktree config: ...`. A finding the main checkout already has (shared config) is not repeated per worktree. PROBLEM |
 | Command overridden? | the last `hook.git-secret-guard.command` comes from a non-global scope and is not the installed script: `command overridden in local config: hook.git-secret-guard.command (<file>)`. The value is never printed. PROBLEM |
 | HEAD `.secret-scan-ignore` | validated with the hook's own code (`scan_ignore_parse`, `scan_ignore_scope`): a line without a reason is a PROBLEM with its line number, as are a symlink or directory, a control character, a `..` component and more than 1000 lines (the hook blocks every commit on these); a catch-all (`**`, `./**`, a union of patterns that covers every tracked file, `*` for top-level files) is a WARNING that quotes the pattern as written, cut at 60 characters (a cut is always marked with `…`). Only HEAD counts, never the index or the work tree, and a `git replace` ref cannot substitute it |
-| HEAD `.gitleaks.toml` | the hook's own pre-flight (`gitleaks_config_preflight`, under `SCAN_TIMEOUT_SECONDS` from the settings): a config that does not load (an `[extend] path`, a syntax error, a timeout) is a PROBLEM; one that loads but leaves gitleaks' built-in rules off is the hook's WARNING sentence. If gitleaks or timeout is unusable the check is reported as not done (WARNING), never skipped silently |
+| HEAD `.gitleaks.toml` | the hook's own pre-flight (`betterleaks_config_preflight`, under `SCAN_TIMEOUT_SECONDS` from the settings): a config that does not load (an `[extend] path`, a syntax error, a timeout) is a PROBLEM; one that loads but leaves betterleaks' built-in rules off is the hook's WARNING sentence. If betterleaks or timeout is unusable the check is reported as not done (WARNING), never skipped silently |
 | `.pre-commit-config.yaml` | info when `<common-dir>/hooks/pre-commit` is not the pre-commit framework's hook (`pre-commit install not run`) |
 | Repo-local `core.hooksPath` | info (husky and similar): config hooks run whatever it says, so it is harmless, and it is listed so you can see it |
 
@@ -84,7 +84,7 @@ machine:
   ok       state records: 2 placed hash(es), 0 original(s) moved aside
   ok       hook: hook.git-secret-guard.event=pre-commit, command=/home/me/.local/share/git-secret-guard/hooks/secret-scan (executable)
   ok       trufflehog: /home/me/.local/bin/trufflehog 3.99.2 (pinned 3.99.2)
-  ok       gitleaks: /home/me/.local/bin/gitleaks 8.30.1 (pinned 8.30.1)
+  ok       betterleaks: /home/me/.local/bin/betterleaks 1.9.0 (pinned 1.9.0)
   ok       jq: /usr/bin/jq
   ok       core.hooksPath: no global value
   ok       git: /usr/local/bin/git 2.56.0

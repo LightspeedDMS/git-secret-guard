@@ -22,7 +22,7 @@ snapshot() {
     )
 }
 
-# ^ external the real gitleaks is used when present, covering every kind of check
+# ^ external the real betterleaks is used when present, covering every kind of check
 mess() {
     local i
     dr_begin || return 1
@@ -45,8 +45,8 @@ mess() {
         cd -- "$DR_ROOTS/linked" || exit 1
         ln -s /etc/hostname .secret-scan-ignore && gitx add .secret-scan-ignore && gitx commit -q --no-verify -m link
     ) || return 1
-    if [ -x "$REAL_GITLEAKS" ]; then
-        sed -i "s#^GITLEAKS_BIN=.*#GITLEAKS_BIN=$REAL_GITLEAKS#" "$LC_DATA/settings" || return 1
+    if [ -x "$REAL_BETTERLEAKS" ]; then
+        sed -i "s#^BETTERLEAKS_BIN=.*#BETTERLEAKS_BIN=$REAL_BETTERLEAKS#" "$LC_DATA/settings" || return 1
         (
             cd -- "$DR_ROOTS/ok" || exit 1
             stage_file .gitleaks.toml "# $1" '[extend]' 'path = "base.toml"' && gitx commit -q --no-verify -m cfg
@@ -158,7 +158,7 @@ test_doctor_folds_git_s_reason_for_a_missing_tree_into_the_finding() {
     doctor
     assert_rc 1 "the missing tree is a finding"
     assert_contains "$OUT" "git said: fatal: not a tree object)" "git's reason is in the finding"
-    assert_contains "$OUT" "cannot read .gitleaks.toml at HEAD (git said: fatal: not a tree object); every commit" "also for the gitleaks file"
+    assert_contains "$OUT" "cannot read .gitleaks.toml at HEAD (git said: fatal: not a tree object); every commit" "also for the betterleaks file"
     assert_not_contains "$ERR" "not a tree object" "and not on doctor's stderr"
 }
 

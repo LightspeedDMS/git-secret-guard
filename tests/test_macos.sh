@@ -485,14 +485,14 @@ test_a_tampered_download_after_the_brew_install_names_the_brew_packages() {
 test_a_scanner_reporting_another_version_after_the_brew_install_names_the_brew_packages() {
     local plat tar
     brew_less_fixture || return 1
-    plat="$(lc_platform gitleaks)"
-    tar="$LC_FIX/gitleaks_8.30.1_$plat.tar.gz"
-    printf '#!/bin/sh\necho "gitleaks version 8.0.0"\n' >"$LC_FIX/src/gitleaks/gitleaks" || return 1
-    tar -czf "$tar" -C "$LC_FIX/src/gitleaks" gitleaks LICENSE README.md || return 1
-    sed -i "s/^gitleaks 8.30.1 $plat .*/gitleaks 8.30.1 $plat $(sha256sum -- "$tar" | cut -d' ' -f1)/" "$LC_FIX/fixture.lock" || return 1
+    plat="$(lc_platform betterleaks)"
+    tar="$LC_FIX/betterleaks_1.9.0_$plat.tar.gz"
+    printf '#!/bin/sh\necho "betterleaks version 8.0.0"\n' >"$LC_FIX/src/betterleaks/betterleaks" || return 1
+    tar -czf "$tar" -C "$LC_FIX/src/betterleaks" betterleaks LICENSE README.md || return 1
+    sed -i "s/^betterleaks 1.9.0 $plat .*/betterleaks 1.9.0 $plat $(sha256sum -- "$tar" | cut -d' ' -f1)/" "$LC_FIX/fixture.lock" || return 1
     gsg install
     assert_rc 1 "a verified tarball whose binary says 8.0.0"
-    assert_contains "$ERR" "does not report version 8.30.1" "the version mismatch is reported"
+    assert_contains "$ERR" "does not report version 1.9.0" "the version mismatch is reported"
     assert_refusal_names_brew "version mismatch"
 }
 

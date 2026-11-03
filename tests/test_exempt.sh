@@ -121,28 +121,28 @@ test_head_blob_reports_a_non_file_as_an_error() {
     assert_rc 3 "a directory at HEAD is an error, not an absent file"
 }
 
-test_the_probe_secret_is_an_aws_key_id_shape_built_from_fragments() {
-    ex gitleaks_probe_secret
+test_the_probe_secret_is_a_github_token_shape_built_from_fragments() {
+    ex betterleaks_probe_secret
     assert_rc 0 "prints"
-    [[ $OUT =~ ^AKIA[A-Z2-7]{16}$ ]] || fail "not an AWS access key id shape: ${#OUT} chars"
+    [[ $OUT =~ ^ghp_[A-Za-z0-9]{36}$ ]] || fail "not a GitHub token shape: ${#OUT} chars"
     assert_eq "$(grep -rlF -- "$OUT" "$GSG_PROJECT/lib" "$GSG_PROJECT/hooks" | wc -l)" 0 "the full value is not a literal in the shipped code"
 }
 
-test_the_pre_flight_runs_gitleaks_under_the_configured_timeout_binary_never_PATH() {
+test_the_pre_flight_runs_betterleaks_under_the_configured_timeout_binary_never_PATH() {
     mkdir -p -- "$SANDBOX/poison" "$SANDBOX/wrap"
     printf '#!/bin/bash\necho PATH-USED >>"%s/poison.log"\nexit 99\n' "$SANDBOX" >"$SANDBOX/poison/timeout"
     # shellcheck disable=SC2016
     printf '#!/bin/bash\necho "$0" >>"%s/wrap.log"\nexec %s "$@"\n' "$SANDBOX" "$TEST_TIMEOUT" >"$SANDBOX/wrap/timeout"
     chmod +x "$SANDBOX/poison/timeout" "$SANDBOX/wrap/timeout"
     printf '[extend]\nuseDefault = true\n' >"$SANDBOX/pf.toml"
-    set_env PATH="$SANDBOX/poison:$TEST_BASE_PATH" GITLEAKS_BIN="$STUBS_DIR/gitleaks" TIMEOUT_BIN="$SANDBOX/wrap/timeout" \
+    set_env PATH="$SANDBOX/poison:$TEST_BASE_PATH" BETTERLEAKS_BIN="$STUBS_DIR/betterleaks" TIMEOUT_BIN="$SANDBOX/wrap/timeout" \
         STUB_LOG="$SANDBOX/pf-calls"
-    ex gitleaks_config_preflight "$SANDBOX/pf.toml" "$SANDBOX/pf-work" 20
+    ex betterleaks_config_preflight "$SANDBOX/pf.toml" "$SANDBOX/pf-work" 20
     assert_rc 0 "the probe is reported by the stand-in"
     assert_no_file "$SANDBOX/poison.log" "PATH timeout was not used"
     assert_contains "$(<"$SANDBOX/wrap.log")" "$SANDBOX/wrap/timeout" "configured timeout was used"
     set_env TIMEOUT_BIN="$SANDBOX/missing"
-    ex gitleaks_config_preflight "$SANDBOX/pf.toml" "$SANDBOX/pf-work2" 20
+    ex betterleaks_config_preflight "$SANDBOX/pf.toml" "$SANDBOX/pf-work2" 20
     assert_rc 1 "an unusable timeout binary blocks"
     assert_contains "$ERR" "timeout" "names it"
     assert_contains "$ERR" "nothing was scanned" "says nothing was scanned"
@@ -151,12 +151,12 @@ test_the_pre_flight_runs_gitleaks_under_the_configured_timeout_binary_never_PATH
 test_the_pre_flight_needs_an_explicit_positive_timeout() {
     local bad
     printf '[extend]\nuseDefault = true\n' >"$SANDBOX/pf.toml"
-    set_env GITLEAKS_BIN=/nonexistent/gitleaks
-    ex gitleaks_config_preflight "$SANDBOX/pf.toml" "$SANDBOX/pf-work"
+    set_env BETTERLEAKS_BIN=/nonexistent/betterleaks
+    ex betterleaks_config_preflight "$SANDBOX/pf.toml" "$SANDBOX/pf-work"
     assert_rc 1 "no timeout argument"
     assert_contains "$ERR" "needs a timeout in seconds" "says what is missing"
     for bad in 0 abc -5 ''; do
-        ex gitleaks_config_preflight "$SANDBOX/pf.toml" "$SANDBOX/pf-work" "$bad"
+        ex betterleaks_config_preflight "$SANDBOX/pf.toml" "$SANDBOX/pf-work" "$bad"
         assert_rc 1 "timeout [$bad]"
         assert_contains "$ERR" "needs a timeout in seconds" "timeout [$bad] is refused before anything runs"
     done

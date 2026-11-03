@@ -412,7 +412,7 @@ test_systemctl_is_looked_up_only_in_lib_install_sh() {
 }
 
 test_the_project_tree_holds_no_credential_looking_literals() {
-    [ -x "$REAL_GITLEAKS" ] || skip_test "gitleaks not found at $REAL_GITLEAKS"
+    [ -x "$REAL_BETTERLEAKS" ] || skip_test "betterleaks not found at $REAL_BETTERLEAKS"
     [ -x "$REAL_TRUFFLEHOG" ] || skip_test "trufflehog not found at $REAL_TRUFFLEHOG"
     local copy="$SANDBOX/tree-copy" report="$SANDBOX/tree-report.json" listing="$SANDBOX/tree-files.z"
     mkdir -p -- "$copy"
@@ -420,8 +420,8 @@ test_the_project_tree_holds_no_credential_looking_literals() {
     (cd -- "$GSG_PROJECT" && gitx ls-files -z -co --exclude-standard) >"$listing" || return 1
     (cd -- "$GSG_PROJECT" && tar -cf - --null -T "$listing") | tar -xf - -C "$copy" || return 1
     [ -n "$(ls -A -- "$copy")" ] || { fail "the project tree copy is empty"; return 1; }
-    run_cap "$REAL_GITLEAKS" dir "$copy" --redact --report-format json --report-path "$report" --no-banner --no-color
-    assert_rc 0 "gitleaks over the project tree"
+    run_cap "$REAL_BETTERLEAKS" dir "$copy" --redact --report-format json --report-path "$report" --no-banner --no-color
+    assert_rc 0 "betterleaks over the project tree"
     run_cap env HTTPS_PROXY=http://127.0.0.1:9 HTTP_PROXY=http://127.0.0.1:9 \
         "$REAL_TRUFFLEHOG" filesystem "$copy" --results=verified,unknown --fail --no-update --no-color
     assert_rc 0 "trufflehog over the project tree"

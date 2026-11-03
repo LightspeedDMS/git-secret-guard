@@ -1,6 +1,6 @@
 usage: git-secret-guard <command> [options]
 
-Machine-wide pre-commit secret scanning (trufflehog + gitleaks) through a git config hook.
+Machine-wide pre-commit secret scanning (trufflehog + betterleaks) through a git config hook.
 
 commands:
   install [--replace-hooks-path] [--with-timer]

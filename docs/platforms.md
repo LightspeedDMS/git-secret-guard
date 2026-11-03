@@ -71,7 +71,7 @@ bin/git-secret-guard install        # lists what is missing, installs it with br
 - **What a refusal says after a brew install.** Once any `brew install` ran in the invocation, no message claims that nothing was changed;
   it names what changed (`the only change made was the Homebrew install of bash in this run`). A failing `brew install` ends the run with brew's
   own message and says Homebrew may have installed part of the list before failing (see `brew list`).
-- **The scanners are never installed with brew.** trufflehog and gitleaks come from the SHA-256-pinned darwin rows of `tools.lock`
+- **The scanners are never installed with brew.** trufflehog and betterleaks come from the SHA-256-pinned darwin rows of `tools.lock`
   through the same download, verify, extract and `--version` path as on Linux, into `~/.local/bin`. Brew only has the latest release
   (trufflehog 3.99.7 against the pin 3.99.2 when this was written), and the documented behaviours are verified per pinned version.
 - **Absolute paths, no `PATH` order.** The settings file records `BASH_BIN` (the Homebrew bash), `GNUBIN_DIR` (the GNU coreutils
@@ -228,7 +228,7 @@ written. It pulls the image when it is absent and runs it with `--rm --init`. Th
 Inside, as root: apt-install the prerequisites (jq, curl, pre-commit, systemd for `systemd-analyze`, dbus, gawk next to mawk), make **mawk** the default
 awk, install **shellcheck 0.11.0** from its release tarball (SHA-256 pinned; apt's 0.9.0 reports other infos than the 0.11 the suite is clean on),
 get git (PPA, else the SHA-256 verified tarball above), create a **non-root user**, then as that user under `env -i`: the **install E2E**
-(`tests/platform/ubuntu-e2e.sh`: install with real downloads, a runtime-built fake token blocked by trufflehog and gitleaks, upgrade, uninstall,
+(`tests/platform/ubuntu-e2e.sh`: install with real downloads, a runtime-built fake token blocked by trufflehog and betterleaks, upgrade, uninstall,
 second uninstall, no value printed) and `tests/run.sh` (some tests use `chmod 000`, which root ignores). Every step runs under `timeout`; the
 run ends with a summary, the list of skipped tests with their reasons, and exits nonzero on any failure. Tests that need something the container
 lacks skip with a reason (`cidx-server unit cannot be read` is the host's own service); none is faked.
@@ -243,7 +243,7 @@ lacks skip with a reason (`cidx-server unit cannot be read` is the host's own se
 - **apt packages are not version-pinned.** `jq`, `curl`, `gawk`, `mawk`, `pre-commit`, `dbus` and the others come from the Ubuntu archive (signed by
   apt's own keyring) and the PPA at whatever version they carry on the day; the summary prints the versions that were used.
 - **Pinned by SHA-256:** the `git-2.56.0.tar.xz` source tarball from kernel.org and the shellcheck 0.11.0 release tarballs. **Pinned by digest:** the
-  base image. **Pinned in `tools.lock`:** trufflehog and gitleaks, which the install E2E downloads for real.
+  base image. **Pinned in `tools.lock`:** trufflehog and betterleaks, which the install E2E downloads for real.
 
 ## Linux containers from a Mac (a regression run, not a trust boundary)
 

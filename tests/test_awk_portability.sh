@@ -193,8 +193,8 @@ inline_report() {
     build_corpus || return 1
     mkdir -p -- "$work" "$cov" || return 1
     printf 'trufflehog\tgithub\tunknown\tsrc/a b.txt\t12\ntrufflehog\tdetect%%sor\tunknown\tp%%d.txt\t1\n' >"$work/trufflehog.rows"
-    printf 'gitleaks\taws-access-token\tfinding\t100%%.txt\t3\n' >"$work/gitleaks.rows"
-    : >"$work/trufflehog.errors" && : >"$work/gitleaks.errors" || return 1
+    printf 'betterleaks\taws-access-token\tfinding\t100%%.txt\t3\n' >"$work/betterleaks.rows"
+    : >"$work/trufflehog.errors" && : >"$work/betterleaks.errors" || return 1
     printf '%s\n' 'x=1' '# ^ note this tag is not in the vocabulary' '# ^ why we pick bash here' '# explains the obvious' 'y=2 # trailing' >"$SANDBOX/planted.sh"
     # shellcheck disable=SC2016
     printf '%s\n' '# shellcheck shell=bash' 'a=1' 'if [ "$a" = 1 ]; then' '    b=2' 'fi' "c='multi" "line'" 'd=4' >"$cov/sample.sh"
@@ -236,9 +236,9 @@ bounds bytes-hundred-over-ninety-nine rc=1 git-secret-guard: refusing to back up
 bounds bytes-3g-over-2g rc=1 git-secret-guard: refusing to back up DIR: it is larger than 2147483648 bytes
 bounds empty-dir rc=0
 report: git-secret-guard: 3 potential secret(s) in lines this commit adds:
-report:   gitleaks   aws-access-token (finding)  100%.txt:3
-report:   trufflehog detect%sor (unknown)  p%d.txt:1
-report:   trufflehog github (unknown)  src/a b.txt:12
+report:   betterleaks aws-access-token (finding)  100%.txt:3
+report:   trufflehog  detect%sor (unknown)  p%d.txt:1
+report:   trufflehog  github (unknown)  src/a b.txt:12
 report:   (values are not shown; remove them and rotate any real credential)
 lint: SB/planted.sh:2: unknown tag [note]: # ^ note this tag is not in the vocabulary
 lint: SB/planted.sh:3: why needs ', not <alternative>': # ^ why we pick bash here

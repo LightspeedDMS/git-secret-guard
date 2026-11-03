@@ -18,13 +18,13 @@ show_state() { printf '[%s][%s][%s][%s][%s][%s][%s][%s][%s]' "$ST_EXISTS" "$ST_V
 test_state_round_trips_verbatim_values() {
     local rep sha placed
     sha="$(printf '%064d' 7)" || return 1
-    rep="gitleaks.gsg-replaced-20261031T101500Z:$sha"
-    placed="gitleaks:$sha trufflehog:$sha"
+    rep="betterleaks.gsg-replaced-20261031T101500Z:$sha"
+    placed="betterleaks:$sha trufflehog:$sha"
     state_dir_env || return 1
-    st eval "$(declare -f show_state); state_write 0.1.0 yes '~/.config/git/hooks \$x \"q\" = tail' 'trufflehog gitleaks' '/a b/backup.tar.gz' '$rep' '$placed' yes && state_read && show_state"
+    st eval "$(declare -f show_state); state_write 0.1.0 yes '~/.config/git/hooks \$x \"q\" = tail' 'trufflehog betterleaks' '/a b/backup.tar.gz' '$rep' '$placed' yes && state_read && show_state"
     assert_rc 0 "write then read"
     # shellcheck disable=SC2016
-    assert_eq "$OUT" "[1][0.1.0][yes][~/.config/git/hooks \$x \"q\" = tail][trufflehog gitleaks][/a b/backup.tar.gz][$rep][$placed][yes]" "values come back exactly, including = and quotes"
+    assert_eq "$OUT" "[1][0.1.0][yes][~/.config/git/hooks \$x \"q\" = tail][trufflehog betterleaks][/a b/backup.tar.gz][$rep][$placed][yes]" "values come back exactly, including = and quotes"
     assert_eq "$(stat -c %a "$SANDBOX/st-state/git-secret-guard")" 700 "dir mode"
     assert_eq "$(stat -c %a "$SANDBOX/st-state/git-secret-guard/state")" 600 "file mode"
     st eval "$(declare -f show_state); rm -f \"\$GSG_STATE_FILE\"; state_read && show_state"
@@ -34,11 +34,11 @@ test_state_round_trips_verbatim_values() {
 test_state_read_accepts_a_legacy_five_key_file_with_nothing_replaced() {
     state_dir_env || return 1
     mkdir -p -- "$SANDBOX/st-state/git-secret-guard" || return 1
-    printf 'version=0.1.0\nprevious_hooks_path_set=no\nprevious_hooks_path=\ntools_installed_by_us=gitleaks\nbackup_path=\n' \
+    printf 'version=0.1.0\nprevious_hooks_path_set=no\nprevious_hooks_path=\ntools_installed_by_us=betterleaks\nbackup_path=\n' \
         >"$SANDBOX/st-state/git-secret-guard/state" || return 1
     st eval "$(declare -f show_state); state_read && show_state"
     assert_rc 0 "a state written before tools_replaced and tools_placed existed"
-    assert_eq "$OUT" '[1][0.1.0][no][][gitleaks][][][][no]' "reads with nothing replaced, nothing placed and no timer"
+    assert_eq "$OUT" '[1][0.1.0][no][][betterleaks][][][][no]' "reads with nothing replaced, nothing placed and no timer"
 }
 
 test_state_read_refuses_files_that_are_not_ours() {

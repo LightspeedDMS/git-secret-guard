@@ -3,7 +3,7 @@ name: tests
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, 'feat/**']
   workflow_dispatch:
     inputs:
       base:
@@ -27,19 +27,27 @@ jobs:
       - id: p
         env:
           EVENT: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           PR_BASE: ${{ github.event.pull_request.base.sha }}
           INPUT_BASE: ${{ inputs.base }}
         run: |
+          # a pull request and a manual run compare the head with a base; so does a push to a feature branch (against the default branch)
           if [ "$EVENT" = pull_request ]; then
-            echo 'targets=["head","base"]' >>"$GITHUB_OUTPUT"
-            echo "base_ref=$PR_BASE" >>"$GITHUB_OUTPUT"
+            targets='["head","base"]'
+            base_ref="$PR_BASE"
           elif [ "$EVENT" = workflow_dispatch ]; then
-            echo 'targets=["head","base"]' >>"$GITHUB_OUTPUT"
-            echo "base_ref=${INPUT_BASE:-main}" >>"$GITHUB_OUTPUT"
+            targets='["head","base"]'
+            base_ref="${INPUT_BASE:-main}"
+          elif [ "$REF_NAME" != "$DEFAULT_BRANCH" ]; then
+            targets='["head","base"]'
+            base_ref="$DEFAULT_BRANCH"
           else
-            echo 'targets=["head"]' >>"$GITHUB_OUTPUT"
-            echo "base_ref=" >>"$GITHUB_OUTPUT"
+            targets='["head"]'
+            base_ref=""
           fi
+          echo "targets=$targets" >>"$GITHUB_OUTPUT"
+          echo "base_ref=$base_ref" >>"$GITHUB_OUTPUT"
 
   # The supported platform (docs/platforms.md): Ubuntu 24.04 with a git from the git-core PPA.
   # The suite runs on the head and, for pull requests, on the base, so a failure that exists already is not blamed on the change.

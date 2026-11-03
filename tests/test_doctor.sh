@@ -164,10 +164,10 @@ test_an_old_git_reachable_on_PATH_or_at_usr_bin_is_a_warning_naming_path_and_ver
     mkdir -p -- "$SANDBOX/oldgit" "$SANDBOX/junkgit" || return 1
     printf '#!/bin/sh\necho "git version 2.30.1"\n' >"$SANDBOX/oldgit/git" && chmod 755 "$SANDBOX/oldgit/git" || return 1
     printf '#!/bin/sh\necho "not a version"\n' >"$SANDBOX/junkgit/git" && chmod 755 "$SANDBOX/junkgit/git" || return 1
-    set_env PATH="$SANDBOX/pathbin:/usr/local/bin:/usr/bin:/bin:$SANDBOX/oldgit:$SANDBOX/junkgit"
+    set_env PATH="$SANDBOX/pathbin:$TEST_BASE_PATH:$SANDBOX/oldgit:$SANDBOX/junkgit"
     doctor
     assert_rc 0 "a warning does not change the exit status"
-    assert_contains "$OUT" "  ok       git: $GIT $("$GIT" --version | sed -n 's/^git version //p')" "the git that commits use is fine"
+    assert_contains "$OUT" "  ok       git: $GIT $("$GIT" --version | sed -n 's/^git version \([0-9][0-9.]*\).*/\1/p')" "the git that commits use is fine"
     assert_contains "$OUT" "  WARNING  git: $SANDBOX/oldgit/git is git 2.30.1; it ignores config-based hooks without any message, so commits made with it are NOT scanned" "old git by path and version"
     assert_contains "$OUT" "  WARNING  git: $SANDBOX/junkgit/git is git of unknown version;" "a git that reports no version is warned about too"
     sys_ver="$(/usr/bin/git --version | sed -n 's/^git version \([0-9]*\.[0-9]*\).*/\1/p')" || return 1

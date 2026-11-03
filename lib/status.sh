@@ -8,7 +8,8 @@ status_problem() {
 }
 
 status_config() {
-    local events commands want_cmd="$GSG_SHARE/hooks/secret-scan"
+    local events commands want_cmd
+    want_cmd="$(hook_command_text "$GSG_SHARE" "$(share_recorded_bash "$GSG_SHARE")")" || return 1
     events="$("$GSG_GIT" config --global --get-all hook.git-secret-guard.event 2>/dev/null | tr '\n' ' ')"
     commands="$("$GSG_GIT" config --global --get-all hook.git-secret-guard.command 2>/dev/null | tr '\n' ' ')"
     if [ "$events" = "pre-commit " ] && [ "$commands" = "$want_cmd " ]; then

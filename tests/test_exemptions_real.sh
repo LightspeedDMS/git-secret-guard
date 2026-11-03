@@ -126,7 +126,8 @@ test_real_both_markers_on_one_line_let_the_commit_succeed_in_either_order() {
         stage_file f.txt "$(token_line "$markers")"
         commit_cap "both markers"
         assert_rc 0 "[$markers] neither tool reports"
-        assert_empty "$OUT$ERR" "silent"
+        assert_empty "$OUT" "stdout stays empty"
+        assert_pass_line_only "$ERR" "only the pass line"
     done
 }
 
@@ -342,6 +343,8 @@ test_real_every_spelling_of_extend_path_is_refused() {
     for spec in "${EXTEND_SPELLINGS[@]}"; do
         name="${spec%%|*}"
         body="${spec#*|}"
+        # ^ external macOS has no /proc; the proc-self-cwd spelling names no file there and its control run cannot mute anything
+        if [ "$name" = proc-self-cwd ] && [ "$TEST_OS" = Darwin ]; then continue; fi
         n=$((n + 1))
         mkdir -p -- "$SANDBOX/ev$n/scan" "$SANDBOX/ev$n/ign"
         printf '[allowlist]\npaths = [%s]\n' "'''.*'''" >"$SANDBOX/ev$n/scan/base.toml"

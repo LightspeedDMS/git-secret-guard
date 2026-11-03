@@ -2,3 +2,6 @@
 .analysis/
 reports/troubleshooting/
 .env*
+.code-indexer/
+.code-indexer-override.yaml
+.ssh-mcp-server.port

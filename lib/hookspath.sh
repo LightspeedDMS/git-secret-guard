@@ -33,16 +33,64 @@ lifecycle_note_global_config() {
     fi
 }
 
+# ^ external BSD realpath (macOS) has no -m and this read runs before brew installs the GNU one; a probe on / names the realpath in use
+# ^ invariant a realpath with -m is called exactly as before; without it the fallback refuses a relative path and returns 1 for an unresolvable ancestor
+lifecycle_realpath_m() {
+    local p="$1" head tail="" comp out
+    local -a comps
+    if realpath -m -- / >/dev/null 2>&1; then
+        realpath -m -- "$p"
+        return
+    fi
+    case "$p" in
+        /*) ;;
+        *) return 1 ;;
+    esac
+    head="$p"
+    while [ "$head" != / ] && [ ! -e "$head" ] && [ ! -L "$head" ]; do
+        tail="/${head##*/}$tail"
+        head="${head%/*}"
+        if [ -z "$head" ]; then head=/; fi
+    done
+    out="$(realpath -- "$head")" || return 1
+    IFS=/ read -r -a comps <<<"$tail"
+    for comp in "${comps[@]}"; do
+        case "$comp" in
+            "" | .) ;;
+            ..)
+                out="${out%/*}"
+                if [ -z "$out" ]; then out=/; fi
+                ;;
+            *)
+                if [ "$out" = / ]; then out="/$comp"; else out="$out/$comp"; fi
+                ;;
+        esac
+    done
+    printf '%s\n' "$out"
+}
+
+# ^ invariant always returns 1; the refusal for a global config file whose real path cannot be resolved, claim included
+hp_report_unresolved() {
+    printf '%s: cannot resolve the include path %s of the global git config; %s\n' "$GSG_NAME" "$1" "$(brew_unchanged_text)" >&2
+    return 1
+}
+
 # ^ external an include.path is resolved against the including file's directory, "~/" against HOME; a missing target is ignored by git
 hp_include_target() {
-    local base="$1" p="$2"
+    local base="$1" p="$2" out
     # shellcheck disable=SC2088
     case "$p" in
         '~/'*) p="$HOME/${p#'~/'}" ;;
         /*) ;;
         *) p="${base%/*}/$p" ;;
     esac
-    realpath -m -- "$p"
+    if out="$(lifecycle_realpath_m "$p" 2>/dev/null)"; then
+        printf '%s\n' "$out"
+        return 0
+    fi
+    # ^ invariant a missing target (dangling symlink, loop) prints nothing and succeeds => git ignores it and the walk skips an empty path
+    if [ ! -e "$p" ]; then return 0; fi
+    hp_report_unresolved "$p"
 }
 
 # ^ why a static walk, not only git's answer; includeIf gitdir and onbranch need a repository, git shows their values only inside one
@@ -119,7 +167,7 @@ lifecycle_read_hooks_path() {
         path="${origin#file:}"
         if [[ -z ${seen_origin[$origin]:-} ]]; then
             seen_origin[$origin]=1
-            real="$(realpath -m -- "$path")" || return 1
+            real="$(lifecycle_realpath_m "$path" 2>/dev/null)" || hp_report_unresolved "$path" || return 1
             GSG_HP_SEEN[$real]=1
         fi
         key="${kv%%$'\n'*}"

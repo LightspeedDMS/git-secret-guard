@@ -24,7 +24,8 @@ test_real_clean_diff_passes_quietly_with_both_tools() {
     stage_file src/app.txt "hello world" "nothing secret here"
     commit_cap "clean"
     assert_rc 0 commit
-    assert_empty "$OUT$ERR" "nothing is printed on success"
+    assert_empty "$OUT" "stdout stays empty"
+    assert_pass_line_only "$ERR" "only the pass line is printed on success"
 }
 
 test_real_gitleaks_catches_a_fake_key_and_the_value_is_absent_from_the_output() {
@@ -231,7 +232,8 @@ test_real_utf16_and_nul_byte_files_commit_unscanned_a_documented_limit() {
     gitx add windows.txt nul.txt bom.txt
     commit_cap "binary-looking text"
     assert_rc 0 "documented limit: git treats UTF-16 and NUL-containing text as binary, so nothing is scanned"
-    assert_empty "$OUT$ERR" "and nothing is printed"
+    assert_empty "$OUT" "nothing on stdout"
+    assert_eq "$ERR" "git-secret-guard: no added lines to scan" "git sees a binary file, so the hook says there was nothing to scan"
 }
 
 test_real_service_environment_scans_with_both_real_tools() {

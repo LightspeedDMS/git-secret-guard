@@ -59,7 +59,7 @@ test_a_cut_hooks_path_value_ends_with_a_visible_marker() {
     assert_contains "$OUT" "info     core.hooksPath=${long:0:120}… in local config ($DR_REAL/wide/.git/config)" "the first 120 characters, then the marker"
     assert_not_contains "$OUT" "${long:0:121}" "and nothing past the cut"
     assert_contains "$OUT" "info     core.hooksPath=$exact in local config ($DR_REAL/fits/.git/config)" "a value of exactly the limit is printed whole"
-    assert_not_contains "$OUT" "$exact…" "without a marker"
+    assert_not_contains "$OUT" "${exact}…" "without a marker"
 }
 
 run_file_tests

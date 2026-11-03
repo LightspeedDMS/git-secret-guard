@@ -44,7 +44,9 @@ test_install_block_upgrade_uninstall_and_uninstall_again_with_the_real_scanners(
     stage_file src/ok.txt "hello" "nothing secret" || return 1
     commit_cap "clean"
     assert_rc 0 "a clean commit passes through the installed hook"
-    assert_empty "$OUT$ERR" "quietly"
+    assert_empty "$OUT" "stdout stays empty"
+    assert_pass_line_only "$ERR" "one pass line"
+    assert_contains "$ERR" "(trufflehog 3.99.2, gitleaks 8.30.1): no findings" "the versions install recorded"
 
     gsg install
     assert_rc 0 "upgrade (second install)"

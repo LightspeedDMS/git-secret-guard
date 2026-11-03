@@ -51,6 +51,49 @@ test_an_exemption_staged_in_the_same_commit_does_not_apply_but_the_next_commit_i
     assert_contains "$ERR" "1 staged file(s) excluded by .secret-scan-ignore" "and the output says so"
 }
 
+stage_two_exempt_fixtures() {
+    commit_ignore_file 'tests/fixtures/**   # synthetic keys for parser tests'
+    stage_file tests/fixtures/k1.txt "fixture $MARKER"
+    stage_file tests/fixtures/k2.txt "fixture $MARKER"
+}
+
+test_a_pass_with_exempted_files_states_the_exempted_count() {
+    begin sc1b || return 1
+    stage_two_exempt_fixtures
+    stage_file src/a.txt "real $MARKER"
+    commit_cap "two exempted, one scanned"
+    assert_rc 0 "stand-ins find nothing"
+    assert_contains "$ERR" "2 staged file(s) excluded by .secret-scan-ignore" "the existing line stays"
+    assert_contains "${ERR##*$'\n'}" "scanned 1 file, 1 added line (trufflehog 1.2.3, gitleaks 4.5.6): no findings, 2 files exempted, " "the pass line states the count"
+    assert_pass_line_only "${ERR##*$'\n'}" "and keeps the pass line shape"
+    no_leak "$MARKER"
+}
+
+test_a_pass_where_every_file_is_exempted_says_there_was_nothing_to_scan_and_how_many_were_exempted() {
+    begin sc1c || return 1
+    stage_two_exempt_fixtures
+    commit_cap "all exempted"
+    assert_rc 0 "nothing left to scan"
+    assert_eq "${ERR##*$'\n'}" "git-secret-guard: no added lines to scan (2 files exempted)" "the last line says what happened"
+    assert_not_contains "$ERR" "no findings" "no claim of a scan"
+    no_leak "$MARKER"
+}
+
+test_the_pass_line_counts_the_edited_ignore_file_scanned_in_the_second_pass() {
+    begin sc1d || return 1
+    commit_ignore_file 'tests/fixtures/**   # synthetic keys for parser tests'
+    printf '%s\n' 'docs/**   # first added pattern' 'vendor/**   # second added pattern' >>.secret-scan-ignore
+    gitx add .secret-scan-ignore
+    stage_file tests/fixtures/k1.txt "fixture $MARKER"
+    stage_file src/a.txt one two three
+    commit_cap "edit the ignore file next to an exempted and an ordinary file"
+    assert_rc 0 "stand-ins find nothing"
+    assert_contains "${ERR##*$'\n'}" "git-secret-guard: scanned 2 files, 5 added lines (trufflehog 1.2.3, gitleaks 4.5.6): no findings, 1 file exempted, " \
+        "src/a.txt (3 lines, first pass) plus the ignore file (2 lines, second pass), one fixture exempted"
+    assert_pass_line_only "${ERR##*$'\n'}" "and the line keeps its shape"
+    no_leak "$MARKER"
+}
+
 test_the_ignore_file_is_always_scanned_even_when_a_pattern_matches_it() {
     begin sc3 || return 1
     commit_ignore_file '.secret-scan-ignore   # a pattern matching the ignore file itself' '.*   # all dot files' '**/*.md   # docs'
@@ -138,7 +181,7 @@ test_an_ordinary_pattern_prints_no_catch_all_warning() {
     commit_cap "ordinary"
     assert_rc 0 "commit"
     assert_not_contains "$ERR" "WARNING" "no warning for patterns that exempt only part of the tree"
-    assert_empty "$ERR" "nothing is printed when nothing was excluded"
+    assert_pass_line_only "$ERR" "only the pass line is printed when nothing was excluded"
 }
 
 test_head_gitleaks_files_are_applied_announced_and_the_staged_versions_never_are() {
@@ -228,7 +271,7 @@ test_nothing_is_announced_and_the_default_config_is_used_without_gitleaks_files_
     stage_file .gitleaksignore '*'
     commit_cap "only staged"
     assert_rc 0 "allowed"
-    assert_empty "$ERR" "nothing announced for files that are not at HEAD"
+    assert_pass_line_only "$ERR" "no exemption announced for files that are not at HEAD"
     assert_contains "$(grep '^gitleaks-config=' "$CALLS")" "gitleaks-config=$SANDBOX/tmp/" "the private default config is used"
     assert_not_contains "$(<"$CALLS")" "gitleaks-ignore-line" "no ignore file given"
 }
@@ -278,14 +321,14 @@ test_a_comment_only_or_empty_ignore_file_excludes_nothing_and_prints_nothing() {
     stage_file src/a.txt one
     commit_cap "comments only"
     assert_rc 0 "commit"
-    assert_empty "$ERR" "silent"
+    assert_pass_line_only "$ERR" "only the pass line"
     assert_eq "$(seen_by gitleaks)" "src/a.txt" "scanned"
     : >.secret-scan-ignore
     gitx add .secret-scan-ignore && gitx commit -q --no-verify -m "empty ignore file"
     stage_file src/b.txt two
     commit_cap "empty"
     assert_rc 0 "commit with an empty ignore file"
-    assert_empty "$ERR" "silent"
+    assert_pass_line_only "$ERR" "only the pass line"
 }
 
 test_a_plain_directory_name_excludes_everything_below_it_but_not_a_same_named_file_elsewhere() {
@@ -506,7 +549,8 @@ test_a_config_that_loads_alone_passes_the_pre_flight_with_only_the_exemption_not
     stage_file src/a.txt one
     commit_cap "ok"
     assert_rc 0 "a config that loads alone passes"
-    assert_eq "$ERR" "git-secret-guard: using .gitleaks.toml from HEAD (this repository's gitleaks rules and allowlists apply)" "and says nothing else"
+    assert_eq "${ERR%%$'\n'*}" "git-secret-guard: using .gitleaks.toml from HEAD (this repository's gitleaks rules and allowlists apply)" "the exemption notice comes first"
+    assert_pass_line_only "${ERR#*$'\n'}" "and the pass line is the only other line"
 }
 
 test_the_pre_flight_runs_from_an_empty_directory() {

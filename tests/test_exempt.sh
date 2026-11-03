@@ -132,10 +132,10 @@ test_the_pre_flight_runs_gitleaks_under_the_configured_timeout_binary_never_PATH
     mkdir -p -- "$SANDBOX/poison" "$SANDBOX/wrap"
     printf '#!/bin/bash\necho PATH-USED >>"%s/poison.log"\nexit 99\n' "$SANDBOX" >"$SANDBOX/poison/timeout"
     # shellcheck disable=SC2016
-    printf '#!/bin/bash\necho "$0" >>"%s/wrap.log"\nexec /bin/timeout "$@"\n' "$SANDBOX" >"$SANDBOX/wrap/timeout"
+    printf '#!/bin/bash\necho "$0" >>"%s/wrap.log"\nexec %s "$@"\n' "$SANDBOX" "$TEST_TIMEOUT" >"$SANDBOX/wrap/timeout"
     chmod +x "$SANDBOX/poison/timeout" "$SANDBOX/wrap/timeout"
     printf '[extend]\nuseDefault = true\n' >"$SANDBOX/pf.toml"
-    set_env PATH="$SANDBOX/poison:/usr/local/bin:/usr/bin:/bin" GITLEAKS_BIN="$STUBS_DIR/gitleaks" TIMEOUT_BIN="$SANDBOX/wrap/timeout" \
+    set_env PATH="$SANDBOX/poison:$TEST_BASE_PATH" GITLEAKS_BIN="$STUBS_DIR/gitleaks" TIMEOUT_BIN="$SANDBOX/wrap/timeout" \
         STUB_LOG="$SANDBOX/pf-calls"
     ex gitleaks_config_preflight "$SANDBOX/pf.toml" "$SANDBOX/pf-work" 20
     assert_rc 0 "the probe is reported by the stand-in"

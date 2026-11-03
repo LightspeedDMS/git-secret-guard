@@ -9,10 +9,14 @@ bin/git-secret-guard install --with-timer   # optional: also run doctor weekly t
 git-secret-guard uninstall          # put back what was there before
 ```
 
-**Requirements.** Linux on x86_64 or arm64 (macOS is not tested and not claimed: `install` refuses it, although
-`tools.lock` already records the darwin checksums for later). bash, **git >= 2.54 first on `PATH`**, `jq`, `setsid`,
-`timeout`, and `curl` plus `tar` when a scanner has to be downloaded. `install` refuses when the git on `PATH` is older
-than 2.54, because older git ignores config hooks without any message.
+**Requirements.** Linux on x86_64 or arm64, or macOS arm64 with Homebrew (macOS x86_64 is mapped, not tested). bash,
+**git >= 2.54 first on `PATH`**, `jq`, `setsid`, `timeout`, and `curl` plus `tar` when a scanner has to be downloaded. On
+macOS, `install` lists whichever of bash 4.4 or newer, `coreutils` (`timeout`), `util-linux` (`setsid`) and `jq` is missing, installs them
+with `brew install` only after its other checks have passed, the `tools.lock` lookup included (with a GNU `timeout` already present, the scanner
+downloads are verified first too; under the system bash 3.2 it first installs `bash` alone), and refuses, changing
+nothing, when Homebrew is not on `PATH`: details in
+[platforms.md](platforms.md#macos-homebrew). `install` refuses when the git on `PATH` is older than 2.54, because older git
+ignores config hooks without any message.
 
 > **Warning, `/usr/bin/git` 2.52.** Any git older than 2.54 ignores config hooks: no error, no scan. `install` warns
 > for every other reachable git older than 2.54 (all `git` on `PATH` plus `/usr/bin/git`; on this machine
@@ -25,10 +29,10 @@ than 2.54, because older git ignores config hooks without any message.
 |---|---|
 | Prechecks | git >= 2.54 on `PATH`, `jq`, `setsid`, `timeout` found (their **absolute paths** are written to the settings file, the hook never resolves them through `PATH`), Linux, absolute `HOME`/`XDG_*`. Any refusal happens before anything is changed. |
 | Scanners | `~/.local/bin/trufflehog` and `~/.local/bin/gitleaks`. A tool that already reports the pinned version (`trufflehog` 3.99.2, `gitleaks` 8.30.1) is **kept**. Otherwise the platform tarball is downloaded from the vendor's GitHub release, its **SHA-256 is checked against `tools.lock`**, only the tool binary is extracted, and its `--version` is checked against the pin. A checksum mismatch deletes the download, installs nothing (neither scanner) and refuses. curl runs with `-q` as its first argument, so a `~/.curlrc` (proxy, protocol, output or `head` settings) cannot change a verified download. **A file already at that path that does not report the pinned version (your own build, a symlink, an older release) is never overwritten:** it is moved aside to `<tool>.gsg-replaced-<UTC stamp>` in the same directory (byte-identical, same mode), the output says where, and the state records the aside name with the SHA-256 of what install put in its place. Such a tool is never recorded as downloaded by install, so it is never "ours to delete". Install also records the SHA-256 of **every** file it places (`tools_placed` in the state), also on an empty path. On an upgrade that bumps the pins, a file that still has that hash is install's own and is **replaced in place** (no aside file, and a downloaded tool stays removable with `--remove-tools`); only a file install did not place is moved aside, and the first original ever moved aside is the one uninstall restores. The aside names and hashes are written to the state **before** the file is moved, so a failure afterwards (state write, second tool, share dir) cannot lose the original: a later uninstall, or a rerun of install, still finds it. |
-| Files | `hooks/`, `lib/`, `bin/`, `tools.lock`, `VERSION` copied to `${XDG_DATA_HOME:-~/.local/share}/git-secret-guard/` (the new tree is built beside the old one and swapped in, so a commit during an upgrade sees the old or the new hook, never half of either; if the final rename fails, the previous tree is moved back, so the share dir is never left missing), plus the generated `settings` file with absolute `TRUFFLEHOG_BIN`, `GITLEAKS_BIN`, `JQ_BIN`, `SETSID_BIN`, `TIMEOUT_BIN` and `SCAN_TIMEOUT_SECONDS=300`. `settings` is rewritten by every install. |
-| Global git config | `hook.git-secret-guard.event=pre-commit` and `hook.git-secret-guard.command=<absolute path of the installed hooks/secret-scan>`, written with `git config --global --replace-all`, so each stays single-valued however often you run `install`. |
+| Files | `hooks/`, `lib/`, `bin/`, `tools.lock`, `VERSION` copied to `${XDG_DATA_HOME:-~/.local/share}/git-secret-guard/` (the new tree is built beside the old one and swapped in, so a commit during an upgrade sees the old or the new hook, never half of either; if the final rename fails, the previous tree is moved back, so the share dir is never left missing), plus the generated `settings` file with absolute `TRUFFLEHOG_BIN`, `GITLEAKS_BIN`, `JQ_BIN`, `SETSID_BIN`, `TIMEOUT_BIN`, the pinned `TRUFFLEHOG_VERSION` and `GITLEAKS_VERSION` (the hook prints them on a passing commit) and `SCAN_TIMEOUT_SECONDS=300` (on macOS also the absolute `BASH_BIN` and `GNUBIN_DIR`). `settings` is rewritten by every install. |
+| Global git config | `hook.git-secret-guard.event=pre-commit` and `hook.git-secret-guard.command=<absolute path of the installed hooks/secret-scan>`, written with `git config --global --replace-all`, so each stays single-valued however often you run `install`. On macOS the command is `'<recorded bash>' '<installed hooks/secret-scan>'`, so the hook runs under bash 4.4 or newer whatever `PATH` the git client has. |
 | CLI | `~/.local/bin/git-secret-guard` is a symlink to the installed copy. Make sure `~/.local/bin` is on your `PATH`. |
-| Timer | Only with `--with-timer`: two systemd **user** units and `systemctl --user enable --now git-secret-guard-doctor.timer`, see [The weekly timer](doctor.md#the-weekly-timer). Without the flag no unit is written and `systemctl` is never called. |
+| Timer | Only with `--with-timer`: two systemd **user** units and `systemctl --user enable --now git-secret-guard-doctor.timer`, see [The weekly timer](doctor.md#the-weekly-timer). Without the flag no unit is written and `systemctl` is never called. On macOS the flag is refused (`launchd is not supported yet`) and nothing is changed. |
 | State | `${XDG_STATE_HOME:-~/.local/state}/git-secret-guard/state` (mode 600 in a 700 directory): version, the previous `core.hooksPath` (or `unset`), which tools install itself downloaded, the backup path, and `timer_installed` (`yes` or `no`). |
 
 Install is idempotent. A second run replaces the files, keeps the config single-valued, downloads nothing that is
@@ -81,7 +85,7 @@ directory to back up or record. If the directory does not exist there is nothing
 
 `tools.lock` holds one line per tool and platform: name, version, platform, SHA-256 of the vendor's release tarball
 (the vendors' checksums, fetched 2026-10-30; vendors name platforms differently, `linux_amd64` against `linux_x64`).
-Only Linux x86_64 and arm64 are used; the darwin rows are recorded, not claimed. A lock that is unreadable, malformed
+Linux x86_64 and arm64 and macOS arm64 are used; the macOS x86_64 rows are mapped but not tested. A lock that is unreadable, malformed
 or ambiguous (two rows for one tool and platform) is refused as a whole, and a missing row is a refusal, never a skip.
 
 **Test-only overrides.** `GSG_TOOLS_BASE_URL` (a directory URL such as `file:///tmp/fixtures`, tarballs named like the

@@ -16,6 +16,7 @@ tl() { run_cap env -i "${GSG_ENV[@]}" "${EXTRA_ENV[@]}" bash -c 'set -u; source 
 test_real_install_downloads_and_verifies_the_pinned_tarballs_from_github() {
     need_network
     lc_begin || return 1
+    if [ "$TEST_OS" = Darwin ]; then lc_real_uname || return 1; fi
     gsg install
     assert_rc 0 "install from the vendor URLs, verified against the shipped tools.lock"
     assert_not_contains "$ERR" "TEST OVERRIDE" "no override was active"
@@ -29,7 +30,7 @@ test_real_install_downloads_and_verifies_the_pinned_tarballs_from_github() {
     assert_eq "$(find "$LC_BIN" -mindepth 1 | wc -l)" 0 "the downloaded tools are removed again"
 }
 
-test_the_other_architecture_linux_rows_of_the_lock_match_the_real_tarballs() {
+test_the_other_platform_rows_of_the_lock_match_the_real_tarballs() {
     need_network
     lc_begin || return 1
     local lock="$GSG_PROJECT/tools.lock" dest="$SANDBOX/real-dl" tool plat ver sha mine
@@ -41,7 +42,7 @@ test_the_other_architecture_linux_rows_of_the_lock_match_the_real_tarballs() {
             tl tools_fetch_verified "$tool" "$ver" "$plat" "$sha" "$dest"
             assert_rc 0 "$tool $ver $plat matches its row in tools.lock"
             rm -f -- "$OUT" || return 1
-        done < <(grep -E "^$tool [0-9.]+ linux_" "$lock")
+        done < <(grep -E "^$tool [0-9.]+ (linux|darwin)_" "$lock")
     done
 }
 

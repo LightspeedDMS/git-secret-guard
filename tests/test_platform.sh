@@ -2,6 +2,9 @@
 # shellcheck source=tests/lib.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
 
+# ^ external the Ubuntu podman launcher and its container scripts read /proc and run apt; they are Linux only and macOS has neither
+if [ "$TEST_OS" = Darwin ]; then FILE_SKIP_REASON="the Ubuntu podman launcher and container scripts read /proc and run apt, Linux only"; fi
+
 UBUNTU_SH="$GSG_PROJECT/tests/platform/ubuntu.sh"
 ARGS=()
 DRY_ENV=()

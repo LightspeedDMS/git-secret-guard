@@ -177,7 +177,7 @@ doctor_values_text() {
 # ^ external git config --show-scope --show-origin -z --get-regexp = "scope NUL origin NUL key NL value NUL" (probed on git 2.56)
 # ^ why -C /, not the current directory; the machine view must not include a repository's local config
 doctor_check_hook_config() {
-    local rc i scope origin value want="$GSG_SHARE/hooks/secret-scan" bad=0 msg
+    local rc i scope origin value want="$DR_HOOK_CMD" hookfile="$GSG_SHARE/hooks/secret-scan" bad=0 msg
     local ev_n=0 ev_ok=0 ev_src="" cmd_n=0 cmd_ok=0 cmd_src=""
     hp_records -C / config --show-scope --show-origin -z --get-regexp '^hook\.git-secret-guard\.'
     rc=$?
@@ -224,7 +224,7 @@ doctor_check_hook_config() {
         doctor_values_text "$cmd_n" "$cmd_ok" "$cmd_src" "the installed hook"
         doctor_machine_line PROBLEM "hook: hook.git-secret-guard.command $REPLY, want exactly one, the installed hook [$want]; run git-secret-guard install"
         bad=1
-    elif msg="$(tool_unusable "hook command" "$want")"; then
+    elif msg="$(tool_unusable "hook command" "$hookfile")"; then
         doctor_machine_line PROBLEM "hook: $msg; run git-secret-guard install"
         bad=1
     fi
@@ -281,6 +281,15 @@ doctor_check_tools() {
             doctor_machine_line ok "$tool: $bin"
         fi
     done
+    if [ -n "${BASH_BIN:-}" ]; then
+        if msg="$(tool_unusable bash "$BASH_BIN")"; then
+            doctor_machine_line PROBLEM "bash: $msg; run git-secret-guard install"
+        elif ! brew_bash_ok "$BASH_BIN"; then
+            doctor_machine_line PROBLEM "bash: $BASH_BIN is older than bash $BREW_BASH_MIN_MAJOR.$BREW_BASH_MIN_MINOR; run git-secret-guard install"
+        else
+            doctor_machine_line ok "bash: $BASH_BIN"
+        fi
+    fi
     if [ "$timeout_ok" -eq 1 ] && [ -n "$DR_LIMIT" ] && ! tool_unusable gitleaks "$GITLEAKS_BIN" >/dev/null; then DR_GITLEAKS_OK=1; fi
 }
 
@@ -350,6 +359,7 @@ doctor_run() {
     doctor_require_git || return 2
     doctor_resolve_roots "$@" || return 2
     doctor_start || return 2
+    DR_HOOK_CMD="$(hook_command_text "$GSG_SHARE" "$(share_recorded_bash "$GSG_SHARE")")" || return 2
     printf 'machine:\n'
     doctor_check_state
     doctor_check_hook_config

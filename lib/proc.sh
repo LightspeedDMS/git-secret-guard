@@ -34,7 +34,7 @@ proc_start_runner() {
 proc_stop_group() {
     local pgid="$1" pid="$2" i
     # ^ hazard TERM on the Windows runner leaves timeout and the native scanner running => taskkill /T /F on the whole tree, no grace period
-    # ^ hazard Windows reuses pids => taskkill runs only while the runner is still the hook's unreaped child
+    # ^ hazard Windows reuses pids => taskkill runs only as long as the runner is still the hook's unreaped child
     # ^ security "$TASKKILL_BIN" comes from settings, not PATH; MSYS_NO_PATHCONV keeps /T /F /PID from being rewritten as paths
     if proc_is_windows; then
         if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then

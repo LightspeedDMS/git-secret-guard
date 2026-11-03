@@ -7,7 +7,7 @@ GSG_EXTRACT_AWK="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)/extract.
 # ^ security -c core.attributesFile=/dev/null => the user's attributes file and the XDG default cannot mark files -diff or binary
 _staged_git_diff() {
     local empty_tree threshold=100g
-    # ^ external Git for Windows keeps core.bigFileThreshold in 32 bits, so 100g is out of range (probed) => 4095m, the largest value it takes
+    # ^ external Git for Windows keeps core.bigFileThreshold in 32 bits => 100g is out of range (probed), 4095m is the largest value it takes
     if gsg_is_windows; then threshold=4095m; fi
     # ^ hazard core.bigFileThreshold below the file size => git treats the file as binary, shows no + lines, the commit passes unscanned
     # ^ why empty tree computed by hash-object, not hard-coded; the id differs for sha256 repositories

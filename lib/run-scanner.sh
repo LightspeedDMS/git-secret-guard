@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ^ invariant started by hooks/secret-scan through lib/proc.sh => on Linux runner pid = its process group id, which the hook's cleanup signals
+# ^ invariant started by hooks/secret-scan through lib/proc.sh => on Linux runner pid = its process group id, the group the hook's cleanup signals
 set -u
 set -o pipefail
 

@@ -109,7 +109,7 @@ gsg_is_windows() {
     return 1
 }
 
-# ^ invariant the process-control tool of this platform: taskkill on Windows, setsid elsewhere; status and doctor judge it like jq and timeout
+# ^ invariant prints the process-control tool of this platform, taskkill on Windows and setsid elsewhere; status and doctor judge it like jq and timeout
 gsg_proc_tool_name() {
     if gsg_is_windows; then printf 'taskkill\n'; else printf 'setsid\n'; fi
 }

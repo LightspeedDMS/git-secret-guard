@@ -179,7 +179,7 @@ install_resolve_bins() {
     return "$bad"
 }
 
-# ^ external a native jq.exe writes CRLF unless given -b => rows end in a carriage return; on Windows JQ_BIN is this wrapper, which adds -b
+# ^ external a native jq.exe writes CRLF unless given -b => rows end in a carriage return; on Windows JQ_BIN is this wrapper adding -b
 # ^ security the wrapper holds the absolute jq path found at install time, quoted with printf %q => it never looks jq up on PATH
 install_write_jq_wrapper() {
     local file="$1" real="$2"
@@ -259,7 +259,7 @@ install_check_prerequisites() {
     if install_downloads_needed; then install_require_curl || bad=$((bad + 1)); fi
     # ^ order systemctl check after every other check; bad > 1 => the count line follows and carries the claim of what changed
     if [ "$timer" -eq 1 ] && tools_is_windows; then
-        claim="; nothing was changed"
+        claim="; $(brew_unchanged_text)"
         if [ "$bad" -gt 0 ]; then claim=""; fi
         printf '%s: --with-timer needs systemd, which Windows does not have%s\n' "$GSG_NAME" "$claim" >&2
         bad=$((bad + 1))
@@ -657,7 +657,7 @@ install_copy_share() {
     fi
 }
 
-# ^ external Git Bash ln -s copies the file instead of linking (probed) => on Windows the CLI entry is a wrapper script that execs the share copy
+# ^ external Git Bash ln -s copies the file instead of linking (probed) => on Windows the CLI entry is a wrapper script running the share copy with exec
 install_cli_wrapper_text() {
     printf '#!/usr/bin/env bash\n'
     printf 'exec %q "$@"\n' "$GSG_SHARE/bin/git-secret-guard"

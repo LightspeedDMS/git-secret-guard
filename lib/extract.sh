@@ -6,14 +6,16 @@ GSG_EXTRACT_AWK="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)/extract.
 # ^ external info/attributes and the system attributes file still apply under --attr-source; test:test_local_attribute_files_still_hide_text_a_documented_limit
 # ^ security -c core.attributesFile=/dev/null => the user's attributes file and the XDG default cannot mark files -diff or binary
 _staged_git_diff() {
-    local empty_tree
+    local empty_tree threshold=100g
+    # ^ external Git for Windows keeps core.bigFileThreshold in 32 bits, so 100g is out of range (probed) => 4095m, the largest value it takes
+    if gsg_is_windows; then threshold=4095m; fi
     # ^ hazard core.bigFileThreshold below the file size => git treats the file as binary, shows no + lines, the commit passes unscanned
     # ^ why empty tree computed by hash-object, not hard-coded; the id differs for sha256 repositories
     empty_tree="$(git hash-object -t tree /dev/null)" || return 1
     # ^ why explicit prefixes/context/no-ext-diff/no-textconv, not the user's diff config; noprefix, interHunkContext and external diff would change the parse
     # ^ why ACMRT, not ACMR; a symlink->file type change adds content
     # ^ hazard adding --text => binary content reaches the scanners; test:test_binary_content_is_not_extracted
-    git --attr-source="$empty_tree" -c core.quotePath=false -c core.bigFileThreshold=100g -c core.attributesFile=/dev/null diff --cached --no-color --no-ext-diff --no-textconv \
+    git --attr-source="$empty_tree" -c core.quotePath=false -c core.bigFileThreshold="$threshold" -c core.attributesFile=/dev/null diff --cached --no-color --no-ext-diff --no-textconv \
         --inter-hunk-context=0 --src-prefix=a/ --dst-prefix=b/ --diff-filter=ACMRT "$@"
 }
 

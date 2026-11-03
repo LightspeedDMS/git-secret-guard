@@ -8,7 +8,8 @@ status_problem() {
 }
 
 status_config() {
-    local events commands want_cmd="$GSG_SHARE/hooks/secret-scan"
+    local events commands want_cmd
+    want_cmd="$(gsg_hook_command)"
     events="$("$GSG_GIT" config --global --get-all hook.git-secret-guard.event 2>/dev/null | tr '\n' ' ')"
     commands="$("$GSG_GIT" config --global --get-all hook.git-secret-guard.command 2>/dev/null | tr '\n' ' ')"
     if [ "$events" = "pre-commit " ] && [ "$commands" = "$want_cmd " ]; then
@@ -76,7 +77,7 @@ status_tools() {
         bin="$(settings_tool_bin "$tool")" || return 1
         status_tool "$tool" "$bin" "${row%% *}"
     done
-    for tool in jq setsid timeout; do
+    for tool in jq "$(gsg_proc_tool_name)" timeout; do
         bin="$(settings_tool_bin "$tool")" || return 1
         if tool_unusable "$tool" "$bin" >/dev/null; then
             status_line "$tool" "$bin (MISSING or not executable)"

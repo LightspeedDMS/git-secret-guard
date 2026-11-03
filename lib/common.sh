@@ -21,7 +21,7 @@ GSG_JQ_CLEAN='def clean: tostring | gsub("[\u0000-\u001f\u007f]"; "?"); '
 # ^ security unset before source => an inherited TRUFFLEHOG_BIN/GITLEAKS_BIN/JQ_BIN/SETSID_BIN/TIMEOUT_BIN cannot fill a gap (silent bypass)
 load_settings() {
     local file="$1"
-    unset TRUFFLEHOG_BIN GITLEAKS_BIN JQ_BIN SETSID_BIN TIMEOUT_BIN SYSTEMCTL_BIN SCAN_TIMEOUT_SECONDS DOCTOR_TIMEOUT_SECONDS
+    unset TRUFFLEHOG_BIN GITLEAKS_BIN JQ_BIN SETSID_BIN TASKKILL_BIN TIMEOUT_BIN SYSTEMCTL_BIN SCAN_TIMEOUT_SECONDS DOCTOR_TIMEOUT_SECONDS
     if [ ! -f "$file" ] || [ ! -r "$file" ]; then
         printf 'settings file is missing or unreadable: %s\n' "$file" >&2
         return 1
@@ -93,10 +93,34 @@ settings_tool_bin() {
         gitleaks) printf '%s' "${GITLEAKS_BIN:-}" ;;
         jq) printf '%s' "${JQ_BIN:-}" ;;
         setsid) printf '%s' "${SETSID_BIN:-}" ;;
+        taskkill) printf '%s' "${TASKKILL_BIN:-}" ;;
         timeout) printf '%s' "${TIMEOUT_BIN:-}" ;;
         systemctl) printf '%s' "${SYSTEMCTL_BIN:-}" ;;
         *) return 1 ;;
     esac
+}
+
+# ^ external Windows means Git for Windows bash (uname -s MINGW64_NT-*) running native .exe scanners; every other platform keeps the Linux code paths
+gsg_is_windows() {
+    case "$(uname -s)" in
+        MINGW64_NT-*) return 0 ;;
+    esac
+    return 1
+}
+
+# ^ invariant the process-control tool of this platform: taskkill on Windows, setsid elsewhere; status and doctor judge it like jq and timeout
+gsg_proc_tool_name() {
+    if gsg_is_windows; then printf 'taskkill\n'; else printf 'setsid\n'; fi
+}
+
+# ^ external native Windows git rewrites a POSIX path argument to C:/dir/file (probed) => on Windows the stored hook command is the mixed form
+# ^ invariant prints the hook command in the form git config holds it; install writes it and status and doctor compare with it
+gsg_hook_command() {
+    if gsg_is_windows; then
+        cygpath -m "$GSG_SHARE/hooks/secret-scan"
+    else
+        printf '%s\n' "$GSG_SHARE/hooks/secret-scan"
+    fi
 }
 
 tool_unusable() {

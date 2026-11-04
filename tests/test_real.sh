@@ -228,9 +228,9 @@ test_real_utf16_and_nul_byte_files_commit_unscanned_a_documented_limit() {
     command -v iconv >/dev/null 2>&1 || skip_test "iconv is not available"
     new_repo realutf16 || return 1
     printf 'key = "%s"\n' "$(fake_aws_key)" | iconv -f UTF-8 -t UTF-16LE >windows.txt
-    printf 'key = "%s"\n\000' "$(fake_aws_key)" >nul.txt
+    printf 'key = "%s"\n\000' "$(fake_aws_key)" >nulbyte.txt
     printf 'key = "%s"\n' "$(fake_aws_key)" | iconv -f UTF-8 -t UTF-16 >bom.txt
-    gitx add windows.txt nul.txt bom.txt
+    gitx add windows.txt nulbyte.txt bom.txt
     commit_cap "binary-looking text"
     assert_rc 0 "documented limit: git treats UTF-16 and NUL-containing text as binary, so nothing is scanned"
     assert_empty "$OUT" "nothing on stdout"

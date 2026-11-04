@@ -99,9 +99,9 @@ test_head_blob_is_read_from_the_commit_only() {
 test_head_blob_refuses_a_symlink_accepts_an_executable_and_reports_an_unreadable_tree_as_an_error() {
     new_repo headmode || return 1
     local dest="$SANDBOX/head-copy3"
-    ln -s '**   # reads as a catch-all, reviews as a one-line symlink' .secret-scan-ignore
+    stage_symlink '**   # reads as a catch-all, reviews as a one-line symlink' .secret-scan-ignore || return 1
     printf 'tool/** # executable file\n' >.gitleaksignore && chmod +x .gitleaksignore
-    gitx add .secret-scan-ignore .gitleaksignore && gitx commit -q --no-verify -m "link and executable"
+    gitx add .gitleaksignore && gitx update-index --chmod=+x .gitleaksignore && gitx commit -q --no-verify -m "link and executable"
     ex exempt_head_blob .secret-scan-ignore "$dest"
     assert_rc 3 "a symlink is not a regular file"
     ex exempt_head_blob .gitleaksignore "$dest"

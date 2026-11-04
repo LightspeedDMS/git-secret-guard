@@ -3,6 +3,9 @@
 source "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
 # shellcheck source=tests/lifecycle.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/lifecycle.sh"
+
+# ^ external the LaunchAgent is macOS only; its tests fake a Mac, and tools.lock and the file names on a Windows host do not fit that
+if [ "$TEST_IS_WINDOWS" -eq 1 ]; then FILE_SKIP_REASON="macOS LaunchAgent, not a Windows feature"; fi
 # shellcheck source=tests/doctor.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/doctor.sh"
 

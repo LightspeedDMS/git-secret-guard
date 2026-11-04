@@ -33,10 +33,10 @@ test_status_shows_the_installation() {
     assert_contains "$OUT" "global config: matches" "config matches"
     assert_contains "$OUT" "previous core.hooksPath: unset" "recorded hooksPath"
     assert_contains "$OUT" "tools installed by us: trufflehog betterleaks" "which tools install downloaded"
-    assert_contains "$OUT" "trufflehog: $LC_BIN/trufflehog 3.99.2 (pinned 3.99.2) ok" "trufflehog path and version"
-    assert_contains "$OUT" "betterleaks: $LC_BIN/betterleaks 1.9.0 (pinned 1.9.0) ok" "betterleaks path and version"
-    assert_contains "$OUT" "jq: $(lc_which jq)" "jq path"
-    assert_contains "$OUT" "setsid: $(lc_which setsid)" "setsid path"
+    assert_contains "$OUT" "trufflehog: $LC_BIN/trufflehog$LC_EXE 3.99.2 (pinned 3.99.2) ok" "trufflehog path and version"
+    assert_contains "$OUT" "betterleaks: $LC_BIN/betterleaks$LC_EXE 1.9.0 (pinned 1.9.0) ok" "betterleaks path and version"
+    assert_contains "$OUT" "jq: $(lc_expected_jq)" "jq path"
+    if [ "$TEST_IS_WINDOWS" -eq 1 ]; then assert_contains "$OUT" "taskkill: " "process tool"; else assert_contains "$OUT" "setsid: $(lc_which setsid)" "setsid path"; fi
     assert_contains "$OUT" "timeout: $(lc_which timeout)" "timeout path"
     assert_eq "$ERR" "git-secret-guard: note: GIT_CONFIG_GLOBAL is set; the global git config used is $SANDBOX/gitconfig" "stderr is only the one-line note"
 }
@@ -45,7 +45,7 @@ test_status_shows_the_recorded_hooks_path_and_backup() {
     lc_begin && lc_make_fixtures && lc_use_fixtures || return 1
     mkdir -p -- "$LC_HOME/.config/git/hooks" && printf 'x\n' >"$LC_HOME/.config/git/hooks/pre-commit" || return 1
     # shellcheck disable=SC2088
-    gitx config --global core.hooksPath '~/.config/git/hooks' || return 1
+    git_literal_config --global core.hooksPath '~/.config/git/hooks' || return 1
     gsg install --replace-hooks-path
     assert_rc 0 "takeover"
     gsg status
@@ -56,7 +56,7 @@ test_status_shows_the_recorded_hooks_path_and_backup() {
 
 test_status_flags_every_kind_of_drift_and_exits_1() {
     fresh_install
-    gitx config --global --replace-all hook.git-secret-guard.command /elsewhere/secret-scan || return 1
+    git_literal_config --global --replace-all hook.git-secret-guard.command /elsewhere/secret-scan || return 1
     gsg status
     assert_rc 1 "a changed command"
     assert_contains "$OUT" "global config: MISMATCH" "flagged"
@@ -76,17 +76,17 @@ test_status_flags_every_kind_of_drift_and_exits_1() {
     assert_contains "$OUT" "hook command: $LC_DATA/hooks/secret-scan (MISSING or not executable)" "flagged"
 
     fresh_install
-    printf '#!/bin/sh\necho "trufflehog 3.0.0"\n' >"$LC_BIN/trufflehog" || return 1
+    printf '#!/bin/sh\necho "trufflehog 3.0.0"\n' >"$LC_BIN/trufflehog$LC_EXE" || return 1
     gsg status
     assert_rc 1 "a tool at another version"
-    assert_contains "$OUT" "trufflehog: $LC_BIN/trufflehog 3.0.0 (pinned 3.99.2) MISMATCH" "flagged with both versions"
-    assert_contains "$OUT" "betterleaks: $LC_BIN/betterleaks 1.9.0 (pinned 1.9.0) ok" "the other tool is still ok"
+    assert_contains "$OUT" "trufflehog: $LC_BIN/trufflehog$LC_EXE 3.0.0 (pinned 3.99.2) MISMATCH" "flagged with both versions"
+    assert_contains "$OUT" "betterleaks: $LC_BIN/betterleaks$LC_EXE 1.9.0 (pinned 1.9.0) ok" "the other tool is still ok"
 
     fresh_install
-    rm -f -- "$LC_BIN/betterleaks" || return 1
+    rm -f -- "$LC_BIN/betterleaks$LC_EXE" || return 1
     gsg status
     assert_rc 1 "a missing tool"
-    assert_contains "$OUT" "betterleaks: $LC_BIN/betterleaks (MISSING or not executable)" "flagged"
+    assert_contains "$OUT" "betterleaks: $LC_BIN/betterleaks$LC_EXE (MISSING or not executable)" "flagged"
 
     fresh_install
     rm -f -- "$LC_DATA/settings" || return 1
@@ -100,7 +100,7 @@ test_status_lists_the_originals_install_moved_aside() {
     gsg status
     assert_contains "$OUT" "originals moved aside: none" "a clean install moved nothing"
     lc_begin && lc_make_fixtures && lc_use_fixtures || return 1
-    mkdir -p -- "$LC_BIN" && printf '#!/bin/sh\necho "betterleaks version 8.18.4"\n' >"$LC_BIN/betterleaks" && chmod 755 "$LC_BIN/betterleaks" || return 1
+    mkdir -p -- "$LC_BIN" && printf '#!/bin/sh\necho "betterleaks version 8.18.4"\n' >"$LC_BIN/betterleaks$LC_EXE" && chmod 755 "$LC_BIN/betterleaks$LC_EXE" || return 1
     gsg install
     assert_rc 0 "install over the user's betterleaks"
     gsg status
@@ -110,14 +110,14 @@ test_status_lists_the_originals_install_moved_aside() {
 
 test_status_judges_versions_exactly_like_install_does() {
     fresh_install
-    printf '#!/bin/sh\necho "betterleaks version 1.9.0-rc1"\n' >"$LC_BIN/betterleaks" || return 1
-    printf '#!/bin/sh\necho "trufflehog 3.99.2.1"\n' >"$LC_BIN/trufflehog" || return 1
+    printf '#!/bin/sh\necho "betterleaks version 1.9.0-rc1"\n' >"$LC_BIN/betterleaks$LC_EXE" || return 1
+    printf '#!/bin/sh\necho "trufflehog 3.99.2.1"\n' >"$LC_BIN/trufflehog$LC_EXE" || return 1
     gsg status
     assert_rc 1 "a pre-release and a four-part version are not the pin"
-    assert_contains "$OUT" "betterleaks: $LC_BIN/betterleaks 1.9.0-rc1 (pinned 1.9.0) MISMATCH" "betterleaks 1.9.0-rc1"
-    assert_contains "$OUT" "trufflehog: $LC_BIN/trufflehog 3.99.2.1 (pinned 3.99.2) MISMATCH" "trufflehog 3.99.2.1"
-    printf '#!/bin/sh\necho "betterleaks version v1.9.0"\n' >"$LC_BIN/betterleaks" || return 1
-    printf '#!/bin/sh\necho "trufflehog 3.99.2"\n' >"$LC_BIN/trufflehog" || return 1
+    assert_contains "$OUT" "betterleaks: $LC_BIN/betterleaks$LC_EXE 1.9.0-rc1 (pinned 1.9.0) MISMATCH" "betterleaks 1.9.0-rc1"
+    assert_contains "$OUT" "trufflehog: $LC_BIN/trufflehog$LC_EXE 3.99.2.1 (pinned 3.99.2) MISMATCH" "trufflehog 3.99.2.1"
+    printf '#!/bin/sh\necho "betterleaks version v1.9.0"\n' >"$LC_BIN/betterleaks$LC_EXE" || return 1
+    printf '#!/bin/sh\necho "trufflehog 3.99.2"\n' >"$LC_BIN/trufflehog$LC_EXE" || return 1
     gsg status
     assert_rc 0 "install's own accepted spellings (v-prefix) are ok"
     assert_contains "$OUT" "(pinned 1.9.0) ok" "ok"

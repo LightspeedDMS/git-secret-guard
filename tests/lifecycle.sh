@@ -55,6 +55,8 @@ EOF
 
 # ^ invariant the fake uname answers these; lc_platform builds the fixture rows for the same platform the CLI will ask about
 LC_FAKE_OS="" LC_FAKE_ARCH=""
+# ^ invariant the suffix of a tool file under test; lc_begin sets it per platform, a faked uname clears it
+LC_EXE=""
 
 # ^ security the stand-in only links files inside $SANDBOX/brewprefix => no lifecycle test can run a real brew install
 # ^ invariant brew.map lines are formula|path under the prefix|source; install links what it is given, brew.fail fails it, brew.nopopulate makes it do nothing
@@ -119,7 +121,7 @@ lc_brew_map() {
         else
             printf '%s\n' "bash|bin/bash|$BASH" "coreutils|opt/coreutils/libexec/gnubin/timeout|$TEST_TIMEOUT"
         fi
-        printf '%s\n' "util-linux|opt/util-linux/bin/setsid|$TEST_SETSID" "jq|bin/jq|$TEST_JQ"
+        printf '%s\n' "util-linux|opt/util-linux/bin/setsid|${TEST_SETSID:-$TEST_TRUE}" "jq|bin/jq|$TEST_JQ"
     } >"$SANDBOX/brew.map"
 }
 
@@ -134,6 +136,7 @@ lc_brew_have() {
 # ^ coupled lc_platform reads LC_FAKE_OS and LC_FAKE_ARCH; the CLI reads the same answers through the fake uname on PATH
 # ^ invariant the fake answers -s and -m only and fails loudly on anything else; its two values are plain words, they are written into a script
 lc_fake_uname() {
+    LC_EXE=""
     if [[ ! $1 =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || [[ ! $2 =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]]; then
         printf 'lc_fake_uname: [%s] [%s] are not plain words\n' "$1" "$2" >&2
         return 1
@@ -161,7 +164,8 @@ lc_begin() {
     LC_FIX="$SANDBOX/fixtures"
     LC_DATA="$SANDBOX/xdg/data/git-secret-guard"
     LC_STATE="$SANDBOX/xdg/state/git-secret-guard"
-    LC_FAKE_OS="" LC_FAKE_ARCH=""
+    LC_FAKE_OS="" LC_FAKE_ARCH="" LC_EXE=""
+    if [ "$TEST_IS_WINDOWS" -eq 1 ]; then LC_EXE=.exe; fi
     rm -rf -- "$LC_HOME" "$SANDBOX/xdg" "$SANDBOX/pathbin" "$LC_FIX" "$SANDBOX/systemctl.log" "$SANDBOX/systemctl.fail" \
         "$SANDBOX/launchctl.log" "$SANDBOX/launchctl.fail" "$SANDBOX/launchctl.failonce" "$SANDBOX/launchctl.loaded" "$SANDBOX/brew.map" || return 1
     mkdir -p -- "$LC_HOME" "$SANDBOX/xdg/data" "$SANDBOX/xdg/state" "$SANDBOX/pathbin" || return 1
@@ -180,6 +184,11 @@ lc_begin() {
     gitx config --global user.email "test@example.invalid" || return 1
     gitx config --global commit.gpgsign false || return 1
     gitx config --global init.defaultBranch main || return 1
+}
+
+# ^ external on Windows JQ_BIN is the wrapper in the share dir adding -b; elsewhere the jq on PATH
+lc_expected_jq() {
+    if [ "$TEST_IS_WINDOWS" -eq 1 ]; then printf '%s' "$LC_DATA/jq"; else env -i HOME="$SANDBOX/home" PATH="$SANDBOX/pathbin:$TEST_BASE_PATH" bash -c 'type -P jq' </dev/null; fi
 }
 
 gsg() { run_cap env -i "${LC_ENV[@]}" "${EXTRA_ENV[@]}" "$GSG_PROJECT/bin/git-secret-guard" "$@"; }
@@ -203,9 +212,11 @@ lc_platform() {
     )
 }
 
+lc_asset_name() { (source "$GSG_PROJECT/lib/common.sh" && source "$GSG_PROJECT/lib/tools.sh" && tools_tarball_name "$@"); }
+
 # ^ security the fakes print the version and nothing else => a passing test never needed the real tool
 lc_make_fixtures() {
-    local tv="${1:-3.99.2}" gv="${2:-1.9.0}" tool ver plat dir tar sha
+    local tv="${1:-3.99.2}" gv="${2:-1.9.0}" tool ver plat dir tar sha bin
     mkdir -p -- "$LC_FIX/src" || return 1
     : >"$LC_FIX/fixture.lock" || return 1
     for tool in trufflehog betterleaks; do
@@ -213,17 +224,24 @@ lc_make_fixtures() {
         if [ "$tool" = betterleaks ]; then ver="$gv"; fi
         plat="$(lc_platform "$tool")" || return 1
         dir="$LC_FIX/src/$tool"
+        bin="$tool"
+        if [ "$TEST_IS_WINDOWS" -eq 1 ] && [ -z "$LC_FAKE_OS" ]; then bin="$tool.exe"; fi
         mkdir -p -- "$dir" || return 1
         if [ "$tool" = betterleaks ]; then
-            printf '#!/bin/sh\necho "betterleaks version %s"\n' "$ver" >"$dir/$tool" || return 1
+            printf '#!/bin/sh\necho "betterleaks version %s"\n' "$ver" >"$dir/$bin" || return 1
         else
-            printf '#!/bin/sh\necho "trufflehog %s"\n' "$ver" >"$dir/$tool" || return 1
+            printf '#!/bin/sh\necho "trufflehog %s"\n' "$ver" >"$dir/$bin" || return 1
         fi
-        chmod 755 "$dir/$tool" || return 1
+        chmod 755 "$dir/$bin" || return 1
         printf 'licence text\n' >"$dir/LICENSE" || return 1
         printf 'readme text\n' >"$dir/README.md" || return 1
-        tar="$LC_FIX/${tool}_${ver}_${plat}.tar.gz"
-        tar -czf "$tar" -C "$dir" "$tool" LICENSE README.md || return 1
+        tar="$LC_FIX/$(lc_asset_name "$tool" "$ver" "$plat")"
+        # ^ external the betterleaks Windows asset is a .zip; only the System32 bsdtar writes one, GNU tar cannot
+        if [[ $tar == *.zip ]]; then
+            "$TEST_SYSTEM32/tar.exe" -a -cf "$(cygpath -m "$tar")" -C "$(cygpath -m "$dir")" "$bin" LICENSE README.md || return 1
+        else
+            tar -czf "$tar" -C "$dir" "$bin" LICENSE README.md || return 1
+        fi
         sha="$(sha256sum -- "$tar" | cut -d' ' -f1)" || return 1
         printf '%s %s %s %s\n' "$tool" "$ver" "$plat" "$sha" >>"$LC_FIX/fixture.lock" || return 1
     done
@@ -249,8 +267,12 @@ lc_path_without() {
 
 lc_seed_real_tools() {
     mkdir -p -- "$LC_BIN" || return 1
-    ln -s "$REAL_TRUFFLEHOG" "$LC_BIN/trufflehog" || return 1
-    ln -s "$REAL_BETTERLEAKS" "$LC_BIN/betterleaks" || return 1
+    if [ "$TEST_IS_WINDOWS" -eq 1 ]; then
+        cp -- "$REAL_TRUFFLEHOG" "$REAL_BETTERLEAKS" "$LC_BIN/" || return 1
+        return 0
+    fi
+    ln -s "$REAL_TRUFFLEHOG" "$LC_BIN/trufflehog$LC_EXE" || return 1
+    ln -s "$REAL_BETTERLEAKS" "$LC_BIN/betterleaks$LC_EXE" || return 1
 }
 
 lc_fake_git() {
@@ -277,4 +299,5 @@ lc_git_wrapper() {
     chmod 755 "$SANDBOX/pathbin/git"
 }
 
-lc_use_fixtures() { set_env GSG_TOOLS_BASE_URL="file://$LC_FIX" GSG_TOOLS_LOCK="$LC_FIX/fixture.lock"; }
+lc_fixture_url() { if [ "$TEST_IS_WINDOWS" -eq 1 ]; then printf 'file:///%s' "$(cygpath -m "$LC_FIX")"; else printf 'file://%s' "$LC_FIX"; fi; }
+lc_use_fixtures() { set_env GSG_TOOLS_BASE_URL="$(lc_fixture_url)" GSG_TOOLS_LOCK="$LC_FIX/fixture.lock"; }

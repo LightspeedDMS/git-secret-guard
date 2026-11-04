@@ -20,8 +20,8 @@ test_real_install_downloads_and_verifies_the_pinned_tarballs_from_github() {
     gsg install
     assert_rc 0 "install from the vendor URLs, verified against the shipped tools.lock"
     assert_not_contains "$ERR" "TEST OVERRIDE" "no override was active"
-    assert_contains "$("$LC_BIN/trufflehog" --version 2>&1)" "3.99.2" "the real trufflehog runs at the pinned version"
-    assert_contains "$("$LC_BIN/betterleaks" version 2>&1)" "1.9.0" "the real betterleaks runs at the pinned version"
+    assert_contains "$("$LC_BIN/trufflehog$LC_EXE" --version 2>&1)" "3.99.2" "the real trufflehog runs at the pinned version"
+    assert_contains "$("$LC_BIN/betterleaks$LC_EXE" version 2>&1)" "1.9.0" "the real betterleaks runs at the pinned version"
     assert_eq "$(state_value tools_installed_by_us)" "trufflehog betterleaks" "both were downloaded by install"
     gsg status
     assert_rc 0 "status is clean after a real install"

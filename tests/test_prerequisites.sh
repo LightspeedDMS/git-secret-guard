@@ -4,6 +4,9 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
 # shellcheck source=tests/lifecycle.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/lifecycle.sh"
 
+# ^ external these pin the apt, PPA and os-release hints of Linux; on Windows the hints and the jq download differ, test_windows.sh covers them
+if [ "$TEST_IS_WINDOWS" -eq 1 ]; then FILE_SKIP_REASON="Linux package manager hints"; fi
+
 UBUNTU_FIX="sudo add-apt-repository ppa:git-core/ppa && sudo apt install git"
 
 # ^ external install reads the distribution from GSG_OS_RELEASE, default /etc/os-release; the tests point it at fixtures

@@ -57,6 +57,7 @@ install_manage_jq() {
     if [ -n "$INSTALL_JQ_BIN" ] && [[ " $ST_PLACED " != *" jq:"* ]]; then return 0; fi
     GSG_TOOL_NAMES+=(jq)
     INSTALL_JQ_BIN="$GSG_BIN_DIR/$(tools_binary_name jq)"
+    # shellcheck disable=SC2034
     INSTALL_JQ_WRAPPER="$GSG_SHARE/jq"
 }
 

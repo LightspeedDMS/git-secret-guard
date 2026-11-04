@@ -86,7 +86,7 @@ test_install_refuses_a_global_hooks_path_without_the_flag_and_changes_nothing() 
     for value in '~/.config/git/hooks' '/abs/hooks dir' ''; do
         lc_begin || return 1
         mkdir -p -- "$LC_HOME/.config/git/hooks" && printf 'echo old\n' >"$LC_HOME/.config/git/hooks/pre-commit" || return 1
-        gitx config --global core.hooksPath "$value" || return 1
+        git_literal_config --global core.hooksPath "$value" || return 1
         snapshot_config
         gsg install
         assert_rc 1 "hooksPath [$value]"
@@ -114,15 +114,15 @@ test_install_downloads_verifies_and_extracts_both_tools_when_missing() {
     assert_rc 0 "install with fixtures"
     assert_contains "$ERR" "GSG_TOOLS_BASE_URL" "the test override is announced, never silent"
     assert_eq "$(find "$LC_BIN" -mindepth 1 -maxdepth 1 -exec basename {} \; | LC_ALL=C sort | tr '\n' ' ')" "betterleaks git-secret-guard trufflehog " "the CLI link and the two binaries; no LICENSE, README or leftovers"
-    [ -x "$LC_BIN/trufflehog" ] && [ -x "$LC_BIN/betterleaks" ] || fail "tools are not executable"
-    assert_eq "$("$LC_BIN/trufflehog" --version)" "trufflehog 3.99.2" "trufflehog is the downloaded one"
-    assert_eq "$("$LC_BIN/betterleaks" --version)" "betterleaks version 1.9.0" "betterleaks is the downloaded one"
+    [ -x "$LC_BIN/trufflehog$LC_EXE" ] && [ -x "$LC_BIN/betterleaks$LC_EXE" ] || fail "tools are not executable"
+    assert_eq "$("$LC_BIN/trufflehog$LC_EXE" --version)" "trufflehog 3.99.2" "trufflehog is the downloaded one"
+    assert_eq "$("$LC_BIN/betterleaks$LC_EXE" --version)" "betterleaks version 1.9.0" "betterleaks is the downloaded one"
 }
 
 seed_tool() {
     mkdir -p -- "$LC_BIN" || return 1
-    printf '#!/bin/sh\necho "%s"\n# mine\n' "$2" >"$LC_BIN/$1" || return 1
-    chmod 755 "$LC_BIN/$1"
+    printf '#!/bin/sh\necho "%s"\n# mine\n' "$2" >"$LC_BIN/$1$LC_EXE" || return 1
+    chmod 755 "$LC_BIN/$1$LC_EXE"
 }
 
 recording_curl() {
@@ -135,34 +135,34 @@ test_install_keeps_tools_that_already_report_the_pinned_version() {
     lc_begin && lc_make_fixtures && lc_use_fixtures && recording_curl || return 1
     seed_tool trufflehog "trufflehog 3.99.2" && seed_tool betterleaks "betterleaks version 1.9.0" || return 1
     local before
-    before="$(sha256sum -- "$LC_BIN/trufflehog" "$LC_BIN/betterleaks")"
+    before="$(sha256sum -- "$LC_BIN/trufflehog$LC_EXE" "$LC_BIN/betterleaks$LC_EXE")"
     gsg install
     assert_rc 0 "install"
-    assert_eq "$(sha256sum -- "$LC_BIN/trufflehog" "$LC_BIN/betterleaks")" "$before" "both files are byte-identical"
+    assert_eq "$(sha256sum -- "$LC_BIN/trufflehog$LC_EXE" "$LC_BIN/betterleaks$LC_EXE")" "$before" "both files are byte-identical"
     assert_no_file "$SANDBOX/curl.log" "nothing was downloaded"
 }
 
 test_install_replaces_tools_that_report_another_version() {
     lc_begin && lc_make_fixtures && lc_use_fixtures || return 1
     seed_tool trufflehog "trufflehog 3.0.0" && seed_tool betterleaks "betterleaks version 1.9.0" || return 1
-    chmod 644 "$LC_BIN/betterleaks"
+    chmod 644 "$LC_BIN/betterleaks$LC_EXE"
     gsg install
     assert_rc 0 "install"
-    assert_eq "$("$LC_BIN/trufflehog" --version)" "trufflehog 3.99.2" "an older trufflehog is replaced"
-    [ -x "$LC_BIN/betterleaks" ] || fail "a non-executable betterleaks is replaced by an executable one"
-    assert_not_contains "$(cat -- "$LC_BIN/trufflehog")" "# mine" "no trace of the old file"
+    assert_eq "$("$LC_BIN/trufflehog$LC_EXE" --version)" "trufflehog 3.99.2" "an older trufflehog is replaced"
+    [ -x "$LC_BIN/betterleaks$LC_EXE" ] || fail "a non-executable betterleaks is replaced by an executable one"
+    assert_not_contains "$(cat -- "$LC_BIN/trufflehog$LC_EXE")" "# mine" "no trace of the old file"
 }
 
 seed_user_betterleaks() {
     mkdir -p -- "$LC_BIN" || return 1
-    printf '#!/bin/sh\necho "betterleaks version 8.18.4"\n# user build\n' >"$LC_BIN/betterleaks" || return 1
-    chmod 750 "$LC_BIN/betterleaks"
+    printf '#!/bin/sh\necho "betterleaks version 8.18.4"\n# user build\n' >"$LC_BIN/betterleaks$LC_EXE" || return 1
+    chmod 750 "$LC_BIN/betterleaks$LC_EXE"
 }
 
 test_a_different_version_tool_of_the_user_is_moved_aside_recorded_and_never_ours() {
     local sha aside rep
     lc_begin && lc_make_fixtures && lc_use_fixtures && seed_user_betterleaks || return 1
-    sha="$(sha256sum <"$LC_BIN/betterleaks")"
+    sha="$(sha256sum <"$LC_BIN/betterleaks$LC_EXE")"
     gsg install
     assert_rc 0 "install over the user's betterleaks 8.18.4"
     aside="$(find "$LC_BIN" -name 'betterleaks.gsg-replaced-*')"
@@ -170,10 +170,10 @@ test_a_different_version_tool_of_the_user_is_moved_aside_recorded_and_never_ours
     assert_eq "$(sha256sum <"$aside")" "$sha" "the user's file is byte-identical"
     assert_eq "$(stat -c %a "$aside")" 750 "and keeps its mode"
     assert_contains "$OUT" "$aside" "the output says where the original went"
-    assert_eq "$("$LC_BIN/betterleaks" --version)" "betterleaks version 1.9.0" "the pinned betterleaks is in place"
+    assert_eq "$("$LC_BIN/betterleaks$LC_EXE" --version)" "betterleaks version 1.9.0" "the pinned betterleaks is in place"
     assert_eq "$(state_value tools_installed_by_us)" "trufflehog" "a replaced file is never recorded as ours to delete"
     rep="$(state_value tools_replaced)"
-    assert_eq "$rep" "${aside##*/}:$(sha256sum <"$LC_BIN/betterleaks" | cut -d' ' -f1)" "state records the aside name and the hash of what install put there"
+    assert_eq "$rep" "${aside##*/}:$(sha256sum <"$LC_BIN/betterleaks$LC_EXE" | cut -d' ' -f1)" "state records the aside name and the hash of what install put there"
     gsg install
     assert_rc 0 "second install"
     assert_eq "$(find "$LC_BIN" -name 'betterleaks.gsg-replaced-*' | wc -l)" 1 "no second aside file"
@@ -188,9 +188,9 @@ test_install_refuses_when_the_aside_name_is_taken_and_changes_nothing() {
     gsg install
     assert_rc 1 "the aside name already exists"
     assert_contains "$ERR" "already exists" "says why"
-    assert_contains "$(<"$LC_BIN/betterleaks")" "user build" "the user's betterleaks is untouched"
+    assert_contains "$(<"$LC_BIN/betterleaks$LC_EXE")" "user build" "the user's betterleaks is untouched"
     assert_eq "$(<"$LC_BIN/betterleaks.gsg-replaced-20261031T101500Z")" taken "and so is the file in the way"
-    assert_no_file "$LC_BIN/trufflehog" "nothing else was installed"
+    assert_no_file "$LC_BIN/trufflehog$LC_EXE" "nothing else was installed"
     assert_no_file "$LC_DATA" "no share dir"
     assert_no_file "$LC_STATE" "no state"
     assert_eq "$(cat -- "$SANDBOX/gitconfig")" "$GITCONFIG_BEFORE" "global config unchanged"
@@ -209,7 +209,7 @@ assert_nothing_installed() {
 test_the_base_url_override_cannot_skip_verification() {
     lc_begin && lc_make_fixtures || return 1
     snapshot_config
-    set_env GSG_TOOLS_BASE_URL="file://$LC_FIX"
+    set_env GSG_TOOLS_BASE_URL="$(lc_fixture_url)"
     gsg install
     assert_nothing_installed "fixture tarballs against the real tools.lock" "SHA-256 mismatch"
 
@@ -219,7 +219,7 @@ test_the_base_url_override_cannot_skip_verification() {
     assert_nothing_installed "a lock with the wrong hashes" "SHA-256 mismatch"
 
     lc_make_fixtures || return 1
-    printf 'tampered after the lock was written\n' >>"$LC_FIX/betterleaks_1.9.0_$(lc_platform betterleaks).tar.gz"
+    printf 'tampered after the lock was written\n' >>"$LC_FIX/$(lc_asset_name betterleaks 1.9.0 "$(lc_platform betterleaks)")"
     gsg install
     assert_nothing_installed "a tarball changed after the lock was written" "SHA-256 mismatch"
     assert_contains "$ERR" "download removed" "and the download is deleted"
@@ -244,7 +244,7 @@ test_install_refuses_a_binary_that_reports_another_version() {
     snapshot_config
     local plat tar
     plat="$(lc_platform betterleaks)"
-    tar="$LC_FIX/betterleaks_1.9.0_$plat.tar.gz"
+    tar="$LC_FIX/$(lc_asset_name betterleaks 1.9.0 "$plat")"
     printf '#!/bin/sh\necho "betterleaks version 8.0.0"\n' >"$LC_FIX/src/betterleaks/betterleaks" || return 1
     tar -czf "$tar" -C "$LC_FIX/src/betterleaks" betterleaks LICENSE README.md || return 1
     sed -i "s/^betterleaks 1.9.0 $plat .*/betterleaks 1.9.0 $plat $(sha256sum -- "$tar" | cut -d' ' -f1)/" "$LC_FIX/fixture.lock" || return 1
@@ -255,7 +255,7 @@ test_install_refuses_a_binary_that_reports_another_version() {
 test_a_bad_second_tool_leaves_the_good_first_tool_uninstalled() {
     lc_begin && lc_make_fixtures && lc_use_fixtures || return 1
     snapshot_config
-    printf 'tampered\n' >>"$LC_FIX/betterleaks_1.9.0_$(lc_platform betterleaks).tar.gz"
+    printf 'tampered\n' >>"$LC_FIX/$(lc_asset_name betterleaks 1.9.0 "$(lc_platform betterleaks)")"
     gsg install
     assert_nothing_installed "trufflehog fine, betterleaks tampered" "SHA-256 mismatch for betterleaks"
 }
@@ -276,12 +276,12 @@ test_curl_is_run_with_q_first_so_the_users_curlrc_is_ignored() {
     lc_begin && lc_make_fixtures && lc_use_fixtures || return 1
     printf 'head\n' >"$LC_HOME/.curlrc" || return 1
     # shellcheck disable=SC2016
-    printf '#!/bin/sh\necho "$1" >>"%s/curl.first"\nexec /usr/bin/curl "$@"\n' "$SANDBOX" >"$SANDBOX/pathbin/curl" || return 1
+    printf '#!/bin/sh\necho "$1" >>"%s/curl.first"\nexec %q "$@"\n' "$SANDBOX" "$(type -P curl)" >"$SANDBOX/pathbin/curl" || return 1
     chmod 755 "$SANDBOX/pathbin/curl" || return 1
     gsg install
     assert_rc 0 "a ~/.curlrc that turns every request into HEAD must not matter"
     assert_eq "$(sort -u "$SANDBOX/curl.first")" "-q" "curl's first argument is always -q"
-    assert_eq "$("$LC_BIN/betterleaks" --version)" "betterleaks version 1.9.0" "the real tarball arrived"
+    assert_eq "$("$LC_BIN/betterleaks$LC_EXE" --version)" "betterleaks version 1.9.0" "the real tarball arrived"
 }
 
 fresh_install() {
@@ -322,8 +322,8 @@ test_install_writes_the_settings_the_hook_reads_with_absolute_tool_paths() {
         printf "SCAN_TIMEOUT_SECONDS=%s\n" "$SCAN_TIMEOUT_SECONDS"' _ "$LC_DATA"
     assert_rc 0 "settings load through load_settings"
     assert_not_contains "$OUT" "unusable" "every configured tool is absolute and executable"
-    assert_contains "$OUT" "trufflehog=$LC_BIN/trufflehog" "trufflehog from ~/.local/bin"
-    assert_contains "$OUT" "betterleaks=$LC_BIN/betterleaks" "betterleaks from ~/.local/bin"
+    assert_contains "$OUT" "trufflehog=$LC_BIN/trufflehog$LC_EXE" "trufflehog from ~/.local/bin"
+    assert_contains "$OUT" "betterleaks=$LC_BIN/betterleaks$LC_EXE" "betterleaks from ~/.local/bin"
     assert_contains "$OUT" "jq=$(lc_which jq)" "jq as found on PATH at install time"
     assert_contains "$OUT" "setsid=$(lc_which setsid)" "setsid resolved at install time"
     assert_contains "$OUT" "timeout=$(lc_which timeout)" "timeout resolved at install time"
@@ -386,7 +386,7 @@ test_fresh_install_records_the_state() {
     assert_eq "$(stat -c %a "$LC_STATE/state")" 600 "state file is private"
     assert_eq "$(state_value tools_replaced)" "" "nothing of the user's was moved aside"
     assert_eq "$(state_value tools_placed)" \
-        "trufflehog:$(sha256sum <"$LC_BIN/trufflehog" | cut -d' ' -f1) betterleaks:$(sha256sum <"$LC_BIN/betterleaks" | cut -d' ' -f1)" \
+        "trufflehog:$(sha256sum <"$LC_BIN/trufflehog$LC_EXE" | cut -d' ' -f1) betterleaks:$(sha256sum <"$LC_BIN/betterleaks$LC_EXE" | cut -d' ' -f1)" \
         "the hash of every file install placed is recorded, also on an empty path"
     assert_eq "$(state_value timer_installed)" no "a plain install installs no timer"
     assert_eq "$(wc -l <"$LC_STATE/state")" 8 "exactly the eight keys"
@@ -405,7 +405,7 @@ test_replace_hooks_path_records_verbatim_backs_up_and_unsets() {
         dir="$LC_HOME/.config/git/hooks"
         case "$value" in /*) dir="$value" ;; esac
         seed_old_hooks "$dir" || return 1
-        gitx config --global core.hooksPath "$value" || return 1
+        git_literal_config --global core.hooksPath "$value" || return 1
         gsg install --replace-hooks-path
         assert_rc 0 "takeover of [$value]"
         gitx config --global --get core.hooksPath >/dev/null
@@ -429,7 +429,7 @@ test_replace_hooks_path_handles_a_missing_directory_and_an_empty_value() {
     local value
     for value in "$SANDBOX/home/does-not-exist" ""; do
         lc_begin && lc_make_fixtures && lc_use_fixtures || return 1
-        gitx config --global core.hooksPath "$value" || return 1
+        git_literal_config --global core.hooksPath "$value" || return 1
         gsg install --replace-hooks-path
         assert_rc 0 "takeover of [$value]"
         assert_eq "$(state_value previous_hooks_path_set)" yes "[$value] is recorded as set"
@@ -442,7 +442,7 @@ test_replace_hooks_path_handles_a_missing_directory_and_an_empty_value() {
 
 test_replace_hooks_path_refuses_a_relative_value_and_an_unbackupable_directory() {
     lc_begin && lc_make_fixtures && lc_use_fixtures || return 1
-    gitx config --global core.hooksPath relative/hooks || return 1
+    git_literal_config --global core.hooksPath relative/hooks || return 1
     snapshot_config
     gsg install --replace-hooks-path
     assert_rc 1 "relative value"
@@ -452,7 +452,7 @@ test_replace_hooks_path_refuses_a_relative_value_and_an_unbackupable_directory()
     lc_begin && lc_make_fixtures && lc_use_fixtures || return 1
     seed_old_hooks "$LC_HOME/hooks" || return 1
     chmod 000 "$LC_HOME/hooks/pre-commit" || return 1
-    gitx config --global core.hooksPath "$LC_HOME/hooks" || return 1
+    git_literal_config --global core.hooksPath "$LC_HOME/hooks" || return 1
     snapshot_config
     gsg install --replace-hooks-path
     chmod 755 "$LC_HOME/hooks/pre-commit"
@@ -469,7 +469,7 @@ test_replace_hooks_path_refuses_the_home_dir_and_directories_over_the_backup_bou
     local dir="$SANDBOX/home/big hooks"
     lc_begin && lc_make_fixtures && lc_use_fixtures || return 1
     printf 'x\n' >"$LC_HOME/some-file-in-home" || return 1
-    gitx config --global core.hooksPath "$LC_HOME" || return 1
+    git_literal_config --global core.hooksPath "$LC_HOME" || return 1
     snapshot_config
     gsg install --replace-hooks-path
     assert_rc 1 "hooksPath = the home directory"
@@ -478,7 +478,7 @@ test_replace_hooks_path_refuses_the_home_dir_and_directories_over_the_backup_bou
 
     lc_begin && lc_make_fixtures && lc_use_fixtures || return 1
     seed_old_hooks "$dir" && truncate -s 51M "$dir/huge" || return 1
-    gitx config --global core.hooksPath "$dir" || return 1
+    git_literal_config --global core.hooksPath "$dir" || return 1
     snapshot_config
     gsg install --replace-hooks-path
     assert_rc 1 "a directory over 50 MB"
@@ -489,7 +489,7 @@ test_replace_hooks_path_refuses_the_home_dir_and_directories_over_the_backup_bou
     seed_old_hooks "$dir" || return 1
     (cd -- "$dir" && seq 1 9997 | xargs touch) || return 1
     assert_eq "$(find "$dir" -mindepth 1 | wc -l)" 10000 "the fixture holds exactly 10000 entries"
-    gitx config --global core.hooksPath "$dir" || return 1
+    git_literal_config --global core.hooksPath "$dir" || return 1
     gsg install --replace-hooks-path
     assert_rc 0 "10000 entries in all are still backed up"
 
@@ -497,7 +497,7 @@ test_replace_hooks_path_refuses_the_home_dir_and_directories_over_the_backup_bou
     seed_old_hooks "$dir" || return 1
     (cd -- "$dir" && seq 1 9998 | xargs touch) || return 1
     assert_eq "$(find "$dir" -mindepth 1 | wc -l)" 10001 "the fixture holds exactly 10001 entries"
-    gitx config --global core.hooksPath "$dir" || return 1
+    git_literal_config --global core.hooksPath "$dir" || return 1
     snapshot_config
     gsg install --replace-hooks-path
     assert_rc 1 "10001 files"
@@ -526,7 +526,7 @@ test_the_resolver_refuses_root_before_anything_could_back_it_up() {
     local value
     lc_begin || return 1
     for value in / // /./ /usr/..; do
-        gitx config --global core.hooksPath "$value" || return 1
+        git_literal_config --global core.hooksPath "$value" || return 1
         # shellcheck disable=SC2016
         run_cap env -i "${LC_ENV[@]}" bash -c '
             for l in common state tools hookspath install; do source "$1/lib/$l.sh" || exit 10; done
@@ -655,7 +655,7 @@ test_the_recorded_hooks_path_is_never_overwritten_by_a_later_install() {
     local first second
     seed_old_hooks "$LC_HOME/.config/git/hooks" || return 1
     # shellcheck disable=SC2088
-    gitx config --global core.hooksPath '~/.config/git/hooks' || return 1
+    git_literal_config --global core.hooksPath '~/.config/git/hooks' || return 1
     gsg install --replace-hooks-path
     assert_rc 0 "takeover"
     first="$(state_value backup_path)"
@@ -666,13 +666,13 @@ test_the_recorded_hooks_path_is_never_overwritten_by_a_later_install() {
     assert_eq "$(state_value backup_path)" "$first" "and the same backup"
 
     seed_old_hooks "$LC_HOME/other hooks" || return 1
-    gitx config --global core.hooksPath "$LC_HOME/other hooks" || return 1
+    git_literal_config --global core.hooksPath "$LC_HOME/other hooks" || return 1
     gsg install
     assert_rc 1 "a new global hooksPath needs the flag again"
     # shellcheck disable=SC2088
     assert_eq "$(state_value previous_hooks_path)" '~/.config/git/hooks' "refusal leaves the record alone"
     # shellcheck disable=SC2088
-    gitx config --global core.hooksPath '~/.config/git/hooks' || return 1
+    git_literal_config --global core.hooksPath '~/.config/git/hooks' || return 1
     gsg install --replace-hooks-path
     assert_rc 0 "second takeover of the value that is already recorded"
     # shellcheck disable=SC2088
@@ -689,10 +689,10 @@ test_a_second_takeover_with_a_different_value_is_refused_and_changes_nothing() {
     local state backups
     lc_begin && lc_make_fixtures && lc_use_fixtures || return 1
     seed_old_hooks "$LC_HOME/h1" && seed_old_hooks "$LC_HOME/h2" || return 1
-    gitx config --global core.hooksPath "$LC_HOME/h1" || return 1
+    git_literal_config --global core.hooksPath "$LC_HOME/h1" || return 1
     gsg install --replace-hooks-path
     assert_rc 0 "first takeover"
-    gitx config --global core.hooksPath "$LC_HOME/h2" || return 1
+    git_literal_config --global core.hooksPath "$LC_HOME/h2" || return 1
     snapshot_config
     state="$(cat -- "$LC_STATE/state")"
     backups="$(find "$LC_STATE" -name 'hooks-path-backup-*' | wc -l)"
@@ -718,7 +718,7 @@ test_a_hooks_path_taken_over_after_a_plain_install_is_recorded() {
     assert_rc 0 "plain install, nothing to record"
     assert_eq "$(state_value previous_hooks_path_set)" no "recorded as unset"
     seed_old_hooks "$LC_HOME/late hooks" || return 1
-    gitx config --global core.hooksPath "$LC_HOME/late hooks" || return 1
+    git_literal_config --global core.hooksPath "$LC_HOME/late hooks" || return 1
     gsg install --replace-hooks-path
     assert_rc 0 "takeover after the fact"
     assert_eq "$(state_value previous_hooks_path_set)" yes "an 'unset' record is not a recorded value, so the real one is kept for uninstall"
@@ -777,7 +777,7 @@ test_install_refuses_before_changing_anything_when_it_cannot_record_or_link() {
     assert_eq "$(cat -- "$SANDBOX/gitconfig")" "$GITCONFIG_BEFORE" "global config unchanged"
 
     lc_begin && lc_make_fixtures && lc_use_fixtures || return 1
-    gitx config --global core.hooksPath $'/with\nnewline' || return 1
+    git_literal_config --global core.hooksPath $'/with\nnewline' || return 1
     snapshot_config
     gsg install --replace-hooks-path
     assert_rc 1 "a hooksPath that contains a newline cannot be recorded"
@@ -792,10 +792,10 @@ test_install_prints_a_summary_of_what_it_did() {
     assert_rc 0 "install"
     assert_contains "$OUT" "installed git-secret-guard $(<"$GSG_PROJECT/VERSION")" "version"
     assert_contains "$OUT" "hook command: $LC_DATA/hooks/secret-scan" "hook command"
-    assert_contains "$OUT" "trufflehog 3.99.2: kept $LC_BIN/trufflehog (already at the pinned version)" "a tool that was already right"
-    assert_contains "$OUT" "betterleaks 1.9.0: downloaded, verified against tools.lock and installed to $LC_BIN/betterleaks" "a tool that was downloaded"
+    assert_contains "$OUT" "trufflehog 3.99.2: kept $LC_BIN/trufflehog$LC_EXE (already at the pinned version)" "a tool that was already right"
+    assert_contains "$OUT" "betterleaks 1.9.0: downloaded, verified against tools.lock and installed to $LC_BIN/betterleaks$LC_EXE" "a tool that was downloaded"
     gsg install
-    assert_contains "$OUT" "betterleaks 1.9.0: kept $LC_BIN/betterleaks (already at the pinned version)" "the second run keeps it"
+    assert_contains "$OUT" "betterleaks 1.9.0: kept $LC_BIN/betterleaks$LC_EXE (already at the pinned version)" "the second run keeps it"
 }
 
 test_install_refuses_when_git_is_missing_or_unreadable_or_a_tool_path_is_relative() {
@@ -868,7 +868,7 @@ test_a_syntactically_broken_global_config_stops_install_and_uninstall() {
 
 test_install_refuses_a_hooks_path_it_cannot_expand() {
     lc_begin && lc_make_fixtures && lc_use_fixtures || return 1
-    gitx config --global core.hooksPath '~no_such_user_gsg/hooks' || return 1
+    git_literal_config --global core.hooksPath '~no_such_user_gsg/hooks' || return 1
     snapshot_config
     gsg install --replace-hooks-path
     assert_rc 1 "a ~user that does not exist"
@@ -881,7 +881,7 @@ test_install_keeps_scanning_when_the_final_hooks_path_unset_fails() {
     lc_begin && lc_make_fixtures && lc_use_fixtures || return 1
     old="$LC_HOME/old hooks"
     seed_old_hooks "$old" || return 1
-    gitx config --global core.hooksPath "$old" || return 1
+    git_literal_config --global core.hooksPath "$old" || return 1
     # shellcheck disable=SC2016
     lc_git_wrapper '[ "$1" = config ] && [ "$3" = --unset-all ] && [ "$4" = core.hooksPath ]' || return 1
     gsg install --replace-hooks-path

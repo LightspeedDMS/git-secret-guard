@@ -7,13 +7,13 @@ setup_commit() { gitx commit -q --no-verify -m setup; }
 # shellcheck disable=SC2016
 extract_staged() {
     run_cap env -i "${GSG_ENV[@]}" bash -c \
-        'set -u; set -o pipefail; source "$1/lib/extract.sh" && staged_diff | extract_added_lines "$2"' _ "$SHARE" "$1"
+        'set -u; set -o pipefail; source "$1/lib/common.sh" && source "$1/lib/extract.sh" && staged_diff | extract_added_lines "$2"' _ "$SHARE" "$1"
 }
 
 # shellcheck disable=SC2016
 extract_text() {
     run_cap env -i "${GSG_ENV[@]}" bash -c \
-        'set -u; set -o pipefail; source "$1/lib/extract.sh" && extract_added_lines "$2"' _ "$SHARE" "$1" <<<"$2"
+        'set -u; set -o pipefail; source "$1/lib/common.sh" && source "$1/lib/extract.sh" && extract_added_lines "$2"' _ "$SHARE" "$1" <<<"$2"
 }
 
 assert_content() {
@@ -246,13 +246,13 @@ test_malformed_diff_fails_instead_of_passing() {
 # shellcheck disable=SC2016
 extract_with_pathspecs() {
     run_cap env -i "${GSG_ENV[@]}" bash -c \
-        'set -u; set -o pipefail; source "$1/lib/extract.sh" && d="$2" && shift 2 && staged_diff -- "$@" | extract_added_lines "$d"' _ "$SHARE" "$@"
+        'set -u; set -o pipefail; source "$1/lib/common.sh" && source "$1/lib/extract.sh" && d="$2" && shift 2 && staged_diff -- "$@" | extract_added_lines "$d"' _ "$SHARE" "$@"
 }
 
 # shellcheck disable=SC2016
 added_file_count() {
     run_cap env -i "${GSG_ENV[@]}" bash -c \
-        'set -u; set -o pipefail; source "$1/lib/extract.sh" && shift && staged_added_file_count -- "$@"' _ "$SHARE" "$@"
+        'set -u; set -o pipefail; source "$1/lib/common.sh" && source "$1/lib/extract.sh" && shift && staged_added_file_count -- "$@"' _ "$SHARE" "$@"
 }
 
 test_pathspec_excludes_remove_files_from_the_extraction_and_the_rest_stays() {
@@ -285,7 +285,7 @@ test_added_file_count_counts_files_that_add_lines_and_honours_pathspecs() {
 
 # shellcheck disable=SC2016
 clean_stderr_of() {
-    run_cap env -i "${GSG_ENV[@]}" bash -c 'source "$1/lib/extract.sh" && _extract_clean_stderr' _ "$SHARE" <<<"$1"
+    run_cap env -i "${GSG_ENV[@]}" bash -c 'source "$1/lib/common.sh" && source "$1/lib/extract.sh" && _extract_clean_stderr' _ "$SHARE" <<<"$1"
 }
 
 test_the_awk_error_sanitizer_ends_the_text_with_a_newline_not_a_question_mark() {

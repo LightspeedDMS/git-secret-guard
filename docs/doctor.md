@@ -48,9 +48,9 @@ outer bound.
 | Installed | no state file (`not installed`) or an unreadable one |
 | State records | `tools_installed_by_us`, `tools_placed` or `tools_replaced` hold an invalid word or a tool install does not manage (PROBLEM); two hashes for one tool (an install did not finish placing it) or an aside file recorded in `tools_replaced` that is gone (WARNING) |
 | Hook config | `hook.git-secret-guard.event` is not exactly one `pre-commit`, `.command` is not exactly one value equal to the installed `hooks/secret-scan`, that file is missing or not executable, or `enabled` is false in the global or system config. A wrong count is reported as `has 2 values (global <file>; global <file>), 1 of them the installed hook`: **never the values**, a global command can hold a token and the timer writes this output to the journal |
-| Tools | the settings file is missing, or `TRUFFLEHOG_BIN`, `BETTERLEAKS_BIN`, `JQ_BIN`, `SETSID_BIN`, `TIMEOUT_BIN` is not an absolute executable, or a scanner does not report the version `tools.lock` pins (judged exactly like `install` and `status`) |
+| Tools | the settings file is missing, or `TRUFFLEHOG_BIN`, `BETTERLEAKS_BIN`, `JQ_BIN`, `SETSID_BIN` (`TASKKILL_BIN` on Windows), `TIMEOUT_BIN` is not an absolute executable, or a scanner does not report the version `tools.lock` pins (judged exactly like `install` and `status`) |
 | `core.hooksPath` | any global value is left, including one in the XDG config or in an included file (the file is named) |
-| git | WARNING for every reachable git older than 2.54: all `git` on `PATH` plus `/usr/bin/git` (2.52 on this machine), by path and version. Such a git ignores config hooks silently, so commits made with it are **not scanned**. Doctor itself needs the git first on `PATH` to be 2.54 or newer (otherwise it exits 2) |
+| git | WARNING for every reachable git older than 2.54: all `git` on `PATH` plus `/usr/bin/git` (2.52 on the RHEL host), by path and version. Such a git ignores config hooks silently, so commits made with it are **not scanned**. Doctor itself needs the git first on `PATH` to be 2.54 or newer (otherwise it exits 2) |
 | Timer | only when the state says a timer is installed: both unit files exist, were written by install, and `SYSTEMCTL_BIN` in the settings is usable; on macOS the LaunchAgent plist exists, was written by install, and `LAUNCHCTL_BIN` is usable |
 
 ## Repository discovery
@@ -244,6 +244,21 @@ the machine has a finding, which is what a timer can act on.
 - **Tests never touch the real user manager.** Lifecycle tests put a recording `systemctl` stand-in first on every `PATH`
   they use, write units into a scratch `XDG_CONFIG_HOME`, and validate the generated units with the real
   `systemd-analyze --user verify` (a parser; it runs in an in-process test manager with a scratch `XDG_RUNTIME_DIR`).
+
+## A weekly run on Windows (Task Scheduler)
+
+Windows has no `--with-timer` (`install --with-timer` stops with a message), so nothing is scheduled for you. A scheduled task you create yourself does the same job and
+works with the installed command. From cmd:
+
+```bat
+schtasks /Create /SC WEEKLY /D MON /ST 09:00 /TN git-secret-guard-doctor /TR "\"%USERPROFILE%\.local\bin\git-secret-guard.cmd\" doctor"
+schtasks /Query /TN git-secret-guard-doctor
+schtasks /Delete /TN git-secret-guard-doctor /F
+```
+
+- The task keeps the coverage reminder current: doctor rewrites its findings record on every run, and commits read it.
+- Like a failed systemd unit, the task shows last result `1` whenever doctor found a PROBLEM.
+- This task is yours: `uninstall` does not know about it, so delete it before you uninstall, or it fails every week.
 
 ## The weekly timer on macOS (launchd)
 

@@ -45,7 +45,7 @@ test_repo_pre_commit_runs_and_runs_after_the_scan() {
     assert_rc 0 commit
     assert_eq "$(hook_args pre-commit)" "args:" "no arguments for pre-commit"
     local scan_last repo_line
-    scan_last="$(line_of gitleaks)"
+    scan_last="$(line_of betterleaks)"
     repo_line="$(line_of pre-commit)"
     [ -n "$scan_last" ] && [ -n "$repo_line" ] && [ "$repo_line" -gt "$scan_last" ] || fail "scan ($scan_last) did not come before the repo hook ($repo_line)"
     [ "$(line_of trufflehog)" -lt "$repo_line" ] || fail "trufflehog did not run before the repo hook"

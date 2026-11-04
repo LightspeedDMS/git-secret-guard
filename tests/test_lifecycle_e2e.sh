@@ -18,7 +18,7 @@ assert_blocked_by_both_scanners() {
     token="$(fake_github_token)"
     assert_rc 1 "$1: the commit is blocked"
     assert_contains "$ERR" "trufflehog" "$1: trufflehog reported"
-    assert_contains "$ERR" "gitleaks" "$1: gitleaks reported"
+    assert_contains "$ERR" "betterleaks" "$1: betterleaks reported"
     assert_contains "$ERR" "src/leak.txt:2" "$1: real file and line"
     no_leak "$token"
     no_leak "${token:4}"
@@ -27,7 +27,7 @@ assert_blocked_by_both_scanners() {
 
 test_install_block_upgrade_uninstall_and_uninstall_again_with_the_real_scanners() {
     [ -x "$REAL_TRUFFLEHOG" ] || skip_test "trufflehog not found at $REAL_TRUFFLEHOG"
-    [ -x "$REAL_GITLEAKS" ] || skip_test "gitleaks not found at $REAL_GITLEAKS"
+    [ -x "$REAL_BETTERLEAKS" ] || skip_test "betterleaks not found at $REAL_BETTERLEAKS"
     lc_begin && lc_seed_real_tools || return 1
     set_env "${DEAD_PROXY[@]}"
 
@@ -46,7 +46,7 @@ test_install_block_upgrade_uninstall_and_uninstall_again_with_the_real_scanners(
     assert_rc 0 "a clean commit passes through the installed hook"
     assert_empty "$OUT" "stdout stays empty"
     assert_pass_line_only "$ERR" "one pass line"
-    assert_contains "$ERR" "(trufflehog 3.99.2, gitleaks 8.30.1): no findings" "the versions install recorded"
+    assert_contains "$ERR" "(trufflehog 3.99.2, betterleaks 1.9.0): no findings" "the versions install recorded"
 
     gsg install
     assert_rc 0 "upgrade (second install)"

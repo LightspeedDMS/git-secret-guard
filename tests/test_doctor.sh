@@ -16,7 +16,7 @@ test_a_healthy_machine_exits_0_and_shows_the_machine_section() {
     assert_contains "$OUT" "  ok       installed: version $want" "installed"
     assert_contains "$OUT" "  ok       hook: hook.git-secret-guard.event=pre-commit, command=$LC_DATA/hooks/secret-scan (executable)" "hook config"
     assert_contains "$OUT" "  ok       trufflehog: $LC_BIN/trufflehog 3.99.2 (pinned 3.99.2)" "trufflehog at the pin"
-    assert_contains "$OUT" "  ok       gitleaks: $LC_BIN/gitleaks 8.30.1 (pinned 8.30.1)" "gitleaks at the pin"
+    assert_contains "$OUT" "  ok       betterleaks: $LC_BIN/betterleaks 1.9.0 (pinned 1.9.0)" "betterleaks at the pin"
     assert_contains "$OUT" "  ok       jq: $(dr_which jq)" "jq"
     assert_contains "$OUT" "  ok       setsid: $(dr_which setsid)" "setsid"
     assert_contains "$OUT" "  ok       timeout: $(dr_which timeout)" "timeout"
@@ -103,11 +103,11 @@ test_the_machine_section_never_prints_a_hook_config_value() {
 
 test_a_tool_that_is_missing_or_at_the_wrong_version_is_a_problem() {
     dr_begin || return 1
-    rm -f -- "$LC_BIN/gitleaks" || return 1
+    rm -f -- "$LC_BIN/betterleaks" || return 1
     printf '#!/bin/sh\necho "trufflehog 3.0.0"\n' >"$LC_BIN/trufflehog" || return 1
     doctor
     assert_rc 1 "a missing and a stale tool"
-    assert_contains "$OUT" "  PROBLEM  gitleaks: gitleaks is missing or not executable ($LC_BIN/gitleaks); run git-secret-guard install" "missing"
+    assert_contains "$OUT" "  PROBLEM  betterleaks: betterleaks is missing or not executable ($LC_BIN/betterleaks); run git-secret-guard install" "missing"
     assert_contains "$OUT" "  PROBLEM  trufflehog: $LC_BIN/trufflehog reports 3.0.0, the pin is 3.99.2; run git-secret-guard install" "wrong version"
     assert_not_contains "$OUT" "  ok       trufflehog:" "no ok line for a tool at the wrong version"
     printf '#!/bin/sh\necho "trufflehog 3.99.2.1"\n' >"$LC_BIN/trufflehog" || return 1
@@ -179,23 +179,33 @@ test_an_old_git_reachable_on_PATH_or_at_usr_bin_is_a_warning_naming_path_and_ver
     assert_contains "$OUT" "warnings: " "the summary counts the warnings"
 }
 
+test_doctor_accepts_the_gitleaks_entries_of_a_state_the_previous_build_wrote() {
+    local h1
+    dr_begin || return 1
+    h1="$(printf '%064d' 1)"
+    sed -i "s#^tools_installed_by_us=.*#tools_installed_by_us=trufflehog gitleaks#; s#^tools_placed=.*#tools_placed=trufflehog:$h1 gitleaks:$h1#" "$LC_STATE/state" || return 1
+    doctor
+    assert_not_contains "$OUT" "PROBLEM  state:" "gitleaks is a tool the previous build recorded, not an unknown one"
+    assert_contains "$OUT" "state records: 2 placed hash(es)" "its hash is counted"
+}
+
 test_the_state_records_are_checked_for_validity_unfinished_placements_and_missing_originals() {
     local h1 h2 aside
     dr_begin || return 1
-    h1="$(printf '%064d' 1)" h2="$(printf '%064d' 2)" aside="gitleaks.gsg-replaced-20261031T101500Z"
+    h1="$(printf '%064d' 1)" h2="$(printf '%064d' 2)" aside="betterleaks.gsg-replaced-20261031T101500Z"
     doctor
     assert_contains "$OUT" "  ok       state records: 2 placed hash(es), 0 original(s) moved aside" "a fresh install is consistent"
 
-    sed -i "s#^tools_placed=.*#tools_placed=gitleaks:xyz git:$h1 trufflehog:$h1#" "$LC_STATE/state" || return 1
+    sed -i "s#^tools_placed=.*#tools_placed=betterleaks:xyz git:$h1 trufflehog:$h1#" "$LC_STATE/state" || return 1
     doctor
     assert_rc 1 "invalid placed entries"
-    assert_contains "$OUT" "  PROBLEM  state: tools_placed entry [gitleaks:xyz] is invalid (want <tool>:<sha256>)" "bad hash"
+    assert_contains "$OUT" "  PROBLEM  state: tools_placed entry [betterleaks:xyz] is invalid (want <tool>:<sha256>)" "bad hash"
     assert_contains "$OUT" "  PROBLEM  state: tools_placed entry [git:$h1] is invalid (want <tool>:<sha256>)" "unknown tool"
 
-    sed -i "s#^tools_placed=.*#tools_placed=gitleaks:$h1 gitleaks:$h2 gitleaks:$h2 trufflehog:$h1#" "$LC_STATE/state" || return 1
+    sed -i "s#^tools_placed=.*#tools_placed=betterleaks:$h1 betterleaks:$h2 betterleaks:$h2 trufflehog:$h1#" "$LC_STATE/state" || return 1
     doctor
     assert_rc 0 "an unfinished placement is a warning"
-    assert_contains "$OUT" "  WARNING  state: tools_placed holds 2 hashes for gitleaks, an install did not finish placing it; run git-secret-guard install again" "two different hashes, the repeat is not counted"
+    assert_contains "$OUT" "  WARNING  state: tools_placed holds 2 hashes for betterleaks, an install did not finish placing it; run git-secret-guard install again" "two different hashes, the repeat is not counted"
     assert_not_contains "$OUT" "for trufflehog" "one hash is fine"
 
     sed -i "s#^tools_installed_by_us=.*#tools_installed_by_us=trufflehog ../escape#" "$LC_STATE/state" || return 1
@@ -226,7 +236,7 @@ test_a_tools_lock_without_a_pin_row_is_a_problem_for_each_scanner() {
     doctor
     assert_rc 1 "no pinned version to compare with"
     assert_contains "$OUT" "  PROBLEM  trufflehog: tools.lock has no pinned version for this platform" "trufflehog"
-    assert_contains "$OUT" "  PROBLEM  gitleaks: tools.lock has no pinned version for this platform" "gitleaks"
+    assert_contains "$OUT" "  PROBLEM  betterleaks: tools.lock has no pinned version for this platform" "betterleaks"
 }
 
 test_a_git_config_that_cannot_be_read_is_a_doctor_error() {

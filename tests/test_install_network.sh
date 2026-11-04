@@ -6,7 +6,7 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/lifecycle.sh"
 
 need_network() {
     curl -fsI --max-time 15 -o /dev/null \
-        "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz" 2>/dev/null \
+        "https://github.com/betterleaks/betterleaks/releases/download/v1.9.0/betterleaks_1.9.0_linux_x64.tar.gz" 2>/dev/null \
         || skip_test "offline: GitHub release downloads are not reachable"
 }
 
@@ -21,8 +21,8 @@ test_real_install_downloads_and_verifies_the_pinned_tarballs_from_github() {
     assert_rc 0 "install from the vendor URLs, verified against the shipped tools.lock"
     assert_not_contains "$ERR" "TEST OVERRIDE" "no override was active"
     assert_contains "$("$LC_BIN/trufflehog" --version 2>&1)" "3.99.2" "the real trufflehog runs at the pinned version"
-    assert_contains "$("$LC_BIN/gitleaks" version 2>&1)" "8.30.1" "the real gitleaks runs at the pinned version"
-    assert_eq "$(state_value tools_installed_by_us)" "trufflehog gitleaks" "both were downloaded by install"
+    assert_contains "$("$LC_BIN/betterleaks" version 2>&1)" "1.9.0" "the real betterleaks runs at the pinned version"
+    assert_eq "$(state_value tools_installed_by_us)" "trufflehog betterleaks" "both were downloaded by install"
     gsg status
     assert_rc 0 "status is clean after a real install"
     gsg uninstall --remove-tools
@@ -35,7 +35,7 @@ test_the_other_platform_rows_of_the_lock_match_the_real_tarballs() {
     lc_begin || return 1
     local lock="$GSG_PROJECT/tools.lock" dest="$SANDBOX/real-dl" tool plat ver sha mine
     mkdir -p -- "$dest" || return 1
-    for tool in trufflehog gitleaks; do
+    for tool in trufflehog betterleaks; do
         mine="$(lc_platform "$tool")" || return 1
         while read -r _ ver plat sha; do
             if [ "$plat" = "$mine" ]; then continue; fi

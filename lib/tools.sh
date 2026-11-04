@@ -2,7 +2,10 @@
 
 GSG_LOCK_MAX_LINES=1000
 GSG_VERSION_PROBE_SECONDS=20
-GSG_TOOL_NAMES=(trufflehog gitleaks)
+GSG_TOOL_NAMES=(trufflehog betterleaks)
+# ^ external the previous build installed gitleaks and recorded it in the state file => state validation accepts it, install retires it
+GSG_LEGACY_TOOL_NAMES=(gitleaks)
+GSG_STATE_TOOL_NAMES=(trufflehog betterleaks gitleaks)
 
 # ^ security GSG_TOOLS_LOCK swaps WHICH lock is trusted, never whether one is checked => see test:test_the_base_url_override_cannot_skip_verification
 tools_lock_path() { printf '%s\n' "${GSG_TOOLS_LOCK:-$GSG_ROOT/tools.lock}"; }
@@ -52,29 +55,29 @@ tools_probe_version() {
     return 1
 }
 
-# ^ external the two vendors name the x86_64 build differently (trufflehog linux_amd64, gitleaks linux_x64); the same holds for windows_*; doc:tools.lock
+# ^ external the two vendors name the x86_64 build differently (trufflehog linux_amd64, betterleaks linux_x64); the same holds for windows_*; doc:tools.lock
 tools_platform_key() {
     local tool="$1" os="$2" arch="$3" cpu prefix=linux
     case "$tool" in
-        trufflehog | gitleaks) ;;
+        trufflehog | betterleaks) ;;
         *) printf '%s: unknown tool [%s]\n' "$GSG_NAME" "$tool" >&2; return 1 ;;
     esac
     case "$os:$arch" in
-        Linux:x86_64) cpu=amd64; [ "$tool" = gitleaks ] && cpu=x64 ;;
-        Darwin:x86_64) prefix=darwin; cpu=amd64; [ "$tool" = gitleaks ] && cpu=x64 ;;
+        Linux:x86_64) cpu=amd64; [ "$tool" = betterleaks ] && cpu=x64 ;;
+        Darwin:x86_64) prefix=darwin; cpu=amd64; [ "$tool" = betterleaks ] && cpu=x64 ;;
         Linux:aarch64 | Linux:arm64) cpu=arm64 ;;
         Darwin:arm64) prefix=darwin; cpu=arm64 ;;
-        MINGW64_NT-*:x86_64) prefix=windows; cpu=amd64; [ "$tool" = gitleaks ] && cpu=x64 ;;
+        MINGW64_NT-*:x86_64) prefix=windows; cpu=amd64; [ "$tool" = betterleaks ] && cpu=x64 ;;
         *) printf '%s: only Linux and macOS on x86_64 or arm64, or Git for Windows on x86_64, are supported, got %s on %s\n' "$GSG_NAME" "$os" "$arch" >&2; return 1 ;;
     esac
     printf '%s_%s\n' "$prefix" "$cpu"
 }
 
-# ^ external the gitleaks Windows release is a .zip, every other asset is a .tar.gz
+# ^ external the betterleaks Windows release is a .zip, every other asset is a .tar.gz
 tools_tarball_name() {
     local tool="$1" version="$2" platform="$3" ext=tar.gz
     case "$platform" in
-        windows_*) if [ "$tool" = gitleaks ]; then ext=zip; fi ;;
+        windows_*) if [ "$tool" = betterleaks ]; then ext=zip; fi ;;
     esac
     printf '%s_%s_%s.%s\n' "$tool" "$version" "$platform" "$ext"
 }
@@ -86,7 +89,7 @@ tools_release_url() {
     name="$(tools_tarball_name "$tool" "$version" "$platform")" || return 1
     case "$tool" in
         trufflehog) repo=trufflesecurity/trufflehog ;;
-        gitleaks) repo=gitleaks/gitleaks ;;
+        betterleaks) repo=betterleaks/betterleaks ;;
         *) printf '%s: unknown tool [%s]\n' "$GSG_NAME" "$tool" >&2; return 1 ;;
     esac
     if [ -n "${GSG_TOOLS_BASE_URL:-}" ]; then
@@ -167,7 +170,7 @@ tools_extract_binary() {
     chmod 755 -- "$dest/$bin"
 }
 
-# ^ external trufflehog prints "trufflehog 3.99.2", gitleaks prints "8.30.1" (version) or "gitleaks version 8.30.1" (--version); probed
+# ^ external trufflehog prints "trufflehog 3.99.2", betterleaks prints "1.9.0" (version) or "betterleaks version 1.9.0" (--version); probed
 tools_version_matches() {
     local output="$1" pinned="$2" word
     local -a words=()

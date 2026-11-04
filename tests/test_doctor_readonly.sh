@@ -8,12 +8,15 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/doctor.sh"
 
 # ^ invariant one line per file, directory or link under the sandbox (mode, size, mtime, SHA-256 of regular files); tmp/ and the harness dot files are left out
 # ^ why mtimes are included, not only hashes; a created, touched or rewritten file or directory changes at least one of them
+# ^ invariant the findings record and its lock are doctor's one write and are left out; the state dir entry is listed without its mtime
 snapshot() {
     (
         cd -- "$SANDBOX" || exit 1
-        find . \( -path ./tmp -o -path './.*' \) -prune -o -print0 | LC_ALL=C sort -z \
+        find . \( -path ./tmp -o -path './.*' -o -path ./xdg/state/git-secret-guard/findings -o -path ./xdg/state/git-secret-guard/findings.lock \) -prune -o -print0 | LC_ALL=C sort -z \
             | while IFS= read -r -d '' p; do
-                if [ -f "$p" ] && [ ! -L "$p" ]; then
+                if [ "$p" = ./xdg/state/git-secret-guard ]; then
+                    stat -c '%n %F %a' -- "$p"
+                elif [ -f "$p" ] && [ ! -L "$p" ]; then
                     printf '%s %s %s\n' "$(stat -c '%n %a %s %Y' -- "$p")" "$(sha256sum -- "$p" | cut -d' ' -f1)" f
                 else
                     stat -c '%n %F %a %Y' -- "$p"
@@ -22,7 +25,7 @@ snapshot() {
     )
 }
 
-# ^ external the real gitleaks is used when present, covering every kind of check
+# ^ external the real betterleaks is used when present, covering every kind of check
 mess() {
     local i
     dr_begin || return 1
@@ -45,8 +48,8 @@ mess() {
         cd -- "$DR_ROOTS/linked" || exit 1
         ln -s /etc/hostname .secret-scan-ignore && gitx add .secret-scan-ignore && gitx commit -q --no-verify -m link
     ) || return 1
-    if [ -x "$REAL_GITLEAKS" ]; then
-        sed -i "s#^GITLEAKS_BIN=.*#GITLEAKS_BIN=$REAL_GITLEAKS#" "$LC_DATA/settings" || return 1
+    if [ -x "$REAL_BETTERLEAKS" ]; then
+        sed -i "s#^BETTERLEAKS_BIN=.*#BETTERLEAKS_BIN=$REAL_BETTERLEAKS#" "$LC_DATA/settings" || return 1
         (
             cd -- "$DR_ROOTS/ok" || exit 1
             stage_file .gitleaks.toml "# $1" '[extend]' 'path = "base.toml"' && gitx commit -q --no-verify -m cfg
@@ -72,6 +75,11 @@ test_doctor_changes_nothing_on_a_sandbox_full_of_problems() {
     assert_empty "$(find "$SANDBOX/tmp" -mindepth 1)" "and doctor removed its own temp dir"
     doctor
     assert_eq "$(snapshot)" "$before" "also after a second run"
+    assert_eq "$(find "$LC_STATE" -mindepth 1 -maxdepth 1 | sed 's#.*/##' | LC_ALL=C sort | grep -v '^hooks-path-backup' | tr '\n' ' ')" "findings state " "the findings record is the only new entry in the state dir, and no lock or temp file stays"
+    gsg doctor --recheck
+    assert_rc 1 "the recorded problems remain"
+    assert_eq "$(snapshot)" "$before" "doctor --recheck changes nothing either"
+    assert_empty "$(find "$SANDBOX/tmp" -mindepth 1)" "and removed its own temp dir"
 }
 
 test_doctor_never_prints_file_contents_secrets_or_the_environment() {
@@ -158,7 +166,7 @@ test_doctor_folds_git_s_reason_for_a_missing_tree_into_the_finding() {
     doctor
     assert_rc 1 "the missing tree is a finding"
     assert_contains "$OUT" "git said: fatal: not a tree object)" "git's reason is in the finding"
-    assert_contains "$OUT" "cannot read .gitleaks.toml at HEAD (git said: fatal: not a tree object); every commit" "also for the gitleaks file"
+    assert_contains "$OUT" "cannot read .gitleaks.toml at HEAD (git said: fatal: not a tree object); every commit" "also for the betterleaks file"
     assert_not_contains "$ERR" "not a tree object" "and not on doctor's stderr"
 }
 
@@ -170,6 +178,40 @@ test_a_repository_git_refuses_for_its_owner_is_reported_not_a_crash() {
     assert_rc 1 "a finding, not a doctor error"
     assert_contains "$OUT" "PROBLEM  cannot be inspected: fatal: detected dubious ownership" "listed with git's own words"
     assert_contains "$OUT" "summary: 1 repos, 0 covered" "counted, not covered"
+}
+
+test_doctor_recheck_runs_no_command_a_repository_configures() {
+    local hook before after
+    dr_begin && reset_markers && dr_repo fsm || return 1
+    gitx -C "$DR_ROOTS/fsm" config hook.git-secret-guard.enabled false || return 1
+    marker_script "$SANDBOX/fsm.sh" fsmonitor || return 1
+    mkdir -p -- "$SANDBOX/hp" || return 1
+    for hook in reference-transaction post-index-change post-checkout pre-commit post-commit; do
+        marker_script "$SANDBOX/hp/$hook" "hook-$hook" || return 1
+    done
+    gitx -C "$DR_ROOTS/fsm" config core.fsmonitor "$SANDBOX/fsm.sh" || return 1
+    gitx -C "$DR_ROOTS/fsm" config core.hooksPath "$SANDBOX/hp" || return 1
+    doctor
+    assert_rc 1 "the full run records the disabled repository"
+    before="$(objects_listing "$DR_ROOTS/fsm")" || return 1
+    gsg doctor --recheck
+    after="$(objects_listing "$DR_ROOTS/fsm")" || return 1
+    assert_rc 1 "still disabled"
+    assert_contains "$OUT" "$DR_REAL/fsm" "the recheck judged the repository"
+    assert_no_markers "no fsmonitor or hook ran during the full run or the recheck"
+    assert_eq "$after" "$before" "the object store is as it was"
+}
+
+test_an_inherited_git_dir_cannot_redirect_a_recheck_to_another_repository() {
+    dr_begin && dr_repo ok && dr_repo off || return 1
+    gitx -C "$DR_ROOTS/off" config hook.git-secret-guard.enabled false || return 1
+    doctor
+    assert_rc 1 "the full run records off"
+    set_env GIT_DIR="$DR_ROOTS/ok/.git" || return 1
+    gsg doctor --recheck
+    assert_rc 1 "off is still disabled"
+    assert_contains "$OUT" "$DR_REAL/off" "the recorded repository is the one judged"
+    assert_not_contains "$OUT" "$DR_REAL/ok" "and the inherited GIT_DIR repository is not"
 }
 
 run_file_tests

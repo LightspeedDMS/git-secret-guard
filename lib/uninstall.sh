@@ -100,6 +100,58 @@ uninstall_timer() {
     fi
 }
 
+# ^ order uninstall_agent before uninstall_share_dir => the settings naming launchctl still exist; a failure keeps plist, share dir and state for a rerun
+# ^ security only a plist carrying the marker is unloaded or removed; launchctl comes from the settings file, never from PATH
+# ^ why print before bootout, not bootout alone; bootout of an agent the user already unloaded fails, and uninstall would never finish
+uninstall_agent() {
+    local msg uid target rc present=1 unloaded=0 usable=1 kept="the plist, the share dir and the state"
+    if [ "$ST_EXISTS" -ne 1 ] || [ "$ST_TIMER" != yes ]; then return 0; fi
+    if [ ! -e "$GSG_AGENT_PLIST" ] && [ ! -L "$GSG_AGENT_PLIST" ]; then
+        present=0
+        kept="the share dir and the state"
+    elif ! launchd_plist_is_ours "$GSG_AGENT_PLIST"; then
+        printf '%s: %s was not written by git-secret-guard; left in place\n' "$GSG_NAME" "$GSG_AGENT_PLIST" >&2
+        return 0
+    fi
+    uid="$(id -u)" || {
+        printf '%s: cannot read the user id (id -u failed); %s are kept\n' "$GSG_NAME" "$kept" >&2
+        return 1
+    }
+    target="gui/$uid/$GSG_LAUNCHD_LABEL"
+    if ! load_settings "$GSG_SHARE/settings" || msg="$(tool_unusable launchctl "${LAUNCHCTL_BIN:-}")"; then
+        # ^ why go on without a plist, not keep everything; nothing is left to remove and the loaded check cannot run; a rerun would stop the same way
+        if [ "$present" -eq 1 ]; then
+            printf '%s: %s; %s are kept; run launchctl bootout %s yourself, delete %s and run uninstall again\n' \
+                "$GSG_NAME" "${msg:-cannot read the settings}" "$kept" "$target" "$GSG_AGENT_PLIST" >&2
+            return 1
+        fi
+        printf '%s: %s; cannot check whether %s is still loaded; run launchctl bootout %s yourself if it is\n' \
+            "$GSG_NAME" "${msg:-cannot read the settings}" "$GSG_LAUNCHD_LABEL" "$target" >&2
+        usable=0
+    fi
+    if [ "$usable" -eq 1 ] && "$LAUNCHCTL_BIN" print "$target" >/dev/null 2>&1; then
+        "$LAUNCHCTL_BIN" bootout "$target"
+        rc=$?
+        if [ "$rc" -ne 0 ]; then
+            printf '%s: could not unload %s (launchctl exit %s); %s are kept; run launchctl bootout %s yourself or fix the cause, then run uninstall again\n' \
+                "$GSG_NAME" "$GSG_LAUNCHD_LABEL" "$rc" "$kept" "$target" >&2
+            return 1
+        fi
+        unloaded=1
+    fi
+    if [ "$present" -eq 1 ]; then rm -f -- "$GSG_AGENT_PLIST" || return 1; fi
+    # ^ invariant the 00 outcome (no plist, not loaded) says nothing; uninstall_say would count an action and hide the final "nothing to do" line
+    case "$present$unloaded" in
+        11) uninstall_say "unloaded and removed the weekly doctor agent ($GSG_AGENT_PLIST)" ;;
+        10) uninstall_say "removed the weekly doctor agent plist $GSG_AGENT_PLIST (the agent was not loaded)" ;;
+        01) uninstall_say "unloaded the weekly doctor agent $GSG_LAUNCHD_LABEL (its plist $GSG_AGENT_PLIST was already gone)" ;;
+    esac
+    if [ -f "$GSG_AGENT_LOG" ] && [ ! -L "$GSG_AGENT_LOG" ]; then
+        rm -f -- "$GSG_AGENT_LOG" || return 1
+        uninstall_say "removed the weekly doctor agent log $GSG_AGENT_LOG"
+    fi
+}
+
 uninstall_cli_link() {
     local link="$GSG_BIN_DIR/git-secret-guard"
     if [ ! -e "$link" ] && [ ! -L "$link" ]; then return 0; fi
@@ -129,7 +181,7 @@ uninstall_read_placed() {
     declare -gA UN_PLACED=()
     read -r -a words <<<"$ST_PLACED"
     for w in "${words[@]}"; do
-        if [[ $w =~ ^([a-z][a-z0-9-]*):([0-9a-f]{64})$ ]] && [[ " ${GSG_TOOL_NAMES[*]} " == *" ${BASH_REMATCH[1]} "* ]]; then
+        if [[ $w =~ ^([a-z][a-z0-9-]*):([0-9a-f]{64})$ ]] && [[ " ${GSG_STATE_TOOL_NAMES[*]} " == *" ${BASH_REMATCH[1]} "* ]]; then
             UN_PLACED[${BASH_REMATCH[1]}]+="${UN_PLACED[${BASH_REMATCH[1]}]:+ }${BASH_REMATCH[2]}"
         else
             printf '%s: invalid tools_placed entry [%s] in the state file; ignored\n' "$GSG_NAME" "${w:0:80}" >&2
@@ -164,7 +216,7 @@ uninstall_restore_replaced() {
         sha="${entry##*:}"
         tool="${aside%%.gsg-replaced-*}"
         if [[ $entry != *:* ]] || [[ ! $aside =~ $GSG_ASIDE_RE ]] || [[ ! $sha =~ ^[0-9a-f]{64}$ ]] \
-            || [[ " ${GSG_TOOL_NAMES[*]} " != *" $tool "* ]]; then
+            || [[ " ${GSG_STATE_TOOL_NAMES[*]} " != *" $tool "* ]]; then
             printf '%s: invalid tools_replaced entry [%s] in the state file; ignored\n' "$GSG_NAME" "${entry:0:80}" >&2
             continue
         fi
@@ -208,7 +260,7 @@ uninstall_tools() {
     fi
     read -r -a words <<<"$ST_TOOLS"
     for name in "${words[@]}"; do
-        if [[ " ${GSG_TOOL_NAMES[*]} " != *" $name "* ]]; then
+        if [[ " ${GSG_STATE_TOOL_NAMES[*]} " != *" $name "* ]]; then
             printf '%s: unknown tool [%s] in the state file; not removed\n' "$GSG_NAME" "$name" >&2
             continue
         fi
@@ -230,28 +282,58 @@ uninstall_tools() {
     done
 }
 
+# ^ invariant doctor's record and temp files go with the state; the caller holds the findings lock, taken at the start of uninstall_run
+# ^ coupled with lib/doctor_findings.sh owner of the record and the lock
+uninstall_findings() {
+    local f
+    for f in "$GSG_FINDINGS_FILE" "$GSG_STATE_DIR"/findings.??????; do
+        if [ -e "$f" ] || [ -L "$f" ]; then
+            rm -f -- "$f" || {
+                printf '%s: cannot remove %s\n' "$GSG_NAME" "$f" >&2
+                return 1
+            }
+        fi
+    done
+}
+
 uninstall_state() {
     if [ "$ST_EXISTS" -ne 1 ]; then return 0; fi
+    # ^ order uninstall_findings before the state file goes => a refused lock or a failed delete leaves the state, and a rerun of uninstall finds work to do
+    uninstall_findings || return 1
     rm -f -- "$GSG_STATE_FILE" || return 1
-    # ^ why rmdir, not rm -r; a non-empty state dir holds the user's backup tarballs and must stay
-    rmdir -- "$GSG_STATE_DIR" 2>/dev/null || true
     uninstall_say "removed the state"
     if [ -n "$ST_BACKUP" ] && [ -e "$ST_BACKUP" ]; then
         printf '%s: the backup of your old hooks directory is kept at %s\n' "$GSG_NAME" "$ST_BACKUP"
     fi
 }
 
+# ^ order the findings lock is taken before anything is removed => a refused lock changes nothing and the installed CLI stays for the rerun
+# ^ invariant uninstall_steps returns on many paths; the lock is released here, once, on all of them, and the state dir goes after it
+# ^ why rmdir, not rm -r; a non-empty state dir holds the user's backup tarballs and must stay
 uninstall_run() {
-    local remove_tools="$1"
+    local remove_tools="$1" rc
     GSG_UNINSTALL_ACTIONS=0
     paths_init || return 1
     lifecycle_note_global_config
     lifecycle_require_git || return 1
     state_read || return 1
+    if [ "$ST_EXISTS" -eq 1 ] && ! doctor_rec_lock; then
+        printf '%s: uninstall changed nothing; run %s uninstall again once no doctor run is active\n' "$GSG_NAME" "$GSG_NAME" >&2
+        return 1
+    fi
+    uninstall_steps "$remove_tools"
+    rc=$?
+    doctor_rec_unlock || rc=1
+    if [ "$rc" -eq 0 ] && [ "$ST_EXISTS" -eq 1 ]; then rmdir -- "$GSG_STATE_DIR" 2>/dev/null || true; fi
+    return "$rc"
+}
+
+uninstall_steps() {
+    local remove_tools="$1"
     # ^ order uninstall_restore_hooks_path before uninstall_hook_section => a failed restore leaves the hook config scanning, never a machine with neither
     uninstall_restore_hooks_path || return 1
     uninstall_hook_section || return 1
-    uninstall_timer || return 1
+    if brew_is_macos; then uninstall_agent || return 1; else uninstall_timer || return 1; fi
     uninstall_cli_link || return 1
     uninstall_share_dir || return 1
     uninstall_read_placed || return 1

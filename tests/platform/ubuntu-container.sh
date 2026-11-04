@@ -522,7 +522,7 @@ stage_checkout() {
 as_user() {
     runuser -u "$TEST_USER" -- env -i HOME="$USER_HOME" PATH="$USER_HOME/.local/bin:/usr/local/bin:/usr/bin:/bin" LANG=C.UTF-8 \
         GSG_TEST_GIT="$GIT_BIN" GSG_TEST_SHELLCHECK="$(type -P shellcheck)" GSG_TEST_JQ="$(type -P jq)" \
-        GSG_TEST_TRUFFLEHOG="$USER_HOME/.local/bin/trufflehog" GSG_TEST_GITLEAKS="$USER_HOME/.local/bin/gitleaks" "$@"
+        GSG_TEST_TRUFFLEHOG="$USER_HOME/.local/bin/trufflehog" GSG_TEST_BETTERLEAKS="$USER_HOME/.local/bin/betterleaks" "$@"
 }
 
 need_git() {

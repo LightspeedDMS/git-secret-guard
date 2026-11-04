@@ -113,10 +113,10 @@ test_install_downloads_verifies_and_extracts_both_tools_when_missing() {
     gsg install
     assert_rc 0 "install with fixtures"
     assert_contains "$ERR" "GSG_TOOLS_BASE_URL" "the test override is announced, never silent"
-    assert_eq "$(find "$LC_BIN" -mindepth 1 -maxdepth 1 -exec basename {} \; | LC_ALL=C sort | tr '\n' ' ')" "git-secret-guard gitleaks trufflehog " "the CLI link and the two binaries; no LICENSE, README or leftovers"
-    [ -x "$LC_BIN/trufflehog" ] && [ -x "$LC_BIN/gitleaks" ] || fail "tools are not executable"
+    assert_eq "$(find "$LC_BIN" -mindepth 1 -maxdepth 1 -exec basename {} \; | LC_ALL=C sort | tr '\n' ' ')" "betterleaks git-secret-guard trufflehog " "the CLI link and the two binaries; no LICENSE, README or leftovers"
+    [ -x "$LC_BIN/trufflehog" ] && [ -x "$LC_BIN/betterleaks" ] || fail "tools are not executable"
     assert_eq "$("$LC_BIN/trufflehog" --version)" "trufflehog 3.99.2" "trufflehog is the downloaded one"
-    assert_eq "$("$LC_BIN/gitleaks" --version)" "gitleaks version 8.30.1" "gitleaks is the downloaded one"
+    assert_eq "$("$LC_BIN/betterleaks" --version)" "betterleaks version 1.9.0" "betterleaks is the downloaded one"
 }
 
 seed_tool() {
@@ -133,63 +133,63 @@ recording_curl() {
 
 test_install_keeps_tools_that_already_report_the_pinned_version() {
     lc_begin && lc_make_fixtures && lc_use_fixtures && recording_curl || return 1
-    seed_tool trufflehog "trufflehog 3.99.2" && seed_tool gitleaks "gitleaks version 8.30.1" || return 1
+    seed_tool trufflehog "trufflehog 3.99.2" && seed_tool betterleaks "betterleaks version 1.9.0" || return 1
     local before
-    before="$(sha256sum -- "$LC_BIN/trufflehog" "$LC_BIN/gitleaks")"
+    before="$(sha256sum -- "$LC_BIN/trufflehog" "$LC_BIN/betterleaks")"
     gsg install
     assert_rc 0 "install"
-    assert_eq "$(sha256sum -- "$LC_BIN/trufflehog" "$LC_BIN/gitleaks")" "$before" "both files are byte-identical"
+    assert_eq "$(sha256sum -- "$LC_BIN/trufflehog" "$LC_BIN/betterleaks")" "$before" "both files are byte-identical"
     assert_no_file "$SANDBOX/curl.log" "nothing was downloaded"
 }
 
 test_install_replaces_tools_that_report_another_version() {
     lc_begin && lc_make_fixtures && lc_use_fixtures || return 1
-    seed_tool trufflehog "trufflehog 3.0.0" && seed_tool gitleaks "gitleaks version 8.30.1" || return 1
-    chmod 644 "$LC_BIN/gitleaks"
+    seed_tool trufflehog "trufflehog 3.0.0" && seed_tool betterleaks "betterleaks version 1.9.0" || return 1
+    chmod 644 "$LC_BIN/betterleaks"
     gsg install
     assert_rc 0 "install"
     assert_eq "$("$LC_BIN/trufflehog" --version)" "trufflehog 3.99.2" "an older trufflehog is replaced"
-    [ -x "$LC_BIN/gitleaks" ] || fail "a non-executable gitleaks is replaced by an executable one"
+    [ -x "$LC_BIN/betterleaks" ] || fail "a non-executable betterleaks is replaced by an executable one"
     assert_not_contains "$(cat -- "$LC_BIN/trufflehog")" "# mine" "no trace of the old file"
 }
 
-seed_user_gitleaks() {
+seed_user_betterleaks() {
     mkdir -p -- "$LC_BIN" || return 1
-    printf '#!/bin/sh\necho "gitleaks version 8.18.4"\n# user build\n' >"$LC_BIN/gitleaks" || return 1
-    chmod 750 "$LC_BIN/gitleaks"
+    printf '#!/bin/sh\necho "betterleaks version 8.18.4"\n# user build\n' >"$LC_BIN/betterleaks" || return 1
+    chmod 750 "$LC_BIN/betterleaks"
 }
 
 test_a_different_version_tool_of_the_user_is_moved_aside_recorded_and_never_ours() {
     local sha aside rep
-    lc_begin && lc_make_fixtures && lc_use_fixtures && seed_user_gitleaks || return 1
-    sha="$(sha256sum <"$LC_BIN/gitleaks")"
+    lc_begin && lc_make_fixtures && lc_use_fixtures && seed_user_betterleaks || return 1
+    sha="$(sha256sum <"$LC_BIN/betterleaks")"
     gsg install
-    assert_rc 0 "install over the user's gitleaks 8.18.4"
-    aside="$(find "$LC_BIN" -name 'gitleaks.gsg-replaced-*')"
-    [[ $aside =~ /gitleaks\.gsg-replaced-[0-9]{8}T[0-9]{6}Z$ ]] || fail "one aside file named <tool>.gsg-replaced-<UTC stamp>, got [$aside]"
+    assert_rc 0 "install over the user's betterleaks 8.18.4"
+    aside="$(find "$LC_BIN" -name 'betterleaks.gsg-replaced-*')"
+    [[ $aside =~ /betterleaks\.gsg-replaced-[0-9]{8}T[0-9]{6}Z$ ]] || fail "one aside file named <tool>.gsg-replaced-<UTC stamp>, got [$aside]"
     assert_eq "$(sha256sum <"$aside")" "$sha" "the user's file is byte-identical"
     assert_eq "$(stat -c %a "$aside")" 750 "and keeps its mode"
     assert_contains "$OUT" "$aside" "the output says where the original went"
-    assert_eq "$("$LC_BIN/gitleaks" --version)" "gitleaks version 8.30.1" "the pinned gitleaks is in place"
+    assert_eq "$("$LC_BIN/betterleaks" --version)" "betterleaks version 1.9.0" "the pinned betterleaks is in place"
     assert_eq "$(state_value tools_installed_by_us)" "trufflehog" "a replaced file is never recorded as ours to delete"
     rep="$(state_value tools_replaced)"
-    assert_eq "$rep" "${aside##*/}:$(sha256sum <"$LC_BIN/gitleaks" | cut -d' ' -f1)" "state records the aside name and the hash of what install put there"
+    assert_eq "$rep" "${aside##*/}:$(sha256sum <"$LC_BIN/betterleaks" | cut -d' ' -f1)" "state records the aside name and the hash of what install put there"
     gsg install
     assert_rc 0 "second install"
-    assert_eq "$(find "$LC_BIN" -name 'gitleaks.gsg-replaced-*' | wc -l)" 1 "no second aside file"
+    assert_eq "$(find "$LC_BIN" -name 'betterleaks.gsg-replaced-*' | wc -l)" 1 "no second aside file"
     assert_eq "$(state_value tools_replaced)" "$rep" "and the record is unchanged"
 }
 
 test_install_refuses_when_the_aside_name_is_taken_and_changes_nothing() {
-    lc_begin && lc_make_fixtures && lc_use_fixtures && seed_user_gitleaks || return 1
+    lc_begin && lc_make_fixtures && lc_use_fixtures && seed_user_betterleaks || return 1
     printf '#!/bin/sh\necho 20261031T101500Z\n' >"$SANDBOX/pathbin/date" && chmod 755 "$SANDBOX/pathbin/date" || return 1
-    printf 'taken\n' >"$LC_BIN/gitleaks.gsg-replaced-20261031T101500Z" || return 1
+    printf 'taken\n' >"$LC_BIN/betterleaks.gsg-replaced-20261031T101500Z" || return 1
     snapshot_config
     gsg install
     assert_rc 1 "the aside name already exists"
     assert_contains "$ERR" "already exists" "says why"
-    assert_contains "$(<"$LC_BIN/gitleaks")" "user build" "the user's gitleaks is untouched"
-    assert_eq "$(<"$LC_BIN/gitleaks.gsg-replaced-20261031T101500Z")" taken "and so is the file in the way"
+    assert_contains "$(<"$LC_BIN/betterleaks")" "user build" "the user's betterleaks is untouched"
+    assert_eq "$(<"$LC_BIN/betterleaks.gsg-replaced-20261031T101500Z")" taken "and so is the file in the way"
     assert_no_file "$LC_BIN/trufflehog" "nothing else was installed"
     assert_no_file "$LC_DATA" "no share dir"
     assert_no_file "$LC_STATE" "no state"
@@ -219,7 +219,7 @@ test_the_base_url_override_cannot_skip_verification() {
     assert_nothing_installed "a lock with the wrong hashes" "SHA-256 mismatch"
 
     lc_make_fixtures || return 1
-    printf 'tampered after the lock was written\n' >>"$LC_FIX/gitleaks_8.30.1_$(lc_platform gitleaks).tar.gz"
+    printf 'tampered after the lock was written\n' >>"$LC_FIX/betterleaks_1.9.0_$(lc_platform betterleaks).tar.gz"
     gsg install
     assert_nothing_installed "a tarball changed after the lock was written" "SHA-256 mismatch"
     assert_contains "$ERR" "download removed" "and the download is deleted"
@@ -229,10 +229,10 @@ test_the_base_url_override_cannot_skip_verification() {
     assert_nothing_installed "an empty lock" "no row for trufflehog"
 
     lc_make_fixtures || return 1
-    grep -v '^gitleaks ' "$LC_FIX/fixture.lock" >"$LC_FIX/partial.lock"
+    grep -v '^betterleaks ' "$LC_FIX/fixture.lock" >"$LC_FIX/partial.lock"
     set_env GSG_TOOLS_LOCK="$LC_FIX/partial.lock"
     gsg install
-    assert_nothing_installed "a lock without a row for gitleaks" "no row for gitleaks"
+    assert_nothing_installed "a lock without a row for betterleaks" "no row for betterleaks"
 
     set_env GSG_TOOLS_LOCK="$LC_FIX/missing.lock"
     gsg install
@@ -243,21 +243,21 @@ test_install_refuses_a_binary_that_reports_another_version() {
     lc_begin && lc_make_fixtures && lc_use_fixtures || return 1
     snapshot_config
     local plat tar
-    plat="$(lc_platform gitleaks)"
-    tar="$LC_FIX/gitleaks_8.30.1_$plat.tar.gz"
-    printf '#!/bin/sh\necho "gitleaks version 8.0.0"\n' >"$LC_FIX/src/gitleaks/gitleaks" || return 1
-    tar -czf "$tar" -C "$LC_FIX/src/gitleaks" gitleaks LICENSE README.md || return 1
-    sed -i "s/^gitleaks 8.30.1 $plat .*/gitleaks 8.30.1 $plat $(sha256sum -- "$tar" | cut -d' ' -f1)/" "$LC_FIX/fixture.lock" || return 1
+    plat="$(lc_platform betterleaks)"
+    tar="$LC_FIX/betterleaks_1.9.0_$plat.tar.gz"
+    printf '#!/bin/sh\necho "betterleaks version 8.0.0"\n' >"$LC_FIX/src/betterleaks/betterleaks" || return 1
+    tar -czf "$tar" -C "$LC_FIX/src/betterleaks" betterleaks LICENSE README.md || return 1
+    sed -i "s/^betterleaks 1.9.0 $plat .*/betterleaks 1.9.0 $plat $(sha256sum -- "$tar" | cut -d' ' -f1)/" "$LC_FIX/fixture.lock" || return 1
     gsg install
-    assert_nothing_installed "a verified tarball whose binary says 8.0.0" "does not report version 8.30.1"
+    assert_nothing_installed "a verified tarball whose binary says 8.0.0" "does not report version 1.9.0"
 }
 
 test_a_bad_second_tool_leaves_the_good_first_tool_uninstalled() {
     lc_begin && lc_make_fixtures && lc_use_fixtures || return 1
     snapshot_config
-    printf 'tampered\n' >>"$LC_FIX/gitleaks_8.30.1_$(lc_platform gitleaks).tar.gz"
+    printf 'tampered\n' >>"$LC_FIX/betterleaks_1.9.0_$(lc_platform betterleaks).tar.gz"
     gsg install
-    assert_nothing_installed "trufflehog fine, gitleaks tampered" "SHA-256 mismatch for gitleaks"
+    assert_nothing_installed "trufflehog fine, betterleaks tampered" "SHA-256 mismatch for betterleaks"
 }
 
 test_curl_is_required_only_when_a_download_is_needed() {
@@ -267,7 +267,7 @@ test_curl_is_required_only_when_a_download_is_needed() {
     assert_rc 1 "downloads needed, no curl"
     assert_contains "$ERR" "curl is required" "says why"
     assert_untouched "no curl"
-    seed_tool trufflehog "trufflehog 3.99.2" && seed_tool gitleaks "gitleaks version 8.30.1" || return 1
+    seed_tool trufflehog "trufflehog 3.99.2" && seed_tool betterleaks "betterleaks version 1.9.0" || return 1
     gsg install
     assert_rc 0 "nothing to download, so curl is not needed"
 }
@@ -281,7 +281,7 @@ test_curl_is_run_with_q_first_so_the_users_curlrc_is_ignored() {
     gsg install
     assert_rc 0 "a ~/.curlrc that turns every request into HEAD must not matter"
     assert_eq "$(sort -u "$SANDBOX/curl.first")" "-q" "curl's first argument is always -q"
-    assert_eq "$("$LC_BIN/gitleaks" --version)" "gitleaks version 8.30.1" "the real tarball arrived"
+    assert_eq "$("$LC_BIN/betterleaks" --version)" "betterleaks version 1.9.0" "the real tarball arrived"
 }
 
 fresh_install() {
@@ -296,7 +296,7 @@ test_fresh_install_copies_the_package_into_the_share_dir_and_links_the_cli() {
     assert_rc 0 "fresh install"
     local f
     for f in hooks/secret-scan lib/common.sh lib/run-scanner.sh lib/exempt.sh lib/extract.sh lib/extract.awk lib/report.sh lib/tools.sh \
-        lib/install.sh lib/state.sh lib/usage.md lib/scanners/trufflehog.sh lib/scanners/gitleaks.sh bin/git-secret-guard tools.lock VERSION; do
+        lib/install.sh lib/state.sh lib/usage.md lib/scanners/trufflehog.sh lib/scanners/betterleaks.sh bin/git-secret-guard tools.lock VERSION; do
         assert_file "$LC_DATA/$f" "share dir holds $f"
         assert_eq "$(cmp -s "$GSG_PROJECT/$f" "$LC_DATA/$f" && echo same)" same "$f is a verbatim copy"
     done
@@ -315,7 +315,7 @@ test_install_writes_the_settings_the_hook_reads_with_absolute_tool_paths() {
     # shellcheck disable=SC2016
     run_cap env -i "${GSG_ENV[@]}" bash -c '
         source "$1/lib/common.sh" && load_settings "$1/settings" || exit 10
-        for spec in jq:$JQ_BIN trufflehog:$TRUFFLEHOG_BIN gitleaks:$GITLEAKS_BIN setsid:$SETSID_BIN timeout:$TIMEOUT_BIN; do
+        for spec in jq:$JQ_BIN trufflehog:$TRUFFLEHOG_BIN betterleaks:$BETTERLEAKS_BIN setsid:$SETSID_BIN timeout:$TIMEOUT_BIN; do
             if tool_unusable "${spec%%:*}" "${spec#*:}"; then echo "unusable ${spec}"; fi
             printf "%s=%s\n" "${spec%%:*}" "${spec#*:}"
         done
@@ -323,7 +323,7 @@ test_install_writes_the_settings_the_hook_reads_with_absolute_tool_paths() {
     assert_rc 0 "settings load through load_settings"
     assert_not_contains "$OUT" "unusable" "every configured tool is absolute and executable"
     assert_contains "$OUT" "trufflehog=$LC_BIN/trufflehog" "trufflehog from ~/.local/bin"
-    assert_contains "$OUT" "gitleaks=$LC_BIN/gitleaks" "gitleaks from ~/.local/bin"
+    assert_contains "$OUT" "betterleaks=$LC_BIN/betterleaks" "betterleaks from ~/.local/bin"
     assert_contains "$OUT" "jq=$(lc_which jq)" "jq as found on PATH at install time"
     assert_contains "$OUT" "setsid=$(lc_which setsid)" "setsid resolved at install time"
     assert_contains "$OUT" "timeout=$(lc_which timeout)" "timeout resolved at install time"
@@ -337,12 +337,12 @@ test_install_records_the_pinned_scanner_versions_in_the_settings() {
     # shellcheck disable=SC2016
     run_cap env -i "${GSG_ENV[@]}" TRUFFLEHOG_VERSION=0.0.1 bash -c '
         source "$1/lib/common.sh" && load_settings "$1/settings" || exit 10
-        printf "tf=%s gl=%s\n" "$TRUFFLEHOG_VERSION" "$GITLEAKS_VERSION"
+        printf "tf=%s gl=%s\n" "$TRUFFLEHOG_VERSION" "$BETTERLEAKS_VERSION"
         grep -v _VERSION= "$1/settings" >"$1/settings.bare"
         load_settings "$1/settings.bare" || exit 11
         printf "bare=[%s]\n" "${TRUFFLEHOG_VERSION:-}"' _ "$LC_DATA"
     assert_rc 0 "settings load"
-    assert_contains "$OUT" "tf=3.99.2 gl=8.30.1" "the pinned versions the install verified"
+    assert_contains "$OUT" "tf=3.99.2 gl=1.9.0" "the pinned versions the install verified"
     assert_contains "$OUT" "bare=[]" "an inherited version cannot fill a file without it"
 }
 
@@ -380,13 +380,13 @@ test_fresh_install_records_the_state() {
     assert_eq "$(state_value version)" "$(<"$GSG_PROJECT/VERSION")" "installed version"
     assert_eq "$(state_value previous_hooks_path_set)" no "no previous core.hooksPath"
     assert_eq "$(state_value previous_hooks_path)" "" "and no value"
-    assert_eq "$(state_value tools_installed_by_us)" "trufflehog gitleaks" "both tools were downloaded by us"
+    assert_eq "$(state_value tools_installed_by_us)" "trufflehog betterleaks" "both tools were downloaded by us"
     assert_eq "$(state_value backup_path)" "" "no backup"
     assert_eq "$(stat -c %a "$LC_STATE")" 700 "state dir is private"
     assert_eq "$(stat -c %a "$LC_STATE/state")" 600 "state file is private"
     assert_eq "$(state_value tools_replaced)" "" "nothing of the user's was moved aside"
     assert_eq "$(state_value tools_placed)" \
-        "trufflehog:$(sha256sum <"$LC_BIN/trufflehog" | cut -d' ' -f1) gitleaks:$(sha256sum <"$LC_BIN/gitleaks" | cut -d' ' -f1)" \
+        "trufflehog:$(sha256sum <"$LC_BIN/trufflehog" | cut -d' ' -f1) betterleaks:$(sha256sum <"$LC_BIN/betterleaks" | cut -d' ' -f1)" \
         "the hash of every file install placed is recorded, also on an empty path"
     assert_eq "$(state_value timer_installed)" no "a plain install installs no timer"
     assert_eq "$(wc -l <"$LC_STATE/state")" 8 "exactly the eight keys"
@@ -565,9 +565,9 @@ test_a_tool_the_user_installed_is_never_recorded_as_ours() {
     seed_tool trufflehog "trufflehog 3.99.2" || return 1
     gsg install
     assert_rc 0 "install"
-    assert_eq "$(state_value tools_installed_by_us)" "gitleaks" "only the downloaded tool is ours"
+    assert_eq "$(state_value tools_installed_by_us)" "betterleaks" "only the downloaded tool is ours"
     gsg install
-    assert_eq "$(state_value tools_installed_by_us)" "gitleaks" "and a re-install keeps it that way"
+    assert_eq "$(state_value tools_installed_by_us)" "betterleaks" "and a re-install keeps it that way"
 }
 
 make_newer_checkout() {
@@ -593,7 +593,7 @@ test_an_install_from_a_newer_checkout_replaces_the_files_and_keeps_the_record() 
     assert_no_file "$LC_DATA/lib/stale-from-0.1.0.sh" "files the new version no longer ships are gone"
     assert_eq "$(cmp -s "$GSG_PROJECT/lib/common.sh" "$LC_DATA/lib/common.sh" && echo same)" same "a local edit is overwritten"
     assert_eq "$(cfg_count hook.git-secret-guard.event)$(cfg_count hook.git-secret-guard.command)" 11 "config keys stay single-valued"
-    assert_eq "$(state_value tools_installed_by_us)" "trufflehog gitleaks" "tools downloaded by the first install stay recorded"
+    assert_eq "$(state_value tools_installed_by_us)" "trufflehog betterleaks" "tools downloaded by the first install stay recorded"
     gsg_installed version
     assert_eq "$OUT" "git-secret-guard 0.2.0" "the installed CLI is the new one"
 }
@@ -793,9 +793,9 @@ test_install_prints_a_summary_of_what_it_did() {
     assert_contains "$OUT" "installed git-secret-guard $(<"$GSG_PROJECT/VERSION")" "version"
     assert_contains "$OUT" "hook command: $LC_DATA/hooks/secret-scan" "hook command"
     assert_contains "$OUT" "trufflehog 3.99.2: kept $LC_BIN/trufflehog (already at the pinned version)" "a tool that was already right"
-    assert_contains "$OUT" "gitleaks 8.30.1: downloaded, verified against tools.lock and installed to $LC_BIN/gitleaks" "a tool that was downloaded"
+    assert_contains "$OUT" "betterleaks 1.9.0: downloaded, verified against tools.lock and installed to $LC_BIN/betterleaks" "a tool that was downloaded"
     gsg install
-    assert_contains "$OUT" "gitleaks 8.30.1: kept $LC_BIN/gitleaks (already at the pinned version)" "the second run keeps it"
+    assert_contains "$OUT" "betterleaks 1.9.0: kept $LC_BIN/betterleaks (already at the pinned version)" "the second run keeps it"
 }
 
 test_install_refuses_when_git_is_missing_or_unreadable_or_a_tool_path_is_relative() {

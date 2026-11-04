@@ -34,7 +34,7 @@ sudo make prefix=/usr/local NO_RUST=1 NO_TCLTK=1 NO_GETTEXT=1 install     # /usr
 Then `git clone <this repository> && cd git-secret-guard && bin/git-secret-guard install` works as on RHEL. `install` names the missing
 prerequisite with its fix, always before it changes anything: git (the PPA command on Ubuntu and its derivatives, a build pointer on
 Debian, generic text elsewhere), `jq` (`sudo apt install jq`), `setsid` (`util-linux`), `timeout` (`coreutils`), `curl`, and
-`systemctl` for `--with-timer` (`systemd`). It checks all of them first and names **every** missing one with its fix in a single refusal
+`systemctl` for `--with-timer` (`systemd`; on macOS `launchctl` instead, which ships with the system). It checks all of them first and names **every** missing one with its fix in a single refusal
 (with the count when there are several), so one run is enough to see everything to install. The distribution is read from `/etc/os-release`
 as data (never sourced); a missing or unreadable file gives the generic hint and no shell error.
 
@@ -63,7 +63,7 @@ bin/git-secret-guard install        # lists what is missing, installs it with br
   When a GNU `timeout` already exists (`coreutils` installed), the tool plan, the download, the SHA-256 check and the `--version` check run
   before that `brew install` as well, so a bad download refuses with nothing changed. Only on a Mac without `coreutils` do they follow it, because
   the version probes need a bounded `timeout`; a failed download there is a refusal that names what brew installed. An old git, an
-  unsupported CPU, `--with-timer`, a set `core.hooksPath`, a lock without a row for this platform and the other refusals therefore install
+  unsupported CPU, a `--with-timer` without `launchctl`, a set `core.hooksPath`, a lock without a row for this platform and the other refusals therefore install
   nothing beyond the bootstrap's `bash`.
 - **The CLI needs the GNU directory.** On macOS every command except `install`, `version` and `help` refuses, naming `brew install coreutils`,
   when no GNU directory is known (the installed copy's settings have no `GNUBIN_DIR`, or a checkout finds no `brew` on `PATH`). A global-config
@@ -71,7 +71,7 @@ bin/git-secret-guard install        # lists what is missing, installs it with br
 - **What a refusal says after a brew install.** Once any `brew install` ran in the invocation, no message claims that nothing was changed;
   it names what changed (`the only change made was the Homebrew install of bash in this run`). A failing `brew install` ends the run with brew's
   own message and says Homebrew may have installed part of the list before failing (see `brew list`).
-- **The scanners are never installed with brew.** trufflehog and gitleaks come from the SHA-256-pinned darwin rows of `tools.lock`
+- **The scanners are never installed with brew.** trufflehog and betterleaks come from the SHA-256-pinned darwin rows of `tools.lock`
   through the same download, verify, extract and `--version` path as on Linux, into `~/.local/bin`. Brew only has the latest release
   (trufflehog 3.99.7 against the pin 3.99.2 when this was written), and the documented behaviours are verified per pinned version.
 - **Absolute paths, no `PATH` order.** The settings file records `BASH_BIN` (the Homebrew bash), `GNUBIN_DIR` (the GNU coreutils
@@ -86,8 +86,11 @@ bin/git-secret-guard install        # lists what is missing, installs it with br
   `._/+@%-` is believed, so a value that needs shell quoting is ignored), checks that it is executable and reports bash 4.4 or
   newer, and re-executes under it once. If that fails it refuses with a message that names the command, the unusable `BASH_BIN`
   and what to do (put the Homebrew bash first on `PATH`, or `brew install bash`), never the install wording.
-- **`install --with-timer` is refused** on macOS (`launchd is not supported yet`) and changes nothing; the weekly doctor timer is
-  systemd only for now. `doctor` and `status` work and check `BASH_BIN` like the other recorded tools.
+- **`install --with-timer` installs a LaunchAgent** on macOS: `~/Library/LaunchAgents/com.lightspeeddms.git-secret-guard.doctor.plist`,
+  loaded with `launchctl bootstrap gui/<uid>`, running doctor weekly through the recorded bash with its output in
+  `doctor.log` in the state directory; `launchctl` is recorded as `LAUNCHCTL_BIN` (details in
+  [the launchd section of the doctor chapter](doctor.md#the-weekly-timer-on-macos-launchd)). `doctor` and `status` check
+  `BASH_BIN` and `LAUNCHCTL_BIN` like the other recorded tools.
 - **GNU flags and their answers.** `realpath -m`, `mktemp --suffix`, `mv -T`/`-n`, `install -T`, `chmod 700 -- DIR` and `sort -z` run from
   the GNU directory. `find -printf` (backup bounds) stays where `find` has it (Linux) and is `find -print0 | xargs stat` elsewhere (GNU or BSD `stat` format chosen by a probe);
   `find -ls` was tried and dropped, because an owner or group name with a space moves its size column;
@@ -228,7 +231,7 @@ written. It pulls the image when it is absent and runs it with `--rm --init`. Th
 Inside, as root: apt-install the prerequisites (jq, curl, pre-commit, systemd for `systemd-analyze`, dbus, gawk next to mawk), make **mawk** the default
 awk, install **shellcheck 0.11.0** from its release tarball (SHA-256 pinned; apt's 0.9.0 reports other infos than the 0.11 the suite is clean on),
 get git (PPA, else the SHA-256 verified tarball above), create a **non-root user**, then as that user under `env -i`: the **install E2E**
-(`tests/platform/ubuntu-e2e.sh`: install with real downloads, a runtime-built fake token blocked by trufflehog and gitleaks, upgrade, uninstall,
+(`tests/platform/ubuntu-e2e.sh`: install with real downloads, a runtime-built fake token blocked by trufflehog and betterleaks, upgrade, uninstall,
 second uninstall, no value printed) and `tests/run.sh` (some tests use `chmod 000`, which root ignores). Every step runs under `timeout`; the
 run ends with a summary, the list of skipped tests with their reasons, and exits nonzero on any failure. Tests that need something the container
 lacks skip with a reason (`cidx-server unit cannot be read` is the host's own service); none is faked.
@@ -243,7 +246,7 @@ lacks skip with a reason (`cidx-server unit cannot be read` is the host's own se
 - **apt packages are not version-pinned.** `jq`, `curl`, `gawk`, `mawk`, `pre-commit`, `dbus` and the others come from the Ubuntu archive (signed by
   apt's own keyring) and the PPA at whatever version they carry on the day; the summary prints the versions that were used.
 - **Pinned by SHA-256:** the `git-2.56.0.tar.xz` source tarball from kernel.org and the shellcheck 0.11.0 release tarballs. **Pinned by digest:** the
-  base image. **Pinned in `tools.lock`:** trufflehog and gitleaks, which the install E2E downloads for real.
+  base image. **Pinned in `tools.lock`:** trufflehog and betterleaks, which the install E2E downloads for real.
 
 ## Linux containers from a Mac (a regression run, not a trust boundary)
 

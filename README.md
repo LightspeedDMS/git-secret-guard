@@ -1,7 +1,7 @@
 # git-secret-guard
 
 Scans each commit made on this machine (with git 2.54 or newer) for secrets before it is made. The lines a
-commit adds are checked by **trufflehog** and **gitleaks** in parallel, and any finding blocks the commit. It is a
+commit adds are checked by **trufflehog** and **betterleaks** in parallel, and any finding blocks the commit. It is a
 git config-based hook, so it runs alongside whatever hooks a repository brings (husky, the pre-commit framework,
 `.git/hooks`), also in repositories cloned later.
 
@@ -21,19 +21,22 @@ git clone <this repository> && cd git-secret-guard
 bin/git-secret-guard install
 ```
 
-This puts trufflehog and gitleaks in `~/.local/bin` at the versions pinned in `tools.lock`. A tool already at the
+This puts trufflehog and betterleaks in `~/.local/bin` at the versions pinned in `tools.lock`. A tool already at the
 pinned version is kept; otherwise it is downloaded and its SHA-256 checked, and a file install did not place there
 is moved aside, never overwritten. Install also links the `git-secret-guard` command into `~/.local/bin` (keep it on
 your `PATH`), copies the package to `~/.local/share/git-secret-guard`, and adds the hook to your global git config.
 If you already have a global `core.hooksPath`, install refuses; `install --replace-hooks-path` backs it up and takes
-it over. To upgrade, run `install` again from a newer checkout. Details: [docs/install.md](docs/install.md).
+it over. To upgrade, run `install` again from a newer checkout; a machine installed by the earlier build that used
+**gitleaks** is upgraded the same way (the gitleaks that build placed is removed, yours is restored). Details:
+[docs/install.md](docs/install.md).
 
 ## Use
 
 ```bash
 git commit ...                          # scanned automatically
 git-secret-guard status                 # what is installed, and whether the config still matches
-git-secret-guard doctor                 # which repositories under ~/Dev are not protected, and why
+git-secret-guard doctor                 # which repositories under ~/Dev are not protected, and why (records the PROBLEMs)
+git-secret-guard doctor --recheck       # re-check only the recorded PROBLEMs, no search
 git-secret-guard uninstall              # restore what was there before (--remove-tools: also the scanners it downloaded)
 ```
 
@@ -41,7 +44,7 @@ A blocked commit lists the scanner, rule, file and line of each finding, never t
 one line, so a clean scan can be told from a hook that never ran:
 
 ```
-git-secret-guard: scanned 3 files, 214 added lines (trufflehog 3.99.2, gitleaks 8.30.1): no findings, 1s
+git-secret-guard: scanned 3 files, 214 added lines (trufflehog 3.99.2, betterleaks 1.9.0): no findings, 1s
 git-secret-guard: no added lines to scan                      # only deletions, binary files, mode changes, an empty commit
 git-secret-guard: scanned 3 files, ..., no findings, 2 files exempted, 1s   # .secret-scan-ignore excluded staged files
 ```
@@ -49,13 +52,24 @@ git-secret-guard: scanned 3 files, ..., no findings, 2 files exempted, 1s   # .s
 No line at all on a commit means the hook did not run (see `docs/scan.md`). The counts come from the extraction, the line
 holds no path or value, and there is no switch to turn it off.
 
+While `doctor` has coverage problems on record (a repository with the hook switched off, a broken tool), every commit
+also ends with a reminder, until they are fixed. The commit itself is never affected:
+
+```
+git-secret-guard: 1 coverage problem still open (doctor run 2026-11-03):
+  /home/me/Dev/legacy: disabled in local config: hook.git-secret-guard.enabled=false (...); remove that key to cover this repository
+  run git-secret-guard doctor for the full report
+```
+
+Details: [docs/scan.md](docs/scan.md#the-coverage-reminder).
+
 ## False positives
 
 | To skip | Do this |
 |---|---|
 | Paths | Add `<glob>  # <reason>` lines to `.secret-scan-ignore` at the repository root |
-| One line | Put `trufflehog:ignore gitleaks:allow` on that line (each marker mutes only its own tool) |
-| gitleaks rules or findings | Commit a `.gitleaks.toml` or `.gitleaksignore` |
+| One line | Put `trufflehog:ignore gitleaks:allow` on that line (each marker mutes only its own tool; `betterleaks:allow` works too) |
+| betterleaks rules or findings | Commit a `.gitleaks.toml` or `.gitleaksignore` (the file names are unchanged from the gitleaks days) |
 | One commit | `git commit --no-verify` |
 
 Exemption files are read from the last commit (HEAD), so commit them first: a commit cannot exempt itself.
@@ -75,21 +89,8 @@ The scan's limits are in [docs/scan.md](docs/scan.md#limits); install, exemption
 
 | Doc | Covers |
 |---|---|
-| [docs/install.md](docs/install.md) | install, upgrade, uninstall, `core.hooksPath` takeover, pinned tools, `status` |
+| [docs/install.md](docs/install.md) | install, upgrade (also from the gitleaks build), uninstall, `core.hooksPath` takeover, pinned tools, `status` |
 | [docs/scan.md](docs/scan.md) | how the scan works, the settings file, tests, the scan's limits |
-| [docs/exemptions.md](docs/exemptions.md) | `.secret-scan-ignore`, inline markers, gitleaks config, local switches |
+| [docs/exemptions.md](docs/exemptions.md) | `.secret-scan-ignore`, inline markers, betterleaks config, local switches |
 | [docs/doctor.md](docs/doctor.md) | the coverage report, its checks and exit status, the weekly timer |
 | [docs/platforms.md](docs/platforms.md) | supported platforms, Ubuntu setup, the Ubuntu container test |
-
-## Development
-
-```bash
-tests/run.sh                 # all suites, sandboxed (never touches your real git config)
-tests/platform/ubuntu.sh     # the same suite in an Ubuntu 24.04 container
-```
-
-Notes for contributors are in `CLAUDE.md`; the epic and stories are GitHub issues (epic #1).
-
-## License
-
-MIT, see `LICENSE`. `tests/fixtures/husky/h` is husky's own file under its MIT license.

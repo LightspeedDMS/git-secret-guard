@@ -102,6 +102,8 @@ jobs:
           GSG_TEST_FILE_TIMEOUT: "900"
         run: |
           set -o pipefail
+          # The install step puts betterleaks in ~/.local/bin; without this the real-betterleaks tests look under linuxbrew and skip.
+          export GSG_TEST_BETTERLEAKS="$HOME/.local/bin/betterleaks"
           tests/run.sh 2>&1 | tee "$RUNNER_TEMP/$TARGET.log" || true
 
       - uses: actions/upload-artifact@v4

@@ -205,6 +205,18 @@ test_the_docs_document_doctor_and_the_timer() {
     if grep -q 'The doctor, in a later story' README.md docs/*.md; then fail "the docs still say the doctor is a later story in the exemptions section"; fi
 }
 
+test_the_docs_describe_the_launchd_agent_and_drop_the_macos_refusal() {
+    cd -- "$GSG_PROJECT" || return 1
+    local needle
+    for needle in 'com.lightspeeddms.git-secret-guard.doctor.plist' 'LAUNCHCTL_BIN' 'launchctl bootstrap gui/' 'launchctl bootout' \
+        'StartCalendarInterval' 'plutil -lint' 'doctor.log'; do
+        grep -qF -- "$needle" docs/doctor.md || fail "docs/doctor.md does not mention [$needle]"
+    done
+    if grep -q -E 'launchd is not supported yet|--with-timer. is refused' README.md docs/*.md lib/usage.md; then
+        fail "a doc still says --with-timer is refused on macOS"
+    fi
+}
+
 test_the_docs_say_a_linked_worktree_outside_the_roots_is_not_checked() {
     cd -- "$GSG_PROJECT" || return 1
     # shellcheck disable=SC2016
@@ -399,7 +411,7 @@ test_the_hook_never_loads_the_doctor_and_timer_libraries() {
     local -a files
     local rc
     mapfile -t files < <(hook_load_path)
-    grep -nE '^[^#]*(doctor|doctor_repos|timer)\.sh' "${files[@]}"
+    grep -nE '^[^#]*(doctor|doctor_repos|doctor_findings|timer|launchd)\.sh' "${files[@]}"
     rc=$?
     assert_eq "$rc" 1 "no code line of the hook's load path names a doctor or timer library (comments may anchor to them)"
 }
@@ -411,8 +423,15 @@ test_systemctl_is_looked_up_only_in_lib_install_sh() {
     assert_eq "$found" "lib/install.sh" "exactly one lookup of systemctl in the shipped code, at install time"
 }
 
+test_launchctl_is_looked_up_only_in_lib_install_sh() {
+    cd -- "$GSG_PROJECT" || return 1
+    local found
+    found="$(grep -rnE '(^|[;&|(`]|\$\()[[:space:]]*(command -v|which |type -a?P)[[:space:]]+launchctl' bin hooks lib | cut -d: -f1)"
+    assert_eq "$found" "lib/install.sh" "exactly one lookup of launchctl in the shipped code, at install time"
+}
+
 test_the_project_tree_holds_no_credential_looking_literals() {
-    [ -x "$REAL_GITLEAKS" ] || skip_test "gitleaks not found at $REAL_GITLEAKS"
+    [ -x "$REAL_BETTERLEAKS" ] || skip_test "betterleaks not found at $REAL_BETTERLEAKS"
     [ -x "$REAL_TRUFFLEHOG" ] || skip_test "trufflehog not found at $REAL_TRUFFLEHOG"
     local copy="$SANDBOX/tree-copy" report="$SANDBOX/tree-report.json" listing="$SANDBOX/tree-files.z"
     mkdir -p -- "$copy"
@@ -420,8 +439,8 @@ test_the_project_tree_holds_no_credential_looking_literals() {
     (cd -- "$GSG_PROJECT" && gitx ls-files -z -co --exclude-standard) >"$listing" || return 1
     (cd -- "$GSG_PROJECT" && tar -cf - --null -T "$listing") | tar -xf - -C "$copy" || return 1
     [ -n "$(ls -A -- "$copy")" ] || { fail "the project tree copy is empty"; return 1; }
-    run_cap "$REAL_GITLEAKS" dir "$copy" --redact --report-format json --report-path "$report" --no-banner --no-color
-    assert_rc 0 "gitleaks over the project tree"
+    run_cap "$REAL_BETTERLEAKS" dir "$copy" --redact --report-format json --report-path "$report" --no-banner --no-color
+    assert_rc 0 "betterleaks over the project tree"
     run_cap env HTTPS_PROXY=http://127.0.0.1:9 HTTP_PROXY=http://127.0.0.1:9 \
         "$REAL_TRUFFLEHOG" filesystem "$copy" --results=verified,unknown --fail --no-update --no-color
     assert_rc 0 "trufflehog over the project tree"

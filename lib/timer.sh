@@ -23,18 +23,24 @@ timer_unit_is_ours() {
     [ "$first" = "$GSG_TIMER_MARKER" ]
 }
 
-# ^ why refuse these characters, not escape them; a quote, backslash, % or $ means something to systemd inside a path, and refusing is simpler to prove right
-# ^ invariant $1 = the directory of the git install found first; every path written into a unit is checked, and a unit of ours is the only one replaced
-timer_check_values() {
-    local what n
-    local -a values=("$GSG_SHARE" "$GSG_UNIT_DIR" "$1")
-    # ^ why only GIT_CONFIG_GLOBAL, not the XDG variables; paths_init already refuses a relative XDG_* before any command runs
+# ^ why only GIT_CONFIG_GLOBAL, not the XDG variables; paths_init already refuses a relative XDG_* before any command runs
+# ^ invariant shared by the systemd units and the launchd plist; a relative value would point nowhere once the manager starts doctor elsewhere
+timer_check_config_global() {
+    local what
     if [ -n "${GIT_CONFIG_GLOBAL:-}" ] && [ "${GIT_CONFIG_GLOBAL#/}" = "$GIT_CONFIG_GLOBAL" ]; then
         what="${GIT_CONFIG_GLOBAL//[[:cntrl:]]/?}"
         trunc_text "$what" 120
         printf '%s: GIT_CONFIG_GLOBAL must be an absolute path to go into the timer unit (got [%s]); nothing was changed\n' "$GSG_NAME" "$REPLY" >&2
         return 1
     fi
+}
+
+# ^ why refuse these characters, not escape them; a quote, backslash, % or $ means something to systemd inside a path, and refusing is simpler to prove right
+# ^ invariant $1 = the directory of the git install found first; every path written into a unit is checked, and a unit of ours is the only one replaced
+timer_check_values() {
+    local what n
+    local -a values=("$GSG_SHARE" "$GSG_UNIT_DIR" "$1")
+    timer_check_config_global || return 1
     for n in "${GSG_TIMER_ENV_NAMES[@]}"; do
         if [ -n "${!n:-}" ]; then values+=("${!n}"); fi
     done
@@ -90,7 +96,7 @@ timer_timer_text() {
 # ^ invariant a unit appears complete or not at all => temp file beside it, rename after the write
 timer_write_unit() {
     local path="$1" tmp
-    tmp="$(mktemp "$GSG_UNIT_DIR/.gsg-unit.XXXXXX")" || return 1
+    tmp="$(mktemp "${path%/*}/.gsg-unit.XXXXXX")" || return 1
     if ! printf '%s\n' "$2" >"$tmp" || ! chmod 644 -- "$tmp" || ! mv -f -- "$tmp" "$path"; then
         rm -f -- "$tmp"
         return 1

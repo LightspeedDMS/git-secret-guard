@@ -11,7 +11,7 @@ begin() {
 }
 count_calls() { local n=0; if [ -f "$CALLS" ]; then n="$(grep -c "^$1 " "$CALLS")"; fi; printf '%s' "$n"; }
 tf_runs() { count_calls trufflehog; }
-gl_runs() { count_calls gitleaks; }
+gl_runs() { count_calls betterleaks; }
 has_head() { gitx rev-parse -q --verify HEAD >/dev/null 2>&1; }
 assert_no_commit() { if has_head; then fail "a commit was created"; fi; }
 workdirs() { find "$SANDBOX/tmp" -maxdepth 1 -name 'git-secret-guard.*' 2>/dev/null; }
@@ -25,10 +25,10 @@ test_clean_commit_prints_one_summary_line_and_runs_both_tools() {
     [[ $ERR =~ $PASS_LINE_RE ]] || fail "stderr is not exactly the pass line: [$ERR]"
     assert_eq "${BASH_REMATCH[1]}" 1 "one file"
     assert_eq "${BASH_REMATCH[2]}" 3 "three added lines"
-    assert_eq "${BASH_REMATCH[3]}" "trufflehog 1.2.3, gitleaks 4.5.6" "versions come from the settings"
+    assert_eq "${BASH_REMATCH[3]}" "trufflehog 1.2.3, betterleaks 4.5.6" "versions come from the settings"
     assert_eq "$(wc -l <<<"$ERR" | tr -d ' ')" 1 "exactly one line"
     assert_eq "$(tf_runs)" 1 "trufflehog ran once"
-    assert_eq "$(gl_runs)" 1 "gitleaks ran once"
+    assert_eq "$(gl_runs)" 1 "betterleaks ran once"
     has_head || fail "commit was not created"
     assert_empty "$(workdirs)" "private temp dir removed"
 }
@@ -41,7 +41,7 @@ test_scan_tree_has_real_paths_and_real_line_numbers() {
     commit_cap "edit"
     assert_rc 0 commit
     local tool
-    for tool in trufflehog gitleaks; do
+    for tool in trufflehog betterleaks; do
         assert_eq "$(<"$SANDBOX/record-tree.$tool")" "== src/app.txt
 
 X" "$tool saw added line 2 at line 2 of src/app.txt, nothing else"
@@ -81,13 +81,13 @@ test_trufflehog_unknown_finding_blocks() {
     no_leak "$MARKER"
 }
 
-test_gitleaks_finding_blocks_and_names_everything_but_the_value() {
+test_betterleaks_finding_blocks_and_names_everything_but_the_value() {
     begin gl || return 1
     stage_file src/app.txt one two three
     set_env STUB_GL_FINDINGS="aws-access-token|src/app.txt|1"
     commit_cap "leak"
     assert_rc 1 "blocked"
-    assert_contains "$ERR" "gitleaks" scanner
+    assert_contains "$ERR" "betterleaks" scanner
     assert_contains "$ERR" "aws-access-token" detector
     assert_contains "$ERR" "finding" status
     assert_contains "$ERR" "src/app.txt:1" "file and line"
@@ -104,7 +104,7 @@ test_findings_from_both_tools_are_merged_into_one_report() {
     commit_cap "leak"
     assert_rc 1 "blocked"
     assert_contains "$ERR" "a.txt:1" "trufflehog row"
-    assert_contains "$ERR" "b.txt:2" "gitleaks row"
+    assert_contains "$ERR" "b.txt:2" "betterleaks row"
     assert_contains "$ERR" "2 potential" "count"
     no_leak "$MARKER"
 }
@@ -120,13 +120,13 @@ test_trufflehog_unexpected_exit_status_blocks_with_the_error() {
     assert_no_commit
 }
 
-test_gitleaks_unexpected_exit_status_blocks_with_the_error() {
+test_betterleaks_unexpected_exit_status_blocks_with_the_error() {
     begin glrc || return 1
     stage_file a.txt one
     set_env STUB_GL_RC=1
     commit_cap "err"
     assert_rc 1 "blocked"
-    assert_contains "$ERR" "gitleaks" tool
+    assert_contains "$ERR" "betterleaks" tool
     assert_contains "$ERR" "exit 1" status
 }
 
@@ -172,30 +172,30 @@ test_an_extraction_write_failure_blocks_with_a_message_about_extraction_and_keep
 
 test_missing_trufflehog_blocks_naming_the_tool_and_scanning_nothing() {
     begin notf || return 1
-    write_settings "$SANDBOX/missing/trufflehog" "$STUBS_DIR/gitleaks" "$TEST_JQ"
+    write_settings "$SANDBOX/missing/trufflehog" "$STUBS_DIR/betterleaks" "$TEST_JQ"
     stage_file a.txt one
     commit_cap "x"
     assert_rc 1 "blocked"
     assert_contains "$ERR" "trufflehog" "names the tool"
     assert_contains "$ERR" "nothing was scanned" "says nothing was scanned"
-    assert_eq "$(gl_runs)" 0 "gitleaks not started either"
+    assert_eq "$(gl_runs)" 0 "betterleaks not started either"
     assert_no_commit
 }
 
-test_missing_gitleaks_blocks_naming_the_tool() {
+test_missing_betterleaks_blocks_naming_the_tool() {
     begin nogl || return 1
-    write_settings "$STUBS_DIR/trufflehog" "$SANDBOX/missing/gitleaks" "$TEST_JQ"
+    write_settings "$STUBS_DIR/trufflehog" "$SANDBOX/missing/betterleaks" "$TEST_JQ"
     stage_file a.txt one
     commit_cap "x"
     assert_rc 1 "blocked"
-    assert_contains "$ERR" "gitleaks" "names the tool"
+    assert_contains "$ERR" "betterleaks" "names the tool"
     assert_contains "$ERR" "nothing was scanned" "says nothing was scanned"
     assert_eq "$(tf_runs)" 0 "trufflehog not started either"
 }
 
 test_missing_jq_blocks_naming_the_tool() {
     begin nojq || return 1
-    write_settings "$STUBS_DIR/trufflehog" "$STUBS_DIR/gitleaks" "$SANDBOX/missing/jq"
+    write_settings "$STUBS_DIR/trufflehog" "$STUBS_DIR/betterleaks" "$SANDBOX/missing/jq"
     stage_file a.txt one
     commit_cap "x"
     assert_rc 1 "blocked"
@@ -204,9 +204,9 @@ test_missing_jq_blocks_naming_the_tool() {
     assert_eq "$(tf_runs)$(gl_runs)" 00 "no scanner started"
 }
 
-test_a_trufflehog_that_exits_0_silently_blocks_like_a_missing_gitleaks_report() {
+test_a_trufflehog_that_exits_0_silently_blocks_like_a_missing_betterleaks_report() {
     begin silenttf || return 1
-    write_settings "$TEST_TRUE" "$STUBS_DIR/gitleaks" "$TEST_JQ"
+    write_settings "$TEST_TRUE" "$STUBS_DIR/betterleaks" "$TEST_JQ"
     stage_file a.txt one
     commit_cap "x"
     assert_rc 1 "blocked"
@@ -218,7 +218,7 @@ test_non_executable_tool_blocks() {
     begin noexec || return 1
     local copy="$SANDBOX/noexec-trufflehog"
     cp -- "$STUBS_DIR/trufflehog" "$copy" && chmod 644 "$copy"
-    write_settings "$copy" "$STUBS_DIR/gitleaks" "$TEST_JQ"
+    write_settings "$copy" "$STUBS_DIR/betterleaks" "$TEST_JQ"
     stage_file a.txt one
     commit_cap "x"
     assert_rc 1 "blocked"
@@ -232,13 +232,13 @@ test_every_missing_tool_is_listed() {
     commit_cap "x"
     assert_rc 1 "blocked"
     assert_contains "$ERR" "trufflehog" t
-    assert_contains "$ERR" "gitleaks" g
+    assert_contains "$ERR" "betterleaks" g
     assert_contains "$ERR" "jq" j
 }
 
 test_relative_tool_path_is_refused_no_path_lookup() {
     begin relpath || return 1
-    write_settings "trufflehog" "$STUBS_DIR/gitleaks" "$TEST_JQ"
+    write_settings "trufflehog" "$STUBS_DIR/betterleaks" "$TEST_JQ"
     stage_file a.txt one
     commit_cap "x"
     assert_rc 1 "blocked"
@@ -247,7 +247,7 @@ test_relative_tool_path_is_refused_no_path_lookup() {
 
 test_environment_cannot_supply_a_tool_the_settings_omit() {
     begin envoverride || return 1
-    printf 'GITLEAKS_BIN=%q\nJQ_BIN=%q\n' "$STUBS_DIR/gitleaks" "$TEST_JQ" >"$SHARE/settings"
+    printf 'BETTERLEAKS_BIN=%q\nJQ_BIN=%q\n' "$STUBS_DIR/betterleaks" "$TEST_JQ" >"$SHARE/settings"
     set_env TRUFFLEHOG_BIN="$STUBS_DIR/trufflehog"
     stage_file a.txt one
     commit_cap "x"
@@ -294,7 +294,7 @@ test_binary_content_is_never_passed_to_the_scanners() {
     commit_cap "bin"
     assert_rc 0 commit
     local tool
-    for tool in trufflehog gitleaks; do
+    for tool in trufflehog betterleaks; do
         assert_not_contains "$(<"$SANDBOX/record-bin.$tool")" "$MARKER" "$tool: binary payload"
         assert_not_contains "$(<"$SANDBOX/record-bin.$tool")" "blob.bin" "$tool: binary file name"
         assert_contains "$(<"$SANDBOX/record-bin.$tool")" "text.txt" "$tool: text file still scanned"
@@ -324,7 +324,7 @@ test_settings_without_versions_print_the_line_without_versions() {
     commit_cap "old settings"
     assert_rc 0 "an older install still commits"
     assert_pass_line_only "$ERR" "still the pass line"
-    assert_contains "$ERR" "(trufflehog, gitleaks)" "tool names without versions"
+    assert_contains "$ERR" "(trufflehog, betterleaks)" "tool names without versions"
 }
 
 test_a_version_that_is_not_digits_and_dots_is_dropped_from_the_line() {
@@ -334,18 +334,18 @@ test_a_version_that_is_not_digits_and_dots_is_dropped_from_the_line() {
     commit_cap "forged"
     assert_rc 0 commit
     assert_pass_line_only "$ERR" "still one pass line"
-    assert_contains "$ERR" "(trufflehog, gitleaks 4.5.6)" "only the sane version is shown"
+    assert_contains "$ERR" "(trufflehog, betterleaks 4.5.6)" "only the sane version is shown"
     assert_not_contains "$ERR" "FORGED" "the odd text never reaches the terminal"
 }
 
 test_an_inherited_version_variable_cannot_fill_a_version_the_settings_omit() {
     begin inherit || return 1
     drop_versions || return 1
-    set_env TRUFFLEHOG_VERSION=7.7.7 GITLEAKS_VERSION=8.8.8
+    set_env TRUFFLEHOG_VERSION=7.7.7 BETTERLEAKS_VERSION=8.8.8
     stage_file a.txt one
     commit_cap "inherited"
     assert_rc 0 commit
-    assert_contains "$ERR" "(trufflehog, gitleaks)" "no inherited version"
+    assert_contains "$ERR" "(trufflehog, betterleaks)" "no inherited version"
 }
 
 test_findings_and_blocks_print_no_pass_line() {
@@ -357,7 +357,7 @@ test_findings_and_blocks_print_no_pass_line() {
     assert_not_contains "$ERR" "no findings" "no pass line with a finding"
     assert_not_contains "$ERR" "scanned " "no pass line with a finding"
     set_env STUB_TF_FINDINGS=
-    use_stubs "GITLEAKS_BIN=/nonexistent/gitleaks"
+    use_stubs "BETTERLEAKS_BIN=/nonexistent/betterleaks"
     commit_cap "blocked"
     assert_rc 1 "blocked by the missing tool"
     assert_contains "$ERR" "nothing was scanned" "the existing block text"
@@ -500,10 +500,10 @@ test_a_scan_wrapper_failing_internally_blocks_the_commit() {
     commit_cap "x"
     assert_rc 1 "blocked"
     assert_contains "$ERR" "trufflehog: scan wrapper failed internally (exit 7)" "status shown"
-    use_stubs "scan_gitleaks() { return 9; }"
+    use_stubs "scan_betterleaks() { return 9; }"
     commit_cap "y"
     assert_rc 1 "blocked"
-    assert_contains "$ERR" "gitleaks: scan wrapper failed internally (exit 9)" "status shown"
+    assert_contains "$ERR" "betterleaks: scan wrapper failed internally (exit 9)" "status shown"
     assert_no_commit
 }
 

@@ -114,23 +114,6 @@ brew_inspect() {
     brew_missing
 }
 
-# ^ external launchd would need its own unit texts and a user-agent bootstrap; the weekly doctor timer is systemd only for now
-# ^ invariant $1 = 1 when --with-timer was given; on macOS it is refused before anything runs, including brew
-brew_refuse_timer() {
-    case "${1:-}" in
-        0 | 1) ;;
-        *)
-            printf '%s: brew_refuse_timer wants 0 or 1, got [%s]\n' "$GSG_NAME" "${1:-}" >&2
-            return 2
-            ;;
-    esac
-    if [ "$1" = 1 ] && brew_is_macos; then
-        printf '%s: --with-timer is not supported on macOS: launchd is not supported yet; nothing was changed\n' "$GSG_NAME" >&2
-        return 1
-    fi
-    return 0
-}
-
 # ^ external macOS ships BSD tools; realpath -m, mv -T and install -T need the GNU ones, kept by Homebrew in one directory outside PATH
 # ^ invariant macOS only; the settings file of an installed copy and brew are exclusive branches, a broken settings file is never papered over by brew
 brew_use_gnubin() {
@@ -234,10 +217,9 @@ brew_running_bash_ok() {
 }
 
 # ^ invariant SCRIPT is the CLI path and the rest its arguments; rc 0 = the running bash is fine, rc 1 = refused with a message, a good re-exec never returns
-# ^ order --with-timer is refused before any brew call; install runs brew install bash alone, and only without a Homebrew bash
 # ^ invariant GSG_BREW_BOOTSTRAPPED=<pid>:<formulae> carries the install across the re-exec; exec keeps the pid, a stale shell value is ignored
 brew_cli_bootstrap() {
-    local self="$1" arg timer=0 reexeced=0 depth="${GSG_BREW_REEXEC_DEPTH-0}" minimum="$BREW_BASH_MIN_MAJOR.$BREW_BASH_MIN_MINOR"
+    local self="$1" reexeced=0 depth="${GSG_BREW_REEXEC_DEPTH-0}" minimum="$BREW_BASH_MIN_MAJOR.$BREW_BASH_MIN_MINOR"
     shift
     case "${GSG_BREW_BOOTSTRAPPED:-}" in
         "$$:"*)
@@ -255,10 +237,6 @@ brew_cli_bootstrap() {
         printf '%s: bash %s or newer is required, this is bash %s\n' "$GSG_NAME" "$minimum" "${BASH_VERSION:-unknown}" >&2
         return 1
     fi
-    for arg in "$@"; do
-        if [ "$arg" = --with-timer ]; then timer=1; fi
-    done
-    brew_refuse_timer "$timer" || return 1
     # ^ invariant two bounds stop a loop, the pid-bound marker and an environment depth counter; a wrapper running bash as a child gets a new pid
     # ^ invariant either one means the bash we started is still old; refuse, never exec again
     if [ "$reexeced" -eq 1 ] || [ "$depth" -ge "$BREW_REEXEC_MAX" ]; then

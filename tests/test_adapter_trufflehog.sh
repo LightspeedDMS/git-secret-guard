@@ -110,7 +110,7 @@ test_unparsable_results_are_an_error() {
     local stub="$SANDBOX/badjson-stub"
     printf '#!/usr/bin/env bash\necho "this is not json"\nexit 183\n' >"$stub"
     chmod +x "$stub"
-    write_settings "$stub" "$STUBS_DIR/gitleaks" "$TEST_JQ"
+    write_settings "$stub" "$STUBS_DIR/betterleaks" "$TEST_JQ"
     run_adapter trufflehog "$SCAN" "$OUTD"
     assert_empty "$(rows)" rows
     assert_contains "$(errors)" "parse" "parse failure reported"
@@ -126,7 +126,7 @@ test_a_hung_scan_times_out_as_an_error() {
 
 test_a_tool_that_exits_0_without_scanning_is_an_error() {
     prepare silent
-    write_settings "$TEST_TRUE" "$STUBS_DIR/gitleaks" "$TEST_JQ"
+    write_settings "$TEST_TRUE" "$STUBS_DIR/betterleaks" "$TEST_JQ"
     run_adapter trufflehog "$SCAN" "$OUTD"
     assert_empty "$(rows)" rows
     assert_contains "$(errors)" "did not report a completed scan" "silence is not a clean scan"
@@ -147,7 +147,7 @@ test_a_completion_line_with_chunks_counts_as_a_completed_scan() {
 
 test_a_missing_binary_is_an_error_not_a_pass() {
     prepare nobin
-    write_settings "$SANDBOX/does-not-exist" "$STUBS_DIR/gitleaks" "$TEST_JQ"
+    write_settings "$SANDBOX/does-not-exist" "$STUBS_DIR/betterleaks" "$TEST_JQ"
     run_adapter trufflehog "$SCAN" "$OUTD"
     assert_empty "$(rows)" rows
     assert_contains "$(errors)" "trufflehog" "error names the tool"

@@ -24,7 +24,7 @@ test_help_lists_every_command_and_flag() {
         gsg "$arg"
         assert_rc 0 "$arg"
         assert_empty "$ERR" "$arg prints nothing on stderr"
-        for word in "install" "--replace-hooks-path" "--with-timer" "uninstall" "--remove-tools" "status" "doctor" "--roots" "version" "help"; do
+        for word in "install" "--replace-hooks-path" "--with-timer" "uninstall" "--remove-tools" "status" "doctor" "--roots" "--recheck" "version" "help"; do
             assert_contains "$OUT" "$word" "$arg mentions $word"
         done
     done
@@ -44,6 +44,8 @@ test_bad_usage_exits_2_and_changes_nothing() {
 doctor --bogus
 doctor stray
 doctor --roots
+doctor --recheck --roots x
+doctor --recheck stray
 uninstall --with-timer
 bogus
 install --bogus

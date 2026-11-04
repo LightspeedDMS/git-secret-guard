@@ -7,7 +7,7 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/lifecycle.sh"
 # shellcheck disable=SC2016
 tl() { run_cap env -i "${GSG_ENV[@]}" "${EXTRA_ENV[@]}" bash -c 'set -u; source "$1/lib/common.sh" && source "$1/lib/tools.sh" && shift && "$@"' _ "$GSG_PROJECT" "$@"; }
 
-test_the_lock_holds_exactly_the_ten_pinned_rows() {
+test_the_lock_holds_exactly_the_eleven_pinned_rows() {
     local rows
     rows="$(grep -v -e '^[[:space:]]*#' -e '^[[:space:]]*$' "$GSG_PROJECT/tools.lock" | LC_ALL=C sort)" || return 1
     assert_eq "$rows" "$(LC_ALL=C sort <<'EOF'
@@ -21,6 +21,7 @@ betterleaks 1.9.0 darwin_x64 68dfd83458d9e7f90663daa7a81c7f944083b170dae82e4f5f8
 betterleaks 1.9.0 darwin_arm64 83dd7eaab13d44a1e8e347a17064cdef153a1478db473276d41b38d55613d3f2
 trufflehog 3.99.2 windows_amd64 494672f03ef4c1c07887bd626f2f68cc5f55305ea961685207d349e273a238e8
 betterleaks 1.9.0 windows_x64 b765daec9fda475b031b5a5159798cbe4294a3f2a50683cbc0471226e376d3da
+jq 1.8.2 windows_amd64 a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627
 EOF
 )" "the lock rows match the story's table"
 }

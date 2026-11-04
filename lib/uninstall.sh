@@ -155,7 +155,9 @@ uninstall_agent() {
 uninstall_cli_link() {
     local link="$GSG_BIN_DIR/git-secret-guard"
     if [ ! -e "$link" ] && [ ! -L "$link" ]; then return 0; fi
-    if [ -L "$link" ] && [ "$(readlink -- "$link")" = "$GSG_SHARE/bin/git-secret-guard" ]; then
+    # ^ coupled lib/install.sh:install_cli_wrapper_text; the Windows CLI entry is this wrapper, never a symlink
+    if { tools_is_windows && [ ! -L "$link" ] && [ "$(<"$link")" = "$(install_cli_wrapper_text)" ]; } \
+        || { [ -L "$link" ] && [ "$(readlink -- "$link")" = "$GSG_SHARE/bin/git-secret-guard" ]; }; then
         rm -f -- "$link" || return 1
         uninstall_say "removed the CLI link $link"
     else
@@ -220,7 +222,7 @@ uninstall_restore_replaced() {
             printf '%s: invalid tools_replaced entry [%s] in the state file; ignored\n' "$GSG_NAME" "${entry:0:80}" >&2
             continue
         fi
-        path="$GSG_BIN_DIR/$tool"
+        path="$GSG_BIN_DIR/$(tools_binary_name "$tool")"
         src="$GSG_BIN_DIR/$aside"
         UN_HANDLED+="$tool "
         if [[ $decided == *" $tool "* ]]; then
@@ -252,7 +254,7 @@ uninstall_restore_replaced() {
 }
 
 uninstall_tools() {
-    local name
+    local name path
     local -a words=()
     if [ "$ST_EXISTS" -ne 1 ]; then
         printf '%s: no state file: cannot tell which tools install downloaded; none removed\n' "$GSG_NAME" >&2
@@ -265,19 +267,20 @@ uninstall_tools() {
             continue
         fi
         if [[ $UN_HANDLED == *" $name "* ]]; then continue; fi
-        if [ ! -e "$GSG_BIN_DIR/$name" ] && [ ! -L "$GSG_BIN_DIR/$name" ]; then continue; fi
+        path="$GSG_BIN_DIR/$(tools_binary_name "$name")"
+        if [ ! -e "$path" ] && [ ! -L "$path" ]; then continue; fi
         # ^ security a tool is deleted only when its hash is one install recorded => a same-version build of the user's, a symlink or an unprovable file stays
         if [ -z "${UN_PLACED[$name]:-}" ] && [ -n "$ST_PLACED" ]; then
             printf '%s: the tools_placed entry for %s in the state file is invalid or missing; %s left in place\n' \
-                "$GSG_NAME" "$name" "$GSG_BIN_DIR/$name" >&2
+                "$GSG_NAME" "$name" "$path" >&2
         elif [ -z "${UN_PLACED[$name]:-}" ]; then
             printf '%s: %s has no recorded hash of a file install placed (state written by an older install); left in place\n' \
-                "$GSG_NAME" "$GSG_BIN_DIR/$name" >&2
-        elif ! uninstall_file_has_hash "$GSG_BIN_DIR/$name" "${UN_PLACED[$name]}"; then
-            printf '%s: %s is not the file install put there; left in place\n' "$GSG_NAME" "$GSG_BIN_DIR/$name" >&2
+                "$GSG_NAME" "$path" >&2
+        elif ! uninstall_file_has_hash "$path" "${UN_PLACED[$name]}"; then
+            printf '%s: %s is not the file install put there; left in place\n' "$GSG_NAME" "$path" >&2
         else
-            rm -f -- "$GSG_BIN_DIR/$name" || return 1
-            uninstall_say "removed $GSG_BIN_DIR/$name (downloaded by install)"
+            rm -f -- "$path" || return 1
+            uninstall_say "removed $path (downloaded by install)"
         fi
     done
 }

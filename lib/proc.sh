@@ -8,18 +8,29 @@ proc_is_windows() {
     return 1
 }
 
+# ^ invariant prints the group proc_stop_group takes for job $1; setsid job = its pid, Windows = its Windows pid; rc 1 when none is readable
+proc_group_of() {
+    local winpid
+    if ! proc_is_windows; then
+        printf '%s' "$1"
+        return 0
+    fi
+    winpid="$(cat "/proc/$1/winpid" 2>/dev/null)" || winpid=""
+    if [[ ! $winpid =~ ^[0-9]+$ ]]; then return 1; fi
+    printf '%s' "$winpid"
+}
+
 # ^ invariant proc_start_runner <scanner> <scan-dir> <work-dir> <pid-var> <group-var> sets the two caller variables; rc 1 when no Windows pid is readable
 # ^ invariant Linux group = runner pid (setsid); Windows group = the runner's Windows pid, read from /proc/<pid>/winpid
 # ^ security "$SETSID_BIN" comes from settings, not PATH => a planted setsid earlier on PATH cannot replace the runner start
 proc_start_runner() {
-    local scanner="$1" scan_dir="$2" work_dir="$3" pid_var="$4" group_var="$5" pid winpid
+    local scanner="$1" scan_dir="$2" work_dir="$3" pid_var="$4" group_var="$5" pid group
     if proc_is_windows; then
         "$BASH" "$SHARE/lib/run-scanner.sh" "$scanner" "$scan_dir" "$work_dir" &
         pid=$!
         printf -v "$pid_var" '%s' "$pid"
-        winpid="$(cat "/proc/$pid/winpid" 2>/dev/null)" || winpid=""
-        if [[ ! $winpid =~ ^[0-9]+$ ]]; then return 1; fi
-        printf -v "$group_var" '%s' "$winpid"
+        group="$(proc_group_of "$pid")" || return 1
+        printf -v "$group_var" '%s' "$group"
         return 0
     fi
     "$SETSID_BIN" "$BASH" "$SHARE/lib/run-scanner.sh" "$scanner" "$scan_dir" "$work_dir" &

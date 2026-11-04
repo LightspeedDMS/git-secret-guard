@@ -67,10 +67,7 @@ install_os_family() {
 # ^ invariant prints the end of a "was not found" message for package $1; apt on Ubuntu and Debian, the package manager elsewhere
 install_fix_hint() {
     if tools_is_windows; then
-        case "$1" in
-            jq) printf 'install it with: winget install jqlang.jq' ;;
-            *) printf 'it comes with Windows or Git for Windows, so check that PATH holds their directories' ;;
-        esac
+        printf 'it comes with Windows or Git for Windows, so check that PATH holds their directories'
         return 0
     fi
     install_os_family
@@ -155,10 +152,12 @@ install_resolve_bins() {
     local name path bad=0
     local -A package=([jq]=jq [setsid]=util-linux [taskkill]=taskkill [timeout]=coreutils)
     local -a names=(jq setsid timeout)
-    INSTALL_SETSID_BIN="" INSTALL_TASKKILL_BIN="" INSTALL_JQ_WRAPPER=""
+    INSTALL_SETSID_BIN="" INSTALL_TASKKILL_BIN="" INSTALL_JQ_WRAPPER="" INSTALL_JQ_BIN=""
     if tools_is_windows; then names=(jq taskkill timeout); fi
     for name in "${names[@]}"; do
         path="$(type -P "$name")" || {
+            # ^ why install_manage_jq, not a refusal; winget is absent on Windows Server, the pinned jq is verified like a scanner
+            if [ "$name" = jq ] && tools_is_windows; then continue; fi
             printf '%s: %s is required but was not found on PATH; %s\n' "$GSG_NAME" "$name" "$(install_fix_hint "${package[$name]}")" >&2
             bad=$((bad + 1))
             continue
@@ -233,6 +232,7 @@ install_require_curl() {
 install_downloads_needed() {
     local tool plat row os arch
     if [ -z "${INSTALL_TIMEOUT_BIN:-}" ]; then return 0; fi
+    if tools_is_windows && [ -z "$INSTALL_JQ_BIN" ]; then return 0; fi
     os="$(uname -s)" && arch="$(uname -m)" || return 1
     for tool in "${GSG_TOOL_NAMES[@]}"; do
         plat="$(tools_platform_key "$tool" "$os" "$arch" 2>/dev/null)" || return 1
@@ -428,6 +428,7 @@ install_write_settings() {
         printf 'TIMEOUT_BIN=%q\n' "$INSTALL_TIMEOUT_BIN"
         # ^ invariant every tool reported its pinned version (tools_has_version) before this file is written; the hook prints these and never runs --version
         for i in "${!GSG_TOOL_NAMES[@]}"; do
+            if [ "${GSG_TOOL_NAMES[$i]}" = jq ]; then continue; fi
             printf '%s_VERSION=%q\n' "${GSG_TOOL_NAMES[$i]^^}" "${GSG_TOOL_VER[$i]}"
         done
         if [ -n "$INSTALL_BASH_BIN" ]; then printf 'BASH_BIN=%q\n' "$INSTALL_BASH_BIN"; fi
@@ -831,6 +832,7 @@ install_run() {
     install_check_config_writable || return 1
     state_read || return 1
     install_note_legacy
+    install_manage_jq
     install_check_recorded_hooks_path || return 1
     install_prepare_timer "$timer" || return 1
     tools_announce_overrides

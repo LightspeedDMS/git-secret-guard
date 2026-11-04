@@ -135,7 +135,8 @@ doctor_rec_break() {
 
 # ^ why a symlink named after the pid, not flock or mkdir plus a pid file; macOS ships no flock, and a symlink is created and given its owner in one atomic step
 doctor_rec_try_lock() {
-    if ln -s "$$" "$GSG_FINDINGS_LOCK" 2>/dev/null; then
+    # ^ external Git Bash ln -s refuses a missing target (probed) => winsymlinks:sys links without admin rights; other platforms ignore MSYS
+    if MSYS=winsymlinks:sys ln -s "$$" "$GSG_FINDINGS_LOCK" 2>/dev/null; then
         DR_REC_LOCKED=1
         return 0
     fi

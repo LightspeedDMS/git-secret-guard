@@ -50,6 +50,16 @@ install_prune_replaced() {
     ST_REPLACED="$kept"
 }
 
+# ^ invariant Windows only; a jq on PATH install did not place stays in use, one recorded in tools_placed stays managed on every rerun
+# ^ order after state_read and before install_plan_lock => jq joins the parallel arrays and gets the same lock, staging, ownership and aside handling
+install_manage_jq() {
+    if ! tools_is_windows; then return 0; fi
+    if [ -n "$INSTALL_JQ_BIN" ] && [[ " $ST_PLACED " != *" jq:"* ]]; then return 0; fi
+    GSG_TOOL_NAMES+=(jq)
+    INSTALL_JQ_BIN="$GSG_BIN_DIR/$(tools_binary_name jq)"
+    INSTALL_JQ_WRAPPER="$GSG_SHARE/jq"
+}
+
 # ^ order pure bash, no timeout needed => install_run calls it before the brew install, a missing or invalid lock row refuses with the machine untouched
 # ^ invariant parallel arrays indexed like GSG_TOOL_NAMES, holding platform key, pinned version and SHA-256 from the lock
 install_plan_lock() {

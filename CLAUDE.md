@@ -132,7 +132,7 @@ Inline markers mute one tool each, only on the same line (`docs/exemptions.md`).
 
 ## Conventions
 
-- Comments follow `~/.claude/coded-comments` (`# ^ tag clause`), sparse. Lint: `tests/comment-rules.awk FILE` (`test_every_comment_follows_the_coded_comments_rules`). Tags: hazard coupled security invariant external order why see perf todo; `why X, not Y; reason`; <= 160 chars, <= 3 coded lines in a row; no ` so `, ` but `, ` because `, ` which `, ` that `, ` then `, ` while `, `: `.
+- Comments are coded (`# ^ tag clause`), sparse; `tests/comment-rules.awk` is the definition. Lint: `tests/comment-rules.awk FILE` (`test_every_comment_follows_the_coded_comments_rules`). Tags: hazard coupled security invariant external order why see perf todo; `why X, not Y; reason`; <= 160 chars, <= 3 coded lines in a row; no ` so `, ` but `, ` because `, ` which `, ` that `, ` then `, ` while `, `: `.
 - `set -u`; check every return value; bounded loops; shellcheck clean (info included) at `GSG_SHELLCHECK_PIN` 0.11.0 (other versions skip the gate). A local named like a sourced array (`lines`) trips SC2178/SC2128.
 - Names must not be confusable (`INSTALL_TIMEOUT_BIN` is a path, not a duration).
 

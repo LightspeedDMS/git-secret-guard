@@ -44,6 +44,43 @@
    paths itself (`node_modules/`, lockfiles, `go.sum`, ...), see "Betterleaks' default config skips whole paths" under Limits. Findings and every block keep their output and print no pass line. There is no switch
    to silence it: `settings` is rewritten by every install, so a hand edit would be lost.
 
+## The coverage reminder
+
+A repository where the hook is switched off never runs it, so the reminder shows up in the commits of the repositories that
+are still covered. When `doctor` has recorded PROBLEMs ([the findings record](doctor.md#the-findings-record-and---recheck)),
+every commit ends with:
+
+```
+git-secret-guard: scanned 1 file, 1 added line (trufflehog 3.99.2, betterleaks 1.9.0): no findings, 1s
+git-secret-guard: 2 coverage problems still open (doctor run 2026-11-03):
+  machine: hook: hook command is missing or not executable (...); run git-secret-guard install
+  /home/me/Dev/legacy: disabled in local config: hook.git-secret-guard.enabled=false (...); remove that key to cover this repository
+  run git-secret-guard doctor for the full report
+```
+
+- **When.** After the hook has decided the commit: after the pass line, after the findings block and its
+  `git commit --no-verify` hint, after a "nothing was scanned" block, after "no added lines to scan". The `date` is the
+  `time` line of the record (the last full search). The count and the lines come from what `doctor --recheck` still finds
+  broken, so a repository you fixed stops being listed on the next commit and leaves the record.
+- **How.** The hook starts `<share>/bin/git-secret-guard doctor --recheck` as a separate process (its own session, through
+  the same `bash` the hook runs under), never by loading doctor code. Every recorded repository is re-checked, with no limit
+  on their number and no total time limit; each git call keeps `DOCTOR_TIMEOUT_SECONDS`. The `GIT_*` variables git sets for
+  a commit (`GIT_INDEX_FILE`, ...) are removed first, so the re-check of another repository reads that repository.
+- **Nothing on record costs nothing.** No findings file, an empty one, or one that holds only its two header lines (a
+  clean full run) starts no process. A damaged record is re-checked, so doctor says so.
+- **The commit never changes.** A pass stays a pass and a block stays a block with its own exit status, whatever the
+  re-check does. If it fails (exit 2, killed, the CLI missing, output that cannot be read) one line says so, and nothing
+  from doctor's stderr is copied: `git-secret-guard: coverage re-check failed (doctor --recheck exit 2); run git-secret-guard doctor`.
+- **The scan tree is gone first.** Before the re-check starts, the hook empties its private temp dir (the scan tree with the
+  added lines and the scanner files), so nothing of the commit stays on disk while doctor runs.
+- **Ctrl-C** during the re-check stops doctor and its process group before the hook exits. One exception: doctor runs each
+  git call under `timeout` without `--foreground` on purpose (so a timeout kills the whole git group), which puts that call
+  in its own group. A git call already running when Ctrl-C arrives is therefore not reached by the hook's group kill; it
+  ends by itself within `DOCTOR_TIMEOUT_SECONDS` (plus 5 seconds for the kill).
+- **No reminder** when the hook blocks before it has a private temp dir: a missing or unusable tool in the settings file,
+  an unusable `TMPDIR`. Those blocks name their own cause; `doctor` reports them as machine problems.
+- Only PROBLEM lines doctor already cleaned are printed, never a value, secret or file content.
+
 ## The settings file
 
 The hook reads `<share>/settings` (`<share>` = two levels above the resolved script path), written by `install`:

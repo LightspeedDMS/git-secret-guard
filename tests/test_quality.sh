@@ -205,6 +205,18 @@ test_the_docs_document_doctor_and_the_timer() {
     if grep -q 'The doctor, in a later story' README.md docs/*.md; then fail "the docs still say the doctor is a later story in the exemptions section"; fi
 }
 
+test_the_docs_describe_the_launchd_agent_and_drop_the_macos_refusal() {
+    cd -- "$GSG_PROJECT" || return 1
+    local needle
+    for needle in 'com.lightspeeddms.git-secret-guard.doctor.plist' 'LAUNCHCTL_BIN' 'launchctl bootstrap gui/' 'launchctl bootout' \
+        'StartCalendarInterval' 'plutil -lint' 'doctor.log'; do
+        grep -qF -- "$needle" docs/doctor.md || fail "docs/doctor.md does not mention [$needle]"
+    done
+    if grep -q -E 'launchd is not supported yet|--with-timer. is refused' README.md docs/*.md lib/usage.md; then
+        fail "a doc still says --with-timer is refused on macOS"
+    fi
+}
+
 test_the_docs_say_a_linked_worktree_outside_the_roots_is_not_checked() {
     cd -- "$GSG_PROJECT" || return 1
     # shellcheck disable=SC2016
@@ -399,7 +411,7 @@ test_the_hook_never_loads_the_doctor_and_timer_libraries() {
     local -a files
     local rc
     mapfile -t files < <(hook_load_path)
-    grep -nE '^[^#]*(doctor|doctor_repos|timer)\.sh' "${files[@]}"
+    grep -nE '^[^#]*(doctor|doctor_repos|doctor_findings|timer|launchd)\.sh' "${files[@]}"
     rc=$?
     assert_eq "$rc" 1 "no code line of the hook's load path names a doctor or timer library (comments may anchor to them)"
 }
@@ -409,6 +421,13 @@ test_systemctl_is_looked_up_only_in_lib_install_sh() {
     local found
     found="$(grep -rnE '(^|[;&|(`]|\$\()[[:space:]]*(command -v|which |type -a?P)[[:space:]]+systemctl' bin hooks lib | cut -d: -f1)"
     assert_eq "$found" "lib/install.sh" "exactly one lookup of systemctl in the shipped code, at install time"
+}
+
+test_launchctl_is_looked_up_only_in_lib_install_sh() {
+    cd -- "$GSG_PROJECT" || return 1
+    local found
+    found="$(grep -rnE '(^|[;&|(`]|\$\()[[:space:]]*(command -v|which |type -a?P)[[:space:]]+launchctl' bin hooks lib | cut -d: -f1)"
+    assert_eq "$found" "lib/install.sh" "exactly one lookup of launchctl in the shipped code, at install time"
 }
 
 test_the_project_tree_holds_no_credential_looking_literals() {

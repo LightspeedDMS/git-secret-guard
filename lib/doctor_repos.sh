@@ -6,7 +6,10 @@ GSG_DOCTOR_MAX_ENTRIES=2000
 GSG_DOCTOR_MAX_NOTES=20
 
 DR_FIND=()
+# ^ invariant DR_FIND_TREE[i] = the worktree label of DR_FIND[i], empty for the main checkout
+DR_FIND_TREE=()
 DR_REPO_BAD=0
+DR_REPO_HEADER=0
 DR_TREE_LABEL=""
 declare -gA DR_SEEN=()
 
@@ -29,6 +32,7 @@ doctor_repo_finding() {
         WARNING) DR_WARNINGS=$((DR_WARNINGS + 1)) ;;
     esac
     DR_FIND+=("$1"$'\t'"$text")
+    DR_FIND_TREE+=("$DR_TREE_LABEL")
 }
 
 # ^ invariant sets REPLY = the file of a config origin; a relative file origin is relative to the repository the check runs in
@@ -85,56 +89,41 @@ doctor_unreadable() {
     done
 }
 
-# ^ invariant fills DR_KEYS (one per git common dir) and DR_SORTED (shown paths in order); rc 1 = bound hit or read failed
-# ^ invariant a linked worktree is grouped under its main repository by common dir; a repository git cannot open is kept, never skipped
-# ^ external wait "$!" after a process substitution = the command's own exit status (probed on bash 5.1.8)
-doctor_discover() {
-    local root entry dir found=0 common gitdir key show rc
-    local -A seen=() key_of=()
+# ^ invariant puts checkout $1 into DR_KEYS, DR_FIRST, DR_MAIN, DR_LINKED and DR_BROKEN by its git common dir; a repository git cannot open is kept as broken
+# ^ why two rev-parse calls, not one two-line answer; a directory name may hold a newline
+doctor_classify_dir() {
+    local dir="$1" gitdir common key
+    if gitdir="$("$GSG_GIT" -C "$dir" rev-parse --path-format=absolute --git-dir 2>"$DR_WORK/rev.err")" \
+        && common="$("$GSG_GIT" -C "$dir" rev-parse --path-format=absolute --git-common-dir 2>"$DR_WORK/rev.err")" \
+        && doctor_resolves_here "$dir" "$gitdir"; then
+        key="$common"
+    else
+        first_message "$DR_WORK/rev.err"
+        key="broken:$dir"
+        DR_BROKEN[$key]="${REPLY:-git could not open it}"
+        gitdir="" common=""
+    fi
+    if [[ -z ${DR_FIRST[$key]:-} ]]; then
+        DR_KEYS+=("$key")
+        DR_FIRST[$key]="$dir"
+    fi
+    if [ -z "$gitdir" ] || [ "$gitdir" = "$common" ]; then
+        DR_MAIN[$key]="$dir"
+    else
+        DR_LINKED[$key]+="${DR_LINKED[$key]:+$'\n'}$dir"
+    fi
+}
+
+doctor_discover_reset() {
     DR_KEYS=() DR_SORTED=() DR_UNREADABLE=()
     declare -gA DR_BAD_SEEN=()
     declare -gA DR_FIRST=() DR_MAIN=() DR_LINKED=() DR_BROKEN=() DR_SHOW=() DR_KEY_OF=()
-    for root in "${DR_ROOT_LIST[@]}"; do
-        while IFS= read -r -d '' entry; do
-            found=$((found + 1))
-            if [ "$found" -gt "$GSG_DOCTOR_MAX_ENTRIES" ]; then
-                printf '%s: more than %s repositories or worktrees under the roots; narrow --roots\n' "$GSG_NAME" "$GSG_DOCTOR_MAX_ENTRIES" >&2
-                return 1
-            fi
-            dir="${entry%/.git}"
-            if [[ -n ${seen[$dir]:-} ]]; then continue; fi
-            seen[$dir]=1
-            # ^ why two rev-parse calls, not one two-line answer; a directory name may hold a newline
-            if gitdir="$("$GSG_GIT" -C "$dir" rev-parse --path-format=absolute --git-dir 2>"$DR_WORK/rev.err")" \
-                && common="$("$GSG_GIT" -C "$dir" rev-parse --path-format=absolute --git-common-dir 2>"$DR_WORK/rev.err")" \
-                && doctor_resolves_here "$dir" "$gitdir"; then
-                key="$common"
-            else
-                first_message "$DR_WORK/rev.err"
-                key="broken:$dir"
-                DR_BROKEN[$key]="${REPLY:-git could not open it}"
-                gitdir="" common=""
-            fi
-            if [[ -z ${DR_FIRST[$key]:-} ]]; then
-                DR_KEYS+=("$key")
-                DR_FIRST[$key]="$dir"
-            fi
-            if [ -z "$gitdir" ] || [ "$gitdir" = "$common" ]; then
-                DR_MAIN[$key]="$dir"
-            else
-                DR_LINKED[$key]+="${DR_LINKED[$key]:+$'\n'}$dir"
-            fi
-        done < <(LC_ALL=C find "$root" -maxdepth "$GSG_DOCTOR_FIND_DEPTH" -name node_modules -type d -prune -o -name .git -prune -print0 2>"$DR_WORK/find.err")
-        wait "$!"
-        rc=$?
-        if [ "$rc" -ne 0 ] && doctor_unreadable "$root"; then rc=0; fi
-        if [ "$rc" -ne 0 ]; then
-            first_message "$DR_WORK/find.err"
-            printf '%s: could not read everything under %s (find exit %s%s); narrow --roots or fix the permissions\n' \
-                "$GSG_NAME" "$root" "$rc" "${REPLY:+: ${REPLY//[[:cntrl:]]/?}}" >&2
-            return 1
-        fi
-    done
+}
+
+# ^ invariant fills DR_SHOW, DR_KEY_OF and DR_SORTED (shown paths, C-locale order) from the classified checkouts in DR_KEYS
+doctor_finish_discovery() {
+    local key show
+    local -A key_of=()
     for key in "${DR_KEYS[@]}"; do
         if [[ -n ${DR_MAIN[$key]:-} ]]; then
             show="${DR_MAIN[$key]}"
@@ -150,6 +139,38 @@ doctor_discover() {
     if [ "${#key_of[@]}" -gt 0 ]; then
         mapfile -d '' -t DR_SORTED < <(printf '%s\0' "${!key_of[@]}" | LC_ALL=C sort -z)
     fi
+}
+
+# ^ invariant fills DR_KEYS (one per git common dir) and DR_SORTED (shown paths in order); rc 1 = bound hit or read failed
+# ^ invariant a linked worktree is grouped under its main repository by common dir; a repository git cannot open is kept, never skipped
+# ^ external wait "$!" after a process substitution = the command's own exit status (probed on bash 5.1.8)
+doctor_discover() {
+    local root entry dir found=0 rc
+    local -A seen=()
+    doctor_discover_reset
+    for root in "${DR_ROOT_LIST[@]}"; do
+        while IFS= read -r -d '' entry; do
+            found=$((found + 1))
+            if [ "$found" -gt "$GSG_DOCTOR_MAX_ENTRIES" ]; then
+                printf '%s: more than %s repositories or worktrees under the roots; narrow --roots\n' "$GSG_NAME" "$GSG_DOCTOR_MAX_ENTRIES" >&2
+                return 1
+            fi
+            dir="${entry%/.git}"
+            if [[ -n ${seen[$dir]:-} ]]; then continue; fi
+            seen[$dir]=1
+            doctor_classify_dir "$dir"
+        done < <(LC_ALL=C find "$root" -maxdepth "$GSG_DOCTOR_FIND_DEPTH" -name node_modules -type d -prune -o -name .git -prune -print0 2>"$DR_WORK/find.err")
+        wait "$!"
+        rc=$?
+        if [ "$rc" -ne 0 ] && doctor_unreadable "$root"; then rc=0; fi
+        if [ "$rc" -ne 0 ]; then
+            first_message "$DR_WORK/find.err"
+            printf '%s: could not read everything under %s (find exit %s%s); narrow --roots or fix the permissions\n' \
+                "$GSG_NAME" "$root" "$rc" "${REPLY:+: ${REPLY//[[:cntrl:]]/?}}" >&2
+            return 1
+        fi
+    done
+    doctor_finish_discovery
 }
 
 # ^ external hook list line = name, "disabled<TAB>name" (enabled=false) or "event-disabled<TAB>name" (hook.pre-commit.enabled=false); git 2.56
@@ -367,7 +388,7 @@ doctor_check_worktrees() {
 
 doctor_check_repo() {
     local key="$1" run
-    DR_FIND=() DR_SEEN=() DR_TREE_LABEL=""
+    DR_FIND=() DR_FIND_TREE=() DR_SEEN=() DR_TREE_LABEL=""
     if [[ -n ${DR_BROKEN[$key]:-} ]]; then
         doctor_repo_finding PROBLEM "cannot be inspected: ${DR_BROKEN[$key]}"
         return 0
@@ -423,27 +444,38 @@ doctor_bound_git() {
     export PATH="$DR_WORK/bin:$PATH"
 }
 
-doctor_repos() {
-    local show key header=0 dir
-    doctor_bound_git || return 1
-    doctor_discover || return 1
-    if [ "${#DR_UNREADABLE[@]}" -gt 0 ]; then
-        printf 'not searched:\n'
-        for dir in "${DR_UNREADABLE[@]}"; do
-            doctor_machine_line PROBLEM "cannot read $dir; repositories below it are not checked"
-        done
-    fi
+# ^ invariant checks every repository in DR_SORTED, records its PROBLEMs for the findings file and prints those with findings (PROBLEMs only in recheck mode)
+doctor_repo_loop() {
+    local show key
     for show in "${DR_SORTED[@]}"; do
         key="${DR_KEY_OF[$show]}"
         DR_REPO_TOTAL=$((DR_REPO_TOTAL + 1))
         DR_REPO_BAD=0
         doctor_check_repo "$key"
         if [ "$DR_REPO_BAD" -eq 0 ]; then DR_REPO_COVERED=$((DR_REPO_COVERED + 1)); fi
+        doctor_rec_collect "$show"
+        if [ "$DR_RECHECK" -eq 1 ]; then doctor_keep_problems_only; fi
         if [ "${#DR_FIND[@]}" -eq 0 ]; then continue; fi
-        if [ "$header" -eq 0 ]; then
+        if [ "$DR_REPO_HEADER" -eq 0 ]; then
             printf 'repos with findings:\n'
-            header=1
+            DR_REPO_HEADER=1
         fi
         doctor_print_repo "$show" "$key"
     done
+}
+
+doctor_repos() {
+    local dir queued
+    doctor_bound_git || return 1
+    doctor_discover || return 1
+    if [ "${#DR_UNREADABLE[@]}" -gt 0 ]; then
+        printf 'not searched:\n'
+        queued="${#DR_REC_NEW[@]}"
+        for dir in "${DR_UNREADABLE[@]}"; do
+            doctor_machine_line PROBLEM "cannot read $dir; repositories below it are not checked"
+        done
+        # ^ why unreadable directories stay out of the record, not in it; only discovery finds one and a recheck never discovers
+        DR_REC_NEW=("${DR_REC_NEW[@]:0:queued}")
+    fi
+    doctor_repo_loop
 }

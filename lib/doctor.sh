@@ -9,15 +9,21 @@ DR_BETTERLEAKS_OK=0
 DR_TIMEOUT_OK=0
 DR_LIMIT=""
 GSG_DOCTOR_TIMEOUT_DEFAULT=30
+DR_RECHECK=0
+DR_REC_NEW=()
 
 # ^ invariant every machine line goes through here => severity is counted once and control characters never reach the terminal
+# ^ invariant a machine PROBLEM is also queued as a record line; in recheck mode nothing is printed here, the open items are printed together afterwards
 doctor_machine_line() {
     local text="${2//[[:cntrl:]]/?}"
     case "$1" in
-        PROBLEM) DR_PROBLEMS=$((DR_PROBLEMS + 1)) ;;
+        PROBLEM)
+            DR_PROBLEMS=$((DR_PROBLEMS + 1))
+            DR_REC_NEW+=("machine"$'\t'"$text")
+            ;;
         WARNING) DR_WARNINGS=$((DR_WARNINGS + 1)) ;;
     esac
-    printf '  %-8s %s\n' "$1" "$text"
+    if [ "$DR_RECHECK" -ne 1 ]; then printf '  %-8s %s\n' "$1" "$text"; fi
 }
 
 # ^ external a git config -z record = "key NL value"; a valueless key is just "key" and its value is empty, never the key
@@ -37,6 +43,11 @@ doctor_is_false() {
 doctor_cleanup() {
     # ^ invariant rm -rf only on the absolute mktemp directory this run made
     if [ -n "$DR_WORK" ] && [ "${DR_WORK#/}" != "$DR_WORK" ]; then rm -rf -- "$DR_WORK"; fi
+    # ^ invariant DR_REC_TMP is the one temp file this run made beside the record; the lock is released only when this process holds it
+    if [ -n "$DR_REC_TMP" ] && ! rm -f -- "$DR_REC_TMP"; then
+        printf '%s: cannot remove %s\n' "$GSG_NAME" "$DR_REC_TMP" >&2
+    fi
+    doctor_rec_unlock
 }
 
 # ^ security pathspec and replace-object variables are dropped or pinned before any HEAD read => an inherited setting cannot change what is judged
@@ -293,10 +304,34 @@ doctor_check_tools() {
     if [ "$timeout_ok" -eq 1 ] && [ -n "$DR_LIMIT" ] && ! tool_unusable betterleaks "$BETTERLEAKS_BIN" >/dev/null; then DR_BETTERLEAKS_OK=1; fi
 }
 
+# ^ invariant read-only; launchctl is judged like the hook's tools and never run, a doctor started by launchd itself cannot fail on the domain
+doctor_check_agent() {
+    local msg bin bad=0
+    if [ ! -e "$GSG_AGENT_PLIST" ] && [ ! -L "$GSG_AGENT_PLIST" ]; then
+        doctor_machine_line PROBLEM "timer: $GSG_AGENT_PLIST is missing; run git-secret-guard install --with-timer"
+        bad=1
+    elif ! launchd_plist_is_ours "$GSG_AGENT_PLIST"; then
+        doctor_machine_line PROBLEM "timer: $GSG_AGENT_PLIST was not written by git-secret-guard; move it away and run git-secret-guard install --with-timer"
+        bad=1
+    fi
+    bin="$(settings_tool_bin launchctl)"
+    if msg="$(tool_unusable launchctl "$bin")"; then
+        doctor_machine_line PROBLEM "launchctl: $msg; run git-secret-guard install --with-timer"
+        bad=1
+    fi
+    if [ "$bad" -eq 0 ]; then
+        doctor_machine_line ok "timer: $GSG_AGENT_PLIST is in place; launchctl $bin"
+    fi
+}
+
 # ^ invariant read-only; systemctl is judged like the hook's tools and never run, a run inside the user manager cannot fail on a bus
 doctor_check_timer() {
     local unit path msg bin bad=0
     if [ "$ST_EXISTS" -ne 1 ] || [ "$ST_TIMER" != yes ]; then return 0; fi
+    if brew_is_macos; then
+        doctor_check_agent
+        return 0
+    fi
     for unit in "$GSG_TIMER_UNIT" "$GSG_SERVICE_UNIT"; do
         path="$GSG_UNIT_DIR/$unit"
         if [ ! -e "$path" ] && [ ! -L "$path" ]; then
@@ -352,7 +387,17 @@ doctor_summary() {
     fi
 }
 
-# ^ invariant exit 0 = no PROBLEM line, 1 = at least one, 2 = doctor could not run; WARNING and info never change the status
+# ^ invariant the machine phase of a full run and of a recheck; the git listing has only ok and WARNING lines, recheck skips it
+doctor_machine_checks() {
+    doctor_check_state
+    doctor_check_hook_config
+    doctor_check_tools
+    doctor_check_timer
+    doctor_check_hooks_path || return 1
+    if [ "$DR_RECHECK" -ne 1 ]; then doctor_check_git; fi
+}
+
+# ^ invariant exit 0 = no PROBLEM line, 1 = at least one, 2 = doctor could not run or could not write its record; WARNING and info never change the status
 doctor_run() {
     paths_init || return 2
     lifecycle_note_global_config
@@ -361,13 +406,9 @@ doctor_run() {
     doctor_start || return 2
     DR_HOOK_CMD="$(hook_command_text "$GSG_SHARE" "$(share_recorded_bash "$GSG_SHARE")")" || return 2
     printf 'machine:\n'
-    doctor_check_state
-    doctor_check_hook_config
-    doctor_check_tools
-    doctor_check_timer
-    doctor_check_hooks_path || return 2
-    doctor_check_git
+    doctor_machine_checks || return 2
     doctor_repos || return 2
     doctor_summary
+    doctor_rec_save_full || return 2
     [ "$DR_PROBLEMS" -eq 0 ]
 }

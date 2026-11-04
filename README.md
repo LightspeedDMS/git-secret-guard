@@ -35,7 +35,8 @@ it over. To upgrade, run `install` again from a newer checkout; a machine instal
 ```bash
 git commit ...                          # scanned automatically
 git-secret-guard status                 # what is installed, and whether the config still matches
-git-secret-guard doctor                 # which repositories under ~/Dev are not protected, and why
+git-secret-guard doctor                 # which repositories under ~/Dev are not protected, and why (records the PROBLEMs)
+git-secret-guard doctor --recheck       # re-check only the recorded PROBLEMs, no search
 git-secret-guard uninstall              # restore what was there before (--remove-tools: also the scanners it downloaded)
 ```
 
@@ -50,6 +51,17 @@ git-secret-guard: scanned 3 files, ..., no findings, 2 files exempted, 1s   # .s
 
 No line at all on a commit means the hook did not run (see `docs/scan.md`). The counts come from the extraction, the line
 holds no path or value, and there is no switch to turn it off.
+
+While `doctor` has coverage problems on record (a repository with the hook switched off, a broken tool), every commit
+also ends with a reminder, until they are fixed. The commit itself is never affected:
+
+```
+git-secret-guard: 1 coverage problem still open (doctor run 2026-11-03):
+  /home/me/Dev/legacy: disabled in local config: hook.git-secret-guard.enabled=false (...); remove that key to cover this repository
+  run git-secret-guard doctor for the full report
+```
+
+Details: [docs/scan.md](docs/scan.md#the-coverage-reminder).
 
 ## False positives
 

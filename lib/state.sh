@@ -1,6 +1,7 @@
 # shellcheck shell=bash disable=SC2034
 
 GSG_STATE_MAX_LINES=100
+GSG_LAUNCHD_LABEL=com.lightspeeddms.git-secret-guard.doctor
 GSG_ASIDE_RE='^[a-z][a-z0-9-]*\.gsg-replaced-[0-9]{8}T[0-9]{6}Z$'
 
 # ^ invariant sets ST_* for every key (ST_PREV_SET and ST_TIMER are yes|no); tools_replaced, tools_placed and timer_installed are optional keys
@@ -90,7 +91,12 @@ paths_init() {
     done
     GSG_BIN_DIR="$HOME/.local/bin"
     GSG_SHARE="${XDG_DATA_HOME:-$HOME/.local/share}/git-secret-guard"
-    GSG_STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/git-secret-guard"
+    GSG_STATE_DIR="$(state_dir_path)" || return 1
     GSG_STATE_FILE="$GSG_STATE_DIR/state"
+    GSG_FINDINGS_FILE="$GSG_STATE_DIR/findings"
+    GSG_FINDINGS_LOCK="$GSG_STATE_DIR/findings.lock"
     GSG_UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+    GSG_AGENT_DIR="$HOME/Library/LaunchAgents"
+    GSG_AGENT_PLIST="$GSG_AGENT_DIR/$GSG_LAUNCHD_LABEL.plist"
+    GSG_AGENT_LOG="$GSG_STATE_DIR/doctor.log"
 }

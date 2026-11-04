@@ -25,6 +25,34 @@ EOF
     chmod 755 "$SANDBOX/pathbin/systemctl"
 }
 
+# ^ security the stand-in records its arguments and touches only files beside it => no lifecycle test can reach the real launchd
+# ^ invariant bootstrap marks the agent loaded, bootout unloads it, print fails with 113 until the agent is loaded; an unmodeled subcommand fails loudly
+lc_launchctl_standin() {
+    cat >"$SANDBOX/pathbin/launchctl" <<'EOF' || return 1
+#!/bin/sh
+d="${0%/*}/.."
+echo "$*" >>"$d/launchctl.log"
+for kind in fail failonce; do
+    if [ -f "$d/launchctl.$kind" ]; then
+        want="$(cat "$d/launchctl.$kind")"
+        case " $* " in *"$want"*)
+            if [ "$kind" = failonce ]; then rm -f "$d/launchctl.failonce"; fi
+            echo "Failed: injected launchctl failure" >&2
+            exit 1 ;;
+        esac
+    fi
+done
+case "$1" in
+    print) [ -f "$d/launchctl.loaded" ] || { echo "Could not find service" >&2; exit 113; } ;;
+    bootstrap) : >"$d/launchctl.loaded" ;;
+    bootout) rm -f "$d/launchctl.loaded" ;;
+    *) echo "Error: the launchctl stand-in does not know the subcommand [$1]" >&2; exit 1 ;;
+esac
+exit 0
+EOF
+    chmod 755 "$SANDBOX/pathbin/launchctl"
+}
+
 # ^ invariant the fake uname answers these; lc_platform builds the fixture rows for the same platform the CLI will ask about
 LC_FAKE_OS="" LC_FAKE_ARCH=""
 
@@ -122,6 +150,11 @@ lc_real_uname() {
     rm -f -- "$SANDBOX/pathbin/uname"
 }
 
+# ^ external on a Mac these run against the real uname (lc_begin installed a fake Linux one, lc_real_uname removes it); elsewhere a fake uname says Darwin
+as_macos() {
+    if [ "$TEST_OS" = Darwin ]; then lc_real_uname; else lc_fake_uname Darwin arm64; fi
+}
+
 lc_begin() {
     LC_HOME="$SANDBOX/home"
     LC_BIN="$LC_HOME/.local/bin"
@@ -129,10 +162,12 @@ lc_begin() {
     LC_DATA="$SANDBOX/xdg/data/git-secret-guard"
     LC_STATE="$SANDBOX/xdg/state/git-secret-guard"
     LC_FAKE_OS="" LC_FAKE_ARCH=""
-    rm -rf -- "$LC_HOME" "$SANDBOX/xdg" "$SANDBOX/pathbin" "$LC_FIX" "$SANDBOX/systemctl.log" "$SANDBOX/systemctl.fail" "$SANDBOX/brew.map" || return 1
+    rm -rf -- "$LC_HOME" "$SANDBOX/xdg" "$SANDBOX/pathbin" "$LC_FIX" "$SANDBOX/systemctl.log" "$SANDBOX/systemctl.fail" \
+        "$SANDBOX/launchctl.log" "$SANDBOX/launchctl.fail" "$SANDBOX/launchctl.failonce" "$SANDBOX/launchctl.loaded" "$SANDBOX/brew.map" || return 1
     mkdir -p -- "$LC_HOME" "$SANDBOX/xdg/data" "$SANDBOX/xdg/state" "$SANDBOX/pathbin" || return 1
     lc_brew_reset || return 1
     lc_systemctl_standin || return 1
+    lc_launchctl_standin || return 1
     lc_brew_standin || return 1
     lc_brew_have bash coreutils util-linux jq || return 1
     # ^ why the Linux flow by default on a Mac, not the real Darwin one; tests/test_macos.sh opts into Darwin with lc_real_uname
@@ -205,7 +240,7 @@ lc_path_without() {
         if compgen -G "$d/*" >/dev/null; then ln -sfn "$d"/* "$dir/" || return 1; fi
     done
     rm -f -- "$dir/$1" || return 1
-    for name in systemctl brew uname git; do
+    for name in systemctl launchctl brew uname git; do
         if [ "$1" = "$name" ] || [ ! -e "$SANDBOX/pathbin/$name" ]; then continue; fi
         ln -sfn -- "$SANDBOX/pathbin/$name" "$dir/$name" || return 1
     done

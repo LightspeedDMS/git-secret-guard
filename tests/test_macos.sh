@@ -4,11 +4,6 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
 # shellcheck source=tests/lifecycle.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/lifecycle.sh"
 
-# ^ external on a Mac these run against the real uname (lc_begin installed a fake Linux one, lc_real_uname removes it); elsewhere a fake uname says Darwin
-as_macos() {
-    if [ "$TEST_OS" = Darwin ]; then lc_real_uname; else lc_fake_uname Darwin arm64; fi
-}
-
 CONFIG_BEFORE=""
 snapshot_config() { CONFIG_BEFORE="$(gitx config --global --list)"; }
 
@@ -112,15 +107,13 @@ test_an_old_git_refuses_before_brew_installs_anything() {
     nothing_changed "old git"
 }
 
-test_with_timer_on_macos_refuses_naming_launchd_and_changes_nothing() {
+test_with_timer_on_macos_installs_the_launch_agent_after_the_one_brew_install() {
     lc_begin && as_macos && lc_brew_reset && lc_make_fixtures && lc_use_fixtures || return 1
-    snapshot_config
     gsg install --with-timer
-    assert_rc 1 "--with-timer on macOS"
-    assert_contains "$ERR" "launchd is not supported yet" "names launchd"
-    assert_contains "$ERR" "nothing was changed" "says nothing changed"
-    assert_eq "$(brew_calls)" "" "no brew install for a refused run"
-    nothing_changed "--with-timer"
+    assert_rc 0 "--with-timer on macOS with every Homebrew prerequisite missing"
+    assert_eq "$(brew_calls)" "install bash coreutils util-linux" "one brew install for exactly the missing formulae"
+    assert_file "$LC_HOME/Library/LaunchAgents/com.lightspeeddms.git-secret-guard.doctor.plist" "the LaunchAgent plist is written"
+    assert_contains "$(<"$LC_DATA/settings")" "LAUNCHCTL_BIN=$SANDBOX/pathbin/launchctl" "launchctl is recorded"
 }
 
 test_linux_install_never_calls_brew_and_writes_no_macos_settings() {
@@ -353,13 +346,14 @@ test_a_recorded_bash_wrapper_that_runs_bash_as_a_child_is_refused_by_the_depth_b
     assert_fake_bash_is_refused "$fake"
 }
 
-test_install_with_timer_under_the_system_bash_is_refused_before_brew_runs() {
+test_install_with_timer_under_the_system_bash_bootstraps_like_a_plain_install() {
     old_system_bash || skip_test "$NO_OLD_BASH"
-    lc_begin && as_macos && lc_brew_reset || return 1
+    lc_begin && as_macos && lc_brew_reset && lc_make_fixtures && lc_use_fixtures || return 1
     oldgsg install --with-timer
-    assert_rc 1 "--with-timer under bash 3.2"
-    assert_contains "$ERR" "launchd is not supported yet" "names launchd"
-    assert_no_file "$SANDBOX/brew.log" "brew was not run"
+    assert_rc 0 "--with-timer under bash 3.2 with every Homebrew prerequisite missing"
+    assert_eq "$(brew_calls)" "install bash
+install coreutils util-linux" "bash alone in the bootstrap, then one install of the rest"
+    assert_file "$LC_HOME/Library/LaunchAgents/com.lightspeeddms.git-secret-guard.doctor.plist" "the LaunchAgent plist is written"
 }
 
 BOOTSTRAP_NOTE="the only change made was the Homebrew install of bash"
@@ -508,8 +502,7 @@ test_a_download_that_cannot_be_fetched_after_the_brew_install_names_the_brew_pac
 CLAIM_REGEX='nothing (was )?(changed|installed)|changes nothing|no change (was )?made|unchanged|nothing else'
 
 # ^ invariant $1 = one joined statement, true when it uses brew_unchanged_text with no literal claim, or equals a line unreachable after brew
-# ^ external the exact lines are the claim text (brew.sh), the pre-brew default of the hooksPath refusal (a BREW_INSTALLED test follows it),
-# ^ external the default claim of install_find_systemctl and the --with-timer refusal; both timer lines are unreachable on macOS, --with-timer is refused first
+# ^ external the exact lines are the claim text (brew.sh) and the pre-brew default of the hooksPath refusal (a BREW_INSTALLED test follows it)
 claim_line_is_allowed() {
     local without="${1//brew_unchanged_text/}"
     case "$1" in
@@ -518,8 +511,6 @@ claim_line_is_allowed() {
             return 0 ;;
         "printf 'nothing was changed'") return 0 ;;
         'claim="install changes nothing and refuses"') return 0 ;;
-        'local found claim="; nothing was changed"') return 0 ;;
-        "printf '%s: --with-timer is not supported on macOS: launchd is not supported yet; nothing was changed\\n' \"\$GSG_NAME\" >&2") return 0 ;;
     esac
     return 1
 }
@@ -528,7 +519,7 @@ claim_line_is_allowed() {
 # ^ external awk joins backslash-continued lines first; comment lines skipped
 claim_sweep() {
     local root="$1" f hit text
-    for f in install tools state hookspath brew; do
+    for f in install install_tools tools state hookspath brew; do
         if [ ! -f "$root/lib/$f.sh" ]; then
             printf '%s.sh: missing\n' "$f"
             continue
@@ -555,7 +546,7 @@ test_every_install_refusal_wording_is_honest_after_a_brew_install() {
 test_the_claim_sweep_catches_each_planted_false_claim() {
     local root="$SANDBOX/planted" out
     rm -rf -- "$root" && mkdir -p -- "$root/lib" || return 1
-    cp -- "$GSG_PROJECT"/lib/{install,tools,state,hookspath,brew}.sh "$root/lib/" || return 1
+    cp -- "$GSG_PROJECT"/lib/{install,install_tools,tools,state,hookspath,brew}.sh "$root/lib/" || return 1
     assert_eq "$(claim_sweep "$root")" "" "the unmodified copy is clean"
     cat >>"$root/lib/tools.sh" <<'EOF' || return 1
 printf 'planted one: nothing installed\n' >&2

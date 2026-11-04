@@ -34,7 +34,7 @@ sudo make prefix=/usr/local NO_RUST=1 NO_TCLTK=1 NO_GETTEXT=1 install     # /usr
 Then `git clone <this repository> && cd git-secret-guard && bin/git-secret-guard install` works as on RHEL. `install` names the missing
 prerequisite with its fix, always before it changes anything: git (the PPA command on Ubuntu and its derivatives, a build pointer on
 Debian, generic text elsewhere), `jq` (`sudo apt install jq`), `setsid` (`util-linux`), `timeout` (`coreutils`), `curl`, and
-`systemctl` for `--with-timer` (`systemd`). It checks all of them first and names **every** missing one with its fix in a single refusal
+`systemctl` for `--with-timer` (`systemd`; on macOS `launchctl` instead, which ships with the system). It checks all of them first and names **every** missing one with its fix in a single refusal
 (with the count when there are several), so one run is enough to see everything to install. The distribution is read from `/etc/os-release`
 as data (never sourced); a missing or unreadable file gives the generic hint and no shell error.
 
@@ -63,7 +63,7 @@ bin/git-secret-guard install        # lists what is missing, installs it with br
   When a GNU `timeout` already exists (`coreutils` installed), the tool plan, the download, the SHA-256 check and the `--version` check run
   before that `brew install` as well, so a bad download refuses with nothing changed. Only on a Mac without `coreutils` do they follow it, because
   the version probes need a bounded `timeout`; a failed download there is a refusal that names what brew installed. An old git, an
-  unsupported CPU, `--with-timer`, a set `core.hooksPath`, a lock without a row for this platform and the other refusals therefore install
+  unsupported CPU, a `--with-timer` without `launchctl`, a set `core.hooksPath`, a lock without a row for this platform and the other refusals therefore install
   nothing beyond the bootstrap's `bash`.
 - **The CLI needs the GNU directory.** On macOS every command except `install`, `version` and `help` refuses, naming `brew install coreutils`,
   when no GNU directory is known (the installed copy's settings have no `GNUBIN_DIR`, or a checkout finds no `brew` on `PATH`). A global-config
@@ -86,8 +86,11 @@ bin/git-secret-guard install        # lists what is missing, installs it with br
   `._/+@%-` is believed, so a value that needs shell quoting is ignored), checks that it is executable and reports bash 4.4 or
   newer, and re-executes under it once. If that fails it refuses with a message that names the command, the unusable `BASH_BIN`
   and what to do (put the Homebrew bash first on `PATH`, or `brew install bash`), never the install wording.
-- **`install --with-timer` is refused** on macOS (`launchd is not supported yet`) and changes nothing; the weekly doctor timer is
-  systemd only for now. `doctor` and `status` work and check `BASH_BIN` like the other recorded tools.
+- **`install --with-timer` installs a LaunchAgent** on macOS: `~/Library/LaunchAgents/com.lightspeeddms.git-secret-guard.doctor.plist`,
+  loaded with `launchctl bootstrap gui/<uid>`, running doctor weekly through the recorded bash with its output in
+  `doctor.log` in the state directory; `launchctl` is recorded as `LAUNCHCTL_BIN` (details in
+  [the launchd section of the doctor chapter](doctor.md#the-weekly-timer-on-macos-launchd)). `doctor` and `status` check
+  `BASH_BIN` and `LAUNCHCTL_BIN` like the other recorded tools.
 - **GNU flags and their answers.** `realpath -m`, `mktemp --suffix`, `mv -T`/`-n`, `install -T`, `chmod 700 -- DIR` and `sort -z` run from
   the GNU directory. `find -printf` (backup bounds) stays where `find` has it (Linux) and is `find -print0 | xargs stat` elsewhere (GNU or BSD `stat` format chosen by a probe);
   `find -ls` was tried and dropped, because an owner or group name with a space moves its size column;

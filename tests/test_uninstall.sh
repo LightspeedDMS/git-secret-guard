@@ -382,4 +382,81 @@ test_the_share_dir_removal_refuses_a_path_that_is_not_ours() {
 
 cfg_all_count() { gitx config --global --get-all "$1" | wc -l; }
 
+# ^ invariant writes a valid findings record with no findings into the state dir
+seed_findings() { printf 'git-secret-guard findings 1\ntime 2026-01-01T00:00:00Z\n' >"$LC_STATE/findings"; }
+
+test_uninstall_removes_the_findings_record_a_dead_lock_and_temp_leftovers() {
+    local dead_pid=99999999
+    fresh_install || return 1
+    seed_findings && : >"$LC_STATE/findings.AbCdEf" && ln -s "$dead_pid" "$LC_STATE/findings.lock" || return 1
+    gsg uninstall
+    assert_rc 0 "uninstall"
+    assert_no_file "$LC_STATE" "the record, the temp file and the dead lock went, so the state dir went too"
+}
+
+# ^ invariant $1 = a command name, $2 = the script text; the stand-in goes first on every sandbox PATH
+write_stand_in() { printf '%s' "$2" >"$SANDBOX/pathbin/$1" && chmod u+rwx,go+rx -- "$SANDBOX/pathbin/$1"; }
+
+# ^ invariant runs the INSTALLED CLI link, not the checkout; the real rerun after a refused uninstall is this one
+gsg_installed() { run_cap env -i "${LC_ENV[@]}" "${EXTRA_ENV[@]}" "$LC_BIN/git-secret-guard" "$@"; }
+
+# ^ invariant $1 = the pid of a background job; stopping it is best effort, it may have exited
+stop_pid() {
+    kill "$1" 2>/dev/null || true
+    wait "$1" 2>/dev/null || true
+}
+
+test_uninstall_refused_by_a_live_run_keeps_everything_and_a_rerun_finishes() {
+    local holder real_sleep hold_seconds=60 setup_failed=0 first_rc=""
+    fresh_install || return 1
+    real_sleep="$(command -v sleep)" || return 1
+    "$real_sleep" "$hold_seconds" &
+    holder=$!
+    # ^ why a stand-in sleep, not a long wait; the lock wait is a fixed number of attempts and the stand-in makes each instant
+    if write_stand_in sleep $'#!/bin/sh\nexit 0\n' && seed_findings && : >"$LC_STATE/findings.AbCdEf" && ln -s "$holder" "$LC_STATE/findings.lock"; then
+        gsg uninstall
+        first_rc=$RC
+    else
+        setup_failed=1
+    fi
+    if [ "$setup_failed" -ne 0 ]; then
+        stop_pid "$holder"
+        fail "could not set up the live lock"
+        return 1
+    fi
+    assert_eq "$first_rc" 1 "uninstall cannot finish while a run holds the lock"
+    assert_contains "$ERR" "another run holds $LC_STATE/findings.lock (process $holder)" "names the holder"
+    assert_contains "$ERR" "uninstall changed nothing" "says that nothing was changed"
+    assert_contains "$ERR" "run git-secret-guard uninstall again" "says what to run"
+    assert_contains "$(gitx config --global --get-regexp '^hook\.git-secret-guard\.')" "hook.git-secret-guard.command" "the hook section is still there"
+    assert_file "$LC_BIN/git-secret-guard" "the installed CLI the message points to is still there"
+    assert_file "$LC_DATA" "so is the share dir"
+    assert_file "$LC_STATE/state" "and the state file, so that the rerun finds work to do"
+    assert_file "$LC_STATE/findings" "the record is untouched while a run may be writing it"
+    assert_file "$LC_STATE/findings.AbCdEf" "so is a leftover temp file"
+    [ -L "$LC_STATE/findings.lock" ] || fail "the live lock is not ours to remove"
+    stop_pid "$holder"
+    gsg_installed uninstall
+    assert_rc 0 "the rerun with the installed CLI finishes once the run is gone"
+    assert_no_file "$LC_BIN/git-secret-guard" "and removes the CLI link"
+    assert_no_file "$LC_DATA" "the share dir"
+    assert_no_file "$LC_STATE" "and the record, the temp file, the lock and the state dir"
+}
+
+test_uninstall_deletes_the_findings_files_only_under_the_lock() {
+    local real_rm log="$SANDBOX/rm.log" script
+    fresh_install || return 1
+    real_rm="$(command -v rm)" || return 1
+    seed_findings && : >"$LC_STATE/findings.AbCdEf" || return 1
+    # shellcheck disable=SC2016
+    printf -v script '#!/bin/sh\ncase "$*" in\n*findings*) if [ -L %q ]; then echo held; else echo free; fi >>%q ;;\nesac\nexec %q "$@"\n' \
+        "$LC_STATE/findings.lock" "$log" "$real_rm" || return 1
+    write_stand_in rm "$script" || return 1
+    gsg uninstall
+    assert_rc 0 "uninstall"
+    assert_contains "$(<"$log")" "held" "findings files were removed"
+    assert_not_contains "$(<"$log")" "free" "and never without the lock"
+    assert_no_file "$LC_STATE" "the state dir went"
+}
+
 run_file_tests

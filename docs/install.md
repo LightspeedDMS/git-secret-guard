@@ -4,8 +4,8 @@
 git clone <this repository> && cd git-secret-guard
 bin/git-secret-guard install        # also the upgrade: run it again from a newer checkout
 git-secret-guard status             # what is installed, and whether the global config still matches
-git-secret-guard doctor             # which repositories are not protected, and why (read-only, see below)
-bin/git-secret-guard install --with-timer   # optional: also run doctor weekly through a systemd user timer
+git-secret-guard doctor             # which repositories are not protected, and why (read-only except its findings record, see below)
+bin/git-secret-guard install --with-timer   # optional: also run doctor weekly (systemd user timer, a LaunchAgent on macOS)
 git-secret-guard uninstall          # put back what was there before
 ```
 
@@ -32,7 +32,7 @@ ignores config hooks without any message.
 | Files | `hooks/`, `lib/`, `bin/`, `tools.lock`, `VERSION` copied to `${XDG_DATA_HOME:-~/.local/share}/git-secret-guard/` (the new tree is built beside the old one and swapped in, so a commit during an upgrade sees the old or the new hook, never half of either; if the final rename fails, the previous tree is moved back, so the share dir is never left missing), plus the generated `settings` file with absolute `TRUFFLEHOG_BIN`, `BETTERLEAKS_BIN`, `JQ_BIN`, `SETSID_BIN`, `TIMEOUT_BIN`, the pinned `TRUFFLEHOG_VERSION` and `BETTERLEAKS_VERSION` (the hook prints them on a passing commit) and `SCAN_TIMEOUT_SECONDS=300` (on macOS also the absolute `BASH_BIN` and `GNUBIN_DIR`). `settings` is rewritten by every install. |
 | Global git config | `hook.git-secret-guard.event=pre-commit` and `hook.git-secret-guard.command=<absolute path of the installed hooks/secret-scan>`, written with `git config --global --replace-all`, so each stays single-valued however often you run `install`. On macOS the command is `'<recorded bash>' '<installed hooks/secret-scan>'`, so the hook runs under bash 4.4 or newer whatever `PATH` the git client has. |
 | CLI | `~/.local/bin/git-secret-guard` is a symlink to the installed copy. Make sure `~/.local/bin` is on your `PATH`. |
-| Timer | Only with `--with-timer`: two systemd **user** units and `systemctl --user enable --now git-secret-guard-doctor.timer`, see [The weekly timer](doctor.md#the-weekly-timer). Without the flag no unit is written and `systemctl` is never called. On macOS the flag is refused (`launchd is not supported yet`) and nothing is changed. |
+| Timer | Only with `--with-timer`: two systemd **user** units and `systemctl --user enable --now git-secret-guard-doctor.timer`, see [The weekly timer](doctor.md#the-weekly-timer). Without the flag no unit is written and `systemctl` is never called. On macOS the flag installs a LaunchAgent plist in `~/Library/LaunchAgents` and loads it with `launchctl bootstrap gui/<uid>`, see [the launchd section](doctor.md#the-weekly-timer-on-macos-launchd). |
 | State | `${XDG_STATE_HOME:-~/.local/state}/git-secret-guard/state` (mode 600 in a 700 directory): version, the previous `core.hooksPath` (or `unset`), which tools install itself downloaded, the backup path, and `timer_installed` (`yes` or `no`). |
 
 Install is idempotent. A second run replaces the files, keeps the config single-valued, downloads nothing that is
@@ -125,7 +125,11 @@ git-secret-guard uninstall --remove-tools  # also removes the scanners that inst
 ```
 
 Removes the `hook.git-secret-guard` section from the global config, restores the recorded previous `core.hooksPath`
-**verbatim** (or leaves it unset when none was recorded), and removes the share dir, the CLI link and the state file.
+**verbatim** (or leaves it unset when none was recorded), and removes the share dir, the CLI link and the state file, together with doctor's findings record (`findings`), its
+leftover `findings.XXXXXX` temp files. Uninstall takes `findings.lock` **before it changes anything** (a dead or old lock is
+taken over). When a live doctor run holds it, uninstall changes nothing (the hook section, the CLI link, the share dir and
+the state all stay), exits 1 and says to run `git-secret-guard uninstall` again; the installed CLI is still there, and the
+rerun finishes once the run is gone.
 `trufflehog` and `betterleaks` stay unless `--remove-tools` is given; then only the ones the state lists as downloaded by
 install onto an empty path are removed (`--remove-tools` has to be given on the run that removes the state, since the
 record is gone afterwards). A tool is deleted only when it is a regular file whose SHA-256 is one install recorded for
@@ -154,7 +158,8 @@ there; left in place` (or that no hash was recorded).
 - A second run reports `nothing to do, git-secret-guard is not installed` and exits 0. A malformed state file is
   refused with nothing changed.
 - **The weekly timer** (only when the state records `timer_installed=yes`) is disabled and removed right after the hook
-  config and before the share dir: [the details are in the doctor chapter](doctor.md#the-weekly-timer). Without a recorded timer,
+  config and before the share dir (on macOS the LaunchAgent is booted out and its plist removed at the same point):
+  [the details are in the doctor chapter](doctor.md#the-weekly-timer). Without a recorded timer,
   uninstall never calls `systemctl`.
 
 ## `status` and `version`

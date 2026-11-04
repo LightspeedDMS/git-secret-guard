@@ -52,6 +52,44 @@ report_nothing_line() {
     fi
 }
 
+# ^ invariant rc 1 = nothing to re-check (no file, an empty file, or exactly the magic line and a time line); rc 0 = anything else
+# ^ why a damaged file counts as due, not as clean; the re-check validates the record and says so, the hook does not parse it
+report_reminder_due() {
+    local l1="" l2="" l3="" rc=0
+    if [ ! -s "$1" ]; then return 1; fi
+    { { IFS= read -r l1; IFS= read -r l2; IFS= read -r l3 || rc=1; } <"$1"; } 2>/dev/null || return 0
+    if [ "$l1" = "$GSG_FINDINGS_MAGIC" ] && [[ $l2 == "time "* ]] && [ "$rc" -eq 1 ] && [ -z "$l3" ]; then return 1; fi
+    return 0
+}
+
+# ^ invariant $1 = a file with doctor --recheck's stdout, $2 = the findings record; prints the reminder on stderr, rc 1 and no output = unreadable
+# ^ security only PROBLEM texts doctor already sanitised are copied, control characters mapped to "?" again here; no stderr of doctor is used
+# ^ coupled lib/doctor_findings.sh:doctor_rec_print_machine and doctor_rec_print_kept print the shapes named in the awk BEGIN block (path, PROBLEM lines)
+report_reminder() {
+    local l1 l2 date lines n
+    { { IFS= read -r l1 && IFS= read -r l2; } <"$2"; } 2>/dev/null || return 1
+    if [[ ! $l2 =~ ^time\ ([0-9]{4}-[0-9]{2}-[0-9]{2})T ]]; then return 1; fi
+    date="${BASH_REMATCH[1]}"
+    lines="$(awk '
+        function clean(s) { gsub(/[[:cntrl:]]/, "?", s); return s }
+        BEGIN { path_indent = "  "; machine_prefix = "  PROBLEM  "; repo_prefix = "    PROBLEM  " }
+        /^machine:$/ { sec = "m"; next }
+        /^repos with findings:$/ { sec = "r"; next }
+        sec == "r" && /^  [^ ]/ { path = clean(substr($0, length(path_indent) + 1)); next }
+        sec == "m" && index($0, machine_prefix) == 1 { print "  machine: " clean(substr($0, length(machine_prefix) + 1)); next }
+        sec == "r" && index($0, repo_prefix) == 1 { print "  " path ": " clean(substr($0, length(repo_prefix) + 1)) }
+    ' "$1")" || return 1
+    if [ -z "$lines" ]; then return 1; fi
+    n="$(printf '%s\n' "$lines" | wc -l)" || return 1
+    n="${n//[[:space:]]/}"
+    printf '%s: %s still open (doctor run %s):\n%s\n  run %s doctor for the full report\n' "$GSG_NAME" "$(_report_count "$n" "coverage problem")" "$date" "$lines" "$GSG_NAME" >&2
+}
+
+# ^ invariant $1 = a short reason made of text the hook wrote itself, never of doctor's output
+report_reminder_failed() {
+    printf '%s: coverage re-check failed (%s); run %s doctor\n' "$GSG_NAME" "$1" "$GSG_NAME" >&2
+}
+
 report_results() {
     local work="${1:-}" rows errs n
     if [ -z "$work" ] || [ ! -d "$work" ]; then

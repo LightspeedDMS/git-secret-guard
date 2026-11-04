@@ -14,6 +14,10 @@ GSG_REPO_GITLEAKS_TOML=repo-gitleaks.toml
 # shellcheck disable=SC2034
 GSG_REPO_GITLEAKS_IGNORE=repo-gitleaksignore
 
+# ^ coupled lib/doctor_findings.sh (writer and reader of the record) and lib/report.sh:report_reminder_due (the hook); line 1 of every findings record
+# shellcheck disable=SC2034
+GSG_FINDINGS_MAGIC="git-secret-guard findings 1"
+
 # ^ security clean maps control characters in tool-provided text to "?" => a detector or file name cannot forge terminal output
 # shellcheck disable=SC2034
 GSG_JQ_CLEAN='def clean: tostring | gsub("[\u0000-\u001f\u007f]"; "?"); '
@@ -21,7 +25,7 @@ GSG_JQ_CLEAN='def clean: tostring | gsub("[\u0000-\u001f\u007f]"; "?"); '
 # ^ security unset before source => an inherited tool path, version, BASH_BIN or GNUBIN_DIR cannot fill a gap (silent bypass)
 load_settings() {
     local file="$1"
-    unset TRUFFLEHOG_BIN BETTERLEAKS_BIN JQ_BIN SETSID_BIN TIMEOUT_BIN SYSTEMCTL_BIN BASH_BIN GNUBIN_DIR SCAN_TIMEOUT_SECONDS DOCTOR_TIMEOUT_SECONDS \
+    unset TRUFFLEHOG_BIN BETTERLEAKS_BIN JQ_BIN SETSID_BIN TIMEOUT_BIN SYSTEMCTL_BIN LAUNCHCTL_BIN BASH_BIN GNUBIN_DIR SCAN_TIMEOUT_SECONDS DOCTOR_TIMEOUT_SECONDS \
         TRUFFLEHOG_VERSION BETTERLEAKS_VERSION GITLEAKS_BIN GITLEAKS_VERSION
     if [ ! -f "$file" ] || [ ! -r "$file" ]; then
         printf 'settings file is missing or unreadable: %s\n' "$file" >&2
@@ -96,6 +100,7 @@ settings_tool_bin() {
         setsid) printf '%s' "${SETSID_BIN:-}" ;;
         timeout) printf '%s' "${TIMEOUT_BIN:-}" ;;
         systemctl) printf '%s' "${SYSTEMCTL_BIN:-}" ;;
+        launchctl) printf '%s' "${LAUNCHCTL_BIN:-}" ;;
         *) return 1 ;;
     esac
 }
@@ -132,4 +137,16 @@ share_recorded_bash() {
         load_settings "$1/settings" >/dev/null 2>&1 || exit 0
         printf '%s' "${BASH_BIN:-}"
     )
+}
+
+# ^ invariant prints the state directory (XDG_STATE_HOME or ~/.local/state, plus git-secret-guard); rc 1 = neither is set; paths_init and the hook both use it
+# ^ why one function in common.sh, not a copy in the hook; the hook finds the findings record without loading the CLI-only state library
+state_dir_path() {
+    if [ -n "${XDG_STATE_HOME:-}" ]; then
+        printf '%s/git-secret-guard' "$XDG_STATE_HOME"
+    elif [ -n "${HOME:-}" ]; then
+        printf '%s/.local/state/git-secret-guard' "$HOME"
+    else
+        return 1
+    fi
 }

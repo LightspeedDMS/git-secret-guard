@@ -138,7 +138,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Prerequisites (git >= 2.54, jq)
+      - name: Prerequisites (git >= 2.54; install downloads jq when the image has none)
         shell: bash
         run: |
           git --version
@@ -147,7 +147,6 @@ jobs:
             echo "::error::git >= 2.54 is required; this runner image has $major.$minor"
             exit 1
           fi
-          command -v jq >/dev/null || choco install jq -y --no-progress
 
       - name: Install
         shell: bash

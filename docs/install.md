@@ -9,7 +9,7 @@ bin/git-secret-guard install --with-timer   # optional: also run doctor weekly (
 git-secret-guard uninstall          # put back what was there before
 ```
 
-**Requirements.** Linux on x86_64 or arm64, or macOS arm64 with Homebrew (macOS x86_64 is mapped, not tested). bash,
+**Requirements.** Linux on x86_64 or arm64, macOS arm64 with Homebrew (macOS x86_64 is mapped, not tested), or Windows x86_64 with Git for Windows ([platforms.md](platforms.md#windows-git-for-windows); run `install` from Git Bash, a missing `jq` is downloaded there). bash,
 **git >= 2.54 first on `PATH`**, `jq`, `setsid`, `timeout`, and `curl` plus `tar` when a scanner has to be downloaded. On
 macOS, `install` lists whichever of bash 4.4 or newer, `coreutils` (`timeout`), `util-linux` (`setsid`) and `jq` is missing, installs them
 with `brew install` only after its other checks have passed, the `tools.lock` lookup included (with a GNU `timeout` already present, the scanner
@@ -130,7 +130,7 @@ leftover `findings.XXXXXX` temp files. Uninstall takes `findings.lock` **before 
 taken over). When a live doctor run holds it, uninstall changes nothing (the hook section, the CLI link, the share dir and
 the state all stay), exits 1 and says to run `git-secret-guard uninstall` again; the installed CLI is still there, and the
 rerun finishes once the run is gone.
-`trufflehog` and `betterleaks` stay unless `--remove-tools` is given; then only the ones the state lists as downloaded by
+`trufflehog` and `betterleaks` (on Windows also a `jq.exe` install downloaded) stay unless `--remove-tools` is given; then only the ones the state lists as downloaded by
 install onto an empty path are removed (`--remove-tools` has to be given on the run that removes the state, since the
 record is gone afterwards). A tool is deleted only when it is a regular file whose SHA-256 is one install recorded for
 it. Your own build of the same version, a symlink, or any file install cannot prove it placed (for instance when the

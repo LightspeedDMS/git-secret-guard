@@ -5,7 +5,8 @@ GSG_VERSION_PROBE_SECONDS=20
 GSG_TOOL_NAMES=(trufflehog betterleaks)
 # ^ external the previous build installed gitleaks and recorded it in the state file => state validation accepts it, install retires it
 GSG_LEGACY_TOOL_NAMES=(gitleaks)
-GSG_STATE_TOOL_NAMES=(trufflehog betterleaks gitleaks)
+# ^ invariant jq joins GSG_TOOL_NAMES only inside an install run, by install_manage_jq; status and doctor see the two scanners
+GSG_STATE_TOOL_NAMES=(trufflehog betterleaks gitleaks jq)
 
 # ^ security GSG_TOOLS_LOCK swaps WHICH lock is trusted, never whether one is checked => see test:test_the_base_url_override_cannot_skip_verification
 tools_lock_path() { printf '%s\n' "${GSG_TOOLS_LOCK:-$GSG_ROOT/tools.lock}"; }
@@ -59,7 +60,7 @@ tools_probe_version() {
 tools_platform_key() {
     local tool="$1" os="$2" arch="$3" cpu prefix=linux
     case "$tool" in
-        trufflehog | betterleaks) ;;
+        trufflehog | betterleaks | jq) ;;
         *) printf '%s: unknown tool [%s]\n' "$GSG_NAME" "$tool" >&2; return 1 ;;
     esac
     case "$os:$arch" in
@@ -74,8 +75,13 @@ tools_platform_key() {
 }
 
 # ^ external the betterleaks Windows release is a .zip, every other asset is a .tar.gz
+# ^ external jq ships a bare executable, jq-windows-amd64.exe, with no version in its name
 tools_tarball_name() {
     local tool="$1" version="$2" platform="$3" ext=tar.gz
+    if [ "$tool" = jq ]; then
+        printf 'jq-%s.exe\n' "${platform//_/-}"
+        return 0
+    fi
     case "$platform" in
         windows_*) if [ "$tool" = betterleaks ]; then ext=zip; fi ;;
     esac
@@ -85,17 +91,18 @@ tools_tarball_name() {
 # ^ security GSG_TOOLS_BASE_URL only moves where the tarball is fetched from => the SHA-256 check against a lock still decides
 # ^ see test:test_the_base_url_override_cannot_skip_verification
 tools_release_url() {
-    local tool="$1" version="$2" platform="$3" name repo
+    local tool="$1" version="$2" platform="$3" name repo tag="v$2"
     name="$(tools_tarball_name "$tool" "$version" "$platform")" || return 1
     case "$tool" in
         trufflehog) repo=trufflesecurity/trufflehog ;;
         betterleaks) repo=betterleaks/betterleaks ;;
+        jq) repo=jqlang/jq tag="jq-$version" ;;
         *) printf '%s: unknown tool [%s]\n' "$GSG_NAME" "$tool" >&2; return 1 ;;
     esac
     if [ -n "${GSG_TOOLS_BASE_URL:-}" ]; then
         printf '%s/%s\n' "${GSG_TOOLS_BASE_URL%/}" "$name"
     else
-        printf 'https://github.com/%s/releases/download/v%s/%s\n' "$repo" "$version" "$name"
+        printf 'https://github.com/%s/releases/download/%s/%s\n' "$repo" "$tag" "$name"
     fi
 }
 
@@ -135,6 +142,12 @@ tools_fetch_verified() {
 tools_extract_binary() {
     local tarball="$1" tool="$2" dest="$3" listing member nl=$'\n' bin tar_bin=tar list_flags=-tzf extract_flags=-xzf
     bin="$(tools_binary_name "$tool")" || return 1
+    # ^ external the jq asset is the executable itself => nothing to list or unpack, the checksum already covered these bytes
+    if [ "$tool" = jq ]; then
+        cp -- "$tarball" "$dest/$bin" || return 1
+        chmod 755 -- "$dest/$bin"
+        return
+    fi
     if tools_is_windows; then
         if [ -z "${SYSTEMROOT:-}" ]; then
             printf '%s: SYSTEMROOT is not set, cannot locate tar.exe\n' "$GSG_NAME" >&2
@@ -171,12 +184,13 @@ tools_extract_binary() {
 }
 
 # ^ external trufflehog prints "trufflehog 3.99.2", betterleaks prints "1.9.0" (version) or "betterleaks version 1.9.0" (--version); probed
+# ^ external jq prints "jq-1.8.2", with CRLF from the native jq.exe (probed) => the carriage return would stick to the word
 tools_version_matches() {
     local output="$1" pinned="$2" word
     local -a words=()
-    read -r -d '' -a words <<<"$output" || true
+    read -r -d '' -a words <<<"${output//$'\r'/}" || true
     for word in "${words[@]}"; do
-        if [ "$word" = "$pinned" ] || [ "$word" = "v$pinned" ]; then return 0; fi
+        if [ "$word" = "$pinned" ] || [ "$word" = "v$pinned" ] || [ "$word" = "jq-$pinned" ]; then return 0; fi
     done
     return 1
 }

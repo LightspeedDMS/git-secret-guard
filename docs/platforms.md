@@ -5,6 +5,7 @@
 | RHEL 9-compatible (x86_64) | Supported. RHEL 9-compatible (tested on Rocky Linux 9.7); there `/usr/local/bin/git` is built from source and `/usr/bin/git` 2.52 is left alone. |
 | Ubuntu 24.04 LTS | Supported. The whole suite and an install E2E with real downloads run in a podman `ubuntu:24.04` container, as a non-root user, with mawk as the default awk: `tests/platform/ubuntu.sh`. |
 | macOS arm64 (tested on macOS 26.7.1) | Supported, with Homebrew: see [macOS (Homebrew)](#macos-homebrew). The whole suite and an install E2E in a scratch home run on a real Mac. |
+| Windows x86_64 (tested on Windows Server 2019) | Supported with Git for Windows: see [Windows (Git for Windows)](#windows-git-for-windows). No weekly timer; the lifecycle test suites do not run there. |
 | macOS x86_64 (Intel) | Mapped (`darwin_amd64` / `darwin_x64` rows of `tools.lock`) but **not tested**. |
 | Other Linux | Not tested. `install` names what is missing and falls back to generic advice when `/etc/os-release` is not Ubuntu or Debian. |
 
@@ -105,6 +106,38 @@ bin/git-secret-guard install        # lists what is missing, installs it with br
   fake prefix (never a real `brew install`); the Linux-behaviour lifecycle suites run on a Mac under a fake Linux `uname`. Explained
   skips: the podman suite (`test_platform.sh`: Linux only), systemd tests (no `systemctl`), `hook.<event>.enabled` (Apple Git has no
   such key), the gawk and mawk cases when those awks are not installed.
+
+## Windows (Git for Windows)
+
+Run everything from **Git Bash**. Commits are scanned from any shell, Git Bash, PowerShell or cmd, because the hook lives
+in the global git config.
+
+```bash
+bin/git-secret-guard install        # downloads what is missing, nothing to install by hand except Git for Windows itself
+```
+
+- **Prerequisites.** Git for Windows with git 2.54 or newer (`install` refuses an older one) on x86_64. `taskkill`,
+  `timeout`, `curl`, `sha256sum` and the System32 `tar.exe` come with Windows or Git for Windows. `~/.local/bin` should be
+  on `PATH` for the `git-secret-guard` command.
+- **jq is handled by `install`.** With no `jq` on `PATH`, `install` downloads the pinned `jq.exe` from the jqlang release,
+  checks its SHA-256 against `tools.lock`, and places it in `~/.local/bin` beside the scanners. No package manager is
+  needed (Windows Server has no winget). It follows the scanner rules: all downloads are verified before anything
+  changes, a rerun keeps it, a pin bump replaces it, and `uninstall --remove-tools` removes it. A `jq` you already have on
+  `PATH` is used as it is and never recorded as ours.
+- **File names.** The scanners and jq keep their `.exe` names. The CLI entry `~/.local/bin/git-secret-guard` is a small
+  wrapper script, not a symlink, and `uninstall` removes it. `JQ_BIN` names a wrapper in the share dir adding `-b`,
+  because a native `jq.exe` otherwise writes CRLF.
+- **Not available.** The weekly timer needs systemd, which Windows does not have. Run `git-secret-guard doctor` yourself.
+- **Stopping a scan.** There are no process groups: scanners are stopped with `taskkill /T /F`, without a grace period.
+- **What was checked.** On Windows Server 2019 with git 2.56.0.windows.4, from a machine with no jq: install, a rerun,
+  `status`, `doctor` (including a worktree and a repository with the hook disabled), `doctor --recheck`, the coverage
+  reminder, `uninstall --remove-tools`, a foreign scanner moved aside and restored, and a `jq` of the user's left alone.
+  Commits from Git Bash and from PowerShell: a clean one passes, findings from both scanners block, `.secret-scan-ignore`
+  and `--no-verify` work, and no scan directory is left behind.
+- **Not checked.** Stopping a running scan with Ctrl-C on Windows, Windows on arm64 (refused), and the lifecycle test
+  suites: they need `setsid`, so they do not run on Windows. `tests/test_windows.sh` covers the Windows branches by
+  faking `uname` around the real libraries, and the `windows` job in `.github/workflows/tests.yml` runs a clean-machine
+  install.
 
 ## What differs on Ubuntu, and what was checked
 

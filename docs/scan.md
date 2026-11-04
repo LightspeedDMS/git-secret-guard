@@ -7,20 +7,22 @@
 1. Git (>= 2.54) runs `hook.git-secret-guard.command` for the `pre-commit` event, from the repo root, before the
    repository's own hook. Both run even if the first fails; the commit is blocked if either fails.
 2. The script reads tool locations from `settings`, an installed file next to `hooks/` and `lib/`. Missing or
-   non-executable `jq`, `trufflehog`, `betterleaks`, `setsid` or `timeout`, or a relative path, blocks the commit and says
-   nothing was scanned. `setsid`, `timeout`, `jq` and both scanners come from the settings file only (no environment
+   non-executable `jq`, `trufflehog`, `betterleaks`, `setsid` (`taskkill` on Windows) or `timeout`, or a relative path,
+   blocks the commit and says nothing was scanned. `setsid`, `timeout`, `jq` and both scanners come from the settings file only (no environment
    override, no `PATH` lookup), so a planted `setsid` earlier on `PATH` cannot take over the scanner start. **Everything
    else the hook runs is found through `PATH`**: `bash` (the `#!/usr/bin/env bash` shebang of the hook and of
    `lib/run-scanner.sh`), `git`, `awk`, `sed`, `cp`, `rm`, `mkdir`, `mktemp`, `realpath`, `find` and the other coreutils.
    Git prepends its own exec-path to `PATH` when it runs a hook, which puts git's directory first; a `PATH` you control
    decides the rest. The shebang is not pinned to an absolute `bash`.
 3. `git diff --cached` (fixed flags, `-U0`) is turned into a private scan tree under `${TMPDIR:-$HOME/.tmp}`
-   (mode 700, removed on exit and on HUP/INT/TERM): each touched file at its real relative path, each **added** line
+   (on Windows a `TMPDIR` outside your home is ignored and `~/.tmp` is used, because NTFS ignores `chmod` and only your
+   profile's permissions keep the staged lines private) (mode 700, removed on exit and on HUP/INT/TERM): each touched file at its real relative path, each **added** line
    at its real line number, every other line blank. Nothing added (empty commit, deletions only, binary only) means no
    scanner is started and the commit proceeds.
 4. `trufflehog filesystem` and `betterleaks dir` run in parallel, each through `lib/run-scanner.sh` in its own session
    (`setsid`) and under a timeout. On HUP/INT/TERM the hook signals both process groups, waits for them, and only
-   then removes the temp dir, so no scanner outlives the commit. Results become rows of scanner, detector, status
+   then removes the temp dir, so no scanner outlives the commit. Windows has no process groups: there the hook finds every
+   process below each scanner and stops them with `taskkill /F`, without a grace period. Results become rows of scanner, detector, status
    (`verified`, `unknown` or `finding`), file and line. Only those are printed, never a value; log lines are reduced
    to their message words. betterleaks never validates a finding against a live API (its `--validation` flag is never
    passed), so it makes no network request. A repository with its own `.gitleaks.toml` at HEAD gets a second, small
@@ -109,8 +111,9 @@ not reachable. The doctor suites (`test_doctor.sh`, `test_doctor_repos.sh`, `tes
 `test_doctor_betterleaks.sh`, `test_doctor_info.sh`, `test_doctor_readonly.sh`) and `test_timer.sh` use the same sandbox,
 with repositories under a scratch root; every lifecycle test finds a recording `systemctl` stand-in first on its `PATH`.
 
-Runtime needs bash, `setsid` (util-linux), `timeout` (coreutils), awk, `jq` and, for `install`, `curl` and `tar`. The
-tests also need `/usr/local/bin/git` (>= 2.54), `shellcheck`, `pre-commit`, and the real `trufflehog` and `betterleaks`
+Runtime needs bash, `setsid` (util-linux; `taskkill` on Windows), `timeout` (coreutils), awk, `jq` and, for `install`, `curl`
+and `tar`. The tests also need a git >= 2.54 (`/usr/local/bin/git` on Linux, the one on `PATH` on Windows), `shellcheck`,
+`pre-commit`, and the real `trufflehog` and `betterleaks`
 (paths overridable with `GSG_TEST_TRUFFLEHOG`, `GSG_TEST_BETTERLEAKS`, `GSG_TEST_JQ`, `GSG_TEST_SHELLCHECK`,
 `GSG_TEST_SETSID`, `GSG_TEST_TIMEOUT`).
 

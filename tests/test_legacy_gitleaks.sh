@@ -33,11 +33,11 @@ legacy_machine() {
     aside="$LC_BIN/gitleaks.gsg-replaced-$STAMP"
     gsg install
     assert_rc 0 "the install that is rewritten below"
-    rm -f -- "$LC_BIN/betterleaks" || return 1
-    printf '#!/bin/sh\necho "gitleaks version 8.30.1"\n# placed by install\n' >"$LC_BIN/gitleaks" || return 1
-    chmod "$OURS_MODE" "$LC_BIN/gitleaks" || return 1
-    OURS_SHA="$(file_sha "$LC_BIN/gitleaks")" || return 1
-    tf_sha="$(file_sha "$LC_BIN/trufflehog")" || return 1
+    rm -f -- "$LC_BIN/betterleaks$LC_EXE" || return 1
+    printf '#!/bin/sh\necho "gitleaks version 8.30.1"\n# placed by install\n' >"$LC_BIN/gitleaks$LC_EXE" || return 1
+    chmod "$OURS_MODE" "$LC_BIN/gitleaks$LC_EXE" || return 1
+    OURS_SHA="$(file_sha "$LC_BIN/gitleaks$LC_EXE")" || return 1
+    tf_sha="$(file_sha "$LC_BIN/trufflehog$LC_EXE")" || return 1
     if [ "$mode" = user ]; then
         printf '#!/bin/sh\necho "gitleaks version 8.18.4"\n# user build\n' >"$aside" || return 1
         chmod "$USER_MODE" "$aside" || return 1
@@ -49,14 +49,14 @@ legacy_machine() {
 }
 
 assert_betterleaks_at_pin() {
-    assert_eq "$("$LC_BIN/betterleaks" --version)" "betterleaks version $BETTERLEAKS_PIN_VERSION" "$1"
+    assert_eq "$("$LC_BIN/betterleaks$LC_EXE" --version)" "betterleaks version $BETTERLEAKS_PIN_VERSION" "$1"
 }
 
 test_an_upgrade_removes_a_gitleaks_install_placed_and_places_betterleaks() {
     legacy_machine ours || return 1
     gsg install
     assert_rc 0 "upgrade"
-    assert_no_file "$LC_BIN/gitleaks" "the gitleaks we placed is removed"
+    assert_no_file "$LC_BIN/gitleaks$LC_EXE" "the gitleaks we placed is removed"
     assert_betterleaks_at_pin "betterleaks is placed at the pin"
     assert_contains "$OUT$ERR" "gitleaks" "the removal is announced"
     assert_eq "$(state_value tools_installed_by_us)" "trufflehog betterleaks" "the state names the current tools only"
@@ -70,8 +70,8 @@ test_an_upgrade_removes_a_gitleaks_install_placed_and_places_betterleaks() {
 
 # ^ invariant user_gitleaks_is_back LABEL = the user's gitleaks is the only file in the bin dir, byte for byte, with its mode, nothing aside
 user_gitleaks_is_back() {
-    assert_eq "$(file_sha "$LC_BIN/gitleaks")" "$USER_SHA" "$1: the user's gitleaks is byte-identical"
-    assert_eq "$(stat -c %a "$LC_BIN/gitleaks")" "$USER_MODE" "$1: and has its mode"
+    assert_eq "$(file_sha "$LC_BIN/gitleaks$LC_EXE")" "$USER_SHA" "$1: the user's gitleaks is byte-identical"
+    assert_eq "$(stat -c %a "$LC_BIN/gitleaks$LC_EXE")" "$USER_MODE" "$1: and has its mode"
     assert_empty "$(find "$LC_BIN" -name '*.gsg-replaced-*')" "$1: no aside file is left"
     assert_eq "$(find "$LC_BIN" -mindepth 1 | wc -l | tr -d ' ')" 1 "$1: only the user's gitleaks is left, as before the first install"
 }
@@ -81,7 +81,7 @@ test_an_upgrade_restores_the_users_moved_aside_gitleaks_and_uninstall_then_leave
     gsg install
     assert_rc 0 "upgrade"
     assert_eq "$(find "$LC_BIN" -name 'gitleaks*' | wc -l | tr -d ' ')" 1 "after the upgrade the user's gitleaks is the only gitleaks file"
-    assert_eq "$(file_sha "$LC_BIN/gitleaks")" "$USER_SHA" "and it is byte-identical"
+    assert_eq "$(file_sha "$LC_BIN/gitleaks$LC_EXE")" "$USER_SHA" "and it is byte-identical"
     assert_betterleaks_at_pin "betterleaks is placed"
     assert_eq "$(state_value tools_replaced)" "" "the record of the move is gone"
     assert_not_contains "$(state_value tools_placed)" "gitleaks" "and so is the placed hash"
@@ -106,10 +106,10 @@ test_uninstall_without_upgrading_removes_a_gitleaks_we_placed_on_an_empty_path()
 
 test_an_upgrade_leaves_a_gitleaks_that_is_no_longer_the_one_we_placed() {
     legacy_machine ours || return 1
-    printf '#!/bin/sh\necho "gitleaks version 9.0.0"\n# changed by the user\n' >"$LC_BIN/gitleaks" || return 1
+    printf '#!/bin/sh\necho "gitleaks version 9.0.0"\n# changed by the user\n' >"$LC_BIN/gitleaks$LC_EXE" || return 1
     gsg install
     assert_rc 0 "upgrade"
-    assert_contains "$(<"$LC_BIN/gitleaks")" "changed by the user" "a file we did not place is never deleted"
+    assert_contains "$(<"$LC_BIN/gitleaks$LC_EXE")" "changed by the user" "a file we did not place is never deleted"
     assert_contains "$OUT$ERR" "left in place" "and the output says so"
     assert_betterleaks_at_pin "betterleaks is placed anyway"
 }
@@ -126,7 +126,7 @@ interrupt_after_restore() {
 
 test_an_interruption_after_the_restore_never_lets_the_rerun_delete_the_users_gitleaks() {
     legacy_machine user || return 1
-    cp -- "$LC_BIN/gitleaks" "$LC_BIN/gitleaks.gsg-replaced-$STAMP" || return 1
+    cp -- "$LC_BIN/gitleaks$LC_EXE" "$LC_BIN/gitleaks.gsg-replaced-$STAMP" || return 1
     chmod "$USER_MODE" "$LC_BIN/gitleaks.gsg-replaced-$STAMP" || return 1
     USER_SHA="$(file_sha "$LC_BIN/gitleaks.gsg-replaced-$STAMP")" || return 1
     interrupt_after_restore || return 1
@@ -135,7 +135,7 @@ test_an_interruption_after_the_restore_never_lets_the_rerun_delete_the_users_git
     rm -f -- "$SANDBOX/pathbin/mv" || return 1
     gsg install
     assert_rc 0 "the rerun"
-    assert_eq "$(file_sha "$LC_BIN/gitleaks")" "$USER_SHA" "the user's gitleaks (identical to the one we placed) was not deleted by the rerun"
+    assert_eq "$(file_sha "$LC_BIN/gitleaks$LC_EXE")" "$USER_SHA" "the user's gitleaks (identical to the one we placed) was not deleted by the rerun"
     gsg uninstall --remove-tools
     assert_rc 0 "uninstall"
     user_gitleaks_is_back "after the interrupted upgrade"

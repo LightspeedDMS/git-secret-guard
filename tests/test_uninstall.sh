@@ -26,8 +26,8 @@ test_uninstall_removes_what_install_added_and_keeps_the_tools() {
     assert_no_file "$LC_DATA" "share dir removed"
     assert_no_file "$LC_BIN/git-secret-guard" "CLI link removed"
     assert_no_file "$LC_STATE" "state removed (no backup, so the state dir goes too)"
-    assert_eq "$("$LC_BIN/trufflehog" --version)" "trufflehog 3.99.2" "trufflehog left in place"
-    assert_eq "$("$LC_BIN/betterleaks" --version)" "betterleaks version 1.9.0" "betterleaks left in place"
+    assert_eq "$("$LC_BIN/trufflehog$LC_EXE" --version)" "trufflehog 3.99.2" "trufflehog left in place"
+    assert_eq "$("$LC_BIN/betterleaks$LC_EXE" --version)" "betterleaks version 1.9.0" "betterleaks left in place"
 }
 
 test_uninstall_twice_reports_nothing_to_do() {
@@ -43,7 +43,7 @@ test_uninstall_twice_reports_nothing_to_do() {
     assert_rc 0 "third, with --remove-tools"
     assert_contains "$OUT" "nothing to do" "says so again"
     assert_eq "$(cat -- "$SANDBOX/gitconfig")" "$cfg" "the config is not touched by the repeat runs"
-    assert_eq "$("$LC_BIN/trufflehog" --version)" "trufflehog 3.99.2" "and the tools are still there: no state, no record of what to remove"
+    assert_eq "$("$LC_BIN/trufflehog$LC_EXE" --version)" "trufflehog 3.99.2" "and the tools are still there: no state, no record of what to remove"
 }
 
 seed_old_hooks() {
@@ -59,7 +59,7 @@ test_uninstall_restores_the_recorded_hooks_path_verbatim_and_keeps_the_backup() 
         dir="$LC_HOME/.config/git/hooks"
         case "$value" in /*) dir="$value" ;; esac
         seed_old_hooks "$dir" || return 1
-        gitx config --global core.hooksPath "$value" || return 1
+        git_literal_config --global core.hooksPath "$value" || return 1
         gsg install --replace-hooks-path
         assert_rc 0 "takeover of [$value]"
         backup="$(state_value backup_path)"
@@ -85,7 +85,7 @@ test_uninstall_restores_core_hooks_path_before_removing_the_hook_config() {
     lc_begin && lc_make_fixtures && lc_use_fixtures || return 1
     old="$LC_HOME/old hooks"
     seed_old_hooks "$old" || return 1
-    gitx config --global core.hooksPath "$old" || return 1
+    git_literal_config --global core.hooksPath "$old" || return 1
     gsg install --replace-hooks-path
     assert_rc 0 "takeover"
     # shellcheck disable=SC2016
@@ -107,8 +107,8 @@ test_uninstall_restores_core_hooks_path_before_removing_the_hook_config() {
 
 seed_tool() {
     mkdir -p -- "$LC_BIN" || return 1
-    printf '#!/bin/sh\necho "%s"\n' "$2" >"$LC_BIN/$1" || return 1
-    chmod 755 "$LC_BIN/$1"
+    printf '#!/bin/sh\necho "%s"\n' "$2" >"$LC_BIN/$1$LC_EXE" || return 1
+    chmod 755 "$LC_BIN/$1$LC_EXE"
 }
 
 test_remove_tools_removes_only_what_install_downloaded() {
@@ -118,9 +118,9 @@ test_remove_tools_removes_only_what_install_downloaded() {
     assert_rc 0 "install: trufflehog is the user's, betterleaks is downloaded"
     gsg uninstall --remove-tools
     assert_rc 0 "uninstall --remove-tools"
-    assert_no_file "$LC_BIN/betterleaks" "the downloaded betterleaks is removed"
-    assert_file "$LC_BIN/trufflehog" "the user's trufflehog stays"
-    assert_contains "$OUT" "removed $LC_BIN/betterleaks" "and the removal is reported"
+    assert_no_file "$LC_BIN/betterleaks$LC_EXE" "the downloaded betterleaks is removed"
+    assert_file "$LC_BIN/trufflehog$LC_EXE" "the user's trufflehog stays"
+    assert_contains "$OUT" "removed $LC_BIN/betterleaks$LC_EXE" "and the removal is reported"
 
     lc_begin && lc_make_fixtures && lc_use_fixtures || return 1
     gsg install
@@ -131,25 +131,25 @@ test_remove_tools_removes_only_what_install_downloaded() {
     lc_begin && lc_make_fixtures && lc_use_fixtures || return 1
     gsg install
     gsg uninstall
-    assert_file "$LC_BIN/trufflehog" "without the flag trufflehog stays"
-    assert_file "$LC_BIN/betterleaks" "and so does betterleaks"
+    assert_file "$LC_BIN/trufflehog$LC_EXE" "without the flag trufflehog stays"
+    assert_file "$LC_BIN/betterleaks$LC_EXE" "and so does betterleaks"
 }
 
 ORIG_SHA="" ORIG_MODE=""
 replaced_install() {
     lc_begin && lc_make_fixtures && lc_use_fixtures || return 1
     mkdir -p -- "$LC_BIN" || return 1
-    printf '#!/bin/sh\necho "betterleaks version 8.18.4"\n# user build\n' >"$LC_BIN/betterleaks" || return 1
-    chmod 750 "$LC_BIN/betterleaks" || return 1
-    ORIG_SHA="$(sha256sum <"$LC_BIN/betterleaks")" || return 1
-    ORIG_MODE="$(stat -c %a "$LC_BIN/betterleaks")" || return 1
+    printf '#!/bin/sh\necho "betterleaks version 8.18.4"\n# user build\n' >"$LC_BIN/betterleaks$LC_EXE" || return 1
+    chmod 750 "$LC_BIN/betterleaks$LC_EXE" || return 1
+    ORIG_SHA="$(sha256sum <"$LC_BIN/betterleaks$LC_EXE")" || return 1
+    ORIG_MODE="$(stat -c %a "$LC_BIN/betterleaks$LC_EXE")" || return 1
     gsg install
     assert_rc 0 "install over the user's betterleaks"
 }
 
 assert_original_is_back() {
-    assert_eq "$(sha256sum <"$LC_BIN/betterleaks")" "$ORIG_SHA" "$1: the user's betterleaks is byte-identical"
-    assert_eq "$(stat -c %a "$LC_BIN/betterleaks")" "$ORIG_MODE" "$1: and has its mode"
+    assert_eq "$(sha256sum <"$LC_BIN/betterleaks$LC_EXE")" "$ORIG_SHA" "$1: the user's betterleaks is byte-identical"
+    assert_eq "$(stat -c %a "$LC_BIN/betterleaks$LC_EXE")" "$ORIG_MODE" "$1: and has its mode"
     assert_empty "$(find "$LC_BIN" -name '*.gsg-replaced-*')" "$1: the aside file was consumed by the restore"
 }
 
@@ -158,24 +158,24 @@ test_uninstall_puts_the_users_replaced_tool_back_byte_identical() {
     gsg uninstall
     assert_rc 0 "uninstall"
     assert_original_is_back "plain uninstall"
-    assert_contains "$OUT" "restored $LC_BIN/betterleaks" "says so"
-    assert_file "$LC_BIN/trufflehog" "the tool install downloaded onto an empty path stays without --remove-tools"
+    assert_contains "$OUT" "restored $LC_BIN/betterleaks$LC_EXE" "says so"
+    assert_file "$LC_BIN/trufflehog$LC_EXE" "the tool install downloaded onto an empty path stays without --remove-tools"
     assert_no_file "$LC_STATE" "state removed"
 
     replaced_install || return 1
     gsg uninstall --remove-tools
     assert_rc 0 "uninstall --remove-tools"
     assert_original_is_back "with --remove-tools"
-    assert_no_file "$LC_BIN/trufflehog" "the tool that was ours is removed"
+    assert_no_file "$LC_BIN/trufflehog$LC_EXE" "the tool that was ours is removed"
 }
 
 test_uninstall_leaves_a_tool_changed_since_install_and_keeps_the_original_aside() {
     replaced_install || return 1
-    printf 'newer file of the user\n' >"$LC_BIN/betterleaks" || return 1
+    printf 'newer file of the user\n' >"$LC_BIN/betterleaks$LC_EXE" || return 1
     gsg uninstall --remove-tools
     assert_rc 0 "uninstall"
     assert_contains "$ERR" "is not the file install put there" "says why it did not restore"
-    assert_eq "$(<"$LC_BIN/betterleaks")" "newer file of the user" "the newer file is untouched, also with --remove-tools"
+    assert_eq "$(<"$LC_BIN/betterleaks$LC_EXE")" "newer file of the user" "the newer file is untouched, also with --remove-tools"
     assert_eq "$(find "$LC_BIN" -name 'betterleaks.gsg-replaced-*' | wc -l)" 1 "the original stays aside"
     assert_contains "$ERR" "betterleaks.gsg-replaced-" "and its location is printed"
 }
@@ -185,7 +185,7 @@ test_uninstall_reads_core_hooks_path_without_touching_the_install_globals() {
     lc_begin && lc_make_fixtures && lc_use_fixtures || return 1
     old="$LC_HOME/old hooks"
     seed_old_hooks "$old" || return 1
-    gitx config --global core.hooksPath "$old" || return 1
+    git_literal_config --global core.hooksPath "$old" || return 1
     gsg install --replace-hooks-path
     assert_rc 0 "takeover"
     # shellcheck disable=SC2016
@@ -201,11 +201,11 @@ test_uninstall_reads_core_hooks_path_without_touching_the_install_globals() {
 
 test_uninstall_does_not_overwrite_a_symlink_the_user_put_at_the_tool_path() {
     replaced_install || return 1
-    cp -p -- "$LC_BIN/betterleaks" "$LC_HOME/mine" || return 1
-    rm -f -- "$LC_BIN/betterleaks" && ln -s "$LC_HOME/mine" "$LC_BIN/betterleaks" || return 1
+    cp -p -- "$LC_BIN/betterleaks$LC_EXE" "$LC_HOME/mine" || return 1
+    rm -f -- "$LC_BIN/betterleaks$LC_EXE" && ln -s "$LC_HOME/mine" "$LC_BIN/betterleaks$LC_EXE" || return 1
     gsg uninstall
     assert_rc 0 "uninstall"
-    assert_eq "$(readlink -- "$LC_BIN/betterleaks")" "$LC_HOME/mine" "the symlink stays"
+    assert_eq "$(readlink -- "$LC_BIN/betterleaks$LC_EXE")" "$LC_HOME/mine" "the symlink stays"
     assert_contains "$ERR" "is not the file install put there" "and the user is told"
     assert_eq "$(find "$LC_BIN" -name 'betterleaks.gsg-replaced-*' | wc -l)" 1 "the original stays aside"
 }
@@ -216,7 +216,7 @@ test_uninstall_reports_a_missing_original_and_leaves_the_tool() {
     gsg uninstall --remove-tools
     assert_rc 0 "uninstall"
     assert_contains "$ERR" "is missing" "says the original is gone"
-    assert_eq "$("$LC_BIN/betterleaks" --version)" "betterleaks version 1.9.0" "the tool at the path is left, not deleted"
+    assert_eq "$("$LC_BIN/betterleaks$LC_EXE" --version)" "betterleaks version 1.9.0" "the tool at the path is left, not deleted"
 }
 
 test_remove_tools_never_deletes_an_original_it_just_restored() {
@@ -225,34 +225,34 @@ test_remove_tools_never_deletes_an_original_it_just_restored() {
     gsg uninstall --remove-tools
     assert_rc 0 "uninstall --remove-tools with betterleaks in both lists"
     assert_original_is_back "both lists"
-    assert_no_file "$LC_BIN/trufflehog" "the tool that is only ours is removed"
+    assert_no_file "$LC_BIN/trufflehog$LC_EXE" "the tool that is only ours is removed"
 }
 
 test_remove_tools_keeps_a_same_version_build_that_replaced_installs_file() {
     fresh_install
-    printf '#!/bin/sh\n# my own build\necho "betterleaks version 1.9.0"\n' >"$LC_BIN/betterleaks" || return 1
-    chmod 755 "$LC_BIN/betterleaks" || return 1
+    printf '#!/bin/sh\n# my own build\necho "betterleaks version 1.9.0"\n' >"$LC_BIN/betterleaks$LC_EXE" || return 1
+    chmod 755 "$LC_BIN/betterleaks$LC_EXE" || return 1
     gsg install
     assert_rc 0 "install keeps a build that already reports the pinned version"
     gsg uninstall --remove-tools
     assert_rc 0 "uninstall --remove-tools"
-    assert_file "$LC_BIN/betterleaks" "the user's build is still there"
-    assert_contains "$(<"$LC_BIN/betterleaks")" "my own build" "byte for byte the user's file"
-    assert_contains "$ERR" "$LC_BIN/betterleaks is not the file install put there; left in place" "and the user is told why"
-    assert_not_contains "$OUT" "removed $LC_BIN/betterleaks" "it is not claimed as removed"
-    assert_no_file "$LC_BIN/trufflehog" "the file install placed and nobody touched is removed"
+    assert_file "$LC_BIN/betterleaks$LC_EXE" "the user's build is still there"
+    assert_contains "$(<"$LC_BIN/betterleaks$LC_EXE")" "my own build" "byte for byte the user's file"
+    assert_contains "$ERR" "$LC_BIN/betterleaks$LC_EXE is not the file install put there; left in place" "and the user is told why"
+    assert_not_contains "$OUT" "removed $LC_BIN/betterleaks$LC_EXE" "it is not claimed as removed"
+    assert_no_file "$LC_BIN/trufflehog$LC_EXE" "the file install placed and nobody touched is removed"
 }
 
 test_remove_tools_keeps_a_symlink_at_the_tool_path() {
     fresh_install
-    cp -p -- "$LC_BIN/betterleaks" "$LC_HOME/mine" || return 1
-    rm -f -- "$LC_BIN/betterleaks" && ln -s "$LC_HOME/mine" "$LC_BIN/betterleaks" || return 1
+    cp -p -- "$LC_BIN/betterleaks$LC_EXE" "$LC_HOME/mine" || return 1
+    rm -f -- "$LC_BIN/betterleaks$LC_EXE" && ln -s "$LC_HOME/mine" "$LC_BIN/betterleaks$LC_EXE" || return 1
     gsg uninstall --remove-tools
     assert_rc 0 "uninstall --remove-tools"
-    assert_eq "$(readlink -- "$LC_BIN/betterleaks")" "$LC_HOME/mine" "the symlink stays"
+    assert_eq "$(readlink -- "$LC_BIN/betterleaks$LC_EXE")" "$LC_HOME/mine" "the symlink stays"
     assert_file "$LC_HOME/mine" "and so does its target"
-    assert_contains "$ERR" "$LC_BIN/betterleaks is not the file install put there; left in place" "with the reason"
-    assert_no_file "$LC_BIN/trufflehog" "the regular file install placed is removed"
+    assert_contains "$ERR" "$LC_BIN/betterleaks$LC_EXE is not the file install put there; left in place" "with the reason"
+    assert_no_file "$LC_BIN/trufflehog$LC_EXE" "the regular file install placed is removed"
 }
 
 test_remove_tools_keeps_every_tool_when_the_state_has_no_tools_placed() {
@@ -260,24 +260,24 @@ test_remove_tools_keeps_every_tool_when_the_state_has_no_tools_placed() {
     sed -i '/^tools_placed=/d;/^tools_replaced=/d' "$LC_STATE/state" || return 1
     gsg uninstall --remove-tools
     assert_rc 0 "uninstall --remove-tools with a state written before tools_placed existed"
-    assert_file "$LC_BIN/trufflehog" "trufflehog cannot be proved to be install's, so it stays"
-    assert_file "$LC_BIN/betterleaks" "and so does betterleaks"
-    assert_contains "$ERR" "$LC_BIN/betterleaks has no recorded hash of a file install placed (state written by an older install); left in place" "the reason is printed"
+    assert_file "$LC_BIN/trufflehog$LC_EXE" "trufflehog cannot be proved to be install's, so it stays"
+    assert_file "$LC_BIN/betterleaks$LC_EXE" "and so does betterleaks"
+    assert_contains "$ERR" "$LC_BIN/betterleaks$LC_EXE has no recorded hash of a file install placed (state written by an older install); left in place" "the reason is printed"
     assert_not_contains "$OUT" "downloaded by install" "nothing is claimed as removed"
 }
 
 test_remove_tools_says_the_tools_placed_entry_is_invalid_when_the_key_exists_but_is_malformed() {
     local good
     fresh_install
-    good="$(sha256sum -- "$LC_BIN/trufflehog" | cut -d' ' -f1)" || return 1
+    good="$(sha256sum -- "$LC_BIN/trufflehog$LC_EXE" | cut -d' ' -f1)" || return 1
     sed -i "s#^tools_placed=.*#tools_placed=betterleaks:not-a-hash trufflehog:$good#" "$LC_STATE/state" || return 1
     gsg uninstall --remove-tools
     assert_rc 0 "uninstall --remove-tools"
     assert_contains "$ERR" "invalid tools_placed entry [betterleaks:not-a-hash] in the state file; ignored" "the bad entry is reported, as before"
-    assert_contains "$ERR" "the tools_placed entry for betterleaks in the state file is invalid or missing; $LC_BIN/betterleaks left in place" "and the tool's line says so"
+    assert_contains "$ERR" "the tools_placed entry for betterleaks in the state file is invalid or missing; $LC_BIN/betterleaks$LC_EXE left in place" "and the tool's line says so"
     assert_not_contains "$ERR" "older install" "a malformed entry is not blamed on an older install"
-    assert_file "$LC_BIN/betterleaks" "betterleaks stays"
-    assert_no_file "$LC_BIN/trufflehog" "the valid entry still allows the removal"
+    assert_file "$LC_BIN/betterleaks$LC_EXE" "betterleaks stays"
+    assert_no_file "$LC_BIN/trufflehog$LC_EXE" "the valid entry still allows the removal"
 }
 
 test_uninstall_ignores_tampered_replaced_entries() {
@@ -289,7 +289,7 @@ test_uninstall_ignores_tampered_replaced_entries() {
     assert_contains "$ERR" "invalid tools_replaced entry [../escape:" "reports the first bad entry"
     assert_contains "$ERR" "invalid tools_replaced entry [git.gsg-replaced-" "and the second"
     assert_eq "$(<"$LC_HOME/.local/escape")" precious "nothing outside the recorded names was touched"
-    assert_eq "$("$LC_BIN/betterleaks" --version)" "betterleaks version 1.9.0" "and no restore happened"
+    assert_eq "$("$LC_BIN/betterleaks$LC_EXE" --version)" "betterleaks version 1.9.0" "and no restore happened"
 }
 
 test_remove_tools_ignores_names_it_does_not_know_and_explains_a_missing_state() {
@@ -302,8 +302,8 @@ test_remove_tools_ignores_names_it_does_not_know_and_explains_a_missing_state() 
     assert_rc 0 "uninstall"
     assert_contains "$ERR" "unknown tool [../escape]" "an unknown name in the state is reported"
     assert_contains "$ERR" "unknown tool [git]" "also a plausible-looking one"
-    assert_no_file "$LC_BIN/betterleaks" "the known tool is removed"
-    assert_file "$LC_BIN/trufflehog" "the one not listed stays"
+    assert_no_file "$LC_BIN/betterleaks$LC_EXE" "the known tool is removed"
+    assert_file "$LC_BIN/trufflehog$LC_EXE" "the one not listed stays"
     assert_file "$LC_HOME/.local/escape" "nothing outside ~/.local/bin was touched"
     assert_file "$LC_BIN/git" "and a file named like an unknown tool stays"
 
@@ -313,7 +313,7 @@ test_remove_tools_ignores_names_it_does_not_know_and_explains_a_missing_state() 
     gsg uninstall --remove-tools
     assert_rc 0 "uninstall without a state file"
     assert_contains "$ERR" "no state file: cannot tell which tools install downloaded; none removed" "explains why no tool was removed"
-    assert_file "$LC_BIN/trufflehog" "trufflehog stays"
+    assert_file "$LC_BIN/trufflehog$LC_EXE" "trufflehog stays"
     assert_no_file "$LC_DATA" "but the rest is removed"
 }
 
@@ -321,12 +321,12 @@ test_uninstall_keeps_what_the_user_changed_since_install() {
     local other
     lc_begin && lc_make_fixtures && lc_use_fixtures || return 1
     seed_old_hooks "$LC_HOME/old hooks" || return 1
-    gitx config --global core.hooksPath "$LC_HOME/old hooks" || return 1
+    git_literal_config --global core.hooksPath "$LC_HOME/old hooks" || return 1
     gsg install --replace-hooks-path
     assert_rc 0 "takeover"
     other="$LC_HOME/newer hooks"
-    gitx config --global core.hooksPath "$other" || return 1
-    gitx config --global hook.other.command /bin/true || return 1
+    git_literal_config --global core.hooksPath "$other" || return 1
+    git_literal_config --global hook.other.command /bin/true || return 1
     gitx config --global hook.other.event pre-push || return 1
     rm -f -- "$LC_BIN/git-secret-guard" && ln -s /bin/true "$LC_BIN/git-secret-guard" || return 1
     gsg uninstall
@@ -355,7 +355,7 @@ test_uninstall_refuses_a_malformed_state_and_changes_nothing() {
 test_uninstall_without_a_state_file_still_removes_the_rest_and_leaves_hooks_path_alone() {
     fresh_install
     rm -f -- "$LC_STATE/state" || return 1
-    gitx config --global core.hooksPath /somewhere/else || return 1
+    git_literal_config --global core.hooksPath /somewhere/else || return 1
     gsg uninstall
     assert_rc 0 "uninstall"
     assert_no_file "$LC_DATA" "share dir removed"
@@ -408,6 +408,7 @@ stop_pid() {
 
 test_uninstall_refused_by_a_live_run_keeps_everything_and_a_rerun_finishes() {
     local holder real_sleep hold_seconds=60 setup_failed=0 first_rc=""
+    if [ "$TEST_IS_WINDOWS" -eq 1 ]; then hold_seconds=900; fi
     fresh_install || return 1
     real_sleep="$(command -v sleep)" || return 1
     "$real_sleep" "$hold_seconds" &

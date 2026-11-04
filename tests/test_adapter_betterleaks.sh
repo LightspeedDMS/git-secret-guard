@@ -378,8 +378,8 @@ test_a_crlf_aws_access_token_fingerprint_gets_a_crlf_twin() {
     run_adapter betterleaks "$SCAN" "$OUTD"
     local calls
     calls="$(<"$SANDBOX/calls-crlffp")"
-    assert_contains "$calls" $'betterleaks-ignore-line: src/c.txt:aws-access-token:5\r' "the original CRLF line is kept"
-    assert_contains "$calls" $'betterleaks-ignore-line: src/c.txt:aws-access-key-id:5\r' "and the twin keeps the carriage return, as the file does"
+    grep -qF $'betterleaks-ignore-line: src/c.txt:aws-access-token:5\r' "$SANDBOX/calls-crlffp" || fail "the original CRLF line is kept"
+    grep -qF $'betterleaks-ignore-line: src/c.txt:aws-access-key-id:5\r' "$SANDBOX/calls-crlffp" || fail "and the twin keeps the carriage return, as the file does"
     assert_not_contains "$calls" "src/d.txt:aws-access-key-id" "other rules are still not mapped"
 }
 

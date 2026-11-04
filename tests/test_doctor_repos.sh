@@ -43,7 +43,7 @@ test_hook_pre_commit_enabled_false_is_reported_with_its_own_key() {
 test_a_disabling_key_in_an_included_global_file_names_that_file() {
     dr_begin && dr_repo inc || return 1
     printf '[hook "git-secret-guard"]\n\tenabled = false\n' >"$SANDBOX/team.conf" || return 1
-    gitx config --global "includeIf.gitdir:$DR_REAL/.path" "$SANDBOX/team.conf" || return 1
+    gitx config --global "includeIf.gitdir:$(git_path "$DR_REAL")/.path" "$SANDBOX/team.conf" || return 1
     doctor
     assert_rc 1 "disabled through an include"
     assert_contains "$OUT" "PROBLEM  disabled in global config: hook.git-secret-guard.enabled=false ($SANDBOX/team.conf); remove that key to cover this repository" "the included file, not ~/.gitconfig"

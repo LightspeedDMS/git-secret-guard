@@ -129,12 +129,23 @@ jobs:
           if [ -f logs/base.log ]; then base=logs/base.log; fi
           bash .github/scripts/compare-test-logs.sh logs/head.log "$base"
 
-  # First draft: proves on a clean Windows machine what was checked by hand (install, a leak is blocked, a clean commit passes, no leftovers).
-  # It is marked continue-on-error until it has run green once; remove that line afterwards.
+  # The suite on Windows, through the front end a Windows developer uses. Tests that cannot apply there are listed with a reason in tests/windows-skips.list.
+  windows-suite:
+    runs-on: windows-2025
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run the suite
+        shell: cmd
+        env:
+          GSG_TEST_FILE_TIMEOUT: "1800"
+        run: tests\run.cmd
+
+  # Proves on a clean Windows machine what a user does: install, a leak is blocked, a clean commit passes, no leftovers, uninstall leaves nothing.
   windows:
     runs-on: windows-2025
     timeout-minutes: 25
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
@@ -155,6 +166,15 @@ jobs:
       - name: Status
         shell: bash
         run: bin/git-secret-guard status
+
+      - name: The installed command works from PowerShell and cmd
+        shell: pwsh
+        run: |
+          $env:Path = "$HOME\.local\bin;$env:Path"
+          git-secret-guard status
+          if ($LASTEXITCODE -ne 0) { throw 'git-secret-guard status failed from PowerShell' }
+          cmd /c "git-secret-guard version"
+          if ($LASTEXITCODE -ne 0) { throw 'git-secret-guard version failed from cmd' }
 
       - name: A leaked token is blocked by the hook, through PowerShell git
         shell: pwsh
@@ -186,3 +206,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'a clean commit was blocked' }
           $left = Get-ChildItem (Join-Path $HOME '.tmp') -Filter 'git-secret-guard.*' -ErrorAction SilentlyContinue
           if ($left) { throw "scan directories were left behind: $($left.FullName -join ', ')" }
+      - name: Uninstall from PowerShell leaves nothing behind
+        shell: pwsh
+        run: |
+          $env:Path = "$HOME\.local\bin;$env:Path"
+          git-secret-guard uninstall --remove-tools
+          if ($LASTEXITCODE -ne 0) { throw 'uninstall failed' }
+          $left = Get-ChildItem (Join-Path $HOME '.local\bin') -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^(git-secret-guard|trufflehog|betterleaks)' }
+          if ($left) { throw "uninstall left files behind: $($left.Name -join ', ')" }

@@ -443,6 +443,12 @@ install_write_settings() {
 install_copy_share() {
     local old item
     GSG_SHARE_NEW=""
+    # ^ external Windows refuses to rename a directory with a running script in it (probed) => from the installed copy only generated files change
+    if tools_is_windows && [ "$GSG_ROOT" -ef "$GSG_SHARE" ]; then
+        install_write_settings "$GSG_SHARE/settings.new" && mv -T -f -- "$GSG_SHARE/settings.new" "$GSG_SHARE/settings" || return 1
+        if [ -n "${INSTALL_JQ_WRAPPER:-}" ]; then install_write_jq_wrapper "$GSG_SHARE/jq" "$INSTALL_JQ_BIN" || return 1; fi
+        return 0
+    fi
     mkdir -p -- "${GSG_SHARE%/*}" || return 1
     GSG_SHARE_NEW="$(mktemp -d "$GSG_SHARE.new.XXXXXX")" || return 1
     chmod 755 -- "$GSG_SHARE_NEW" || return 1
@@ -479,12 +485,39 @@ install_cli_wrapper_text() {
     printf 'exec %q "$@"\n' "$GSG_SHARE/bin/git-secret-guard"
 }
 
+GSG_CLI_CMD_MARKER='rem git-secret-guard: written by install, every install rewrites this file'
+
+# ^ external cmd and PowerShell cannot start the bash wrapper => a .cmd beside it; Git's bin\bash.exe sets up PATH, usr\bin\bash.exe does not
+# ^ hazard uninstall removes the share under this running file => it deletes itself with the (goto) idiom; a plain rm ends in "batch file cannot be found"
+# ^ invariant prints CRLF lines; % is doubled => cmd reads a literal percent sign in a path
+install_cli_cmd_text() {
+    local root share_win share_mixed bash_win
+    root="$(cygpath -w /)" || return 1
+    share_win="$(cygpath -w "$GSG_SHARE")" || return 1
+    share_mixed="$(cygpath -m "$GSG_SHARE")" || return 1
+    bash_win="${root%\\}\\bin\\bash.exe"
+    printf '%s\r\n' '@echo off' "$GSG_CLI_CMD_MARKER" setlocal 'set "GSG_CMD_ENTRY=%~f0"' \
+        "\"${bash_win//%/%%}\" \"${share_mixed//%/%%}/bin/git-secret-guard\" %*" 'set "GSG_RC=%errorlevel%"' \
+        "if not exist \"${share_win//%/%%}\\bin\\git-secret-guard\" (goto) 2>nul & del \"%~f0\"" 'exit /b %GSG_RC%'
+}
+
+# ^ invariant true only for a file install_cli_cmd_text wrote; the second line is the marker, whatever paths it names
+install_cli_cmd_is_ours() {
+    local line
+    { read -r line && read -r line; } <"$1" || return 1
+    [ "${line%$'\r'}" = "$GSG_CLI_CMD_MARKER" ]
+}
+
 # ^ invariant on Windows only a file written by install_cli_wrapper_text counts as ours, whatever share path it names => any other file is refused
 install_check_cli_link() {
     local link="$GSG_BIN_DIR/git-secret-guard"
     if tools_is_windows; then
         if [ -e "$link" ] && [[ "$(<"$link")" != "#!/usr/bin/env bash"$'\n'"exec "*"/bin/git-secret-guard "'"$@"' ]]; then
             printf '%s: %s exists and is not the wrapper install writes; remove it and run install again\n' "$GSG_NAME" "$link" >&2
+            return 1
+        fi
+        if [ -e "$link.cmd" ] && ! install_cli_cmd_is_ours "$link.cmd"; then
+            printf '%s: %s exists and is not the wrapper install writes; remove it and run install again\n' "$GSG_NAME" "$link.cmd" >&2
             return 1
         fi
         return 0
@@ -515,7 +548,12 @@ install_link_cli() {
             rm -f -- "$tmp"
             return 1
         }
-        mv -T -f -- "$tmp" "$link"
+        mv -T -f -- "$tmp" "$link" || return 1
+        install_cli_cmd_text >"$tmp" || {
+            rm -f -- "$tmp"
+            return 1
+        }
+        mv -T -f -- "$tmp" "$link.cmd"
         return
     fi
     ln -sfn -- "$GSG_SHARE/bin/git-secret-guard" "$link"
@@ -585,6 +623,8 @@ install_resolve_hooks_dir() {
         printf '%s: cannot expand the global core.hooksPath [%s]\n' "$GSG_NAME" "$GSG_PREV" >&2
         return 1
     }
+    # ^ external native Windows git expands to C:/dir => the absolute check and the backup below need the POSIX form
+    if [[ $expanded == [A-Za-z]:/* ]] && tools_is_windows; then expanded="$(cygpath -u "$expanded")" || return 1; fi
     if [ "${expanded#/}" = "$expanded" ]; then
         printf '%s: core.hooksPath [%s] is relative (git resolves it per repository), so there is no one directory to back up; make it absolute and run install again\n' \
             "$GSG_NAME" "$GSG_PREV" >&2
@@ -719,7 +759,8 @@ install_note_legacy() {
 # ^ invariant the user's moved-aside original comes back only onto an empty path; every record not restored stays, a record whose aside file is gone goes
 # ^ external coreutils 8.32 (el9) mv -n exits 0 when it skips => the restore is verified by looking at both paths
 install_retire_legacy_tool() {
-    local tool="$1" path="$GSG_BIN_DIR/$1" w aside asidepath kept="" restored=0 foreign=0
+    local tool="$1" path w aside asidepath kept="" restored=0 foreign=0
+    path="$GSG_BIN_DIR/$(tools_binary_name "$tool")"
     local -a words=()
     if install_path_present "$path"; then
         if install_owns_file "$tool"; then

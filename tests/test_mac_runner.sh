@@ -2,6 +2,9 @@
 # shellcheck source=tests/lib.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
 
+# ^ external these checks run the Mac and container launchers; Git for Windows has no podman and is no POSIX host
+if [ "$TEST_IS_WINDOWS" -eq 1 ]; then FILE_SKIP_REASON="the container launchers need podman and a POSIX host"; fi
+
 MAC_SH="$GSG_PROJECT/tests/platform/mac-linux.sh"
 ROCKY_SH="$GSG_PROJECT/tests/platform/rocky-container.sh"
 UBUNTU_SH="$GSG_PROJECT/tests/platform/ubuntu.sh"

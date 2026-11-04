@@ -32,9 +32,9 @@ proc_alive() {
 # ^ external the fixture tools only print their version; each wrapper forwards everything except --version to the test stand-in
 # ^ why wrappers at the installed paths, not other settings; doctor reads the same settings and must still see the pinned versions
 rem_scanners() {
-    printf '#!/bin/sh\ncase "$1" in --version) echo "trufflehog 3.99.2"; exit 0 ;; esac\nexec %q "$@"\n' "$STUBS_DIR/trufflehog" >"$LC_BIN/trufflehog" || return 1
-    printf '#!/bin/sh\ncase "$1" in --version) echo "betterleaks version 1.9.0"; exit 0 ;; esac\nexec %q "$@"\n' "$STUBS_DIR/betterleaks" >"$LC_BIN/betterleaks" || return 1
-    chmod 755 "$LC_BIN/trufflehog" "$LC_BIN/betterleaks"
+    printf '#!/bin/sh\ncase "$1" in --version) echo "trufflehog 3.99.2"; exit 0 ;; esac\nexec %q "$@"\n' "$STUBS_DIR/trufflehog" >"$LC_BIN/trufflehog$LC_EXE" || return 1
+    printf '#!/bin/sh\ncase "$1" in --version) echo "betterleaks version 1.9.0"; exit 0 ;; esac\nexec %q "$@"\n' "$STUBS_DIR/betterleaks" >"$LC_BIN/betterleaks$LC_EXE" || return 1
+    chmod 755 "$LC_BIN/trufflehog$LC_EXE" "$LC_BIN/betterleaks$LC_EXE"
 }
 
 # ^ invariant the stand-in logs each setsid call and forwards it; for the re-check call it plays the failure named in $SANDBOX/spy.mode (exit2, kill, hang)
@@ -46,7 +46,7 @@ rem_spy_setsid() {
 echo "\$* ## \$(env | sed -n 's/^\(GIT_[A-Za-z_]*\)=.*/\1/p' | sort | tr '\n' ' ')" >>$SANDBOX/spy.log
 case " \$* " in
     *" doctor --recheck "*)
-        ls -A $SANDBOX/tmp/git-secret-guard.*/ >$SANDBOX/spy.workls 2>&1
+        ls -A $TEST_WORK_BASE/git-secret-guard.*/ >$SANDBOX/spy.workls 2>&1
         if [ -f $SANDBOX/spy.mode ]; then
             case "\$(cat $SANDBOX/spy.mode)" in
                 exit2) echo "internal doctor noise" >&2; exit 2 ;;
@@ -274,7 +274,7 @@ test_ctrl_c_during_the_recheck_leaves_no_process_behind() {
     wait "$cpid"
     sleep "$SETTLE_SECONDS"
     proc_alive "$rpid" && fail "the re-check process survived Ctrl-C"
-    assert_eq "$(find "$SANDBOX/tmp" -maxdepth 1 -name 'git-secret-guard.*' | wc -l | tr -d ' ')" 0 "the hook's work dir is gone"
+    assert_eq "$(find "$TEST_WORK_BASE" -maxdepth 1 -name 'git-secret-guard.*' | wc -l | tr -d ' ')" 0 "the hook's work dir is gone"
     kill -KILL "$rpid" 2>/dev/null
     return 0
 }
@@ -351,11 +351,11 @@ test_control_characters_in_recheck_output_never_reach_the_reminder() {
 # ^ coupled lib/state.sh:paths_init takes the state dir from state_dir_path => the hook and doctor read one record
 test_the_state_dir_has_one_definition_shared_by_the_hook_and_doctor() {
     local got
-    got="$(env -i HOME=/h XDG_STATE_HOME=/x bash -c 'source "$1/lib/common.sh" && state_dir_path' _ "$GSG_PROJECT")"
+    got="$(env -i PATH="$TEST_BASE_PATH" HOME=/h XDG_STATE_HOME=/x bash -c 'source "$1/lib/common.sh" && state_dir_path' _ "$GSG_PROJECT")"
     assert_eq "$got" "/x/git-secret-guard" "XDG_STATE_HOME wins"
-    got="$(env -i HOME=/h bash -c 'source "$1/lib/common.sh" && state_dir_path' _ "$GSG_PROJECT")"
+    got="$(env -i PATH="$TEST_BASE_PATH" HOME=/h bash -c 'source "$1/lib/common.sh" && state_dir_path' _ "$GSG_PROJECT")"
     assert_eq "$got" "/h/.local/state/git-secret-guard" "default under HOME"
-    env -i bash -c 'source "$1/lib/common.sh" && state_dir_path' _ "$GSG_PROJECT" >/dev/null 2>&1
+    env -i PATH="$TEST_BASE_PATH" bash -c 'source "$1/lib/common.sh" && state_dir_path' _ "$GSG_PROJECT" >/dev/null 2>&1
     assert_eq "$?" 1 "neither HOME nor XDG_STATE_HOME: refused"
     grep -q 'state_dir_path' "$GSG_PROJECT/lib/state.sh" || fail "paths_init does not use state_dir_path"
 }

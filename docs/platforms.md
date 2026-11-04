@@ -109,12 +109,17 @@ bin/git-secret-guard install        # lists what is missing, installs it with br
 
 ## Windows (Git for Windows)
 
-Run everything from **Git Bash**. Commits are scanned from any shell, Git Bash, PowerShell or cmd, because the hook lives
-in the global git config.
+Install [Git for Windows](https://git-scm.com/download/win), then, from PowerShell or cmd:
 
-```bash
-bin/git-secret-guard install        # downloads what is missing, nothing to install by hand except Git for Windows itself
+```powershell
+git clone <this repository>
+cd git-secret-guard
+bin\git-secret-guard.cmd install    # downloads what is missing
+git-secret-guard status             # in a new terminal, once %USERPROFILE%\.local\bin is on PATH
 ```
+
+Git Bash works the same way with `bin/git-secret-guard install`. Commits are scanned from any shell and from GUI clients,
+because the hook lives in the global git config.
 
 - **Prerequisites.** Git for Windows with git 2.54 or newer (`install` refuses an older one) on x86_64. `taskkill`,
   `timeout`, `curl`, `sha256sum` and the System32 `tar.exe` come with Windows or Git for Windows. `~/.local/bin` should be
@@ -124,20 +129,48 @@ bin/git-secret-guard install        # downloads what is missing, nothing to inst
   needed (Windows Server has no winget). It follows the scanner rules: all downloads are verified before anything
   changes, a rerun keeps it, a pin bump replaces it, and `uninstall --remove-tools` removes it. A `jq` you already have on
   `PATH` is used as it is and never recorded as ours.
-- **File names.** The scanners and jq keep their `.exe` names. The CLI entry `~/.local/bin/git-secret-guard` is a small
-  wrapper script, not a symlink, and `uninstall` removes it. `JQ_BIN` names a wrapper in the share dir adding `-b`,
+- **`git` in PowerShell.** The Git for Windows installer normally puts `git` on `PATH`. If `git` is not found there, re-run
+  it and choose "Git from the command line", or add `C:\Program Files\Git\cmd` to `PATH`. `git-secret-guard.cmd` finds Git
+  for Windows either way, next to `git.exe` or in its default locations, and never uses the WSL `bash.exe` in `System32`.
+- **File names.** The scanners and jq keep their `.exe` names. `~/.local/bin/git-secret-guard` is a small wrapper script,
+  not a symlink, and `git-secret-guard.cmd` next to it serves PowerShell and cmd. `uninstall` removes both. `JQ_BIN` names a wrapper in the share dir adding `-b`,
   because a native `jq.exe` otherwise writes CRLF.
-- **Not available.** The weekly timer needs systemd, which Windows does not have. Run `git-secret-guard doctor` yourself.
-- **Stopping a scan.** There are no process groups: scanners are stopped with `taskkill /T /F`, without a grace period.
-- **What was checked.** On Windows Server 2019 with git 2.56.0.windows.4, from a machine with no jq: install, a rerun,
-  `status`, `doctor` (including a worktree and a repository with the hook disabled), `doctor --recheck`, the coverage
-  reminder, `uninstall --remove-tools`, a foreign scanner moved aside and restored, and a `jq` of the user's left alone.
-  Commits from Git Bash and from PowerShell: a clean one passes, findings from both scanners block, `.secret-scan-ignore`
-  and `--no-verify` work, and no scan directory is left behind.
-- **Not checked.** Stopping a running scan with Ctrl-C on Windows, Windows on arm64 (refused), and the lifecycle test
-  suites: they need `setsid`, so they do not run on Windows. `tests/test_windows.sh` covers the Windows branches by
-  faking `uname` around the real libraries, and the `windows` job in `.github/workflows/tests.yml` runs a clean-machine
-  install.
+- **Weekly doctor.** `--with-timer` needs systemd or launchd. Use [Task Scheduler](doctor.md#a-weekly-run-on-windows-task-scheduler).
+- **Line endings.** A checkout keeps LF whatever `core.autocrlf` says (`.gitattributes`), so the bash files run as they
+  are. The warning `LF will be replaced by CRLF` in your own repositories comes from Git for Windows' default config and
+  has nothing to do with the scan.
+- **UTF-16.** Windows PowerShell 5.1 can write UTF-16 with `>` and `Out-File`. Git treats such a file as binary, so it is
+  [not scanned](scan.md#limits). Use `Set-Content -Encoding utf8`, or PowerShell 7.
+- **Stopping a scan.** There are no process groups: on an interrupt or a timeout the hook finds every process below each
+  scanner and stops them with `taskkill /F`, without a grace period, then removes its work dir.
+- **What was checked by hand.** On Windows Server 2019 with git 2.56.0.windows.4, from a machine with no jq: install from Git
+  Bash and from PowerShell, a rerun, `status`, `doctor` (including a worktree and a repository with the hook disabled),
+  `doctor --recheck`, the coverage reminder, `--replace-hooks-path` and the restore on uninstall, `uninstall --remove-tools`
+  from Git Bash and from PowerShell, a foreign scanner moved aside and restored, and a `jq` of the user's left alone. In
+  commits: a clean one passes and a leak is blocked from Git Bash and PowerShell, findings from both scanners,
+  `.secret-scan-ignore`, `--no-verify` and a broken probe repository blocking with `nothing was scanned` from Git Bash.
+
+### The test suite on Windows
+
+```powershell
+tests\run.cmd                      # the whole suite (tests/run.sh from Git Bash)
+tests\run.cmd tests\test_hook.sh   # one file
+```
+
+Git for Windows is all it needs: `tests/run.sh` fetches the pinned scanners and `jq.exe` into
+`~/.cache/git-secret-guard-test-tools` the first time (SHA-256 checked against `tools.lock`). Test files run in parallel, one
+per core (`GSG_TEST_JOBS=1` for one at a time), because starting a process costs far more than on Linux. Each file still
+has its own sandbox, and `GSG_TEST_GIT` picks another git.
+
+The suites run on the real Windows flow, not a fake Linux one: real `.exe` names, native git, `taskkill`. Two things keep
+one set of tests working on every platform. `run_cap` turns the sandbox's `C:/` prefix and the `.exe` tool names back into
+the POSIX spelling before assertions read them, and `git_path` gives a path in the form native git needs inside a config
+file. A test that cannot apply is reported as `SKIPPED` with its reason: a whole file through `FILE_SKIP_REASON` (systemd,
+launchd, the container launchers), a single test through [`tests/windows-skips.list`](../tests/windows-skips.list). Read that
+list to see exactly what is not covered on Windows. Add to it only what truly cannot apply, with the reason; a failure
+that could be a bug gets fixed.
+
+`tests/test_windows.sh` tests the Windows branches through a faked `uname`, so a change that breaks them also fails on Linux.
 
 ## What differs on Ubuntu, and what was checked
 

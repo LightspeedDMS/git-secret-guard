@@ -152,8 +152,23 @@ uninstall_agent() {
     fi
 }
 
+# ^ invariant only a running git-secret-guard.cmd sets GSG_CMD_ENTRY; it deletes itself once the share dir is gone
+uninstall_cli_cmd() {
+    local cmd="$GSG_BIN_DIR/git-secret-guard.cmd"
+    if ! tools_is_windows || [ ! -e "$cmd" ]; then return 0; fi
+    if ! install_cli_cmd_is_ours "$cmd"; then
+        printf '%s: %s is not the wrapper install created; left in place\n' "$GSG_NAME" "$cmd" >&2
+    elif [ -n "${GSG_CMD_ENTRY:-}" ]; then
+        uninstall_say "$cmd removes itself as this command ends"
+    else
+        rm -f -- "$cmd" || return 1
+        uninstall_say "removed $cmd"
+    fi
+}
+
 uninstall_cli_link() {
     local link="$GSG_BIN_DIR/git-secret-guard"
+    uninstall_cli_cmd || return 1
     if [ ! -e "$link" ] && [ ! -L "$link" ]; then return 0; fi
     # ^ coupled lib/install.sh:install_cli_wrapper_text; the Windows CLI entry is this wrapper, never a symlink
     if { tools_is_windows && [ ! -L "$link" ] && [ "$(<"$link")" = "$(install_cli_wrapper_text)" ]; } \

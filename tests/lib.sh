@@ -15,8 +15,32 @@ HOOK_NAME=git-secret-guard
 TEST_OS="$(uname -s)"
 TEST_BREW_PREFIX=""
 TEST_BASH="" TEST_GNUBIN=""
+TEST_IS_WINDOWS=0 TEST_TASKKILL="" TEST_JQ_EXE="" TEST_SANDBOX_MIXED="" TEST_WORK_BASE=""
 # shellcheck disable=SC2034
 case "$TEST_OS" in
+    MINGW64_NT-*)
+        # ^ external Git for Windows has no setsid or /bin/jq; a native jq.exe needs the -b wrapper install writes, built per sandbox in sandbox_create
+        TEST_IS_WINDOWS=1
+        # ^ why this process only, not GSG_ENV; plain ln -s copies each file here, and the code under test must run without the help
+        export MSYS=winsymlinks:sys
+        TEST_TOOLS_CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/git-secret-guard-test-tools"
+        GIT="${GSG_TEST_GIT:-$(type -P git)}"
+        TEST_SYSTEM32="$(cygpath -u "${SYSTEMROOT:-C:\Windows}")/System32"
+        TEST_BASE_PATH="${GIT%/*}:/usr/bin:/bin:$TEST_SYSTEM32"
+        REAL_TRUFFLEHOG="${GSG_TEST_TRUFFLEHOG:-$TEST_TOOLS_CACHE/trufflehog.exe}"
+        REAL_BETTERLEAKS="${GSG_TEST_BETTERLEAKS:-$TEST_TOOLS_CACHE/betterleaks.exe}"
+        TEST_JQ_EXE="${GSG_TEST_JQ:-$TEST_TOOLS_CACHE/jq.exe}"
+        if [ ! -x "$TEST_JQ_EXE" ]; then TEST_JQ_EXE="$(type -P jq)"; fi
+        if [ ! -x "$TEST_JQ_EXE" ]; then
+            printf 'tests need jq on Windows; run tests/fetch-test-tools.sh\n' >&2
+            exit 2
+        fi
+        TEST_JQ=""
+        TEST_SETSID=""
+        TEST_TASKKILL="$TEST_SYSTEM32/taskkill"
+        TEST_TIMEOUT="${GSG_TEST_TIMEOUT:-/usr/bin/timeout}"
+        TEST_TRUE="${GSG_TEST_TRUE:-/usr/bin/true}"
+        ;;
     Darwin)
         TEST_BREW_PREFIX="${GSG_TEST_BREW_PREFIX:-$(brew --prefix 2>/dev/null)}"
         if [ -z "$TEST_BREW_PREFIX" ]; then
@@ -76,8 +100,17 @@ sandbox_create() {
     mkdir -p -- "$REAL_HOME/.tmp" || exit 2
     SANDBOX="$(mktemp -d -- "$REAL_HOME/.tmp/git-secret-guard-tests.XXXXXX")" || exit 2
     SHARE="$SANDBOX/share"
+    # ^ coupled hooks/secret-scan keeps its work dir under HOME on Windows whatever TMPDIR says (NTFS ignores chmod)
+    TEST_WORK_BASE="$SANDBOX/tmp"
+    # shellcheck disable=SC2034
+    if [ "$TEST_IS_WINDOWS" -eq 1 ]; then TEST_WORK_BASE="$SANDBOX/home/.tmp"; fi
     mkdir -p -- "$SANDBOX/home" "$SANDBOX/tmp" "$SHARE" "$SANDBOX/repos" || exit 2
     cp -r -- "$GSG_PROJECT/hooks" "$GSG_PROJECT/lib" "$SHARE/" || exit 2
+    # ^ invariant jq on the sandbox PATH like a system jq elsewhere => install keeps it; a test wanting the download path removes it with lc_path_without
+    if [ "$TEST_IS_WINDOWS" -eq 1 ]; then
+        mkdir -p -- "$SANDBOX/jqbin" && cp -- "$TEST_JQ_EXE" "$SANDBOX/jqbin/jq.exe" || exit 2
+        TEST_BASE_PATH="$SANDBOX/jqbin:$TEST_BASE_PATH"
+    fi
     GSG_ENV=(
         HOME="$SANDBOX/home"
         GIT_CONFIG_GLOBAL="$SANDBOX/gitconfig"
@@ -88,6 +121,13 @@ sandbox_create() {
         GIT_TERMINAL_PROMPT=0
         PYTHONUSERBASE="$REAL_HOME/.local"
     )
+    if [ "$TEST_IS_WINDOWS" -eq 1 ]; then
+        TEST_SANDBOX_MIXED="$(cygpath -m "$SANDBOX")" || exit 2
+        GSG_ENV+=(SYSTEMROOT="$SYSTEMROOT")
+        TEST_JQ="$SANDBOX/jq-binary-mode"
+        printf '#!/usr/bin/env bash\nexec %q -b "$@"\n' "$TEST_JQ_EXE" >"$TEST_JQ" || exit 2
+        chmod 755 "$TEST_JQ" || exit 2
+    fi
     if [ -n "${GSG_TRACE_FILE:-}" ]; then
         GSG_ENV+=(BASH_ENV="$GSG_PROJECT/tests/coverage-env.sh" GSG_TRACE_FILE="$GSG_TRACE_FILE")
     fi
@@ -119,7 +159,8 @@ write_settings() {
         printf 'TRUFFLEHOG_BIN=%q\n' "$1"
         printf 'BETTERLEAKS_BIN=%q\n' "$2"
         printf 'JQ_BIN=%q\n' "$3"
-        printf 'SETSID_BIN=%q\n' "$TEST_SETSID"
+        if [ -n "$TEST_SETSID" ]; then printf 'SETSID_BIN=%q\n' "$TEST_SETSID"; fi
+        if [ -n "$TEST_TASKKILL" ]; then printf 'TASKKILL_BIN=%q\n' "$TEST_TASKKILL"; fi
         printf 'TIMEOUT_BIN=%q\n' "$TEST_TIMEOUT"
         printf 'TRUFFLEHOG_VERSION=%q\n' "$TEST_TF_VERSION"
         printf 'BETTERLEAKS_VERSION=%q\n' "$TEST_GL_VERSION"
@@ -138,11 +179,29 @@ set_env() { EXTRA_ENV+=("$@"); }
 
 gitx() { env -i "${GSG_ENV[@]}" "${EXTRA_ENV[@]}" "$GIT" "$@"; }
 
+# ^ why normalise here, not in each assertion; native git answers C:/ paths and the tools keep .exe, the suites expect the POSIX spelling on every platform
+# ^ invariant only the sandbox prefix and the three tool names change => a wrong path elsewhere still fails its assertion
+windows_plain_text() {
+    local text="$1" tool
+    text="${text//$TEST_SANDBOX_MIXED/$SANDBOX}"
+    for tool in trufflehog betterleaks jq; do text="${text//$tool.exe/$tool}"; done
+    printf '%s' "$text"
+}
+
+# ^ external a path written into a git config file reaches native git unconverted, and it only understands C:/ there
+git_path() { if [ "$TEST_IS_WINDOWS" -eq 1 ]; then cygpath -m "$1"; else printf '%s' "$1"; fi; }
+
+windows_or_plain() { if [ "$TEST_IS_WINDOWS" -eq 1 ]; then windows_plain_text "$1"; else printf '%s' "$1"; fi; }
+
 run_cap() {
     "$@" >"$SANDBOX/.out" 2>"$SANDBOX/.err"
     RC=$?
     OUT="$(<"$SANDBOX/.out")"
     ERR="$(<"$SANDBOX/.err")"
+    if [ "$TEST_IS_WINDOWS" -eq 1 ]; then
+        OUT="$(windows_plain_text "$OUT")"
+        ERR="$(windows_plain_text "$ERR")"
+    fi
 }
 
 # shellcheck disable=SC2016
@@ -185,6 +244,22 @@ new_repo() {
     mkdir -p -- "$REPO" || return 1
     gitx init -q "$REPO" || return 1
     cd -- "$REPO" || return 1
+}
+
+# ^ why through the index, not ln -s; on Windows ln -s writes no symlink native git can see, and the refusal of a symlink at HEAD must be tested there too
+stage_symlink() {
+    local sha
+    sha="$(printf '%s' "$1" | gitx hash-object -w --stdin)" || return 1
+    gitx update-index --add --cacheinfo "120000,$sha,$2"
+}
+
+# ^ external Git Bash rewrites an argument like /old/hooks into a path under its install dir before native git sees it
+git_literal_config() {
+    if [ "$TEST_IS_WINDOWS" -eq 1 ]; then
+        env -i "${GSG_ENV[@]}" "${EXTRA_ENV[@]}" MSYS_NO_PATHCONV=1 GIT_CONFIG_GLOBAL="$(git_path "$SANDBOX/gitconfig")" "$GIT" config "$@"
+    else
+        gitx config "$@"
+    fi
 }
 
 stage_file() {
@@ -231,6 +306,15 @@ assert_eq() { [ "$1" = "$2" ] || fail "${3:-assert_eq}: expected [$2] got [$1]";
 assert_rc() { [ "$RC" -eq "$1" ] || fail "${2:-rc}: expected exit $1 got $RC (stderr: ${ERR:0:300})"; }
 assert_contains() { case "$1" in *"$2"*) return 0 ;; esac; fail "${3:-assert_contains}: missing [$2] in [${1:0:400}]"; }
 assert_not_contains() { case "$1" in *"$2"*) fail "${3:-assert_not_contains}: unexpected [$2]"; return 1 ;; esac; }
+# ^ why here too, not only in run_cap; many assertions read git or the state directly
+if [ "$TEST_IS_WINDOWS" -eq 1 ]; then
+    eval "$(declare -f assert_eq | sed '1s/assert_eq/posix_assert_eq/')"
+    eval "$(declare -f assert_contains | sed '1s/assert_contains/posix_assert_contains/')"
+    eval "$(declare -f assert_not_contains | sed '1s/assert_not_contains/posix_assert_not_contains/')"
+    assert_eq() { posix_assert_eq "$(windows_plain_text "$1")" "$(windows_plain_text "$2")" "${3:-assert_eq}"; }
+    assert_contains() { posix_assert_contains "$(windows_plain_text "$1")" "$(windows_plain_text "$2")" "${3:-assert_contains}"; }
+    assert_not_contains() { posix_assert_not_contains "$(windows_plain_text "$1")" "$(windows_plain_text "$2")" "${3:-assert_not_contains}"; }
+fi
 assert_empty() { [ -z "$1" ] || fail "${2:-assert_empty}: got [${1:0:300}]"; }
 PASS_LINE_RE='^git-secret-guard: scanned ([0-9]+) files?, ([0-9]+) added lines? \(([^)]*)\): no findings(, [0-9]+ files? exempted)?, [0-9]+s$'
 assert_pass_line_only() { [[ $1 =~ $PASS_LINE_RE ]] || fail "${2:-assert_pass_line_only}: expected exactly the pass line, got [${1:0:300}]"; }
@@ -241,8 +325,22 @@ skip_test() { printf '%s\n' "$1" >"$SANDBOX/.skip"; exit 0; }
 
 no_leak() { assert_not_contains "$OUT" "$1" "stdout leak"; assert_not_contains "$ERR" "$1" "stderr leak"; }
 
+# ^ invariant prints the reason tests/windows-skips.list gives for test $1 of file $2; rc 1 when it has none, or off Windows
+windows_skip_reason() {
+    local id reason
+    if [ "$TEST_IS_WINDOWS" -ne 1 ]; then return 1; fi
+    while IFS='|' read -r id reason; do
+        id="${id%% *}"
+        if [ "$id" = "$2::$1" ]; then
+            printf '%s\n' "${reason# }"
+            return 0
+        fi
+    done <"$GSG_PROJECT/tests/windows-skips.list"
+    return 1
+}
+
 run_file_tests() {
-    local file name fn status detail line
+    local file name fn status detail line reason
     local -a fns=()
     local passed=0 failed=0 skipped=0
     file="$(basename -- "${BASH_SOURCE[1]}")"
@@ -261,6 +359,9 @@ run_file_tests() {
         use_stubs
         if [ -n "${FILE_SKIP_REASON:-}" ]; then
             printf '%s\n' "$FILE_SKIP_REASON" >"$SANDBOX/.skip"
+            status=0
+        elif reason="$(windows_skip_reason "$fn" "${file%.sh}")"; then
+            printf '%s\n' "$reason" >"$SANDBOX/.skip"
             status=0
         else
             (cd -- "$SANDBOX" && "$fn") >"$SANDBOX/.testout" 2>&1

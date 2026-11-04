@@ -6,7 +6,7 @@ it, so changes are held to a high bar: every behaviour has a test, and every use
 ## Reporting
 
 - **Bugs and feature requests:** open a [GitHub issue](https://github.com/LightspeedDMS/git-secret-guard/issues). For a
-  bug, include the platform, `git --version`, `bash --version`, the output of `git-secret-guard status` and
+  bug, include the platform (on Windows, whether you used Git Bash, PowerShell or cmd), `git --version`, `bash --version`, the output of `git-secret-guard status` and
   `git-secret-guard doctor`, the steps to reproduce, and what you expected instead.
 - **A way to get a secret past the hook, or any other security problem:** do **not** open a public issue. Use
   [private vulnerability reporting](https://github.com/LightspeedDMS/git-secret-guard/security/advisories/new)
@@ -15,18 +15,25 @@ it, so changes are held to a high bar: every behaviour has a test, and every use
 
 ## Setting up
 
-You need the same tools as a user (see [README.md](README.md#requirements) and [docs/platforms.md](docs/platforms.md)):
+You need the same tools as a user (see [README.md](README.md#requirements) and [docs/platforms.md](docs/platforms.md)).
+Development is supported on all three platforms:
 
-- Linux (x86_64/arm64) or macOS arm64 with Homebrew.
-- **git 2.54 or newer.** Older git silently ignores config hooks, so most tests would prove nothing. The tests use
-  `/usr/local/bin/git` unless you set `GSG_TEST_GIT=/path/to/git`.
-- bash 4.4+, `jq`, `setsid`, `timeout`, `curl`, `tar`, and gawk or mawk.
-- [shellcheck](https://github.com/koalaman/shellcheck) **0.11.0** for the lint gate (`pipx install shellcheck-py==0.11.0.1`);
-  with another version the gate is skipped, not passed.
+| | Windows x86_64 | macOS arm64 | Linux x86_64/arm64 |
+|---|---|---|---|
+| **Needs** | [Git for Windows](https://git-scm.com/download/win) | Homebrew, `brew install bash coreutils util-linux jq` | bash 4.4+, `jq`, `setsid`, `timeout`, `curl`, `tar`, gawk or mawk |
+| **git 2.54 or newer** | the one on `PATH` | `/usr/bin/git` | `/usr/local/bin/git` |
+| **Run the tests with** | `tests\run.cmd` (PowerShell, cmd) or `tests/run.sh` (Git Bash) | `tests/run.sh` | `tests/run.sh` |
+
+Older git silently ignores config hooks, so most tests would prove nothing; set `GSG_TEST_GIT=/path/to/git` to use another.
+
+- [shellcheck](https://github.com/koalaman/shellcheck) **0.11.0** for the lint gate (`pipx install shellcheck-py==0.11.0.1`;
+  on Windows also the `shellcheck.exe` of the [0.11.0 release](https://github.com/koalaman/shellcheck/releases/tag/v0.11.0),
+  put in `~/.local/bin`); with another version the gate is skipped, not passed.
 - Optional: `pre-commit`, for the framework coexistence tests.
 
 The real trufflehog and betterleaks are needed only by the tests that pin their behaviour; without them those tests
 skip with a reason. `tests/fetch-test-tools.sh` downloads the versions pinned in `tools.lock` and checks their SHA-256.
+On Windows, `tests/run.sh` does this for you the first time, and fetches `jq.exe` too, so Git for Windows is all you install.
 
 ## Running the tests
 
@@ -35,7 +42,20 @@ tests/run.sh                       # the whole suite
 tests/run.sh tests/test_hook.sh    # one file
 ```
 
-On macOS always go through `tests/run.sh`: it puts Homebrew's bash and the GNU tools first on `PATH`.
+From PowerShell or cmd on Windows:
+
+```powershell
+tests\run.cmd                      # the whole suite
+tests\run.cmd tests\test_hook.sh   # one file
+```
+
+Always go through the runner on macOS and Windows: on macOS it puts Homebrew's bash and the GNU tools first on `PATH`, on
+Windows it fetches the test tools and `tests\run.cmd` finds Git for Windows' bash (never the WSL one in `System32`).
+
+On Windows a test that cannot apply there is reported as `SKIPPED` with its reason, never as passed: see
+[what the suite covers on Windows](docs/platforms.md#the-test-suite-on-windows). The suite is slower there, because starting
+a process costs far more than on Linux: files run in parallel by default (`GSG_TEST_JOBS` sets how many, also on Linux and
+macOS, where the default is one), and during development it is best to run the files you touched.
 
 Every test file runs in a throwaway sandbox with its own `HOME` and global git config, so the suite never touches your
 own git configuration or installed hook. The Ubuntu and Rocky container runs live in `tests/platform/` and are described
@@ -57,8 +77,12 @@ in [docs/platforms.md](docs/platforms.md); they are not part of `tests/run.sh`.
 - **Keep files under 1000 lines;** split by responsibility when one grows past that.
 - **Document behaviour changes** in the matching file under `docs/` (and `README.md` when it is part of the overview).
   `tests/test_quality.sh` checks several documented promises.
-- **Portability:** the hook and CLI run on Linux and macOS (BSD userland behind Homebrew's GNU tools). The awk
-  programs must give identical output under gawk, mawk and macOS awk (`tests/test_awk_portability.sh`).
+- **Portability:** the hook and CLI run on Linux, macOS (BSD userland behind Homebrew's GNU tools) and Windows (Git for
+  Windows bash with native `.exe` tools). The awk programs must give identical output under gawk, mawk and macOS awk
+  (`tests/test_awk_portability.sh`). On Windows, native tools answer in `C:/` paths while bash uses `/c/`, there are no
+  process groups, and `ln -s` behaves differently: `lib/proc.sh`, `gsg_is_windows` and `tools_binary_name` are the places
+  for that, and `tests/test_windows.sh` is where it is tested on every platform.
+- **`.cmd` files stay CRLF** (`.gitattributes`); everything else is LF, also in a Windows checkout.
 
 [CLAUDE.md](CLAUDE.md) holds the maintainer notes: why the code is shaped the way it is, and which "simplifications"
 break it. Read it before changing the hook, extraction, exemptions or install. It is written for AI coding agents too.
@@ -67,9 +91,9 @@ break it. Read it before changing the hook, extraction, exemptions or install. I
 
 1. Open or pick an issue first for anything larger than a small fix, so the approach can be agreed.
 2. Branch from `main`, keep the change focused, and write commit messages that say why, not only what.
-3. Run `tests/run.sh` before pushing and mention in the PR anything you could not run (for example macOS).
+3. Run the suite before pushing and mention in the PR anything you could not run (for example macOS, or Windows).
 4. CI runs the suite on Ubuntu 24.04 for both your branch and the base, and fails only on tests that pass on the base
-   and fail on your branch. A Windows smoke job runs too, but its result doesn't count yet.
+   and fail on your branch. On Windows it runs the suite and a clean-machine install, leak and uninstall check.
 5. Link the issue in the PR description.
 
 ## License

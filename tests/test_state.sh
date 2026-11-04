@@ -9,7 +9,7 @@ st() {
 }
 
 state_dir_env() {
-    mkdir -p -- "$SANDBOX/st-home" || return 1
+    rm -rf -- "$SANDBOX/st-state" && mkdir -p -- "$SANDBOX/st-home" || return 1
     set_env HOME="$SANDBOX/st-home" XDG_STATE_HOME="$SANDBOX/st-state" XDG_DATA_HOME="$SANDBOX/st-data"
 }
 

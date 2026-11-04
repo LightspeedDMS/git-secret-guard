@@ -36,7 +36,11 @@ doctor_repo_finding() {
 }
 
 # ^ invariant sets REPLY = the file of a config origin; a relative file origin is relative to the repository the check runs in
+# ^ external native Windows git prints absolute origins as file:C:/dir, relative ones resolve to /c/dir => one spelling, else a finding repeats per worktree
 doctor_origin_text() {
+    if [[ $1 == file:[A-Za-z]:/* ]] && gsg_is_windows; then
+        REPLY="$(cygpath -u "${1#file:}")" && return 0
+    fi
     case "$1" in
         file:/*) REPLY="${1#file:}" ;;
         file:*) REPLY="$PWD/${1#file:}" ;;

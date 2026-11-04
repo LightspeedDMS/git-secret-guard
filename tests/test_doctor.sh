@@ -15,10 +15,10 @@ test_a_healthy_machine_exits_0_and_shows_the_machine_section() {
     assert_contains "$OUT" "machine:" "the machine section comes first"
     assert_contains "$OUT" "  ok       installed: version $want" "installed"
     assert_contains "$OUT" "  ok       hook: hook.git-secret-guard.event=pre-commit, command=$LC_DATA/hooks/secret-scan (executable)" "hook config"
-    assert_contains "$OUT" "  ok       trufflehog: $LC_BIN/trufflehog 3.99.2 (pinned 3.99.2)" "trufflehog at the pin"
-    assert_contains "$OUT" "  ok       betterleaks: $LC_BIN/betterleaks 1.9.0 (pinned 1.9.0)" "betterleaks at the pin"
-    assert_contains "$OUT" "  ok       jq: $(dr_which jq)" "jq"
-    assert_contains "$OUT" "  ok       setsid: $(dr_which setsid)" "setsid"
+    assert_contains "$OUT" "  ok       trufflehog: $LC_BIN/trufflehog$LC_EXE 3.99.2 (pinned 3.99.2)" "trufflehog at the pin"
+    assert_contains "$OUT" "  ok       betterleaks: $LC_BIN/betterleaks$LC_EXE 1.9.0 (pinned 1.9.0)" "betterleaks at the pin"
+    assert_contains "$OUT" "  ok       jq: $(lc_expected_jq)" "jq"
+    if [ "$TEST_IS_WINDOWS" -eq 1 ]; then assert_contains "$OUT" "  ok       taskkill: " "process tool"; else assert_contains "$OUT" "  ok       setsid: $(dr_which setsid)" "setsid"; fi
     assert_contains "$OUT" "  ok       timeout: $(dr_which timeout)" "timeout"
     assert_contains "$OUT" "  ok       core.hooksPath: no global value" "no leftover hooksPath"
     assert_contains "$OUT" "summary: 0 repos, 0 covered" "the summary line"
@@ -103,16 +103,16 @@ test_the_machine_section_never_prints_a_hook_config_value() {
 
 test_a_tool_that_is_missing_or_at_the_wrong_version_is_a_problem() {
     dr_begin || return 1
-    rm -f -- "$LC_BIN/betterleaks" || return 1
-    printf '#!/bin/sh\necho "trufflehog 3.0.0"\n' >"$LC_BIN/trufflehog" || return 1
+    rm -f -- "$LC_BIN/betterleaks$LC_EXE" || return 1
+    printf '#!/bin/sh\necho "trufflehog 3.0.0"\n' >"$LC_BIN/trufflehog$LC_EXE" || return 1
     doctor
     assert_rc 1 "a missing and a stale tool"
     assert_contains "$OUT" "  PROBLEM  betterleaks: betterleaks is missing or not executable ($LC_BIN/betterleaks); run git-secret-guard install" "missing"
-    assert_contains "$OUT" "  PROBLEM  trufflehog: $LC_BIN/trufflehog reports 3.0.0, the pin is 3.99.2; run git-secret-guard install" "wrong version"
+    assert_contains "$OUT" "  PROBLEM  trufflehog: $LC_BIN/trufflehog$LC_EXE reports 3.0.0, the pin is 3.99.2; run git-secret-guard install" "wrong version"
     assert_not_contains "$OUT" "  ok       trufflehog:" "no ok line for a tool at the wrong version"
-    printf '#!/bin/sh\necho "trufflehog 3.99.2.1"\n' >"$LC_BIN/trufflehog" || return 1
+    printf '#!/bin/sh\necho "trufflehog 3.99.2.1"\n' >"$LC_BIN/trufflehog$LC_EXE" || return 1
     doctor
-    assert_contains "$OUT" "trufflehog: $LC_BIN/trufflehog reports 3.99.2.1, the pin is 3.99.2" "a longer version is not the pin, as install judges it"
+    assert_contains "$OUT" "trufflehog: $LC_BIN/trufflehog$LC_EXE reports 3.99.2.1, the pin is 3.99.2" "a longer version is not the pin, as install judges it"
 }
 
 test_an_unusable_jq_timeout_or_settings_file_is_a_problem() {
@@ -125,7 +125,7 @@ test_an_unusable_jq_timeout_or_settings_file_is_a_problem() {
     doctor
     assert_rc 1 "timeout is relative"
     assert_contains "$OUT" "timeout: timeout must be an absolute path, got [relative/timeout]; run git-secret-guard install" "timeout named"
-    assert_contains "$OUT" "trufflehog: $LC_BIN/trufflehog version not checked, timeout is unusable" "versions cannot be probed without it"
+    assert_contains "$OUT" "trufflehog: $LC_BIN/trufflehog$LC_EXE version not checked, timeout is unusable" "versions cannot be probed without it"
     rm -f -- "$LC_DATA/settings" || return 1
     doctor
     assert_rc 1 "no settings file"
@@ -134,7 +134,7 @@ test_an_unusable_jq_timeout_or_settings_file_is_a_problem() {
 
 test_a_leftover_global_hooks_path_is_a_problem_also_from_an_included_file() {
     dr_begin || return 1
-    gitx config --global core.hooksPath /old/hooks || return 1
+    git_literal_config --global core.hooksPath /old/hooks || return 1
     doctor
     assert_rc 1 "a value in the global file"
     assert_contains "$OUT" "  PROBLEM  core.hooksPath: [/old/hooks] is still set in $SANDBOX/gitconfig; remove it (git config --global --unset-all core.hooksPath)" "own file"
@@ -167,7 +167,7 @@ test_an_old_git_reachable_on_PATH_or_at_usr_bin_is_a_warning_naming_path_and_ver
     set_env PATH="$SANDBOX/pathbin:$TEST_BASE_PATH:$SANDBOX/oldgit:$SANDBOX/junkgit"
     doctor
     assert_rc 0 "a warning does not change the exit status"
-    assert_contains "$OUT" "  ok       git: $GIT $("$GIT" --version | sed -n 's/^git version \([0-9][0-9.]*\).*/\1/p')" "the git that commits use is fine"
+    assert_contains "$OUT" "  ok       git: $GIT $("$GIT" --version | sed -n 's/^git version \([0-9][0-9.]*[0-9]\).*/\1/p')" "the git that commits use is fine"
     assert_contains "$OUT" "  WARNING  git: $SANDBOX/oldgit/git is git 2.30.1; it ignores config-based hooks without any message, so commits made with it are NOT scanned" "old git by path and version"
     assert_contains "$OUT" "  WARNING  git: $SANDBOX/junkgit/git is git of unknown version;" "a git that reports no version is warned about too"
     sys_ver="$(/usr/bin/git --version | sed -n 's/^git version \([0-9]*\.[0-9]*\).*/\1/p')" || return 1

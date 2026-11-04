@@ -14,7 +14,7 @@ tf_runs() { count_calls trufflehog; }
 gl_runs() { count_calls betterleaks; }
 has_head() { gitx rev-parse -q --verify HEAD >/dev/null 2>&1; }
 assert_no_commit() { if has_head; then fail "a commit was created"; fi; }
-workdirs() { find "$SANDBOX/tmp" -maxdepth 1 -name 'git-secret-guard.*' 2>/dev/null; }
+workdirs() { find "$TEST_WORK_BASE" -maxdepth 1 -name 'git-secret-guard.*' 2>/dev/null; }
 
 test_clean_commit_prints_one_summary_line_and_runs_both_tools() {
     begin clean || return 1
@@ -486,7 +486,7 @@ test_hook_blocks_when_neither_tmpdir_nor_home_is_set() {
 test_hook_falls_back_to_home_tmp_when_tmpdir_is_unset() {
     begin homedir || return 1
     stage_file a.txt one
-    run_cap env -i HOME="$SANDBOX/home" PATH="/usr/local/bin:/usr/bin:/bin" GIT_CONFIG_GLOBAL="$SANDBOX/gitconfig" \
+    run_cap env -i HOME="$SANDBOX/home" PATH="$TEST_BASE_PATH" SYSTEMROOT="${SYSTEMROOT:-}" GIT_CONFIG_GLOBAL="$SANDBOX/gitconfig" \
         GIT_CONFIG_NOSYSTEM=1 STUB_LOG="$CALLS" "$GIT" commit -q -m home
     assert_rc 0 commit
     assert_contains "$(<"$CALLS")" "workdir-mode=700" "scan ran with a work dir under HOME/.tmp"
@@ -509,7 +509,7 @@ test_a_scan_wrapper_failing_internally_blocks_the_commit() {
 
 SIGDUR=""
 # ^ security match on this sandbox's temp path and a per-test sleep duration, never on shared paths => stubs of a concurrent run or sandbox are not counted
-scanner_processes() { pgrep -f -- "$SANDBOX/tmp|sleep $SIGDUR" | wc -l; }
+scanner_processes() { pgrep -f -- "$TEST_WORK_BASE|sleep $SIGDUR" | wc -l; }
 
 signal_test() {
     begin "$1" || return 1
@@ -520,7 +520,7 @@ signal_test() {
     env --default-signal=INT,TERM -i "${GSG_ENV[@]}" "${EXTRA_ENV[@]}" "$GIT" commit -q -m sig >/dev/null 2>&1 &
     local cpid=$! tries=0
     while { [ "$(tf_runs)" -lt 1 ] || [ "$(gl_runs)" -lt 1 ]; } && [ "$tries" -lt 150 ]; do sleep 0.1; tries=$((tries + 1)); done
-    assert_eq "$(find "$SANDBOX/tmp" -maxdepth 1 -name 'git-secret-guard.*' | wc -l)" 1 "work dir exists during the scan"
+    assert_eq "$(find "$TEST_WORK_BASE" -maxdepth 1 -name 'git-secret-guard.*' | wc -l)" 1 "work dir exists during the scan"
     [ "$(scanner_processes)" -ge 2 ] || fail "sanity: scanners are not running before the signal"
     pkill "-$2" -f "$SHARE/hooks/secret-scan"
     wait "$cpid"
@@ -624,7 +624,7 @@ test_a_signal_before_the_runner_has_its_own_group_does_not_wait_for_the_scan() {
     stage_file a.txt one
     env --default-signal=INT,TERM -i "${GSG_ENV[@]}" "${EXTRA_ENV[@]}" "$GIT" commit -q -m early >/dev/null 2>&1 &
     local cpid=$! tries=0
-    while [ -z "$(find "$SANDBOX/tmp" -path '*/scan/a.txt' 2>/dev/null)" ] && [ "$tries" -lt 100 ]; do sleep 0.05; tries=$((tries + 1)); done
+    while [ -z "$(find "$TEST_WORK_BASE" -path '*/scan/a.txt' 2>/dev/null)" ] && [ "$tries" -lt 100 ]; do sleep 0.05; tries=$((tries + 1)); done
     sleep 0.3
     local t0 t1
     t0="$(date +%s%N)"

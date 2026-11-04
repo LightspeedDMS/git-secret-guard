@@ -1,0 +1,68 @@
+# Tests that cannot apply on Windows, one per line: file::test | reason. Read by tests/lib.sh; each is reported as SKIPPED with its reason.
+test_doctor::test_a_hook_command_that_is_missing_or_not_executable_is_a_problem | NTFS has no executable bit, chmod -x changes nothing
+test_doctor::test_doctor_checks_the_timer_only_when_the_state_says_one_is_installed | installs a systemd timer, Windows has none
+test_doctor_repos::test_a_repository_whose_config_hangs_git_becomes_a_timed_out_finding_instead_of_a_hang | needs a FIFO, which Git for Windows cannot create for native git
+test_doctor_repos::test_a_timed_out_doctor_run_leaves_no_process_behind | needs ps -x and process groups
+test_doctor_repos::test_an_unreadable_directory_is_a_listed_problem_and_the_rest_is_still_checked | NTFS ignores chmod, so nothing is unreadable
+test_doctor_repos::test_control_characters_in_repository_names_never_reach_the_output | NTFS forbids control characters in file names
+test_doctor_findings::test_a_full_run_keeps_recorded_repos_it_could_not_have_seen_under_its_roots | NTFS ignores chmod, so nothing is unreadable
+test_doctor_findings::test_a_repository_path_the_record_cannot_hold_is_reported_not_silently_lost | NTFS forbids control characters in file names
+test_doctor_findings::test_machine_problems_are_recorded_as_machine_scope | NTFS has no executable bit, chmod -x changes nothing
+test_doctor_findings::test_recheck_keeps_a_recorded_repo_and_worktree_it_cannot_reach_and_says_so | NTFS ignores chmod, so nothing is unreadable
+test_doctor_findings::test_recheck_reruns_the_machine_checks_and_prints_what_is_still_broken | NTFS has no executable bit, chmod -x changes nothing
+test_exemptions_real::test_real_an_absolute_extend_path_to_an_existing_file_still_loads_a_documented_residual | the residual is about a POSIX absolute path; a native betterleaks.exe cannot read it
+test_extract::test_filenames_with_spaces_quotes_and_tabs | NTFS forbids quotes and tabs in file names
+test_extract::test_shell_metacharacters_in_paths_are_inert | NTFS forbids some of these characters in file names
+test_extract::test_symlink_to_file_type_change_is_scanned | ln -s writes no symlink native git can see
+test_hook::test_non_executable_tool_blocks | NTFS has no executable bit, chmod -x changes nothing
+test_hook::test_the_hook_blocks_when_setsid_or_timeout_is_not_a_usable_absolute_path | setsid is not used on Windows; taskkill takes its place
+test_hook::test_the_hook_takes_setsid_and_timeout_from_settings_never_from_PATH | setsid is not used on Windows; taskkill takes its place
+test_hook::test_a_scanner_that_ignores_term_is_killed_before_the_temp_dir_is_removed | uses pgrep and TERM grace; test_windows covers the interrupt with real processes
+test_hook::test_a_signal_before_the_runner_has_its_own_group_does_not_wait_for_the_scan | no process groups on Windows; test_windows covers the interrupt with real processes
+test_hook::test_int_signal_stops_the_scanners_and_removes_the_private_temp_dir | uses pgrep; test_windows covers the interrupt with real processes
+test_hook::test_term_signal_stops_the_scanners_and_removes_the_private_temp_dir | uses pgrep; test_windows covers the interrupt with real processes
+test_hookspath::test_a_dangling_include_does_not_hide_a_later_include_that_sets_core_hooks_path | ln -s writes no symlink native git can see
+test_hookspath::test_a_symlinked_global_gitconfig_stays_a_symlink_through_install_and_uninstall | ln -s writes no symlink native git can see
+test_hookspath::test_an_include_pointing_at_a_dangling_symlink_is_skipped_like_git_does | ln -s writes no symlink native git can see
+test_hookspath::test_an_include_that_realpath_cannot_resolve_is_refused_with_a_message_of_ours | ln -s writes no symlink native git can see
+test_hookspath::test_the_global_config_read_does_not_need_a_realpath_that_knows_dash_m | fakes a BSD realpath, a macOS concern
+test_install::test_fresh_install_records_the_state | NTFS ignores chmod, so modes 600 and 700 cannot be checked
+test_install::test_replace_hooks_path_records_verbatim_backs_up_and_unsets | NTFS ignores chmod, so modes 600 and 700 cannot be checked
+test_install::test_install_refuses_a_read_only_global_config_before_changing_anything | NTFS ignores chmod, so nothing is read-only
+test_install::test_a_failed_copy_leaves_no_staging_dir_beside_the_share_dir | NTFS ignores chmod, so nothing is unreadable
+test_install::test_a_leftover_old_tree_that_cannot_be_removed_is_reported | NTFS ignores chmod, so nothing is undeletable
+test_install::test_install_refuses_when_jq_setsid_or_timeout_is_not_reachable | Linux prerequisite list; Windows downloads jq, covered by test_windows
+test_macos::test_doctor_accepts_the_macos_command_form_and_checks_the_recorded_bash | fakes a Mac; the fixtures of a Windows host do not fit
+test_macos::test_linux_install_never_calls_brew_and_writes_no_macos_settings | fakes Linux; the fixtures of a Windows host do not fit
+test_macos::test_load_settings_discards_inherited_bash_and_gnubin | fakes a Mac; the fixtures of a Windows host do not fit
+test_real::test_real_betterleaks_unreadable_input_exits_clean_but_the_adapter_reports_it | NTFS ignores chmod, so nothing is unreadable
+test_real::test_real_trufflehog_lesson_3_unreadable_input_exits_0_yet_the_adapter_errors | NTFS ignores chmod, so nothing is unreadable
+test_state::test_state_round_trips_verbatim_values | NTFS ignores chmod, so modes 600 and 700 cannot be checked
+test_tools::test_extract_reports_a_destination_it_cannot_write | builds a Linux .tar.gz fixture; the Windows extract path is proven by every install
+test_tools::test_extract_takes_only_the_tool_binary_and_refuses_odd_tarballs | builds a Linux .tar.gz fixture; the Windows extract path is proven by every install
+test_tools::test_fetch_verified_downloads_and_accepts_a_matching_sha | builds a Linux .tar.gz fixture; the Windows extract path is proven by every install
+test_uninstall::test_remove_tools_keeps_a_symlink_at_the_tool_path | ln -s writes no symlink native git can see
+test_uninstall::test_uninstall_does_not_overwrite_a_symlink_the_user_put_at_the_tool_path | ln -s writes no symlink native git can see
+test_adapter_betterleaks::test_a_crlf_aws_access_token_fingerprint_gets_a_crlf_twin | Git Bash awk drops the carriage return; harmless, an ignore entry with one would not match
+test_doctor::test_an_old_git_reachable_on_PATH_or_at_usr_bin_is_a_warning_naming_path_and_version | /usr/bin/git does not exist in Git for Windows
+test_install::test_a_different_version_tool_of_the_user_is_moved_aside_recorded_and_never_ours | NTFS ignores chmod, so a file mode cannot be kept or checked
+test_install::test_fresh_install_copies_the_package_into_the_share_dir_and_links_the_cli | the CLI entry is a wrapper, not a symlink; test_windows covers it
+test_install::test_install_downloads_verifies_and_extracts_both_tools_when_missing | the CLI entry is a wrapper plus a .cmd; test_windows covers it
+test_install::test_install_refuses_a_binary_that_reports_another_version | builds a Linux .tar.gz fixture
+test_install::test_install_refuses_an_unsupported_platform | fakes another OS, whose prerequisites a Windows host does not have
+test_install::test_install_refuses_before_changing_anything_when_it_cannot_record_or_link | the CLI entry is a wrapper, not a symlink; test_windows covers the refusal
+test_install::test_install_writes_the_settings_the_hook_reads_with_absolute_tool_paths | checks SETSID_BIN; test_windows and every commit cover the Windows settings
+test_legacy_gitleaks::test_uninstall_without_upgrading_still_restores_the_users_gitleaks_and_removes_ours | NTFS ignores chmod, so a file mode cannot be kept or checked
+test_reminder::test_a_failing_recheck_never_changes_a_passing_commit_and_prints_one_line | drives a setsid stand-in, not used on Windows
+test_reminder::test_a_fixed_problem_stops_being_reminded_and_leaves_the_record | drives a setsid stand-in, not used on Windows
+test_reminder::test_ctrl_c_during_the_recheck_leaves_no_process_behind | drives a setsid stand-in; test_windows covers interrupts with real processes
+test_reminder::test_the_commits_environment_does_not_reach_the_recheck_of_other_repositories | drives a setsid stand-in, not used on Windows
+test_reminder::test_the_scan_tree_and_scanner_outputs_are_gone_before_the_recheck_starts | drives a setsid stand-in, not used on Windows
+test_upgrade::test_a_failure_placing_the_second_tool_still_lets_uninstall_restore_both_originals | NTFS ignores chmod, so a file mode cannot be kept or checked
+test_upgrade::test_a_state_dir_that_cannot_be_created_is_reported_with_the_reason_and_nothing_changed | NTFS ignores chmod, so nothing is read-only
+test_doctor_betterleaks::test_the_preflight_runs_under_doctors_own_smaller_limit | timing bound assumes Linux process start costs
+test_hook::test_both_tools_run_in_parallel | timing bound assumes Linux process start costs
+test_install::test_replace_hooks_path_refuses_a_relative_value_and_an_unbackupable_directory | NTFS ignores chmod, so tar can read everything
+test_install::test_the_resolver_refuses_root_before_anything_could_back_it_up | // is a UNC prefix in Git Bash, not the root
+test_legacy_gitleaks::test_an_interruption_after_the_restore_never_lets_the_rerun_delete_the_users_gitleaks | NTFS ignores chmod, so a file mode cannot be kept or checked
+test_legacy_gitleaks::test_an_upgrade_restores_the_users_moved_aside_gitleaks_and_uninstall_then_leaves_the_machine_as_before | NTFS ignores chmod, so a file mode cannot be kept or checked

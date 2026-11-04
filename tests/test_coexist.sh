@@ -33,7 +33,7 @@ line_of() { grep -n -m1 "^$1" "$ORDER" | cut -d: -f1; }
 test_sandbox_never_applies_the_real_global_config() {
     new_repo iso || return 1
     assert_empty "$(gitx config --get core.hooksPath)" "no hooksPath leaks into the sandbox"
-    assert_eq "$(gitx config --show-origin --get "hook.$HOOK_NAME.command" | cut -f1)" "file:$SANDBOX/gitconfig" "hook config comes from the scratch file"
+    assert_eq "$(windows_or_plain "$(gitx config --show-origin --get "hook.$HOOK_NAME.command" | cut -f1)")" "file:$SANDBOX/gitconfig" "hook config comes from the scratch file"
     assert_eq "$(gitx config --global --get user.email)" "test@example.invalid" "scratch identity"
 }
 
@@ -149,7 +149,7 @@ test_pre_push_gets_remote_and_ref_lines_on_stdin_and_can_block() {
     repo_hook pre-push 0 stdin
     run_cap gitx push -q origin HEAD:refs/heads/main
     assert_rc 0 push
-    assert_eq "$(hook_args pre-push)" "args: [origin] [$remote]" "remote name and url"
+    assert_eq "$(windows_or_plain "$(hook_args pre-push)")" "args: [origin] [$remote]" "remote name and url"
     assert_contains "$(<"$HLOG/pre-push.stdin")" "refs/heads/main" "ref lines on stdin"
     repo_hook pre-push 1 stdin
     stage_file more.txt more && commit_cap "more"

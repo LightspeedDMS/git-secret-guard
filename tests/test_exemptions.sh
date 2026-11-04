@@ -272,7 +272,7 @@ test_nothing_is_announced_and_the_default_config_is_used_without_gitleaks_files_
     commit_cap "only staged"
     assert_rc 0 "allowed"
     assert_pass_line_only "$ERR" "no exemption announced for files that are not at HEAD"
-    assert_contains "$(grep '^betterleaks-config=' "$CALLS")" "betterleaks-config=$SANDBOX/tmp/" "the private default config is used"
+    assert_contains "$(grep '^betterleaks-config=' "$CALLS")" "betterleaks-config=$TEST_WORK_BASE/" "the private default config is used"
     assert_not_contains "$(<"$CALLS")" "betterleaks-ignore-line" "no ignore file given"
 }
 
@@ -348,7 +348,7 @@ test_a_plain_directory_name_excludes_everything_below_it_but_not_a_same_named_fi
 # ^ why includeIf gitdir scoped to $TMPDIR, not a global bad value; the repo being committed (outside it) must keep working, only the hook's probe repo breaks
 break_probe_repository() {
     cp -- "$SANDBOX/gitconfig" "$SANDBOX/gitconfig-broken"
-    printf '[includeIf "gitdir:%s/tmp/"]\n\tpath = %s\n' "$SANDBOX" "$SANDBOX/probe-breaker.cfg" >>"$SANDBOX/gitconfig-broken"
+    printf '[includeIf "gitdir:%s/"]\n\tpath = %s\n' "$(git_path "$TEST_WORK_BASE")" "$(git_path "$SANDBOX/probe-breaker.cfg")" >>"$SANDBOX/gitconfig-broken"
     printf '[%s]\n\t%s = %s\n' "$1" "$2" "$3" >"$SANDBOX/probe-breaker.cfg"
     set_env GIT_CONFIG_GLOBAL="$SANDBOX/gitconfig-broken"
 }
@@ -498,8 +498,7 @@ test_a_symlink_as_the_ignore_file_or_gitleaks_config_at_head_blocks_the_commit()
     for name in .secret-scan-ignore .gitleaks.toml .gitleaksignore; do
         n=$((n + 1))
         begin "sym$n" || return 1
-        ln -s '**   # a catch-all behind a symlink' "$name"
-        gitx add "$name" && gitx commit -q --no-verify -m "symlink"
+        stage_symlink '**   # a catch-all behind a symlink' "$name" && gitx commit -q --no-verify -m "symlink"
         stage_file src/a.txt "x $MARKER"
         commit_cap "blocked"
         assert_rc 1 "[$name] blocked"

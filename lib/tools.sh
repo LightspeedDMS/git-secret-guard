@@ -17,6 +17,24 @@ tools_announce_overrides() {
     fi
 }
 
+# ^ external Windows means Git for Windows bash (uname -s MINGW64_NT-*) running the native .exe scanners; no WSL, no MSYS2 shells
+tools_is_windows() {
+    case "$(uname -s)" in
+        MINGW64_NT-*) return 0 ;;
+    esac
+    return 1
+}
+
+# ^ invariant the file name of a scanner on this platform; callers build "$dir/$(tools_binary_name "$tool")", never "$dir/$tool"
+# ^ external trufflehog restarts itself by its own path and Go cannot start a Windows file without .exe (probed) => the scanners keep the .exe name
+tools_binary_name() {
+    if tools_is_windows; then
+        printf '%s.exe\n' "$1"
+    else
+        printf '%s\n' "$1"
+    fi
+}
+
 tools_has_version() {
     local bin="$1" pinned="$2" timeout_bin="$3" out
     if [ ! -f "$bin" ] || [ ! -x "$bin" ]; then return 1; fi
@@ -37,25 +55,31 @@ tools_probe_version() {
     return 1
 }
 
-# ^ external the two vendors name the x86_64 build differently (trufflehog linux_amd64, betterleaks linux_x64); doc:tools.lock
+# ^ external the two vendors name the x86_64 build differently (trufflehog linux_amd64, betterleaks linux_x64); the same holds for windows_*; doc:tools.lock
 tools_platform_key() {
-    local tool="$1" os="$2" arch="$3" cpu prefix
+    local tool="$1" os="$2" arch="$3" cpu prefix=linux
     case "$tool" in
         trufflehog | betterleaks) ;;
         *) printf '%s: unknown tool [%s]\n' "$GSG_NAME" "$tool" >&2; return 1 ;;
     esac
     case "$os:$arch" in
-        Linux:x86_64 | Darwin:x86_64) cpu=amd64; [ "$tool" = betterleaks ] && cpu=x64 ;;
-        Linux:aarch64 | Linux:arm64 | Darwin:arm64) cpu=arm64 ;;
-        *) printf '%s: only Linux and macOS on x86_64 or arm64 are supported, got %s on %s\n' "$GSG_NAME" "$os" "$arch" >&2; return 1 ;;
+        Linux:x86_64) cpu=amd64; [ "$tool" = betterleaks ] && cpu=x64 ;;
+        Darwin:x86_64) prefix=darwin; cpu=amd64; [ "$tool" = betterleaks ] && cpu=x64 ;;
+        Linux:aarch64 | Linux:arm64) cpu=arm64 ;;
+        Darwin:arm64) prefix=darwin; cpu=arm64 ;;
+        MINGW64_NT-*:x86_64) prefix=windows; cpu=amd64; [ "$tool" = betterleaks ] && cpu=x64 ;;
+        *) printf '%s: only Linux and macOS on x86_64 or arm64, or Git for Windows on x86_64, are supported, got %s on %s\n' "$GSG_NAME" "$os" "$arch" >&2; return 1 ;;
     esac
-    prefix=linux
-    if [ "$os" = Darwin ]; then prefix=darwin; fi
     printf '%s_%s\n' "$prefix" "$cpu"
 }
 
+# ^ external the betterleaks Windows release is a .zip, every other asset is a .tar.gz
 tools_tarball_name() {
-    printf '%s_%s_%s.tar.gz\n' "$1" "$2" "$3"
+    local tool="$1" version="$2" platform="$3" ext=tar.gz
+    case "$platform" in
+        windows_*) if [ "$tool" = betterleaks ]; then ext=zip; fi ;;
+    esac
+    printf '%s_%s_%s.%s\n' "$tool" "$version" "$platform" "$ext"
 }
 
 # ^ security GSG_TOOLS_BASE_URL only moves where the tarball is fetched from => the SHA-256 check against a lock still decides
@@ -106,28 +130,44 @@ tools_fetch_verified() {
     printf '%s\n' "$file"
 }
 
-# ^ security only the member named exactly like the tool is extracted, as a regular file => no path in the tarball can write elsewhere
+# ^ security only the member named exactly like the binary is extracted, as a regular file => no path in the archive can write elsewhere
+# ^ external on Windows bsdtar from System32 reads .tar.gz and .zip (GNU tar cannot read zip); found through SYSTEMROOT, never PATH
 tools_extract_binary() {
-    local tarball="$1" tool="$2" dest="$3" listing member nl=$'\n'
-    listing="$(tar -tzf "$tarball" 2>/dev/null)" || {
+    local tarball="$1" tool="$2" dest="$3" listing member nl=$'\n' bin tar_bin=tar list_flags=-tzf extract_flags=-xzf
+    bin="$(tools_binary_name "$tool")" || return 1
+    if tools_is_windows; then
+        if [ -z "${SYSTEMROOT:-}" ]; then
+            printf '%s: SYSTEMROOT is not set, cannot locate tar.exe\n' "$GSG_NAME" >&2
+            return 1
+        fi
+        tar_bin="$(cygpath -u "$SYSTEMROOT")/System32/tar.exe" || return 1
+        if [ ! -x "$tar_bin" ]; then
+            printf '%s: %s not found; it ships with Windows 10 and 11\n' "$GSG_NAME" "$tar_bin" >&2
+            return 1
+        fi
+        list_flags=-tf
+        extract_flags=-xf
+    fi
+    listing="$("$tar_bin" "$list_flags" "$tarball" 2>/dev/null)" || {
         printf '%s: cannot list the tarball %s\n' "$GSG_NAME" "$tarball" >&2
         return 1
     }
+    listing="${listing//$'\r'/}"
     case "$nl$listing$nl" in
-        *"$nl$tool$nl"*) member="$tool" ;;
-        *"$nl./$tool$nl"*) member="./$tool" ;;
-        *) printf '%s: the tarball %s does not contain a file named %s\n' "$GSG_NAME" "$tarball" "$tool" >&2; return 1 ;;
+        *"$nl$bin$nl"*) member="$bin" ;;
+        *"$nl./$bin$nl"*) member="./$bin" ;;
+        *) printf '%s: the tarball %s does not contain a file named %s\n' "$GSG_NAME" "$tarball" "$bin" >&2; return 1 ;;
     esac
-    tar -xzf "$tarball" -C "$dest" --no-same-owner -- "$member" || {
-        printf '%s: cannot extract %s from %s\n' "$GSG_NAME" "$tool" "$tarball" >&2
+    "$tar_bin" "$extract_flags" "$tarball" -C "$dest" --no-same-owner -- "$member" || {
+        printf '%s: cannot extract %s from %s\n' "$GSG_NAME" "$bin" "$tarball" >&2
         return 1
     }
-    if [ ! -f "$dest/$tool" ] || [ -L "$dest/$tool" ]; then
-        rm -f -- "$dest/$tool" || return 1
-        printf '%s: %s in the tarball is not a regular file\n' "$GSG_NAME" "$tool" >&2
+    if [ ! -f "$dest/$bin" ] || [ -L "$dest/$bin" ]; then
+        rm -f -- "$dest/$bin" || return 1
+        printf '%s: %s in the tarball is not a regular file\n' "$GSG_NAME" "$bin" >&2
         return 1
     fi
-    chmod 755 -- "$dest/$tool"
+    chmod 755 -- "$dest/$bin"
 }
 
 # ^ external trufflehog prints "trufflehog 3.99.2", betterleaks prints "1.9.0" (version) or "betterleaks version 1.9.0" (--version); probed

@@ -58,7 +58,7 @@ test_install_refuses_an_unsupported_platform() {
         snapshot_config
         gsg install
         assert_rc 1 "$os $arch"
-        assert_contains "$ERR" "only Linux and macOS on x86_64 or arm64 are supported, got $os on $arch" "says what is supported"
+        assert_contains "$ERR" "only Linux and macOS on x86_64 or arm64, or Git for Windows on x86_64, are supported, got $os on $arch" "says what is supported"
         assert_untouched "$os $arch"
     done <<'EOF'
 Darwin i386

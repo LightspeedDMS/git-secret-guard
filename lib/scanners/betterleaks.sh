@@ -122,7 +122,8 @@ betterleaks_write_ignore() {
 # ^ invariant args = label, run status, report, scan dir, rows file (overwritten), errors file (appended); rows are scanner, rule, status, file, line
 # shellcheck disable=SC2016
 betterleaks_collect() {
-    local label="$1" rc="$2" report="$3" scan_dir="$4" rows="$5" errs="$6" nrows
+    local label="$1" rc="$2" report="$3" scan_dir="$4" rows="$5" errs="$6" nrows windows=0
+    if gsg_is_windows; then windows=1; fi
     : >"$rows" || return 1
     if [ "$rc" -eq "$GSG_BETTERLEAKS_TIMEOUT_RC" ]; then
         printf '%s: timed out after %ss; the scan did not complete\n' "$label" "$SCAN_TIMEOUT_SECONDS" >>"$errs" || return 1
@@ -130,13 +131,14 @@ betterleaks_collect() {
         printf '%s: scan failed (exit %s)\n' "$label" "$rc" >>"$errs" || return 1
     elif [ ! -s "$report" ]; then
         printf '%s: no report was written (exit %s); failing closed\n' "$label" "$rc" >>"$errs" || return 1
+    # ^ external betterleaks.exe is assumed to write backslashes into File like gitleaks.exe did (unverified) => they become "/" before the prefix is trimmed
     # ^ security jq stderr dropped => parse errors quote the input
-    elif ! "$JQ_BIN" -r --arg prefix "$scan_dir/" --arg suffix "$GSG_BETTERLEAKS_RENAMED_SUFFIX" --arg names "${GSG_BETTERLEAKS_IGNORE_NAMES[*]}" \
+    elif ! "$JQ_BIN" -r --arg prefix "$scan_dir/" --arg suffix "$GSG_BETTERLEAKS_RENAMED_SUFFIX" --arg names "${GSG_BETTERLEAKS_IGNORE_NAMES[*]}" --arg windows "$windows" \
         "$GSG_JQ_CLEAN"'
             (if type == "array" then .[] else error("not an array") end)
             | (if type == "object" then . else error("not an object") end)
             | (.StartLine // 0) as $line
-            | (.File // "?" | ltrimstr($prefix)) as $file
+            | (.File // "?" | (if $windows == "1" then gsub("\\\\"; "/") else . end) | ltrimstr($prefix)) as $file
             | ($file | rtrimstr($suffix)) as $base
             | ["betterleaks", (.RuleID // "?" | clean), "finding",
                ((if ($file | endswith($suffix)) and (($names | split(" ")) | index($base)) then $base else $file end) | clean),

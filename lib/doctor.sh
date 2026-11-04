@@ -284,7 +284,7 @@ doctor_check_tools() {
             doctor_machine_line PROBLEM "$tool: $bin reports $TOOL_FOUND, the pin is $pinned; run git-secret-guard install"
         fi
     done
-    for tool in jq setsid timeout; do
+    for tool in jq "$(gsg_proc_tool_name)" timeout; do
         bin="$(settings_tool_bin "$tool")"
         if msg="$(tool_unusable "$tool" "$bin")"; then
             doctor_machine_line PROBLEM "$tool: $msg; run git-secret-guard install"

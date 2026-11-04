@@ -9,3 +9,6 @@ betterleaks 1.9.0 linux_x64 f8b185a39ffcece2a1ca82bf3a4e7435cd81963ffd16b7a9128d
 betterleaks 1.9.0 linux_arm64 1d39116e0a58dc94574715e2aa12a2dbd5062f193eee3fec011fef6ba06bd13b
 betterleaks 1.9.0 darwin_x64 68dfd83458d9e7f90663daa7a81c7f944083b170dae82e4f5f8d0581ed519ef1
 betterleaks 1.9.0 darwin_arm64 83dd7eaab13d44a1e8e347a17064cdef153a1478db473276d41b38d55613d3f2
+# Windows (Git for Windows bash): checksums from the vendors' own checksum files (trufflehog fetched 2026-11-02, betterleaks 2026-11-03). trufflehog ships .tar.gz, betterleaks .zip.
+trufflehog 3.99.2 windows_amd64 494672f03ef4c1c07887bd626f2f68cc5f55305ea961685207d349e273a238e8
+betterleaks 1.9.0 windows_x64 b765daec9fda475b031b5a5159798cbe4294a3f2a50683cbc0471226e376d3da

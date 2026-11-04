@@ -25,8 +25,8 @@ GSG_JQ_CLEAN='def clean: tostring | gsub("[\u0000-\u001f\u007f]"; "?"); '
 # ^ security unset before source => an inherited tool path, version, BASH_BIN or GNUBIN_DIR cannot fill a gap (silent bypass)
 load_settings() {
     local file="$1"
-    unset TRUFFLEHOG_BIN BETTERLEAKS_BIN JQ_BIN SETSID_BIN TIMEOUT_BIN SYSTEMCTL_BIN LAUNCHCTL_BIN BASH_BIN GNUBIN_DIR SCAN_TIMEOUT_SECONDS DOCTOR_TIMEOUT_SECONDS \
-        TRUFFLEHOG_VERSION BETTERLEAKS_VERSION GITLEAKS_BIN GITLEAKS_VERSION
+    unset TRUFFLEHOG_BIN BETTERLEAKS_BIN JQ_BIN SETSID_BIN TASKKILL_BIN TIMEOUT_BIN SYSTEMCTL_BIN LAUNCHCTL_BIN BASH_BIN GNUBIN_DIR SCAN_TIMEOUT_SECONDS \
+        DOCTOR_TIMEOUT_SECONDS TRUFFLEHOG_VERSION BETTERLEAKS_VERSION GITLEAKS_BIN GITLEAKS_VERSION
     if [ ! -f "$file" ] || [ ! -r "$file" ]; then
         printf 'settings file is missing or unreadable: %s\n' "$file" >&2
         return 1
@@ -98,11 +98,25 @@ settings_tool_bin() {
         betterleaks) printf '%s' "${BETTERLEAKS_BIN:-}" ;;
         jq) printf '%s' "${JQ_BIN:-}" ;;
         setsid) printf '%s' "${SETSID_BIN:-}" ;;
+        taskkill) printf '%s' "${TASKKILL_BIN:-}" ;;
         timeout) printf '%s' "${TIMEOUT_BIN:-}" ;;
         systemctl) printf '%s' "${SYSTEMCTL_BIN:-}" ;;
         launchctl) printf '%s' "${LAUNCHCTL_BIN:-}" ;;
         *) return 1 ;;
     esac
+}
+
+# ^ external Windows means Git for Windows bash (uname -s MINGW64_NT-*) running native .exe scanners; every other platform keeps the Linux code paths
+gsg_is_windows() {
+    case "$(uname -s)" in
+        MINGW64_NT-*) return 0 ;;
+    esac
+    return 1
+}
+
+# ^ invariant prints the process-control tool of this platform, taskkill on Windows and setsid elsewhere; status and doctor judge it like jq and timeout
+gsg_proc_tool_name() {
+    if gsg_is_windows; then printf 'taskkill\n'; else printf 'setsid\n'; fi
 }
 
 tool_unusable() {
@@ -124,6 +138,11 @@ tool_unusable() {
 # ^ see test:test_the_hook_command_names_the_recorded_bash_and_status_accepts_it
 hook_command_text() {
     local hook="$1/hooks/secret-scan" bash_bin="${2:-}" q="'" esc="'\\''"
+    # ^ external native Windows git rewrites a POSIX path argument to C:/dir/file (probed) => on Windows the hook path is the mixed form
+    if [ -z "$bash_bin" ] && gsg_is_windows; then
+        cygpath -m "$hook" | tr -d '\n'
+        return "${PIPESTATUS[0]}"
+    fi
     if [ -z "$bash_bin" ]; then
         printf '%s' "$hook"
         return 0

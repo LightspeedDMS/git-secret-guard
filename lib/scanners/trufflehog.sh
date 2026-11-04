@@ -4,8 +4,13 @@ scan_trufflehog() {
     local scan_dir="$1" out="$2"
     local rows="$out/trufflehog.rows" errs="$out/trufflehog.errors"
     local results="$out/trufflehog.json" log="$out/trufflehog.log"
-    local rc problem nrows completed parse_failed=0
+    local rc problem nrows completed parse_failed=0 prefix="$scan_dir/" windows=0
     : >"$rows" && : >"$errs" || return 1
+    # ^ external trufflehog.exe prints Windows style paths in file => prefix in mixed form C:/dir/, backslashes become "/" before trimming
+    if gsg_is_windows; then
+        windows=1
+        prefix="$(cygpath -m "$scan_dir")/" || return 1
+    fi
 
     if problem="$(tool_unusable trufflehog "${TRUFFLEHOG_BIN:-}")" || problem="$(tool_unusable timeout "${TIMEOUT_BIN:-}")"; then
         printf 'trufflehog: %s; nothing was scanned\n' "$problem" >"$errs" || return 1
@@ -22,13 +27,13 @@ scan_trufflehog() {
     # ^ security jq stderr dropped everywhere below => its parse errors would quote the candidate value
     if [ -s "$results" ]; then
         # shellcheck disable=SC2016
-        if ! "$JQ_BIN" -r --arg prefix "$scan_dir/" "$GSG_JQ_CLEAN"'
+        if ! "$JQ_BIN" -r --arg prefix "$prefix" --arg windows "$windows" "$GSG_JQ_CLEAN"'
             (if type == "object" then . else error("not an object") end)
             | (.SourceMetadata.Data.Filesystem // {}) as $fs
             | ($fs.line // 0) as $line
             | ["trufflehog", (.DetectorName // "?" | clean),
                (if .Verified == true then "verified" else "unknown" end),
-               ($fs.file // "?" | ltrimstr($prefix) | clean),
+               ($fs.file // "?" | (if $windows == "1" then gsub("\\\\"; "/") else . end) | ltrimstr($prefix) | clean),
                (if ($line | type) == "number" and $line >= 1 then ($line | floor | tostring) else "?" end)]
             | @tsv' "$results" >"$rows" 2>/dev/null; then
             : >"$rows"

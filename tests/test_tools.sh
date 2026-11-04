@@ -7,7 +7,7 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/lifecycle.sh"
 # shellcheck disable=SC2016
 tl() { run_cap env -i "${GSG_ENV[@]}" "${EXTRA_ENV[@]}" bash -c 'set -u; source "$1/lib/common.sh" && source "$1/lib/tools.sh" && shift && "$@"' _ "$GSG_PROJECT" "$@"; }
 
-test_the_lock_holds_exactly_the_eight_pinned_rows() {
+test_the_lock_holds_exactly_the_ten_pinned_rows() {
     local rows
     rows="$(grep -v -e '^[[:space:]]*#' -e '^[[:space:]]*$' "$GSG_PROJECT/tools.lock" | LC_ALL=C sort)" || return 1
     assert_eq "$rows" "$(LC_ALL=C sort <<'EOF'
@@ -19,6 +19,8 @@ betterleaks 1.9.0 linux_x64 f8b185a39ffcece2a1ca82bf3a4e7435cd81963ffd16b7a9128d
 betterleaks 1.9.0 linux_arm64 1d39116e0a58dc94574715e2aa12a2dbd5062f193eee3fec011fef6ba06bd13b
 betterleaks 1.9.0 darwin_x64 68dfd83458d9e7f90663daa7a81c7f944083b170dae82e4f5f8d0581ed519ef1
 betterleaks 1.9.0 darwin_arm64 83dd7eaab13d44a1e8e347a17064cdef153a1478db473276d41b38d55613d3f2
+trufflehog 3.99.2 windows_amd64 494672f03ef4c1c07887bd626f2f68cc5f55305ea961685207d349e273a238e8
+betterleaks 1.9.0 windows_x64 b765daec9fda475b031b5a5159798cbe4294a3f2a50683cbc0471226e376d3da
 EOF
 )" "the lock rows match the story's table"
 }
@@ -63,7 +65,7 @@ test_lock_lookup_refuses_a_missing_empty_malformed_or_ambiguous_lock() {
     assert_contains "$ERR" "more than one row" "says why"
 }
 
-test_platform_keys_use_each_vendors_own_names_and_only_linux_and_macos_are_supported() {
+test_platform_keys_use_each_vendors_own_names_and_only_linux_macos_and_git_for_windows_are_supported() {
     local tool os arch want
     while read -r tool os arch want; do
         tl tools_platform_key "$tool" "$os" "$arch"
@@ -80,16 +82,20 @@ trufflehog Darwin arm64 darwin_arm64
 trufflehog Darwin x86_64 darwin_amd64
 betterleaks Darwin arm64 darwin_arm64
 betterleaks Darwin x86_64 darwin_x64
+trufflehog MINGW64_NT-10.0-26200 x86_64 windows_amd64
+betterleaks MINGW64_NT-10.0-26200 x86_64 windows_x64
 EOF
     while read -r os arch; do
         tl tools_platform_key betterleaks "$os" "$arch"
         assert_rc 1 "[$os $arch] is not supported"
-        assert_contains "$ERR" "only Linux and macOS on x86_64 or arm64 are supported" "says what is supported"
+        assert_contains "$ERR" "only Linux and macOS on x86_64 or arm64, or Git for Windows on x86_64, are supported" "says what is supported"
     done <<'EOF'
 Darwin i386
 FreeBSD amd64
 Linux i686
 Linux riscv64
+MINGW64_NT-10.0-26200 aarch64
+MSYS_NT-10.0-26200 x86_64
 Linux
 EOF
     tl tools_platform_key semgrep Linux x86_64

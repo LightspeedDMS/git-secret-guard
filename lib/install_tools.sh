@@ -21,8 +21,9 @@ install_placed_hashes() {
 
 # ^ invariant true only for a regular file whose SHA-256 is ANY hash install recorded for the tool => install's own file, never a user's
 install_owns_file() {
-    local path="$GSG_BIN_DIR/$1" got h
+    local path got h
     local -a want=()
+    path="$GSG_BIN_DIR/$(tools_binary_name "$1")"
     read -r -a want <<<"$(install_placed_hashes "$1")"
     if [ "${#want[@]}" -eq 0 ] || [ -L "$path" ] || [ ! -f "$path" ]; then return 1; fi
     got="$(sha256sum -- "$path" | cut -d' ' -f1)"
@@ -74,14 +75,14 @@ install_plan_tools() {
     for i in "${!GSG_TOOL_NAMES[@]}"; do
         tool="${GSG_TOOL_NAMES[$i]}"
         aside=""
-        if tools_has_version "$GSG_BIN_DIR/$tool" "${GSG_TOOL_VER[$i]}" "$INSTALL_TIMEOUT_BIN"; then
+        if tools_has_version "$GSG_BIN_DIR/$(tools_binary_name "$tool")" "${GSG_TOOL_VER[$i]}" "$INSTALL_TIMEOUT_BIN"; then
             GSG_TOOL_NEED+=(0)
         else
             GSG_TOOL_NEED+=(1)
-            if { [ -e "$GSG_BIN_DIR/$tool" ] || [ -L "$GSG_BIN_DIR/$tool" ]; } && ! install_owns_file "$tool"; then aside="$tool.gsg-replaced-$stamp"; fi
+            if { [ -e "$GSG_BIN_DIR/$(tools_binary_name "$tool")" ] || [ -L "$GSG_BIN_DIR/$(tools_binary_name "$tool")" ]; } && ! install_owns_file "$tool"; then aside="$tool.gsg-replaced-$stamp"; fi
         fi
         if [ -n "$aside" ] && { [ -e "$GSG_BIN_DIR/$aside" ] || [ -L "$GSG_BIN_DIR/$aside" ]; }; then
-            printf '%s: %s already exists, so %s cannot be moved there; %s\n' "$GSG_NAME" "$GSG_BIN_DIR/$aside" "$GSG_BIN_DIR/$tool" "$(brew_unchanged_text)" >&2
+            printf '%s: %s already exists, so %s cannot be moved there; %s\n' "$GSG_NAME" "$GSG_BIN_DIR/$aside" "$GSG_BIN_DIR/$(tools_binary_name "$tool")" "$(brew_unchanged_text)" >&2
             return 1
         fi
         GSG_TOOL_ASIDE+=("$aside")
@@ -103,7 +104,7 @@ install_stage_refused() {
 
 # ^ order every needed tool is downloaded, verified and version-checked before any file leaves the staging dir => a bad second tool installs nothing
 install_stage_tools() {
-    local i tool tarball out
+    local i tool tarball out bin
     GSG_STAGE=""
     if [[ " ${GSG_TOOL_NEED[*]} " != *" 1 "* ]]; then return 0; fi
     install_require_curl || install_stage_refused || return 1
@@ -114,8 +115,9 @@ install_stage_tools() {
         tool="${GSG_TOOL_NAMES[$i]}"
         tarball="$(tools_fetch_verified "$tool" "${GSG_TOOL_VER[$i]}" "${GSG_TOOL_PLAT[$i]}" "${GSG_TOOL_SHA[$i]}" "$GSG_STAGE")" || install_stage_refused || return 1
         tools_extract_binary "$tarball" "$tool" "$GSG_STAGE/out" || install_stage_refused || return 1
-        if ! tools_has_version "$GSG_STAGE/out/$tool" "${GSG_TOOL_VER[$i]}" "$INSTALL_TIMEOUT_BIN"; then
-            out="$("$INSTALL_TIMEOUT_BIN" "$GSG_VERSION_PROBE_SECONDS" "$GSG_STAGE/out/$tool" --version 2>&1 | head -c 200)"
+        bin="$GSG_STAGE/out/$(tools_binary_name "$tool")"
+        if ! tools_has_version "$bin" "${GSG_TOOL_VER[$i]}" "$INSTALL_TIMEOUT_BIN"; then
+            out="$("$INSTALL_TIMEOUT_BIN" "$GSG_VERSION_PROBE_SECONDS" "$bin" --version 2>&1 | head -c 200)"
             printf '%s: the extracted %s does not report version %s (it said: %s)\n' "$GSG_NAME" "$tool" "${GSG_TOOL_VER[$i]}" "${out//[^[:print:]]/?}" >&2
             install_stage_refused || return 1
         fi
@@ -149,7 +151,7 @@ install_hash_staged() {
         GSG_TOOL_NEWSHA+=("")
         if [ "${GSG_TOOL_NEED[$i]}" -ne 1 ]; then continue; fi
         tool="${GSG_TOOL_NAMES[$i]}"
-        sha="$(sha256sum -- "$GSG_STAGE/out/$tool" | cut -d' ' -f1)"
+        sha="$(sha256sum -- "$GSG_STAGE/out/$(tools_binary_name "$tool")" | cut -d' ' -f1)"
         if [ -z "$sha" ]; then
             printf '%s: cannot hash the staged %s\n' "$GSG_NAME" "$tool" >&2
             install_stage_refused || return 1
@@ -166,12 +168,12 @@ install_commit_tools() {
     for i in "${!GSG_TOOL_NAMES[@]}"; do
         if [ "${GSG_TOOL_NEED[$i]}" -ne 1 ]; then continue; fi
         tool="${GSG_TOOL_NAMES[$i]}"
-        target="$GSG_BIN_DIR/$tool"
+        target="$GSG_BIN_DIR/$(tools_binary_name "$tool")"
         aside="${GSG_TOOL_ASIDE[$i]}"
         new="$GSG_BIN_DIR/.$tool.gsg-new"
         # ^ why install -T, not a plain destination; a directory at $new would take the file inside it and the cleanup rm -f would add "Is a directory"
         # ^ why capture install's stderr, not let it through; coreutils prints its own line before ours, and the reason belongs inside the one message
-        err="$(install -m 755 -T -- "$GSG_STAGE/out/$tool" "$new" 2>&1)" || {
+        err="$(install -m 755 -T -- "$GSG_STAGE/out/$(tools_binary_name "$tool")" "$new" 2>&1)" || {
             err="${err%%$'\n'*}"
             err="${err#install: }"
             err="${err//[[:cntrl:]]/?}"

@@ -5,9 +5,14 @@ set -o pipefail
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)" || exit 2
 # shellcheck source=tests/platform/ubuntu-container.sh
 source "$HERE/ubuntu-container.sh" || exit 2
+# shellcheck source=tests/platform/rpm-phase.sh
+source "$HERE/rpm-phase.sh" || exit 2
 
 # ^ why the Ubuntu script is sourced and four names are redefined below, not copied; steps, git build, shellcheck, E2E and suite phases are shared
 PLATFORM_TITLE="ROCKY LINUX 9"
+RPM_DISTRO=rocky
+ISOLATION_OS_ID=rocky
+ISOLATION_OS_VERSION=9
 GIT_SOURCE=source
 SHORT_TIMEOUT=60
 DNF_TIMEOUT=900
@@ -17,9 +22,9 @@ DNF_DEPS=(git ca-certificates jq tar gzip xz findutils diffutils gawk procps-ng 
     perl make gcc libcurl openssl-libs expat zlib libcurl-devel openssl-devel expat-devel zlib-devel python3-pip)
 
 usage() {
-    printf 'usage: rocky-container.sh --skip-isolation REASON [--phase prepare|e2e|suite]... [--suite-file test_x.sh]... [--image REF]\n'
-    printf 'Runs as root inside rockylinux:9.x. Started by tests/platform/mac-linux.sh, the macOS host runner. check_isolation is the RHEL launcher'"'"'s and\n'
-    printf 'knows only ubuntu 24.04, so a skip reason is required and is printed in the output and the summary.\n'
+    printf 'usage: rocky-container.sh (--skip-isolation REASON | --host-ns NAME=ID...) [--phase prepare|e2e|suite|upgrade]... [--suite-file test_x.sh]... [--image REF]\n'
+    printf 'Runs as root inside rockylinux:9.x. Started by tests/platform/rpm.sh (Linux host, full isolation check) or tests/platform/mac-linux.sh (macOS host,\n'
+    printf 'isolation skipped with a reason that is printed in the output and the summary). The upgrade phase is the real git upgrade E2E and replaces prepare, e2e and suite.\n'
 }
 
 # ^ invariant the tarball git in /usr/local/bin comes first on PATH; the stock /usr/bin/git stays installed (older than 2.54), as on the reference host
@@ -44,11 +49,11 @@ phase_prepare() {
     fi
 }
 
-skip_given=0
+isolation_given=0
 for arg in "$@"; do
-    if [ "$arg" = --skip-isolation ]; then skip_given=1; fi
+    if [ "$arg" = --skip-isolation ] || [ "$arg" = --host-ns ]; then isolation_given=1; fi
 done
-if [ "$skip_given" -eq 0 ]; then
+if [ "$isolation_given" -eq 0 ]; then
     usage >&2
     exit 2
 fi

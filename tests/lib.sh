@@ -64,7 +64,9 @@ case "$TEST_OS" in
         TEST_BASE_PATH="/usr/local/bin:/usr/bin:/bin"
         GIT="${GSG_TEST_GIT:-/usr/local/bin/git}"
         REAL_TRUFFLEHOG="${GSG_TEST_TRUFFLEHOG:-$REAL_HOME/.local/bin/trufflehog}"
-        REAL_BETTERLEAKS="${GSG_TEST_BETTERLEAKS:-/home/linuxbrew/.linuxbrew/bin/betterleaks}"
+        TEST_TOOLS_CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/git-secret-guard-test-tools"
+        REAL_BETTERLEAKS="${GSG_TEST_BETTERLEAKS:-$REAL_HOME/.local/bin/betterleaks}"
+        if [ -z "${GSG_TEST_BETTERLEAKS:-}" ] && [ -x "$TEST_TOOLS_CACHE/betterleaks" ]; then REAL_BETTERLEAKS="$TEST_TOOLS_CACHE/betterleaks"; fi
         TEST_JQ="${GSG_TEST_JQ:-/bin/jq}"
         TEST_SETSID="${GSG_TEST_SETSID:-/bin/setsid}"
         TEST_TIMEOUT="${GSG_TEST_TIMEOUT:-/bin/timeout}"

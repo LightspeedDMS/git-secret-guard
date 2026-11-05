@@ -89,6 +89,58 @@ in [docs/platforms.md](docs/platforms.md); they are not part of `tests/run.sh`.
 [CLAUDE.md](CLAUDE.md) holds the maintainer notes: why the code is shaped the way it is, and which "simplifications"
 break it. Read it before changing the hook, extraction, exemptions or install. It is written for AI coding agents too.
 
+## Adding an OS module
+
+`install` can offer to upgrade an old git (`install --upgrade-git`). The offer, the consent rules, the ordering with the other checks, the re-verification and the
+"what changed" refusal text live in `lib/gitup.sh` and are shared. An OS plugs in with **one file and one line**, and edits none of that logic:
+
+1. **The file** `lib/gitup_<module>.sh` (a plain lowercase word; `rpm` is the example). It is CLI-only: the hook never loads it, and `lib/install.sh` is the only place
+   that may look a tool up on `PATH` (`install_find_bin NAME [PATH]` sets `REPLY`).
+2. **The line** in `gitup_registry` (`lib/gitup.sh`). Each planned class has its own reserved line (`ubuntu`, `debian`, `macos`, `windows`, `other`), so parallel branches
+   change different lines: replace `windows) REPLY="" ;;` by `windows) REPLY=windows ;;`. **Keep the comment line between the entries:** git treats two changed lines
+   that touch as one conflict (real merges showed it), and with a comment line between them any two class branches merge cleanly
+   (`test_branches_that_each_take_one_reserved_registry_line_merge_without_conflicts` runs those merges). The registry is a plain `case`; there is no globbing and no
+   generated name outside `gitup_call`. `gitup_os_class` already detects every class; only the WSL signal (#31) will touch detection. Shared files a module branch does
+   not edit: `tests/coverage.sh` globs `lib/gitup*.sh`, the registry test reads the class list from the library, the CLI loads only the shared `gitup` and
+   `gitup_source`, a module sources its own helper libraries (`gitup_rpm.sh` does it for `gitup_takeover.sh`), and the contract tests use synthetic classes
+   (`gu_tree_add_class` in `tests/gitup.sh`), so they need no edit. **What a class branch does edit:** the tests that pin today's refusal for that class, because the
+   refusal goes away when the class gets a module (`test_a_class_with_no_module_keeps_todays_refusal_and_offers_nothing` in `tests/test_gitup.sh`, the cases of that class
+   in `tests/test_prerequisites.sh`, and the takeover refusal in `tests/test_gitup_takeover.sh`). Two branches that both change the same test conflict there; agree who
+   goes first.
+3. **The contract.** Required:
+   - `gitup_<module>_plan MODE` prints what `apply` would do and names each privileged command with `gitup_plan_priv "<command>"` (the full path of the tool root runs, from
+     `gitup_system_bin NAME`) and each caveat with `gitup_plan_note "<text>"`. `MODE` is `upgrade` (git missing or old) or `refresh` (git is fine; rc 1 and nothing printed when
+     nothing is stale, rc 2 with the reason printed when a rebuild is needed but cannot be done now: the install goes on, or is refused when `--upgrade-git` asked for it). It
+     sets `GITUP_ROUTE` (`path-fix` with `GITUP_FOUND_GIT` when a qualifying git exists but is not first on `PATH`: the core prints the exact fix and refuses, `apply` is not
+     called). rc 0 = a plan, rc 1 = no route, with the reason printed.
+   - `gitup_<module>_apply` carries out `GITUP_ROUTE`. rc 0 = done (the core re-resolves git and requires 2.54; set `GITUP_NEW_GIT` to the git it installed so a refusal can
+     print the `export PATH` line), rc 1 = failed (set `GITUP_CHANGED`, or add clauses with `gitup_changed_add`, so later refusals say what changed), rc 2 = it must finish
+     outside this process (set `GITUP_NEXT`; the core stops with exit 3 and prints it).
+   - Optional, **all five or none** (`gitup_module_check` refuses half): `gitup_<module>_takeover_supported PATH` (compare real paths), `_takeover_plan PATH` (prints only on rc 0; on
+     rc 1 refused and rc 2 nothing to do it sets `GITUP_REASON`), `_takeover_apply PATH`, `_takeover_restore`, `_takeover_status` (sets `GITUP_TK_STATE`, `GITUP_TK_TEXT`,
+     `GITUP_TK_HOWTO` and `GITUP_TK_TARGET`).
+   - Optional, **both or neither**: `gitup_<module>_can_elevate` and `gitup_<module>_elevate CMD...`, for a platform without root or `sudo` (Windows UAC). The core's
+     `gitup_can_elevate` and `gitup_elevate` call them first; every privileged command runs under `umask 022`.
+   - Optional singles: `gitup_<module>_takeover_unavailable` prints why `--take-over-system-git` cannot be done on this platform, and the install continues instead of refusing;
+     `gitup_<module>_abort` is called once when the process exits inside `apply` or `takeover_apply` (an interrupt), so the module can undo a half-made change.
+   - **A module that wraps another class** (WSL) calls `gitup_delegate CLASS KIND ARGS...` to run the inner module's `plan` or `apply` and adds its own `gitup_plan_note`.
+     **A wrapper must also forward `abort`** (`gitup_<wrapper>_abort() { gitup_delegate CLASS abort; }` when the inner module defines one) and the takeover functions it
+     supports. Nothing checks this: a wrapper without it leaves the inner module's half-made change in place when the process is interrupted.
+   - **A module never prompts, never decides consent and never prints its own refusal after a failed apply.** Privileged commands go through `gitup_elevate` and are
+     planned with `gitup_plan_priv`. Both resolve a tool given by name with `gitup_system_bin` (the fixed system path, root-owned, not writable by others), so the plan prints
+     the full path that runs. A root run never finds a tool through the caller's `PATH`, and a name missing from the system path is refused by name. The plan lists every
+     command, `mkdir` included, and takes its words from the same place as the apply step (the `cp` words of the source route are one array, `GITUP_SRC_CP`, used by both). Reuse `gitup_source_apply`, `gitup_source_print_plan` and
+     `gitup_source_plan_refresh PREPARE_FN` (set `GITUP_SRC_DEPS` and `GITUP_SRC_FLAGS` in `PREPARE_FN`), `tools_fetch_verified` (SHA-256 against `tools.lock`) and
+     `gitup_version_at_least`.
+4. **The tests.** `tests/gitup.sh` has the helpers (`gu_tree_with_module` builds a copy of the product with your module and its one registry line, `gu_tree_add_module` adds a
+   second one), and `lc_begin` puts recording stand-ins for `sudo`, `dnf`, `rpm`, `restorecon`, `make`, `df` and `ldd` first on `PATH` and as the only places the fixed system path
+   looks in; a real tool is never reached. `test_every_registered_module_implements_the_contract` (in `tests/test_gitup.sh`) loads every module in the registry and fails
+   naming the module and the missing function, so a new module is checked by being added. `tests/test_gitup_contract.sh` shows each optional capability driven through a test
+   module. System paths come from `GSG_GITUP_ROOT` (a sandbox directory in tests), never from `/usr`, `/etc` or `/var` directly. **Fixtures copy the real layout**: the RPM
+   has three relative symlinks among its six files, and fixtures of six regular files hid a data-loss bug.
+5. **The docs** to update: `docs/platforms.md` (the platform section), `docs/install.md`, `lib/usage.md`, `CLAUDE.md` (layout and facts), and the install hint in
+   `install_git_hint` for the class.
+
 ## Pull requests
 
 1. Open or pick an issue first for anything larger than a small fix, so the approach can be agreed.

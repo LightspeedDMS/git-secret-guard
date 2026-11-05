@@ -102,7 +102,10 @@ install_plan_tools() {
 
 # shellcheck disable=SC2329
 install_cleanup() {
+    local rc=$?
+    gitup_abort_cleanup "$rc"
     if [ -n "${GSG_STAGE:-}" ]; then rm -rf -- "$GSG_STAGE"; fi
+    if [ -n "${GITUP_BUILD_DIR:-}" ]; then gitup_source_cleanup; fi
     # ^ invariant GSG_SHARE_NEW is "" once the tree is renamed to the share dir => this never deletes the live share
     if [ -n "${GSG_SHARE_NEW:-}" ]; then rm -rf -- "$GSG_SHARE_NEW"; fi
 }

@@ -18,8 +18,9 @@ macOS, `install` lists whichever of bash 4.4 or newer, `coreutils` (`timeout`), 
 with `brew install` only after its other checks have passed, the `tools.lock` lookup included (with a GNU `timeout` already present, the scanner
 downloads are verified first too; under the system bash 3.2 it first installs `bash` alone), and refuses, changing
 nothing, when Homebrew is not on `PATH`: details in
-[platforms.md](platforms.md#macos-homebrew). `install` refuses when the git on `PATH` is older than 2.54, because older git
-ignores config hooks without any message.
+[platforms.md](platforms.md#macos-homebrew). Older git ignores config hooks without any message, so when the git on `PATH` is older
+than 2.54 or missing, `install` offers to upgrade it on RHEL, Rocky, AlmaLinux and Fedora (see
+[platforms.md](platforms.md#rhel-rocky-and-fedora-rpm)). If you decline, and on every other platform, it refuses and prints how to get a newer git.
 
 > **Warning, old git.** On Windows, check the git your IDE or GUI client bundles: it is often not the one on `PATH`. The
 > example below is the RHEL host, where `/usr/bin/git` is 2.52.
@@ -27,13 +28,16 @@ ignores config hooks without any message.
 > Any git older than 2.54 ignores config hooks: no error, no scan. `install` warns
 > for every other reachable git older than 2.54 (all `git` on `PATH` plus `/usr/bin/git`; on this machine
 > `/usr/bin/git` is 2.52) and goes on, because the git that matters is the one your commits run. Commits made with the
-> old one are **not scanned**; call `/usr/local/bin/git` (or put it first on `PATH`) wherever you commit.
+> old one are **not scanned**; call `/usr/local/bin/git` (or put it first on `PATH`) wherever you commit. On RHEL, Rocky and
+> AlmaLinux, `install --take-over-system-git` points an old package `/usr/bin/git` at the new build, which also covers cron
+> jobs and scripts that call it by full path (undo: `restore-system-git`).
 
 ## What `install` does
 
 | Step | Result |
 |---|---|
-| Prechecks | git >= 2.54 on `PATH`, `jq`, `setsid` (`taskkill` on Windows), `timeout` found (their **absolute paths** are written to the settings file, the hook never resolves them through `PATH`), a supported platform, absolute `HOME`/`XDG_*`. Any refusal happens before anything is changed (on macOS under bash 3.2 the one exception is the `brew install bash` that runs first, see above). |
+| Prechecks | git >= 2.54 on `PATH`, `jq`, `setsid` (`taskkill` on Windows), `timeout` found (their **absolute paths** are written to the settings file, the hook never resolves them through `PATH`), a supported platform, absolute `HOME`/`XDG_*`. A refusal happens before anything is changed, with two exceptions: after a git upgrade you accepted, and on a Mac where the system bash 3.2 first needs `brew install bash`. In both cases the refusal says what changed. |
+| Git upgrade | Only on RHEL, Rocky, AlmaLinux and Fedora, and only if you agree at the prompt (default No) or pass the flag. `--upgrade-git` handles an old or missing git, or a build of ours older than the pin; `--take-over-system-git` handles an old package git left in `/usr/bin`. The plan, with every privileged command, is printed first. See [platforms.md](platforms.md#rhel-rocky-and-fedora-rpm). |
 | Scanners | `~/.local/bin/trufflehog` and `~/.local/bin/betterleaks` (`trufflehog.exe` and `betterleaks.exe` on Windows, where a missing `jq` is downloaded the same way as `jq.exe`). A tool that already reports the pinned version (`trufflehog` 3.99.2, `betterleaks` 1.9.0) is **kept**. Otherwise the platform tarball is downloaded from the vendor's GitHub release, its **SHA-256 is checked against `tools.lock`**, only the tool binary is extracted, and its `--version` is checked against the pin. A checksum mismatch deletes the download, installs nothing (neither scanner) and refuses. curl runs with `-q` as its first argument, so a `~/.curlrc` (proxy, protocol, output or `head` settings) cannot change a verified download. **A file already at that path that does not report the pinned version (your own build, a symlink, an older release) is never overwritten:** it is moved aside to `<tool>.gsg-replaced-<UTC stamp>` in the same directory (byte-identical, same mode), the output says where, and the state records the aside name with the SHA-256 of what install put in its place. Such a tool is never recorded as downloaded by install, so it is never "ours to delete". Install also records the SHA-256 of **every** file it places (`tools_placed` in the state), also on an empty path. On an upgrade that bumps the pins, a file that still has that hash is install's own and is **replaced in place** (no aside file, and a downloaded tool stays removable with `--remove-tools`); only a file install did not place is moved aside, and the first original ever moved aside is the one uninstall restores. The aside names and hashes are written to the state **before** the file is moved, so a failure afterwards (state write, second tool, share dir) cannot lose the original: a later uninstall, or a rerun of install, still finds it. |
 | Files | `hooks/`, `lib/`, `bin/`, `tools.lock`, `VERSION` copied to `${XDG_DATA_HOME:-~/.local/share}/git-secret-guard/` (the new tree is built complete beside the old one and swapped in with two renames, old out, new in, so a commit during an upgrade runs the old or the new hook, never half of either; in the instant between the two renames the hook path is missing and a commit started then fails. If the second rename fails the previous tree is moved back; if that fails too, the message names where it is, `<share>.old.XXXXXX/previous`), plus the generated `settings` file with absolute `TRUFFLEHOG_BIN`, `BETTERLEAKS_BIN`, `JQ_BIN`, `SETSID_BIN`, `TIMEOUT_BIN`, the pinned `TRUFFLEHOG_VERSION` and `BETTERLEAKS_VERSION` (the hook prints them on a passing commit) and `SCAN_TIMEOUT_SECONDS=300` (on macOS also the absolute `BASH_BIN` and `GNUBIN_DIR`; on Windows `TASKKILL_BIN` in place of `SETSID_BIN`, and `JQ_BIN` names a small wrapper in the share dir). `settings` is rewritten by every install. |
 | Global git config | `hook.git-secret-guard.event=pre-commit` and `hook.git-secret-guard.command=<absolute path of the installed hooks/secret-scan>`, written with `git config --global --replace-all`, so each stays single-valued however often you run `install`. On macOS the command is `'<recorded bash>' '<installed hooks/secret-scan>'`, so the hook runs under bash 4.4 or newer whatever `PATH` the git client has. On Windows the path is in the mixed form `C:/Users/...`, the form native git keeps. |
@@ -68,6 +72,37 @@ commit during the upgrade is never left without a scanner):
 state file the gitleaks build wrote (it still restores your moved-aside gitleaks and, with `--remove-tools`, removes
 the one the old install placed), so you can uninstall without upgrading. Your repositories' exemptions need no change:
 `.gitleaks.toml`, `.gitleaksignore` and `gitleaks:allow` mean the same thing, see [Exemptions](exemptions.md).
+
+## Upgrading an old git: `--upgrade-git` and `--take-over-system-git`
+
+On a system whose class has an upgrade module (RHEL, Rocky, AlmaLinux, CentOS and Fedora today: [the RPM section of platforms.md](platforms.md#rhel-rocky-and-fedora-rpm);
+Ubuntu, Debian, macOS and Windows keep the refusal and hint they always had until their modules land), `install` no longer stops at an old or missing git. It
+finishes every other check first (`jq`, `setsid`, `timeout`, `core.hooksPath`, the CLI link, the platform), reports their problems together, and only then offers
+the upgrade, so a run that would be refused anyway changes nothing. An old git can still read the config, so the `core.hooksPath` checks run before the upgrade;
+with no git at all they run right after it.
+
+| Offer | Asked when | If you decline, or there is no terminal and no flag |
+|---|---|---|
+| Upgrade git | git is missing or older than 2.54 | install refuses as before and names `--upgrade-git`; nothing changed |
+| Rebuild | the git first on `PATH` is a build of ours (listed in a `MANIFEST`) older than the git `tools.lock` pins | git is left as it is and install continues |
+| Take over the system git | an old package git (`/usr/bin/git`) remains next to a qualifying build of ours | nothing changes in `/usr/bin`, no dnf config is written, install continues |
+
+- **Consent.** `--upgrade-git` answers yes to the first two; `--take-over-system-git` answers yes to the third (each offer names its flag). In a terminal install
+  prints the plan, with every privileged command, and asks `[y/N]`; the default is No. It prompts only when stdin **and** stderr are terminals,
+  so a script, cron or CI never hangs. Without a terminal and without the flag it prints the flag and goes on.
+- **Privileges.** Privileged steps run directly as root, or through `sudo`, under `umask 022`; every privileged tool is looked up only in the fixed
+  system path (`/usr/bin:/bin:/usr/sbin:/sbin`) and must be root-owned and not writable by group or others, and the plan prints the full path of each. With neither root nor
+  sudo, install prints the commands to run as root that can be typed by hand (the copy from the build directory cannot, and the message says so) and changes nothing.
+- **After the upgrade** install reads `PATH` again; a git still older than 2.54 (for example the new git is not first on `PATH`) is a refusal that gives the exact
+  `export PATH=...` line for the directory of the git the module installed (`/usr/bin` for the package route, `/usr/local/bin` for the source route; no shell
+  profile is edited). Every refusal after the upgrade says what the upgrade changed, as it does after a Homebrew install on macOS.
+- **A rerun does nothing to git:** a git that qualifies, at the pin or not a build of ours, with no old package git behind it, means no prompt, no download of git and no
+  `sudo`, `dnf` or `make` call.
+- **Exit status 3** is reserved for a module that must finish the upgrade outside the install process; install stops, prints the next step and changes nothing else.
+- **Takeover.** `git-secret-guard restore-system-git` undoes it from the saved originals without a network. `uninstall` stops while a takeover is active
+  (it would take the restore command with it) and names `restore-system-git` and `uninstall --keep-system-git`. `status` and `doctor` report the takeover, and one that
+  something else undid, which leaves commits through `/usr/bin/git` unscanned.
+- The install warning about another old git now also names the git in use, and (where the takeover exists) that cron jobs and scripts calling it by full path are not scanned.
 
 ## An existing global `core.hooksPath`
 

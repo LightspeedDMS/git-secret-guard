@@ -88,6 +88,23 @@ status_tools() {
     done
 }
 
+# ^ invariant one line for a class whose module has the takeover capability; a takeover undone by something else is a MISMATCH and a problem
+status_system_git() {
+    if ! gitup_system_git_state; then return 0; fi
+    case "$GITUP_TK_STATE" in
+        none | active) status_line "system git takeover" "$GITUP_TK_TEXT" ;;
+        *)
+            status_line "system git takeover" "MISMATCH $GITUP_TK_TEXT"
+            status_problem
+            ;;
+    esac
+}
+
+# ^ invariant an interrupted source copy (MANIFEST.partial) is shown with its next step; it is not counted as a problem
+status_unfinished_copy() {
+    if gitup_source_unfinished_copy; then status_line "git build" "$REPLY"; fi
+}
+
 status_run() {
     STATUS_PROBLEMS=0
     paths_init || return 1
@@ -96,6 +113,8 @@ status_run() {
     state_read || return 1
     if [ "$ST_EXISTS" -ne 1 ]; then
         printf '%s: not installed (no state file at %s)\n' "$GSG_NAME" "$GSG_STATE_FILE"
+        if gitup_system_git_state && [ "$GITUP_TK_STATE" != none ]; then status_system_git; fi
+        status_unfinished_copy
         return 1
     fi
     status_line "installed version" "$ST_VERSION"
@@ -116,5 +135,7 @@ status_run() {
     done
     status_line "originals moved aside" "${asides:-none}"
     status_tools || return 1
+    status_system_git
+    status_unfinished_copy
     [ "$STATUS_PROBLEMS" -eq 0 ]
 }

@@ -32,6 +32,21 @@ lifecycle_require_git() {
     }
 }
 
+# ^ invariant sets GSG_GIT = the absolute path of the first git on PATH, "" when there is none; prints nothing (the git upgrade decides what to say)
+install_find_git() {
+    GSG_GIT="$(type -P git)" || GSG_GIT=""
+}
+
+# ^ external the only lookup of the upgrade tools (sudo, dnf, rpm, restorecon, make, ldd); install-time only, the hook never resolves a tool through PATH
+# ^ invariant install_find_bin NAME [PATH] sets REPLY = the absolute path of NAME on PATH or the given search path, "" when absent; rc 1 when absent
+install_find_bin() {
+    local found
+    if [ -n "${2:-}" ]; then found="$(PATH="$2" type -P "$1")" || found=""; else found="$(type -P "$1")" || found=""; fi
+    if [ "${found#/}" = "$found" ]; then found=""; fi
+    REPLY="$found"
+    [ -n "$found" ]
+}
+
 # ^ security os-release is parsed as data, never sourced => a hostile line cannot run; test:test_os_release_fields_are_read_as_data
 # ^ invariant sets REPLY = first KEY= value of FILE minus one pair of quotes, "" for an absent key or unreadable FILE; prints nothing
 # ^ why braces around mapfile, not 2>/dev/null after it; a missing FILE fails the redirection first and bash prints its own error
@@ -49,8 +64,9 @@ install_os_release_field() {
     done
 }
 
-# ^ external GSG_OS_RELEASE names another file, for tests only; it can change a hint text and nothing else
-# ^ invariant sets REPLY = ubuntu (ID or ID_LIKE names ubuntu), debian (names debian) or other, from the first ID= and ID_LIKE= lines
+# ^ external GSG_OS_RELEASE names another file, for tests only; it changes the hint text and selects the git upgrade module, and the module announces it
+# ^ invariant sets REPLY = ubuntu (ID or ID_LIKE names ubuntu), debian (names debian), rpm (names rhel, fedora, centos, rocky or almalinux) or other
+# ^ invariant the first ID= and ID_LIKE= lines decide; a word is matched whole ("fedora-asahi" is not "fedora")
 install_os_family() {
     local file="${GSG_OS_RELEASE:-/etc/os-release}" id like
     install_os_release_field "$file" ID
@@ -61,6 +77,7 @@ install_os_family() {
     case " $id $like " in
         *" ubuntu "*) REPLY=ubuntu ;;
         *" debian "*) REPLY=debian ;;
+        *" rhel "* | *" fedora "* | *" centos "* | *" rocky "* | *" almalinux "*) REPLY=rpm ;;
     esac
 }
 
@@ -73,6 +90,7 @@ install_fix_hint() {
     install_os_family
     case "$REPLY" in
         ubuntu | debian) printf 'install it with: sudo apt install %s' "$1" ;;
+        rpm) printf 'install it with: sudo dnf install %s' "$1" ;;
         *) printf 'install it with your package manager' ;;
     esac
 }
@@ -91,6 +109,10 @@ install_git_hint() {
             ;;
         debian)
             printf '%s: Debian has no PPA; install git >= 2.54 from a newer release or backports, or build it from source, see docs/platforms.md\n' "$GSG_NAME" >&2
+            ;;
+        rpm)
+            printf '%s: on RHEL-compatible systems and Fedora, run: %s install --upgrade-git; it takes git >= 2.54 from your repositories or builds the pinned source, see docs/platforms.md\n' \
+                "$GSG_NAME" "$GSG_NAME" >&2
             ;;
         *)
             printf '%s: get git >= 2.54 from your distribution or build it from source, see docs/platforms.md\n' "$GSG_NAME" >&2
@@ -118,7 +140,7 @@ install_collect_gits() {
     local -a cands=()
     GSG_GIT_CANDIDATES=() GSG_GIT_REAL=()
     mapfile -t cands < <(type -aP git)
-    cands+=(/usr/bin/git)
+    cands+=("${GITUP_USRBIN:-/usr/bin}/git")
     for cand in "${cands[@]}"; do
         if [ ! -x "$cand" ]; then continue; fi
         real="$(realpath -- "$cand")" || continue
@@ -129,21 +151,26 @@ install_collect_gits() {
     done
 }
 
-# ^ external a git older than 2.54 ignores hook.<name>.* config without any message (verified on /usr/bin/git 2.52); warning only, the PATH git decides
-install_warn_other_gits() {
-    local i cand used ver
-    used="$(realpath -- "$GSG_GIT")" || {
+# ^ invariant sets GSG_GIT_USED = the real path of the git on PATH; a path realpath cannot resolve is a refusal naming what changed
+install_check_git_real() {
+    GSG_GIT_USED="$(realpath -- "$GSG_GIT")" || {
         printf '%s: cannot resolve the real path of %s; install refused, %s\n' "$GSG_NAME" "$GSG_GIT" "$(brew_unchanged_text)" >&2
         return 1
     }
+}
+
+# ^ external a git older than 2.54 ignores hook.<name>.* config without any message (verified on /usr/bin/git 2.52); warning only, the PATH git decides
+# ^ order runs after the git upgrade offers and install_check_git_real, and a takeover of /usr/bin/git leaves nothing to warn about
+install_report_other_gits() {
+    local i cand ver
     install_collect_gits
     for i in "${!GSG_GIT_CANDIDATES[@]}"; do
         cand="${GSG_GIT_CANDIDATES[$i]}"
-        if [ "${GSG_GIT_REAL[$i]}" = "$used" ]; then continue; fi
+        if [ "${GSG_GIT_REAL[$i]}" = "$GSG_GIT_USED" ]; then continue; fi
         if install_git_is_new_enough "$cand"; then continue; fi
         ver="$(install_git_version "$cand")" || ver="of unknown version"
-        printf '%s: warning: %s is git %s; it ignores config-based hooks without any message, so commits made with it are not scanned\n' \
-            "$GSG_NAME" "$cand" "$ver" >&2
+        printf '%s: warning: %s is git %s; it ignores config-based hooks without any message, so commits made with it are not scanned (the git in use is %s, git %s)%s\n' \
+            "$GSG_NAME" "$cand" "$ver" "$GSG_GIT" "$(install_git_version "$GSG_GIT")" "$(gitup_takeover_note "$cand")" >&2
     done
 }
 
@@ -246,11 +273,20 @@ install_downloads_needed() {
 install_check_prerequisites() {
     local timer="$1" bad=0 claim
     INSTALL_TIMEOUT_BIN="" INSTALL_BASH_BIN="" INSTALL_GNUBIN_DIR=""
-    if install_require_git; then
-        install_warn_other_gits || bad=$((bad + 1))
-    else
-        bad=$((bad + 1))
-    fi
+    GITUP_PENDING=0
+    # ^ order an old or missing git is recorded, not refused, before the checks below, and every other check still runs and is reported with it
+    gitup_defers_git
+    case $? in
+        0) GITUP_PENDING=1 ;;
+        2) bad=$((bad + 1)) ;;
+        *)
+            if install_require_git; then
+                install_check_git_real || bad=$((bad + 1))
+            else
+                bad=$((bad + 1))
+            fi
+            ;;
+    esac
     if brew_is_macos; then
         install_macos_inspect || bad=$((bad + 1))
     else
@@ -268,6 +304,9 @@ install_check_prerequisites() {
     fi
     if [ "$bad" -gt 1 ]; then printf '%s: %s prerequisites are missing; install refused, %s\n' "$GSG_NAME" "$bad" "$(brew_unchanged_text)" >&2; fi
     if [ "$bad" -eq 1 ] && [ -n "$BREW_INSTALLED" ]; then printf '%s: install refused; %s\n' "$GSG_NAME" "$(brew_unchanged_text)" >&2; fi
+    if [ "$bad" -gt 0 ] && [ "$GITUP_PENDING" -eq 1 ]; then
+        printf '%s: %s; once the problems above are fixed install offers to upgrade it (%s install --upgrade-git)\n' "$GSG_NAME" "$(gitup_describe_git)" "$GSG_NAME" >&2
+    fi
     [ "$bad" -eq 0 ]
 }
 
@@ -526,16 +565,6 @@ install_check_cli_link() {
         printf '%s: %s exists and is not a symlink; remove it and run install again\n' "$GSG_NAME" "$link" >&2
         return 1
     fi
-}
-
-# ^ why a write probe, not git config --list; --list exits 128 for a missing file too = a normal fresh machine
-# ^ order before the first download or copy => an unwritable global config leaves nothing half installed
-install_check_config_writable() {
-    if "$GSG_GIT" config --global gsg-install-probe.ok 1 2>/dev/null; then
-        "$GSG_GIT" config --global --remove-section gsg-install-probe 2>/dev/null && return 0
-    fi
-    printf '%s: cannot write the global git config; %s\n' "$GSG_NAME" "$(brew_unchanged_text)" >&2
-    return 1
 }
 
 install_link_cli() {
@@ -850,34 +879,82 @@ install_check_recorded_hooks_path() {
     return 1
 }
 
+# ^ invariant refuses a recorded global core.hooksPath without --replace-hooks-path; the claim also covers a Homebrew install or a git upgrade of this run
+install_refuse_hooks_path() {
+    local claim
+    claim="install changes nothing and refuses"
+    if [ "$GSG_PREV_SET" != yes ] || [ "$1" -eq 1 ]; then return 0; fi
+    if [ -n "$BREW_INSTALLED${GITUP_CHANGED:-}" ]; then claim="install refuses ($(brew_unchanged_text))"; fi
+    printf '%s: the global core.hooksPath is set to [%s]; %s.\n' "$GSG_NAME" "$GSG_PREV" "$claim" >&2
+    printf '%s: run install --replace-hooks-path to record it, back up the directory it points to, and unset it.\n' "$GSG_NAME" >&2
+    return 1
+}
+
+# ^ invariant the refusable checks needing a git (global config, state) run before the git offers if the git can read them, otherwise after
+# ^ coupled a refusal here after an upgrade of this run names the upgrade through gitup_report_changes, for the checks whose own text does not
+install_run_state_checks() {
+    install_resolve_hooks_dir || {
+        gitup_report_changes
+        return 1
+    }
+    install_check_config_writable || return 1
+    state_read || {
+        gitup_report_changes
+        return 1
+    }
+    install_note_legacy
+    install_manage_jq
+    install_check_recorded_hooks_path || return 1
+    install_plan_lock || {
+        gitup_report_changes
+        return 1
+    }
+}
+
+# ^ external git 2.26 added config --show-scope, used by lifecycle_read_hooks_path; an older git has its hooks-path checks after the upgrade
+INSTALL_HP_MIN_GIT=2.26
+
+# ^ order the timer or agent checks run before the git offers; the git directory is the only value an upgrade changes (it installs under /usr/local/bin)
+# ^ invariant $1 = 1 when --with-timer was given; the later install_prepare_timer repeats the check with the final git directory
+install_precheck_timer() {
+    local dir="/usr/local/bin"
+    if [ "$1" -ne 1 ]; then return 0; fi
+    if [ -n "$GSG_GIT" ]; then dir="${GSG_GIT%/*}"; fi
+    if brew_is_macos; then launchd_check_target "$dir"; else timer_check_target "$dir"; fi
+}
+
+# ^ order the git offers run after every refusable check a git can run; a missing git, or one too old for --show-scope, runs them after the offers
+# ^ invariant install_run returns 3 when a git upgrade module hands off to finish outside this process
 install_run() {
-    local replace="$1" timer="$2" claim
+    local replace="$1" timer="$2" upgrade="${3:-0}" takeover="${4:-0}" rc early=0 ver
     paths_init || return 1
     lifecycle_note_global_config
-    install_check_prerequisites "$timer" || return 1
-    install_check_platform || return 1
-    install_check_hooks_path || return 1
-    install_check_cli_link || return 1
-    if [ "$GSG_PREV_SET" = yes ] && [ "$replace" -ne 1 ]; then
-        claim="install changes nothing and refuses"
-        if [ -n "$BREW_INSTALLED" ]; then claim="install refuses ($(brew_unchanged_text))"; fi
-        printf '%s: the global core.hooksPath is set to [%s]; %s.\n' "$GSG_NAME" "$GSG_PREV" "$claim" >&2
-        printf '%s: run install --replace-hooks-path to record it, back up the directory it points to, and unset it.\n' "$GSG_NAME" >&2
-        return 1
-    fi
     trap install_cleanup EXIT
     trap 'exit 129' HUP
     trap 'exit 130' INT
     trap 'exit 143' TERM
-    install_resolve_hooks_dir || return 1
-    install_check_config_writable || return 1
-    state_read || return 1
-    install_note_legacy
-    install_manage_jq
-    install_check_recorded_hooks_path || return 1
+    install_check_prerequisites "$timer" || return 1
+    install_check_platform || return 1
+    if [ -n "$GSG_GIT" ] && ver="$(install_git_version "$GSG_GIT")" && gitup_version_at_least "$ver" "$INSTALL_HP_MIN_GIT"; then early=1; fi
+    if [ "$early" -eq 1 ]; then install_check_hooks_path || return 1; fi
+    install_check_cli_link || return 1
+    install_precheck_timer "$timer" || return 1
+    if [ "$early" -eq 1 ]; then
+        install_refuse_hooks_path "$replace" || return 1
+        install_run_state_checks || return 1
+    fi
+    gitup_offers "$upgrade" "$takeover"
+    rc=$?
+    if [ "$rc" -ne 0 ]; then return "$rc"; fi
+    if [ "$early" -eq 0 ]; then
+        install_check_hooks_path || return 1
+        install_refuse_hooks_path "$replace" || return 1
+    fi
+    install_check_git_real || return 1
+    install_report_other_gits || return 1
+    if [ "$early" -eq 0 ]; then install_run_state_checks || return 1; fi
     install_prepare_timer "$timer" || return 1
     tools_announce_overrides
-    install_plan_lock || return 1
     install_tools_ready || return 1
     install_hash_staged || return 1
     install_backup_hooks_dir || return 1

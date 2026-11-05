@@ -155,15 +155,16 @@ git --version                                     # must say 2.54 or newer, firs
 ```
 
 The PPA (`ppa:git-core/ppa`) carried git 2.56.0 (`1:2.56.0-0ppa1~ubuntu24.04.2`) when this was tested. Debian has no PPA, and a PPA
-may lag behind: then build git from source. The tarball is accepted only when its SHA-256 matches:
+may lag behind: then build git from source. The commands are chained with `&&`, so nothing is unpacked or built
+unless the download succeeded and its SHA-256 matches:
 
 ```bash
 sudo apt install build-essential libcurl4-openssl-dev libssl-dev libexpat1-dev zlib1g-dev perl
-curl -fsSLO https://www.kernel.org/pub/software/scm/git/git-2.56.0.tar.xz
-echo '26c56c296b38c0695b26fa95f475f1d01704d2d38e73465ca30b0b2f5dc789d3  git-2.56.0.tar.xz' | sha256sum -c -
-tar -xf git-2.56.0.tar.xz && cd git-2.56.0
-make -j"$(nproc)" prefix=/usr/local NO_RUST=1 NO_TCLTK=1 NO_GETTEXT=1 all
-sudo make prefix=/usr/local NO_RUST=1 NO_TCLTK=1 NO_GETTEXT=1 install     # /usr/local/bin must come before /usr/bin on PATH
+curl -fsSLO https://www.kernel.org/pub/software/scm/git/git-2.56.0.tar.xz \
+  && echo '26c56c296b38c0695b26fa95f475f1d01704d2d38e73465ca30b0b2f5dc789d3  git-2.56.0.tar.xz' | sha256sum -c - \
+  && tar -xf git-2.56.0.tar.xz && cd git-2.56.0 \
+  && make -j"$(nproc)" prefix=/usr/local NO_RUST=1 NO_TCLTK=1 NO_GETTEXT=1 all \
+  && sudo make prefix=/usr/local NO_RUST=1 NO_TCLTK=1 NO_GETTEXT=1 install     # /usr/local/bin must come before /usr/bin on PATH
 ```
 
 Then `git clone <this repository> && cd git-secret-guard && bin/git-secret-guard install` works as on RHEL. `install` names the missing
@@ -211,7 +212,8 @@ bin/git-secret-guard install        # lists what is missing, installs it with br
   (trufflehog 3.99.7 against the pin 3.99.2 when this was written), and the documented behaviours are verified per pinned version.
 - **Absolute paths, no `PATH` order.** The settings file records `BASH_BIN` (the Homebrew bash), `GNUBIN_DIR` (the GNU coreutils
   directory), `TIMEOUT_BIN` (`gnubin/timeout`), `SETSID_BIN` and `JQ_BIN`. The hook puts `GNUBIN_DIR` first on its own `PATH`
-  (an absolute, existing directory or it blocks) and the CLI does the same, so no BSD tool answers where a GNU flag is used.
+  (a non-empty value must be an absolute, existing directory or the hook blocks; an empty one adds nothing) and the CLI does the same (it checks only
+  that the directory exists), so no BSD tool answers where a GNU flag is used.
 - **The hook never runs unscanned under bash 3.2.** The configured command is `'<BASH_BIN>' '<share>/hooks/secret-scan'`, so a GUI git
   client that starts with `/usr/bin:/bin` (and `/bin/bash` 3.2 first) still runs the hook under the recorded bash. A hook started any
   other way under bash older than 4.4 blocks with `nothing was scanned` before it reads another line. The CLI behaves the same: started
@@ -224,8 +226,9 @@ bin/git-secret-guard install        # lists what is missing, installs it with br
 - **`install --with-timer` installs a LaunchAgent** on macOS: `~/Library/LaunchAgents/com.lightspeeddms.git-secret-guard.doctor.plist`,
   loaded with `launchctl bootstrap gui/<uid>`, running doctor weekly through the recorded bash with its output in
   `doctor.log` in the state directory; `launchctl` is recorded as `LAUNCHCTL_BIN` (details in
-  [the launchd section of the doctor chapter](doctor.md#the-weekly-timer-on-macos-launchd)). `doctor` and `status` check
-  `BASH_BIN` and `LAUNCHCTL_BIN` like the other recorded tools.
+  [the launchd section of the doctor chapter](doctor.md#the-weekly-timer-on-macos-launchd)). `doctor` checks `BASH_BIN`
+  (executable, bash 4.4 or newer) and, when a timer is recorded, `LAUNCHCTL_BIN`, like the other recorded tools;
+  `status` checks neither.
 - **GNU flags and their answers.** `realpath -m`, `mktemp --suffix`, `mv -T`/`-n`, `install -T`, `chmod 700 -- DIR` and `sort -z` run from
   the GNU directory. `find -printf` (backup bounds) stays where `find` has it (Linux) and is `find -print0 | xargs stat` elsewhere (GNU or BSD `stat` format chosen by a probe);
   `find -ls` was tried and dropped, because an owner or group name with a space moves its size column;
@@ -276,7 +279,7 @@ because the hook lives in the global git config.
 - **UTF-16.** Windows PowerShell 5.1 can write UTF-16 with `>` and `Out-File`. Git treats such a file as binary, so it is
   [not scanned](scan.md#limits). Use `Set-Content -Encoding utf8`, or PowerShell 7.
 - **Stopping a scan.** There are no process groups: on an interrupt or a timeout the hook finds every process below each
-  scanner and stops them with `taskkill /F`, without a grace period, then removes its work dir.
+  scanner and stops them with `taskkill /T /F`, without a grace period, then removes its work dir.
 - **What was checked by hand.** On Windows Server 2019 with git 2.56.0.windows.4, from a machine with no jq: install from Git
   Bash and from PowerShell, a rerun, `status`, `doctor` (including a worktree and a repository with the hook disabled),
   `doctor --recheck`, the coverage reminder, `--replace-hooks-path` and the restore on uninstall, `uninstall --remove-tools`
@@ -317,8 +320,8 @@ that could be a bug gets fixed.
 - **Checked and found identical:** `realpath -m`, `stat`, `sha256sum`, `setsid`, `timeout --foreground`, `mktemp --suffix`,
   `tar`, `sed -E`, coreutils 9.4, bash 5.2, and dash as `/bin/sh` (the hook and the CLI use no `sh -c`; the test stand-ins use `#!/bin/sh`).
   The backup-bounds walk uses `find -printf` on Linux, exactly as before story 06.01 (the macOS size source only runs where `find` has no `-printf`).
-- **Test infrastructure that moved:** the suite drives `$GSG_TEST_GIT` (default `/usr/local/bin/git`), because the PPA git lives in
-  `/usr/bin/git`; the timer tests compute the unit `PATH` from the first git on the lifecycle `PATH`.
+- **Test infrastructure that moved:** the suite drives `$GSG_TEST_GIT` (default `/usr/local/bin/git` on Linux, `/usr/bin/git` on macOS), because the
+  PPA git lives in `/usr/bin/git`; the timer tests compute the unit `PATH` from the first git on the lifecycle `PATH`.
 
 ## `tests/platform/ubuntu.sh`: the repeatable container run
 
@@ -399,7 +402,8 @@ written. It pulls the image when it is absent and runs it with `--rm --init`. Th
 
 ### What the platform run enforces
 
-- No host variable reaches podman (`env -i`) or the container (names checked), and the container has no `~/.ssh`, `~/.gitconfig` or `.git`.
+- Podman starts under `env -i` with only `PATH`, `XDG_RUNTIME_DIR` and `XDG_DATA_HOME` taken from the host (the rest point into the
+  scratch home or are fixed); no host variable reaches the container (names checked), and the container has no `~/.ssh`, `~/.gitconfig` or `.git`.
 - **No `containers.conf` layer is read** (`CONTAINERS_CONF` in the scratch home), so no `volumes`, `devices`, `env`, namespace, `default_sysctls` or
   `hooks_dir` of a system or user layer applies, and the OCI hooks directory is empty. Held by construction and probed with real containers,
   hook positive control included.
@@ -464,7 +468,7 @@ Both run the whole suite and the install E2E as a non-root user, in a podman-mac
   summary. `ubuntu.sh` and its checks are unchanged. The VM is the boundary here, and nothing verifies it. The container still gets no `-e`, no host
   `HOME`, no `~/.gitconfig` or `~/.ssh`, `--http-proxy=false`, and a read-only copy of the files `git ls-files -co --exclude-standard` lists.
 - **`--tmpfs /run/secrets`**: podman machine mounts `/run/secrets/rhsm` into every container, and the suite's isolation test expects an empty directory.
-- **Rocky** has its own script, `tests/platform/rocky-container.sh`, which sources `ubuntu-container.sh` and redefines only the prepare phase: dnf
+- **Rocky** has its own script, `tests/platform/rocky-container.sh`, which sources `ubuntu-container.sh` and redefines `usage`, `install_git_source`, `install_pre_commit` and `phase_prepare`: dnf
   prerequisites (with `--allowerasing`, the image's `libcurl-minimal` conflicts with `libcurl-devel`), shellcheck 0.11.0 (SHA-256), pre-commit from pip
   (unpinned), git 2.56.0 built from the SHA-256 verified tarball into `/usr/local` next to the stock `/usr/bin/git`. The Rocky image is
   `docker.io/rockylinux/rockylinux:9.7@sha256:53f4c6dcb34e1403bd93207351f0af9a593610faeb7165cb8a037346765199b0` (manifest-list digest, looked up like the
@@ -498,3 +502,69 @@ Both run the whole suite and the install E2E as a non-root user, in a podman-mac
 - **Entering the platform container from a shell.** `podman exec` needs the same `env -i` environment the script uses
   (`env -i HOME=<scratch> PATH XDG_RUNTIME_DIR XDG_DATA_HOME XDG_CONFIG_HOME LANG=C.UTF-8 podman exec ...`); a plain shell's podman falls back to
   cgroupfs and crun fails with `cgroup.procs: Permission denied` (rc 126). A container started with `sleep 7200` for iteration exits after two hours.
+- **Container script chain.** `ubuntu.sh` (host launcher, the trust boundary) -> `ubuntu-container.sh` (root; sourceable, `main`
+  runs only when executed) -> `ubuntu-e2e.sh` (`gsguser`), tested through `--dry-run` and sourced functions by `tests/test_platform.sh`
+  (skipped on Darwin). Helpers there: `isolation_with`, `dev_baseline`, `ns_fixture`, `baseline_with`, `mountinfo_fixture MP[=FSTYPE]`,
+  `PPA_STUB_ENV` (`STUB_LOCK` needs non-root). `ubuntu.sh` must never mention `--skip-isolation` (`tests/test_mac_runner.sh`). A failed
+  `ppa_disable` makes `install_git_ppa` return 2 and no source build runs (its root `apt-get install` would trust a PPA that may still be
+  enabled). Rocky also installs the stock distro git, because a doctor test calls `/usr/bin/git` directly.
+- **Mac runner gotchas.** `stage_checkout` runs `git init` in the copy (`tests/test_quality.sh` uses `git ls-files`); BSD `mktemp -t`
+  appends a suffix; macOS bash rejects a regex repetition over 255.
+- **Shell traps that bit.** `set -o pipefail` plus `sed ...q` inside `$( )` is a race (the writer gets SIGPIPE); it once turned a good
+  PPA install into a silent source build. A failed redirection is reported before `2>/dev/null` applies: write
+  `{ mapfile ... <"$f"; } 2>/dev/null`. bash 5.3 in the C locale reads a UTF-8 `…` after `$name` as part of the name: write `${name}…`.
+- **awk portability**: `tests/test_awk_portability.sh` picks each interpreter through `awk_farm` and skips with a reason when one is absent.
+- **macOS bash bootstrap.** `/bin/bash` 3.2 cannot parse the libs (`mapfile`, `declare -g`, `local -A`). `brew_cli_bootstrap` re-execs
+  under a Homebrew bash 4.4 or newer; `brew_refuse_old_bash` refuses for other commands; an installed copy without `brew` reads
+  `BASH_BIN` through `brew_recorded_bash` and checks it with `brew_bash_ok`. Two loop bounds: the pid-bound `GSG_BREW_BOOTSTRAPPED`
+  (`test_a_recorded_bash_that_is_really_bash_3_2_is_refused_after_one_exec_not_looped`) and `GSG_BREW_REEXEC_DEPTH` at
+  `BREW_REEXEC_MAX` (`test_a_recorded_bash_wrapper_that_runs_bash_as_a_child_is_refused_by_the_depth_bound_not_looped`); both need a
+  real bash 3.2 and skip on Linux.
+- **macOS install order** (a user decision). `brew_inspect` (`brew_find` = `type -P brew` only, never a guessed `/opt/homebrew`) and
+  `install_macos_inspect` only detect; the one `brew install` (after the bash bootstrap) is in `install_macos_finish` (through
+  `install_tools_ready`), after every refusable check except the staging, which follows it when no GNU `timeout` exists; `install_stage_refused` handles a stage that fails after brew ran. Every install refusal uses `brew_unchanged_text`
+  (`test_every_install_refusal_wording_is_honest_after_a_brew_install`, two allow-listed exceptions); `curl_order_recorder` proves the
+  download order. The hook command comes from `hook_command_text`, shared through `share_recorded_bash` and `DR_HOOK_CMD`; the hook has a
+  bash 3.2 syntax guard at the top. `brew_use_gnubin` prepends the recorded `GNUBIN_DIR` for the CLI and refuses every command but
+  `install`, `version` and `help` without a GNU directory
+  (`test_a_command_that_needs_the_gnu_tools_refuses_when_their_directory_is_missing`); a settings file `load_settings` refuses
+  prints `cannot read <file>: <reason>`, the reason sanitised and cut (`test_a_refused_settings_file_names_the_reason_on_macos`).
+- **BSD differences that shaped code**: no `realpath -m`, `mktemp --suffix`, `mv -T`, `stat -c`, `env --default-signal`; `install -T`
+  means tags; `chmod 700 -- DIR` fails; `find` lacks `-printf`/`-readable`/`-executable` (sizes via `install_entry_sizes`; never
+  `find -ls`: `test_the_backup_bounds_do_not_depend_on_the_owner_columns_of_find_ls`); `wc -l` pads.
+- **Mac test harness.** `tests/lib.sh` picks per-OS `TEST_BASE_PATH`, `TEST_BASH`, `TEST_GNUBIN`, `TEST_TRUE` and the cached scanners;
+  `lc_begin` fakes a Linux `uname`, and `tests/test_macos.sh` uses `lc_real_uname`/`as_macos`. A test that replaces `PATH` must keep
+  `$SANDBOX/pathbin`, or the real `brew` is reachable. `FILE_SKIP_REASON` skips a whole file with a reason.
+- **Windows: three path forms.** bash and `find` say `/c/dir`; native git, curl and tar want or answer `C:/dir`; `cmd` wants
+  `C:\dir`. Compare and display in one form: every check that treats a path as absolute with `/*` is wrong for what native git
+  prints. Found that way: `doctor_origin_text` (`file:C:/...` taken as relative made a finding repeat per worktree),
+  `install_resolve_hooks_dir` (`--type=path` output called relative, so `--replace-hooks-path` refused every value) and
+  `doctor_resolves_here`. `cygpath -m -l` gives git's long form; plain `-m` keeps `ADMINI~1`.
+- **Windows: stopping processes.** No process groups, and MSYS `exec` keeps the MSYS pid while replacing the Windows process
+  (details in docs/scan.md#maintainer-notes). Tests: `test_windows_only_an_interrupted_scan_leaves_no_native_process_and_no_work_dir`
+  proves it with `PING.EXE`.
+- **Windows: slow process starts change timing logic.** Each lock attempt starts a few processes, so 300 attempts outlast
+  `GSG_FINDINGS_LOCK_MAX_AGE_MIN` and a live holder's lock was broken at 60 s instead of refused. The wait is bounded in
+  seconds there (`GSG_FINDINGS_LOCK_WAIT_SECONDS_WINDOWS`, 45): fewer attempts made a queued run give up under load, an
+  intermittent failure of `test_concurrent_runs_over_different_roots_keep_both_sets`. A holder in a test must outlive the whole wait.
+- **Windows: a running script pins its directory.** Windows refuses to rename the share dir while `bin/git-secret-guard` runs
+  from it, so `install_copy_share` rewrites only the generated files when `GSG_ROOT` is the share dir.
+- **Windows: XDG variables.** Native git hands the hook `XDG_*` as `C:/dir` and only `HOME`, `PATH` and `TMP` are turned back;
+  `gsg_posix_path` normalises them for `state_dir_path` and `paths_init`, which also accepts a `C:\dir` a Windows user typed.
+- **Windows: `ln -s`** refuses a missing target and copies an existing one unless `MSYS=winsymlinks:sys`; native git cannot read
+  those links, so a symlink fixture feeds nothing to git (skip list). The test process exports the variable, `GSG_ENV`
+  deliberately does not, so the product cannot lean on it.
+- **Windows: the work dir ignores a `TMPDIR` outside `HOME`** (NTFS ignores `chmod`, the profile ACL keeps staged lines private).
+  Tests look at `TEST_WORK_BASE`, never `$SANDBOX/tmp`; an `includeIf` aimed at the wrong one silently sabotages nothing, and a
+  fail-closed test goes green or red for the wrong reason.
+- **Windows: batch files.** `cmd` re-reads a batch file line by line, so a file deleted while it runs ends in `The batch file
+  cannot be found`, also with `call`. The installed `.cmd` therefore deletes itself after bash returns, with
+  `(goto) 2>nul & del "%~f0"`, once the share dir is gone (`GSG_CMD_ENTRY` tells uninstall to leave it). The checkout's `.cmd`
+  files are never deleted and use plain `exit /b %errorlevel%`. `!errorlevel!` after a same-line `setlocal EnableDelayedExpansion`
+  does not work. Use `bin\bash.exe`, which sets up `PATH`; `usr\bin\bash.exe` does not. PowerShell finds `git-secret-guard.cmd`
+  before the extensionless wrapper through `PATHEXT`.
+- **Windows: test-side quirks.** MSYS `[ -e x ]` is true when only `x.exe` exists: assert on a listing. `NUL` is a reserved
+  name, so a file called `nul.txt` cannot exist. Native curl needs `file:///C:/...` (`lc_fixture_url`). The betterleaks asset is a
+  `.zip` (`lc_asset_name`); appending to a guessed `.tar.gz` tampers with nothing and the test then "fails" for the wrong
+  reason. Inspect a failing fail-closed test before skipping it. `tests/test_windows.sh` fakes `uname` around the real libs so the
+  Windows branches are also tested on Linux and macOS; `tests/windows-skips.list` names the tests that cannot apply, with reasons.

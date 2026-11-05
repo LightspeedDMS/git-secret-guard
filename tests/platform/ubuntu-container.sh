@@ -49,7 +49,7 @@ os_field() {
     printf '%s' "$REPLY"
 }
 
-# ^ external PPA key fingerprint as embedded in the .sources file add-apt-repository writes; lookup in doc:CLAUDE.md#Portability and follow-ups
+# ^ external PPA key fingerprint as embedded in the .sources file add-apt-repository writes; lookup in doc:docs/platforms.md#maintainer-notes
 PPA_PINNED_FPR=F911AB184317630C59970973E363C90F8F1B6217
 PPA_SOURCES_DIR=/etc/apt/sources.list.d
 
@@ -188,7 +188,8 @@ isolation_stray_names() {
     [ "$stray" -eq 0 ]
 }
 
-# ^ external an unmodified rootless podman 5 container under CONTAINERS_CONF has exactly these MOUNTPOINT=FSTYPE entries; doc:CLAUDE.md#Review round 3
+# ^ external an unmodified rootless podman 5 container under CONTAINERS_CONF has exactly these MOUNTPOINT=FSTYPE entries
+# ^ see doc:docs/platforms.md#what-the-platform-run-enforces
 ISOLATION_MOUNT_RULES=" /=* /dev=tmpfs /dev/full=devtmpfs /dev/mqueue=mqueue /dev/null=devtmpfs /dev/pts=devpts /dev/random=devtmpfs /dev/shm=tmpfs /dev/tty=devtmpfs"
 ISOLATION_MOUNT_RULES+=" /dev/urandom=devtmpfs /dev/zero=devtmpfs /etc/hostname=tmpfs /etc/hosts=tmpfs /etc/resolv.conf=tmpfs /proc=proc /proc/acpi=tmpfs"
 ISOLATION_MOUNT_RULES+=" /proc/asound=proc /proc/bus=proc /proc/fs=proc /proc/interrupts=devtmpfs /proc/irq=proc /proc/kcore=devtmpfs /proc/keys=devtmpfs"
@@ -248,7 +249,8 @@ isolation_stray_mounts() {
     [ "$stray" -eq 0 ]
 }
 
-# ^ external the 17 entries of /dev to depth 4 in an unmodified rootless podman 5 container under CONTAINERS_CONF; doc:CLAUDE.md#Review round 3
+# ^ external the 17 entries of /dev to depth 4 in an unmodified rootless podman 5 container under CONTAINERS_CONF
+# ^ see doc:docs/platforms.md#what-the-platform-run-enforces
 ISOLATION_ALLOWED_DEV=" core fd full mqueue null ptmx pts pts/ptmx random shm stderr stdin stdout tty urandom zero "
 ISOLATION_MAX_DEV_ENTRIES=500
 ISOLATION_DEV_DEPTH=4
@@ -292,7 +294,8 @@ isolation_stray_devices() {
     [ "$stray" -eq 0 ]
 }
 
-# ^ external time is shared with the host; user is not compared (rootful shares it); probed with each *ns = host; doc:CLAUDE.md#Review round 3
+# ^ external time is shared with the host; user is not compared (rootful shares it); probed with each *ns = host
+# ^ see doc:docs/platforms.md#what-the-platform-run-enforces
 ISOLATION_NS_LIST=(cgroup ipc net pid uts)
 
 # ^ security a container in the launcher's network or IPC namespace sees host interfaces or shared memory => ubuntu.sh passes its /proc/self/ns ids as arguments

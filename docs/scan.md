@@ -7,22 +7,27 @@
 1. Git (>= 2.54) runs `hook.git-secret-guard.command` for the `pre-commit` event, from the repo root, before the
    repository's own hook. Both run even if the first fails; the commit is blocked if either fails.
 2. The script reads tool locations from `settings`, an installed file next to `hooks/` and `lib/`. Missing or
-   non-executable `jq`, `trufflehog`, `betterleaks`, `setsid` (`taskkill` on Windows) or `timeout`, or a relative path,
-   blocks the commit and says nothing was scanned. `setsid`, `timeout`, `jq` and both scanners come from the settings file only (no environment
-   override, no `PATH` lookup), so a planted `setsid` earlier on `PATH` cannot take over the scanner start. **Everything
-   else the hook runs is found through `PATH`**: `bash` (the `#!/usr/bin/env bash` shebang of the hook and of
-   `lib/run-scanner.sh`), `git`, `awk`, `sed`, `cp`, `rm`, `mkdir`, `mktemp`, `realpath`, `find` and the other coreutils.
-   Git prepends its own exec-path to `PATH` when it runs a hook, which puts git's directory first; a `PATH` you control
-   decides the rest. The shebang is not pinned to an absolute `bash`.
+   non-executable `jq`, `trufflehog`, `betterleaks`, `setsid` or `timeout`, or a relative path, blocks the commit and says
+   nothing was scanned. `setsid`, `timeout`, `jq` and both scanners come from the settings file only (no environment
+   override, no `PATH` lookup), so a planted `setsid` earlier on `PATH` cannot take over the scanner start. (On Git for Windows
+   `taskkill` from the settings file, `TASKKILL_BIN`, takes the place of `setsid`.) **Everything
+   else the hook runs is found through `PATH`**: `bash` itself on Linux (the `#!/usr/bin/env bash` shebang of the
+   hook), `git`, `awk`, `sed`, `cp`, `rm`, `mkdir`, `mktemp`, `realpath`, `find` and the other coreutils. Git prepends
+   its own exec-path to `PATH` when it runs a hook, which puts git's directory first; a `PATH` you control decides the
+   rest. The shebang is not pinned to an absolute `bash`. On macOS the hook command names the recorded `BASH_BIN`
+   instead. Child scripts (`lib/run-scanner.sh`, the coverage re-check) run under the same bash binary as the hook
+   (`$BASH`), not through a new lookup.
 3. `git diff --cached` (fixed flags, `-U0`) is turned into a private scan tree under `${TMPDIR:-$HOME/.tmp}`
    (on Windows a `TMPDIR` outside your home is ignored and `~/.tmp` is used, because NTFS ignores `chmod` and only your
    profile's permissions keep the staged lines private) (mode 700, removed on exit and on HUP/INT/TERM): each touched file at its real relative path, each **added** line
    at its real line number, every other line blank. Nothing added (empty commit, deletions only, binary only) means no
-   scanner is started and the commit proceeds.
+   scan is started and the commit proceeds. The exemptions are loaded before that point, so a repository with a
+   `.gitleaks.toml` at HEAD still gets its betterleaks pre-flight ([Exemptions](exemptions.md)), and a config that
+   does not load blocks even a commit with nothing to scan.
 4. `trufflehog filesystem` and `betterleaks dir` run in parallel, each through `lib/run-scanner.sh` in its own session
    (`setsid`) and under a timeout. On HUP/INT/TERM the hook signals both process groups, waits for them, and only
    then removes the temp dir, so no scanner outlives the commit. Windows has no process groups: there the hook finds every
-   process below each scanner and stops them with `taskkill /F`, without a grace period. Results become rows of scanner, detector, status
+   process below each scanner and stops them with `taskkill /T /F`, without a grace period. Results become rows of scanner, detector, status
    (`verified`, `unknown` or `finding`), file and line. Only those are printed, never a value; log lines are reduced
    to their message words. betterleaks never validates a finding against a live API (its `--validation` flag is never
    passed), so it makes no network request. A repository with its own `.gitleaks.toml` at HEAD gets a second, small
@@ -30,8 +35,11 @@
 5. Any finding, any scanner error (unexpected exit status, timeout, unreadable report, error-level log line, skipped
    file, an oversized betterleaks log, or trufflehog exiting 0 without its `finished scanning` line with `chunks >= 1`)
    blocks with exit 1 and the hint `git commit --no-verify`.
-6. A passing commit prints one line on stderr, so a clean scan can be told from a hook that never ran (a repository-local
-   `hook.git-secret-guard.enabled=false`, a leftover `core.hooksPath`, a git older than 2.54 that ignores config hooks):
+6. A passing commit prints one summary line on stderr, so a clean scan can be told from a hook that never ran (a
+   repository-local `hook.git-secret-guard.enabled=false`, a git older than 2.54 that ignores config hooks; a
+   `core.hooksPath` does not stop config hooks). Exemption notices and warnings (`using .gitleaks.toml from HEAD ...`,
+   `N staged file(s) excluded ...`) come before it and [the coverage reminder](#the-coverage-reminder) after it, when
+   they apply:
    - **Scanned:** `git-secret-guard: scanned 3 files, 214 added lines (trufflehog 3.99.2, betterleaks 1.9.0): no findings, 1s`.
    - **Nothing to scan** (only deletions, binary files, mode changes, an empty commit): `git-secret-guard: no added lines to scan`.
    - **Exemptions:** when `.secret-scan-ignore` at HEAD excluded staged files with added lines, the scanned line adds
@@ -80,17 +88,19 @@ git-secret-guard: 2 coverage problems still open (doctor run 2026-11-03):
   in its own group. A git call already running when Ctrl-C arrives is therefore not reached by the hook's group kill; it
   ends by itself within `DOCTOR_TIMEOUT_SECONDS` (plus 5 seconds for the kill).
 - **No reminder** when the hook blocks before it has a private temp dir: a missing or unusable tool in the settings file,
-  an unusable `TMPDIR`. Those blocks name their own cause; `doctor` reports them as machine problems.
+  an unusable `TMPDIR`. Those blocks name their own cause. `doctor` reports an unusable tool as a machine problem; an
+  unusable `TMPDIR` stops doctor itself (`cannot create a temp directory`, exit status 2).
 - Only PROBLEM lines doctor already cleaned are printed, never a value, secret or file content.
 
 ## The settings file
 
 The hook reads `<share>/settings` (`<share>` = two levels above the resolved script path), written by `install`:
-absolute `TRUFFLEHOG_BIN`, `BETTERLEAKS_BIN`, `JQ_BIN`, `SETSID_BIN`, `TIMEOUT_BIN`, the pinned `TRUFFLEHOG_VERSION` and
+absolute `TRUFFLEHOG_BIN`, `BETTERLEAKS_BIN`, `JQ_BIN`, `SETSID_BIN` (`TASKKILL_BIN` on Windows), `TIMEOUT_BIN`, the pinned `TRUFFLEHOG_VERSION` and
 `BETTERLEAKS_VERSION` (shown on the pass line only) and `SCAN_TIMEOUT_SECONDS`. The `GITLEAKS_*` keys of the previous
 build are neither written nor read (an inherited `GITLEAKS_BIN` is discarded like any other). A missing,
-relative or non-executable entry blocks the commit and says nothing was scanned; an inherited environment variable of
-the same name is discarded before the file is read.
+relative or non-executable tool path blocks the commit and says nothing was scanned. A missing `SCAN_TIMEOUT_SECONDS`
+means 300; only an integer from 1 to 999999 written without a leading zero is accepted, anything else blocks (empty, a non-digit, `0`, `00`, `007`, `1000000`). GNU `timeout` reads `00` as no limit and fails open on a value of about 20 digits, so those must never reach it; `007` would mean 7 and is refused only to keep one strict form, the same as the pre-flight; missing or non-numeric versions only drop the versions from
+the pass line. An inherited environment variable of the same name as any key is discarded before the file is read.
 Skip once with `git commit --no-verify`; automation can disable only this hook with
 `GIT_CONFIG_PARAMETERS="'hook.git-secret-guard.enabled'='false'"` (the repository's own hooks still run).
 
@@ -111,22 +121,27 @@ not reachable. The doctor suites (`test_doctor.sh`, `test_doctor_repos.sh`, `tes
 `test_doctor_betterleaks.sh`, `test_doctor_info.sh`, `test_doctor_readonly.sh`) and `test_timer.sh` use the same sandbox,
 with repositories under a scratch root; every lifecycle test finds a recording `systemctl` stand-in first on its `PATH`.
 
-Runtime needs bash, `setsid` (util-linux; `taskkill` on Windows), `timeout` (coreutils), awk, `jq` and, for `install`, `curl`
-and `tar`. The tests also need a git >= 2.54 (`/usr/local/bin/git` on Linux, the one on `PATH` on Windows), `shellcheck`,
-`pre-commit`, and the real `trufflehog` and `betterleaks`
-(paths overridable with `GSG_TEST_TRUFFLEHOG`, `GSG_TEST_BETTERLEAKS`, `GSG_TEST_JQ`, `GSG_TEST_SHELLCHECK`,
-`GSG_TEST_SETSID`, `GSG_TEST_TIMEOUT`).
+Runtime needs bash 4.4 or newer, `setsid` (util-linux; `taskkill` on Windows), `timeout` (coreutils), awk, `jq` and, for
+`install`, `curl` and `tar`. The tests drive `GSG_TEST_GIT` (default `/usr/local/bin/git` on Linux, `/usr/bin/git` on macOS,
+the one on `PATH` on Windows; it must be >= 2.54).
+`shellcheck` 0.11.0, `pre-commit` and the real `trufflehog` and `betterleaks` are optional: the tests that need one skip
+with a reason when it is absent. `tests/fetch-test-tools.sh` downloads the pinned scanners (SHA-256 checked) into
+`~/.cache/git-secret-guard-test-tools`, where the Windows and macOS harness looks by default; on Linux point
+`GSG_TEST_TRUFFLEHOG` and `GSG_TEST_BETTERLEAKS` at them. Other overrides: `GSG_TEST_JQ`, `GSG_TEST_SHELLCHECK`,
+`GSG_TEST_SETSID`, `GSG_TEST_TIMEOUT`.
 
 ## Limits
 
 - **Git >= 2.54 only.** Older git (e.g. `/usr/bin/git` 2.52) ignores config hooks without any message; its commits are
   not scanned.
-- **Only the `pre-commit` event.** Commits that do not fire `pre-commit` are not scanned: merge commits (they fire
-  `pre-merge-commit`), `git cherry-pick`, `git rebase` and `git am`. Probed on the real install (git 2.56): a fake key
+- **Only the `pre-commit` event.** Commits that do not fire `pre-commit` are not scanned: a merge commit that
+  `git merge` makes by itself (it fires `pre-merge-commit`), `git cherry-pick`, `git rebase` and `git am`. A merge finished
+  with `git commit` (after resolving conflicts, or after `git merge --no-commit`) fires `pre-commit` and is scanned. Probed on the real install (git 2.56): a fake key
   committed on a branch with `--no-verify` reached `main` through `cherry-pick` and through `rebase` with exit 0 and no
   scan. Scan before a branch is shared; `--no-verify` there is the hole, not the replay.
 - **About 2 seconds per commit.** Both scanners start on every commit that adds lines (measured 2.0 to 2.2 s per commit
-  on this machine). Commits that add nothing (deletions only, empty) start no scanner.
+  on this machine). Commits that add nothing (deletions only, empty) start no scan (only the betterleaks
+  pre-flight, when there is a `.gitleaks.toml` at HEAD).
 - **The repository's own hooks still run when the scan blocks.** git runs every hook configured for `pre-commit`, the
   config hook and the repository's hookdir hook (`.git/hooks`, husky, the pre-commit framework); a blocked scan does not
   stop the repository's hook from running (probed: its marker file was written while the commit exited 1).
@@ -161,8 +176,8 @@ and `tar`. The tests also need a git >= 2.54 (`/usr/local/bin/git` on Linux, the
 - **A lone AWS access key ID.** betterleaks 1.9.0 reports an AWS key ID (`aws-access-token`) only with the secret access
   key within 5 lines; gitleaks 8.30.1 flagged a lone ID, and trufflehog needs the pair as well. A bare `AKIA...` line
   would therefore commit unnoticed, so the package ships its own rule, `aws-access-key-id` (`lib/betterleaks-rule.toml`),
-  written to match what gitleaks 8.30.1's `aws-access-token` did: the regex with the `A3T` prefix (`A3T`, `AKIA`, `ASIA`,
-  `ABIA` or `ACCA` plus 16 characters), `entropy = 3`, and an allowlist for values ending in `EXAMPLE` (so AWS's documented
+  written to match what gitleaks 8.30.1's `aws-access-token` did: the regex with the `A3T` prefix (`A3T` plus one letter or digit, or
+  `AKIA`, `ASIA`, `ABIA`, `ACCA`, followed by 16 characters from `A-Z` and `2-7`), `entropy = 3`, and an allowlist for values ending in `EXAMPLE` (so AWS's documented
   example ID and an all-`A` placeholder pass, as before; `test_real_our_aws_rule_matches_what_gitleaks_aws_access_token_did`).
   The hook always generates one config, the default rules plus this rule. With no `.gitleaks.toml` at HEAD that config is
   the one betterleaks run. With one, the repository's config runs exactly as written and a second betterleaks run uses the
@@ -197,4 +212,72 @@ and `tar`. The tests also need a git >= 2.54 (`/usr/local/bin/git` on Linux, the
   `--gitleaks-ignore-path` says, probed on 1.9.0). A committed `.betterleaks.toml` or `.gitleaks.toml` cannot load either,
   because `--config` always names a private file. Only the versions of `.gitleaks.toml` and `.gitleaksignore` at HEAD
   count, see [Exemptions](exemptions.md).
-- **Fail closed on timeout.** A scanner running longer than `SCAN_TIMEOUT_SECONDS` (default 300) blocks the commit.
+- **Fail closed on timeout.** A scanner run lasting longer than `SCAN_TIMEOUT_SECONDS` (default 300) blocks the commit.
+  The limit applies to each run, not to the whole hook: with a `.gitleaks.toml` at HEAD the betterleaks pre-flight and
+  the two betterleaks runs (one after the other, next to trufflehog) each get it.
+
+## Maintainer notes
+
+Why the scan code is shaped this way; each point was probed on the pinned versions.
+
+- **trufflehog 3.99.2** exits 0 on unreadable input even with `--fail-on-scan-errors` and only logs an error-level JSON
+  line: those lines are scan errors, and only their `msg` is printed (other fields can hold verifier URLs with the
+  candidate). Findings exit 183. Exit 0 or 183 counts only with `{"msg":"finished scanning","chunks":N}`, `N >= 1`, so
+  `/bin/true` as `TRUFFLEHOG_BIN` is an error. `tests/test_real.sh` pins this and fails if a newer version changes it.
+- **Offline tests.** A fake credential the vendor rejects is `unverified` (hidden by `--results=verified,unknown`); a dead
+  proxy (`HTTPS_PROXY=http://127.0.0.1:9`) makes it `unknown` deterministically, which the real-binary tests use. The one
+  online test, `test_real_trufflehog_online_fake_credential_is_unverified_and_not_reported`, skips offline.
+- **betterleaks 1.9.0 exit codes and logs.** Clean is 0 and `[]`. The default leak status 1 equals the fatal status, so the
+  adapter passes `--exit-code 42` (`GSG_BETTERLEAKS_LEAK_RC`). `WRN skipping ...` still exits 0 or the leak status, so it
+  counts as an error. Only the message words of ERR, FTL and `WRN skipping` lines are printed, cut at the first `key=`
+  word (`msg_words`); FTL lines are ANSI-coloured even with `--no-color` (`strip_ansi` before matching); more than 5000 log
+  lines is an error. Pinned by `test_real_betterleaks_exit_code_semantics_1_9_0` and the other `test_real_betterleaks_*` tests.
+- **betterleaks runs with cwd = the scan dir and target `.`**, so `File` and `Fingerprint` are repo-relative
+  (`src/a.txt:aws-access-key-id:4`), the form `.gitleaksignore` needs; with an absolute target no ignore entry matches
+  (tests use `env -C DIR ... dir .`). Root `.gitleaks.toml`/`.betterleaks.toml` load only without `--config`; `--config`
+  beats them and `BETTERLEAKS_CONFIG[_TOML]`/`GITLEAKS_CONFIG[_TOML]`. `--ignore-gitleaks-allow` turns both inline markers off.
+- **The lone AWS key ID.** `aws-access-token` is a composite rule (it needs an `aws-secret-access-key` within 5 lines). The
+  adapter always writes `$out/betterleaks.toml` (`[extend] useDefault = true` plus `lib/betterleaks-rule.toml`); 1.9.0 logs
+  `Isolating rules` on the `--enable-rule` run. `betterleaks_write_ignore` adds the twins (bounded by
+  `GSG_BETTERLEAKS_IGNORE_MAX_LINES`); `betterleaks_drop_pair_key_rows` drops the key-ID row of a pair. The stand-in tells
+  the runs apart by `--enable-rule` (`STUB_GL_EXTRA_FINDINGS`, `STUB_GL_EXTRA_RC`).
+- **Fixtures.** A finding only a built-in rule makes is `generic_key`/`builtin_line` in `tests/test_exemptions_real.sh`;
+  `fake_aws_secret` is random per call. The pre-flight probe `betterleaks_probe_secret` is a bare fake GitHub token, where
+  `github-pat` fires alone (a `token = "..."` line would also fire `generic-api-key`; an AWS ID is no use because of the
+  composite rule and our own rule).
+- **Extraction.** Added line N sits at line N, the rest blank: never count scan-tree lines. The counts come from
+  `lib/extract.awk` through `GSG_EXTRACT_COUNTS` (written in `END` only on success), and `exempt_extract_tree` sums both
+  passes into `GSG_EXTRACT_FILES`/`GSG_EXTRACT_LINES` (`test_a_missing_or_garbage_counts_file_blocks_and_never_reports_zero`).
+  The awk unquotes C-quoted names, refuses `..`, `.`, empty components and absolute paths (exit 2), and dies on a hunk
+  line that is not `+ - space \` or a diff that ends early. Its stderr goes through `_extract_clean_stderr` and its status
+  comes from `PIPESTATUS` (`test_an_extraction_write_failure_blocks_with_a_message_about_extraction_and_keeps_the_awk_line`).
+- **Config pins.** A command-line `-c` beats repository config, `GIT_CONFIG_PARAMETERS` and `GIT_CONFIG_COUNT`.
+  `tests/test_inherited_config.sh` sets its keys in all three forms; add any new one there
+  (`test_other_inherited_git_settings_cannot_change_what_is_extracted`). `replace_head_with_permissive_commit` is the
+  helper for the replace-ref tests.
+- **Signals.** Scanners start as `setsid bash lib/run-scanner.sh` (pid = group id) through `proc_start_runner` and stop
+  through `proc_stop_group`. `cleanup` sends TERM to the group, waits, polls (bounded), sends KILL, and only then removes
+  the work dir (a surviving `cp -a` could re-create files holding added lines). Adapters use `timeout --foreground`: plain
+  `timeout` makes its own group, which the group kill misses. The process groups and the TERM-then-KILL sequence are Linux and macOS;
+  on Git for Windows there are no groups. MSYS `exec` replaces the Windows process but keeps the MSYS pid, so a Windows pid read
+  at start goes stale and `taskkill /T` stops at the gap: `proc_windows_tree` walks `/proc/*/ppid` at stop time and
+  `proc_stop_group` names each current `winpid` to `taskkill /T /F` (no grace period). A survivor keeps the work dir busy, so the staged lines stay on disk
+  (`test_windows_only_an_interrupted_scan_leaves_no_native_process_and_no_work_dir`). The coverage reminder starts through plain `"$BASH"` there, because the settings hold no `SETSID_BIN`. Background jobs start with SIGINT ignored, so INT tests run
+  git with `env --default-signal=INT`.
+- **Pass line.** `report_pass_line` and `report_nothing_line`; tests use `assert_pass_line_only`. Finding rows print the
+  scanner in an 11-character column (`betterleaks` is 11).
+- **Reminder.** `run_reminder` in the hook; `report_reminder_due`, `report_reminder` and `report_reminder_failed` in
+  `lib/report.sh`. It runs only once `REMINDER_READY=1` (the work dir exists). The child is `rpid`/`rpgid`, killed by
+  `cleanup` like the scanners; `{ wait "$rpid"; } 2>/dev/null` hides bash's own `Killed` message. The record path comes from
+  `state_dir_path` and `GSG_FINDINGS_MAGIC` (`lib/common.sh`, shared with doctor). The `git rev-parse --local-env-vars`
+  names are unset in the child; `test_the_commits_environment_does_not_reach_the_recheck_of_other_repositories` reads them
+  from a `setsid` stand-in, because a fake `git` on `PATH` never runs inside a hook. Tests: `tests/test_reminder.sh`.
+- **Test helpers.** `write_settings` (`tests/lib.sh`) writes `TEST_SETSID`/`TEST_TIMEOUT` and the versions `1.2.3`/`4.5.6`.
+  Lifecycle (`tests/lifecycle.sh`): `lc_begin` wipes the sandbox and installs `lc_systemctl_standin` (log in
+  `$SANDBOX/systemctl.log`, failures from `$SANDBOX/systemctl.fail`) and `lc_brew_standin` (`brew.map`, `brew.fail`,
+  `brew.failon`, `brew.nopopulate`); `gsg` runs the CLI under `env -i`; also `lc_make_fixtures`/`lc_use_fixtures`,
+  `lc_path_without TOOL`, `lc_git_wrapper '<sh condition>'` and `lc_real_lookup` with `gitreal`. Doctor (`tests/doctor.sh`):
+  `dr_begin`, `dr_repo NAME`, `doctor`. Stand-ins: betterleaks without `--report-path` is the pre-flight
+  (`STUB_GL_PREFLIGHT_RC`, `STUB_GL_PREFLIGHT_ERROR`, `STUB_GL_PREFLIGHT_SLEEP`); only real-betterleaks tests settle what a
+  config means; timing assertions allow one extra sleep for the `--version` probe. `tests/fixtures/husky/h` is husky
+  9.1.7's real `h` (MIT, verbatim). `tests/coverage.sh` measures shell lines through xtrace (not `lib/extract.awk`).

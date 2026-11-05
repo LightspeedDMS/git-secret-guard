@@ -171,6 +171,24 @@ test_doctor_accepts_the_macos_command_form_and_checks_the_recorded_bash() {
     assert_contains "$OUT" "PROBLEM  bash: " "names bash"
 }
 
+# ^ why the installed CLI, not the checkout one; only its GSG_ROOT holds the settings file under test
+installed_doctor() { run_cap env -i "${LC_ENV[@]}" "${EXTRA_ENV[@]}" "${TEST_BASH:-bash}" "$LC_DATA/bin/git-secret-guard" doctor; }
+
+test_a_refused_settings_file_names_the_reason_on_macos() {
+    lc_begin && as_macos && lc_make_fixtures && lc_use_fixtures || return 1
+    gsg install
+    assert_rc 0 "install"
+    printf 'SCAN_TIMEOUT_SECONDS=00\n' >>"$LC_DATA/settings" || return 1
+    installed_doctor
+    assert_rc 1 "a settings file load_settings refuses"
+    assert_contains "$ERR" "cannot read $LC_DATA/settings: SCAN_TIMEOUT_SECONDS must be a positive integer, got [00]" "the file and load_settings' own reason"
+    printf 'SCAN_TIMEOUT_SECONDS="0\033[31m\tx"\n' >>"$LC_DATA/settings" || return 1
+    installed_doctor
+    assert_rc 1 "a control character in the bad value"
+    assert_contains "$ERR" "got [0?[31m?x]" "control characters are shown as ?"
+    assert_not_contains "$ERR" $'\033' "no raw escape reaches the terminal"
+}
+
 test_a_command_that_needs_the_gnu_tools_refuses_when_their_directory_is_missing() {
     local gnubin
     lc_begin && as_macos && lc_make_fixtures && lc_use_fixtures || return 1

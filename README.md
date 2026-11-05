@@ -61,7 +61,7 @@ These are the same in every shell. On Windows, commits are scanned from Git Bash
 use a git 2.54 or newer.
 
 A blocked commit lists the scanner, rule, file and line of each finding, never the secret itself. A passing commit prints
-one line, so a clean scan can be told from a hook that never ran:
+one summary line (plus any exemption notices and the reminder below), so a clean scan can be told from a hook that never ran:
 
 ```
 git-secret-guard: scanned 3 files, 214 added lines (trufflehog 3.99.2, betterleaks 1.9.0): no findings, 1s
@@ -98,7 +98,8 @@ Details: [docs/exemptions.md](docs/exemptions.md).
 ## Limits
 
 - Commits made with git older than 2.54 are not scanned (check the git your IDE or GUI client bundles).
-- Only `pre-commit` runs the scan: merges, cherry-picks, rebases and `git am` are not scanned.
+- Only `pre-commit` runs the scan: automatic merge commits, cherry-picks, rebases and `git am` are not scanned (a merge
+  finished with `git commit` is).
 - Binary files, including UTF-16 text, are not scanned. On Windows that matters more than elsewhere: Windows PowerShell
   5.1 can write UTF-16 with `>` and `Out-File`, so a secret saved that way is invisible to the scan.
 - Offline, trufflehog cannot verify a candidate and reports it as `unknown`, which blocks.

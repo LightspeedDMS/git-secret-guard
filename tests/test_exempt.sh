@@ -155,7 +155,7 @@ test_the_pre_flight_needs_an_explicit_positive_timeout() {
     ex betterleaks_config_preflight "$SANDBOX/pf.toml" "$SANDBOX/pf-work"
     assert_rc 1 "no timeout argument"
     assert_contains "$ERR" "needs a timeout in seconds" "says what is missing"
-    for bad in 0 abc -5 ''; do
+    for bad in 0 00 1000000 12345678901234567890 abc -5 ''; do
         ex betterleaks_config_preflight "$SANDBOX/pf.toml" "$SANDBOX/pf-work" "$bad"
         assert_rc 1 "timeout [$bad]"
         assert_contains "$ERR" "needs a timeout in seconds" "timeout [$bad] is refused before anything runs"

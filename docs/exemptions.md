@@ -18,8 +18,8 @@ vendor               # third-party code
 
 | Rule | Detail |
 |---|---|
-| Line format | `<glob><whitespace>#<whitespace><reason>`. A blank line or a line starting with `#` is a comment. |
-| Reason is mandatory | A pattern line with no reason (no `#`, or nothing after it) **blocks the commit**, and the message names each offending line (`git-secret-guard: .secret-scan-ignore line 3: a reason is required ...`). Control characters, `..` components, an empty pattern and more than 1000 lines are rejected the same way. |
+| Line format | `<glob><whitespace>#<reason>`: whitespace before the `#` is required (a `#` touching the glob is part of the glob), after it optional. A blank line or a line starting with `#` is a comment. |
+| Reason is mandatory | A pattern line with no reason (no `#`, or nothing after it) **blocks the commit**, and the message names each offending line (`git-secret-guard: .secret-scan-ignore line 3: a reason is required ...`). A control character or a `..` component in the pattern, an empty pattern and more than 1000 lines are rejected the same way (the reason text is not checked and never printed). |
 | Globs | git's `glob` pathspecs relative to the repository root. `*` does **not** cross `/`, `**` does: `*.lock` matches top-level lock files only, `**/*.lock` matches them at any depth. A plain name (`vendor`, `docs/`) excludes everything below it, but only at that path. A leading `/` or `./` is dropped. There is no `!` negation (a leading `!` is just part of the name). |
 | What happens | Excluded files are given to neither trufflehog nor betterleaks. When any staged file was excluded, the commit prints `N staged file(s) excluded by .secret-scan-ignore` (a count, never names or content). |
 | HEAD only | The file is read from HEAD's tree (`git ls-tree`, then `git cat-file blob`), never from the index or the work tree. With no HEAD (the first commit) or no entry there are no excludes. It must be a **regular file** (mode 100644 or 100755): a symlink (which would read as its target text), a directory, or a tree git cannot read blocks the commit. Staging a new or edited `.secret-scan-ignore` and a finding in the same commit still reports the finding. |
@@ -91,7 +91,9 @@ either name; the finding names the rule that fires, which tells you the fingerpr
 - `.gitleaks.toml` at HEAD is passed to betterleaks with `--config`: its custom rules fire and its allowlists apply.
 - `.gitleaksignore` at HEAD is passed with `--gitleaks-ignore-path`. A fingerprint `<path>:<rule>:<line>` (for
   example `src/k.txt:generic-api-key:1`) suppresses exactly that finding and no other; the line is the line number in
-  the version being committed, so edits above it shift the fingerprint.
+  the version being committed, so edits above it shift the fingerprint. One exception: a finding inside a root
+  `.gitleaksignore` or `.betterleaksignore` that the commit adds is scanned under the renamed path (see above), so its
+  fingerprint is `.gitleaksignore.gsg-committed:<rule>:<line>`, although the finding row prints `.gitleaksignore`.
 - Versions in the index or work tree are never honored. A commit that stages its own `.gitleaks.toml` or
   `.gitleaksignore` is scanned with the HEAD versions (or the defaults), and the staged file is just scanned as text.
 - Each applied file prints one line (`using .gitleaks.toml from HEAD ...`), so the exemption is never silent.
@@ -103,7 +105,8 @@ either name; the finding names the rule that fires, which tells you the fingerpr
   nothing from the repository and under the same default skip list as without a config: an `allowlist`, `disabledRules` or
   a missing `[extend]` do not hide a lone ID. A `.gitleaksignore` fingerprint (`src/k.txt:aws-access-key-id:1`, or the old
   `src/k.txt:aws-access-token:1`) or an inline marker does.
-- **A HEAD `.gitleaks.toml` must load on its own, which refuses every `[extend] path`.** Verified on 1.9.0: betterleaks
+- **A HEAD `.gitleaks.toml` must load on its own, which refuses a relative `[extend] path`** (an absolute one is a
+  residual, see the end of this point). Verified on 1.9.0: betterleaks
   resolves `extend.path` against its working directory, which here is the scan tree of added lines, not the config's
   directory. A commit could therefore stage the file a HEAD config extends and have betterleaks honor it (for example an
   allowlist that mutes everything), and a legitimate `path = "ci/base.toml"` would fail every scan. No line-based
@@ -111,7 +114,7 @@ either name; the finding names the rule that fires, which tells you the fingerpr
   a `[` line, `"path"` is the key `path`, `"extend".path`, `Extend.Path` and inline tables are all valid), so the
   hook asks betterleaks itself: before scanning it runs the real binary with the HEAD copy from an **empty working
   directory** (over a separate probe directory, see the next bullet), under the scan timeout. Any failure (a relative path cannot be opened there, a syntax error, a timeout, any
-  non-zero exit) **blocks the commit** with `.gitleaks.toml at HEAD does not load on its own (betterleaks said: ...)`;
+  exit status other than 0 or the leak status the hook asks for, 42) **blocks the commit** with `.gitleaks.toml at HEAD does not load on its own (betterleaks said: ...)`;
   only the message words of betterleaks' first error line are shown (its colour codes are stripped first: 1.9.0 colours
   fatal lines even with `--no-color`), never its `key=value` fields. Inline the base config into
   `.gitleaks.toml`. Verified spellings: 22 (`test_real_every_spelling_of_extend_path_is_refused`).
@@ -151,3 +154,29 @@ For a repository you do not control, where an in-repo file is not an option:
 - Automation can do the same for one process without touching any file:
   `GIT_CONFIG_PARAMETERS="'hook.git-secret-guard.enabled'='false'"`.
 - `git commit --no-verify` skips the scan for one commit.
+
+## Maintainer notes
+
+- **HEAD reads** go through `exempt_head_blob` (`git ls-tree --full-tree HEAD -- <path>`, then `git cat-file blob`); git's
+  stderr lands in `EXEMPT_GIT_ERR` and becomes `cannot read X at HEAD (git said: ...)`. The gitleaks files are
+  materialised as `repo-gitleaks.toml` and `repo-gitleaksignore`. Tests: `tests/test_exemptions.sh`,
+  `tests/test_exemptions_real.sh`.
+- **Pathspecs** (git 2.56): each pattern becomes `:(exclude,top,glob)<p>`. `top` is required: without it `/x` and `../x`
+  abort and `.` excludes everything. `**/` and `[` exclude nothing; malformed globs never fail. `scan_ignore_parse`
+  rows are `LINE<TAB>pattern<TAB>as-written`.
+- **Excludes cannot be re-included**, so with excludes `exempt_extract_tree` runs two diffs: everything but the ignore
+  file with the excludes, then the ignore file alone.
+- **Catch-all checks.** `_warn_if_catch_all` has `scan_ignore_probe_init` build a throwaway repository (`git init
+  --template=` in the work dir) the first time a pattern holds `*`, `?` or `[`; `scan_ignore_scope` then classifies each
+  such pattern with git's own `diff --cached --name-only`; the `git rev-parse
+  --local-env-vars` names are unset for it (`GIT_INDEX_FILE` is set during `commit -a`). `_warn_if_union_covers_tree`
+  compares `git ls-files -z --cached` counts with and without all excludes (per-pattern probes miss `src/** lib/**`).
+  `exempt_warn_rows` is shared with doctor.
+- **Pre-flight directories.** `betterleaks_config_preflight` runs the HEAD config with cwd = an empty
+  `$work/preflight/empty` (made before the scan tree exists) on the target `$work/preflight/probe`; the timeout is an
+  explicit argument, and a missing one, or one outside 1 to 999999, is refused.
+- **Built-in-rules status is decided by behaviour, never by parsing TOML.** A TOML-aware awk and a regex detector were
+  tried and were unsound both ways (multi-line strings; case-insensitive, dotted, inline and quoted keys); do not
+  reintroduce them (`test_real_every_spelling_that_keeps_the_default_rules_prints_no_warning`,
+  `test_real_a_use_default_setting_hidden_in_a_multi_line_string_still_warns`,
+  `test_real_an_allowlist_that_covers_everything_also_warns_that_the_built_in_rules_are_off`).

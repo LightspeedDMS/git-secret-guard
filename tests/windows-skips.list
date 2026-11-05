@@ -10,6 +10,10 @@ test_doctor_findings::test_a_repository_path_the_record_cannot_hold_is_reported_
 test_doctor_findings::test_machine_problems_are_recorded_as_machine_scope | NTFS has no executable bit, chmod -x changes nothing
 test_doctor_findings::test_recheck_keeps_a_recorded_repo_and_worktree_it_cannot_reach_and_says_so | NTFS ignores chmod, so nothing is unreadable
 test_doctor_findings::test_recheck_reruns_the_machine_checks_and_prints_what_is_still_broken | NTFS has no executable bit, chmod -x changes nothing
+test_doctor_home::test_a_folder_find_calls_operation_not_permitted_is_listed_and_the_rest_is_checked | NTFS ignores chmod, so nothing is unreadable
+test_doctor_home::test_an_unreadable_trash_beside_another_locked_folder_is_not_named | NTFS ignores chmod, so nothing is unreadable
+test_doctor_home::test_operation_not_permitted_is_explained_only_when_every_line_says_so | NTFS ignores chmod, so nothing is unreadable
+test_doctor_home::test_the_library_is_left_out_of_the_unreadable_folder_search_too | NTFS ignores chmod, so nothing is unreadable
 test_exemptions_real::test_real_an_absolute_extend_path_to_an_existing_file_still_loads_a_documented_residual | the residual is about a POSIX absolute path; a native betterleaks.exe cannot read it
 test_extract::test_filenames_with_spaces_quotes_and_tabs | NTFS forbids quotes and tabs in file names
 test_extract::test_shell_metacharacters_in_paths_are_inert | NTFS forbids some of these characters in file names

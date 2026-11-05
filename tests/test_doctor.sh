@@ -32,9 +32,11 @@ test_a_doctor_that_cannot_run_exits_2_and_says_why() {
     assert_rc 2 "a root that is not a directory"
     assert_contains "$ERR" "git-secret-guard: root $SANDBOX/no-such-dir is not a directory" "names the root"
     assert_empty "$OUT" "and prints no report"
-    run_cap env -i "${LC_ENV[@]}" "${EXTRA_ENV[@]}" HOME="$SANDBOX/no-such-home" "$GSG_PROJECT/bin/git-secret-guard" doctor
-    assert_rc 2 "the default root, HOME, does not exist"
-    assert_contains "$ERR" "default root $SANDBOX/no-such-home is not a directory; pass --roots DIR" "says how to fix it"
+    set_env HOME="$SANDBOX/no-home"
+    gsg doctor
+    assert_rc 2 "the default root, the home directory, does not exist"
+    assert_contains "$ERR" "default root $SANDBOX/no-home is not a directory; pass --roots DIR" "says how to fix it"
+    set_env HOME="$LC_HOME"
     lc_fake_git 2.40.0 || return 1
     doctor
     assert_rc 2 "the git first on PATH is too old to evaluate config hooks"

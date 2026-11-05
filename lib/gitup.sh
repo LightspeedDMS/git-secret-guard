@@ -434,7 +434,7 @@ gitup_run_apply() {
     case "$rc" in
         0) return 0 ;;
         2)
-            printf '%s: the git upgrade must be finished outside this process; install stopped and the git on this machine is unchanged until that step is done; next: %s\n' \
+            printf '%s: the git upgrade must be finished outside this process; install stopped and the git on this machine stays as it was until that step is done; next: %s\n' \
                 "$GSG_NAME" "${GITUP_NEXT:-see the output above}"
             return 3
             ;;
@@ -471,7 +471,7 @@ gitup_offer_upgrade() {
     if [ "$crc" -ne 0 ]; then
         if [ "$crc" -eq 2 ]; then extra=" (there is no terminal to ask on, so the flag is the only way to say yes)"; fi
         install_require_git
-        printf '%s: nothing was changed; to let install upgrade git run: %s install --upgrade-git%s\n' "$GSG_NAME" "$GSG_NAME" "$extra" >&2
+        printf '%s: %s; to let install upgrade git run: %s install --upgrade-git%s\n' "$GSG_NAME" "$(brew_unchanged_text)" "$GSG_NAME" "$extra" >&2
         return 1
     fi
     gitup_need_elevation || return 1

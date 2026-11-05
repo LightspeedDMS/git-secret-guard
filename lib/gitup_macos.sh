@@ -83,5 +83,5 @@ gitup_macos_apply() {
 
 # ^ invariant no takeover capability on macOS; the core prints this text for --take-over-system-git, changes nothing and install goes on
 gitup_macos_takeover_unavailable() {
-    printf '/usr/bin/git is on the sealed, SIP-protected system volume and cannot be replaced on macOS; nothing was changed there, install goes on and uses the Homebrew git'
+    printf '/usr/bin/git is on the sealed, SIP-protected system volume and cannot be replaced on macOS; no file there is touched, install goes on and uses the Homebrew git'
 }

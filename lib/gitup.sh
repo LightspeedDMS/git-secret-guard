@@ -48,7 +48,7 @@ gitup_registry() {
         # ^ see doc:CONTRIBUTING.md
         debian) REPLY="" ;;
         # ^ see doc:CONTRIBUTING.md
-        macos) REPLY="" ;;
+        macos) REPLY=macos ;;
         # ^ see doc:CONTRIBUTING.md
         windows) REPLY="" ;;
         # ^ see doc:CONTRIBUTING.md

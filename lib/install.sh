@@ -3,10 +3,19 @@
 GSG_MIN_GIT_MAJOR=2
 GSG_MIN_GIT_MINOR=54
 
+# ^ external /usr/bin/git on a Mac without developer tools is a shim opening an install dialog; xcode-select -p answers without one
+# ^ invariant true only on macOS, for the git of the system directory, when its xcode-select reports no developer directory; such a git is never run
+install_git_shim_unusable() {
+    local usrbin="${GITUP_USRBIN:-/usr/bin}"
+    if [ "$1" != "$usrbin/git" ] || ! brew_is_macos || [ ! -x "$usrbin/xcode-select" ]; then return 1; fi
+    ! "$usrbin/xcode-select" -p >/dev/null 2>&1
+}
+
 # ^ external install-time lookups (type -P) are legitimate here; the hook never resolves a tool through PATH
 # ^ see test:test_the_hook_never_looks_tools_up_on_PATH
 install_git_version() {
     local out
+    if install_git_shim_unusable "$1"; then return 1; fi
     # ^ external git 2.56 --version dies on a syntactically broken global config; the probe must not read user config
     out="$(GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null "$1" --version 2>/dev/null)" || return 1
     if [[ $out =~ ^git\ version\ ([0-9]+)\.([0-9]+)(\.[0-9]+)? ]]; then
@@ -102,6 +111,10 @@ install_git_hint() {
         return 0
     fi
     install_os_family
+    if brew_is_macos; then
+        printf '%s: on macOS run: %s install --upgrade-git; it installs or upgrades git with Homebrew, see docs/platforms.md\n' "$GSG_NAME" "$GSG_NAME" >&2
+        return 0
+    fi
     case "$REPLY" in
         ubuntu)
             printf '%s: on Ubuntu get a current git with: sudo add-apt-repository ppa:git-core/ppa && sudo apt install git\n' "$GSG_NAME" >&2
@@ -171,6 +184,9 @@ install_report_other_gits() {
         ver="$(install_git_version "$cand")" || ver="of unknown version"
         printf '%s: warning: %s is git %s; it ignores config-based hooks without any message, so commits made with it are not scanned (the git in use is %s, git %s)%s\n' \
             "$GSG_NAME" "$cand" "$ver" "$GSG_GIT" "$(install_git_version "$GSG_GIT")" "$(gitup_takeover_note "$cand")" >&2
+        if brew_is_macos; then
+            printf '%s: on macOS the old git stays where it is (the system volume cannot be changed); GUI clients and tools that start with PATH=/usr/bin:/bin still use it and are not scanned\n' "$GSG_NAME" >&2
+        fi
     done
 }
 

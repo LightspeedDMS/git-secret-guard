@@ -60,7 +60,7 @@ lc_gitup_standins() {
     cat >"$SANDBOX/pathbin/sudo" <<'EOF' || return 1
 #!/bin/sh
 d="$(cd "${0%/*}/.." && pwd -P)" || exit 1
-echo "sudo $*" >>"$d/gitup.log"
+printf 'sudo %s\n' "$*" >>"$d/gitup.log"
 if [ -f "$d/sudo.stall" ]; then
     case " $* " in
         *"$(cat "$d/sudo.stall")"*)
@@ -101,7 +101,7 @@ EOF
     cat >"$SANDBOX/pathbin/rpm" <<'EOF' || return 1
 #!/bin/sh
 d="$(cd "${0%/*}/.." && pwd -P)" || exit 1
-echo "rpm $*" >>"$d/gitup.log"
+printf 'rpm %s\n' "$*" >>"$d/gitup.log"
 answer() { if [ -f "$d/$1" ]; then cat "$d/$1"; exit 0; fi; echo "error: the rpm stand-in has no $1" >&2; exit 1; }
 case "$*" in
     "-qf --qf %{NAME}\n -- "*) if [ -f "$d/rpm.owner" ]; then cat "$d/rpm.owner"; exit 0; fi; echo "file $5 is not owned by any package" >&2; exit 1 ;;
@@ -117,7 +117,7 @@ EOF
     cat >"$SANDBOX/pathbin/dnf" <<'EOF' || return 1
 #!/bin/sh
 d="$(cd "${0%/*}/.." && pwd -P)" || exit 1
-echo "dnf $*" >>"$d/gitup.log"
+printf 'dnf %s\n' "$*" >>"$d/gitup.log"
 case " $* " in *" repoquery "* | *" repolist "*) if [ -t 0 ]; then echo "query-stdin-is-a-terminal" >>"$d/gitup.log"; fi ;; esac
 if [ -f "$d/dnf.fail" ]; then
     case " $* " in *"$(cat "$d/dnf.fail")"*) echo "Error: injected dnf failure" >&2; exit 1 ;; esac
@@ -156,13 +156,13 @@ EOF
     cat >"$SANDBOX/pathbin/restorecon" <<'EOF' || return 1
 #!/bin/sh
 d="$(cd "${0%/*}/.." && pwd -P)" || exit 1
-echo "restorecon $*" >>"$d/gitup.log"
+printf 'restorecon %s\n' "$*" >>"$d/gitup.log"
 exit 0
 EOF
     cat >"$SANDBOX/pathbin/make" <<'EOF' || return 1
 #!/bin/sh
 d="$(cd "${0%/*}/.." && pwd -P)" || exit 1
-echo "make $*" >>"$d/gitup.log"
+printf 'make %s\n' "$*" >>"$d/gitup.log"
 { echo "PATH=$PATH"; env | cut -d= -f1 | LC_ALL=C sort | tr '\n' ' '; echo; echo "cwd=$(pwd)"; } >>"$d/make.env"
 if [ -f "$d/make.hang" ]; then : >"$d/make.started"; exec sleep 60; fi
 if [ -f "$d/make.fail" ]; then echo "make: *** injected failure" >&2; exit 2; fi
@@ -210,7 +210,7 @@ EOF
     cat >"$SANDBOX/pathbin/ldd" <<'EOF' || return 1
 #!/bin/sh
 d="$(cd "${0%/*}/.." && pwd -P)" || exit 1
-echo "ldd $*" >>"$d/gitup.log"
+printf 'ldd %s\n' "$*" >>"$d/gitup.log"
 if [ -f "$d/ldd.out" ]; then
     if [ ! -f "$d/ldd.only" ]; then cat "$d/ldd.out"; exit 0; fi
     case "$1" in *"$(cat "$d/ldd.only")"*) cat "$d/ldd.out"; exit 0 ;; esac
@@ -219,20 +219,24 @@ echo "	not a dynamic executable" >&2
 exit 1
 EOF
     chmod 755 "$SANDBOX/pathbin/sudo" "$SANDBOX/pathbin/dnf" "$SANDBOX/pathbin/restorecon" "$SANDBOX/pathbin/make" "$SANDBOX/pathbin/df" "$SANDBOX/pathbin/ldd" "$SANDBOX/pathbin/rpm" || return 1
-    # ^ why copies, not symlinks; gitup_system_bin checks the owner of the target, and /usr/bin files belong to root, not to the test user
+    # ^ why exec wrappers, not symlinks or copies; gitup_system_bin wants a regular file owned by the test user, and macOS kills a copied system binary
+    # ^ why TEST_BASE_PATH, not /usr/bin; on macOS the GNU directory comes first, and the install needs GNU mv -T
+    local -a base_dirs
+    IFS=: read -r -a base_dirs <<<"$TEST_BASE_PATH"
     for tool in cp rm mv mkdir install ln rmdir touch; do
         src=""
-        for dir in /usr/bin /bin; do
+        for dir in "${base_dirs[@]}"; do
             if [ -x "$dir/$tool" ]; then
                 src="$dir/$tool"
                 break
             fi
         done
         if [ -z "$src" ]; then
-            printf 'lc_gitup_standins: no %s in /usr/bin or /bin\n' "$tool" >&2
+            printf 'lc_gitup_standins: no %s on TEST_BASE_PATH (%s)\n' "$tool" "$TEST_BASE_PATH" >&2
             return 1
         fi
-        cp -- "$src" "$SANDBOX/pathbin/$tool" || return 1
+        printf '#!/bin/sh\nexec %s "$@"\n' "$src" >"$SANDBOX/pathbin/$tool" || return 1
+        chmod 755 "$SANDBOX/pathbin/$tool" || return 1
     done
     printf '%s' "$GIT" >"$SANDBOX/real-git"
 }

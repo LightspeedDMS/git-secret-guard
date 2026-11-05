@@ -242,8 +242,8 @@ betterleaks_config_preflight() {
     local conf="$1" base="$2/preflight" log="$2/preflight.log" limit="${3:-}" rc line msg=""
     local empty="$base/empty" probe="$base/probe" problem
     local -a lines=()
-    if [[ ! $limit =~ ^[1-9][0-9]*$ ]]; then
-        printf '%s: betterleaks_config_preflight needs a timeout in seconds (a positive integer); commit blocked, nothing was scanned.\n' "$GSG_NAME" >&2
+    if [[ ! $limit =~ ^[1-9][0-9]{0,5}$ ]]; then
+        printf '%s: betterleaks_config_preflight needs a timeout in seconds (an integer, 1 to 999999); commit blocked, nothing was scanned.\n' "$GSG_NAME" >&2
         return 1
     fi
     if problem="$(tool_unusable timeout "${TIMEOUT_BIN:-}")"; then

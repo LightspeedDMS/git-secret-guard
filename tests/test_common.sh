@@ -74,12 +74,32 @@ test_strip_ansi_removes_colour_sequences_and_nothing_else() {
 }
 
 test_load_settings_rejects_bad_timeouts() {
-    local bad
-    for bad in 0 abc -5 "" 1.5; do
+    local bad good
+    # ^ why 007 is refused, not read as 7; one strict form like the pre-flight, 00 means no limit to GNU timeout
+    # ^ why 1000000 and 20 digits are refused, not run; GNU timeout fails open on a huge value, 999999 is the largest accepted
+    for bad in 0 00 000 007 1000000 12345678901234567890 abc -5 "" 1.5; do
         write_settings /a/t /a/g /a/j "SCAN_TIMEOUT_SECONDS=\"$bad\""
         in_common "load_settings '$SHARE/settings'"
         assert_rc 1 "timeout [$bad] refused"
-        assert_contains "$ERR" "SCAN_TIMEOUT_SECONDS" "names the setting"
+        assert_contains "$ERR" "SCAN_TIMEOUT_SECONDS must be a positive integer, got [$bad]" "names the setting"
+    done
+    for good in 1 10 300 86400 999999; do
+        write_settings /a/t /a/g /a/j "SCAN_TIMEOUT_SECONDS=\"$good\""
+        in_common "load_settings '$SHARE/settings'"
+        assert_rc 0 "timeout [$good] accepted"
+    done
+}
+
+test_hook_blocks_on_a_padded_or_oversized_timeout_setting() {
+    local bad
+    new_repo zeropad || return 1
+    for bad in 00 000 007 1000000; do
+        use_stubs "SCAN_TIMEOUT_SECONDS=$bad"
+        stage_file a.txt one
+        commit_cap "x"
+        assert_rc 1 "[$bad] blocks"
+        assert_contains "$ERR" "SCAN_TIMEOUT_SECONDS must be a positive integer, got [$bad]" "[$bad] named"
+        assert_contains "$ERR" "nothing was scanned" "[$bad] says nothing was scanned"
     done
 }
 

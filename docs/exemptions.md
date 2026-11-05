@@ -174,7 +174,7 @@ For a repository you do not control, where an in-repo file is not an option:
   `exempt_warn_rows` is shared with doctor.
 - **Pre-flight directories.** `betterleaks_config_preflight` runs the HEAD config with cwd = an empty
   `$work/preflight/empty` (made before the scan tree exists) on the target `$work/preflight/probe`; the timeout is an
-  explicit argument, and a missing or non-positive one is refused.
+  explicit argument, and a missing one, or one outside 1 to 999999, is refused.
 - **Built-in-rules status is decided by behaviour, never by parsing TOML.** A TOML-aware awk and a regex detector were
   tried and were unsound both ways (multi-line strings; case-insensitive, dotted, inline and quoted keys); do not
   reintroduce them (`test_real_every_spelling_that_keeps_the_default_rules_prints_no_warning`,

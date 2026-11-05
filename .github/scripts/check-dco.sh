@@ -11,8 +11,13 @@ die() {
     exit 2
 }
 
+lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+
 [ "$#" -eq 2 ] || die "usage: check-dco.sh BASE HEAD"
-case "$max_commits" in '' | *[!0-9]*) die "DCO_MAX_COMMITS must be a number, got [$max_commits]" ;; esac
+# ^ why no leading zero, not a numeric test alone; bash arithmetic reads 08 as a bad octal number
+bound_ok=1
+case "$max_commits" in '' | 0* | *[!0-9]*) bound_ok=0 ;; esac
+[ "$bound_ok" -eq 1 ] || die "DCO_MAX_COMMITS must be a whole number from 1 (no leading zero), got [$max_commits]"
 
 base="$1"
 head="$2"
@@ -35,9 +40,14 @@ while IFS= read -r sha; do
     subject="$(git log -1 --format=%s "$sha")" || die "cannot read the subject of $sha"
     short="$(git rev-parse --short "$sha")" || die "cannot shorten $sha"
     signoffs="$(git log -1 --format='%(trailers:key=Signed-off-by,valueonly,unfold)' "$sha")" || die "cannot read the trailers of $sha"
+    want_email="$(lower "$email")"
     found=0
     while IFS= read -r line; do
-        if [ "$line" = "$name <$email>" ]; then
+        # ^ why name exact and email lower-cased, not both exact; mail addresses ignore case in practice, a name is spelled as written
+        rest="${line##* <}"
+        [ "$rest" != "$line" ] || continue
+        [ "${rest%>}>" = "$rest" ] || continue
+        if [ "${line%" <"*}" = "$name" ] && [ "$(lower "${rest%>}")" = "$want_email" ]; then
             found=1
             break
         fi
@@ -53,4 +63,6 @@ if [ "$bad" -gt 0 ]; then
     printf 'Fix the last commit: git commit --amend -s --no-edit\nFix a whole branch:  git rebase --signoff origin/main   (then push with --force-with-lease)\nSee CONTRIBUTING.md and DCO.txt.\n' >&2
     exit 1
 fi
-printf 'check-dco: %d commits checked, all signed off by their author\n' "$total"
+noun=commits
+if [ "$total" -eq 1 ]; then noun=commit; fi
+printf 'check-dco: %d %s checked, all signed off by their author\n' "$total" "$noun"

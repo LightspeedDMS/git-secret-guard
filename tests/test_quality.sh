@@ -440,19 +440,23 @@ test_third_party_licenses_list_every_component_at_its_tools_lock_version() {
         grep -F -- "$tool" THIRD_PARTY_LICENSES | grep -qF -- "$version" || fail "THIRD_PARTY_LICENSES has no row with $tool and $version from tools.lock"
     done <tools.lock
     for needle in 'AGPL-3.0' 'MIT' 'GPL-2.0' 'not redistributed' 'husky' 'typicode' 'Zachary Rice' 'Stephen Dolan' \
+        'Heimdal' 'Kungliga Tekniska' 'NetBSD' 'Lucent' 'decNumber' \
         'https://github.com/trufflesecurity/trufflehog' 'https://github.com/betterleaks/betterleaks' 'https://github.com/jqlang/jq'; do
         grep -qF -- "$needle" THIRD_PARTY_LICENSES || fail "THIRD_PARTY_LICENSES does not mention [$needle]"
     done
 }
 
 # ^ why the maintainer link built from fragments, not a literal; test_no_tracked_file_names_an_internal_host_service_or_account searches this file
+# shellcheck disable=SC2016
 test_the_security_policy_and_the_maintainer_are_published() {
     cd -- "$GSG_PROJECT" || return 1
     local needle
     assert_file SECURITY.md "SECURITY.md"
-    for needle in 'Report a vulnerability' 'security/advisories/new' 'do not open a public issue' '5 business days' 'latest release'; do
+    for needle in 'Report a vulnerability' 'security/advisories/new' 'do not open a public issue' '5 business days' 'current `main` branch' 'merged to `main`'; do
         grep -qiF -- "$needle" SECURITY.md || fail "SECURITY.md does not mention [$needle]"
     done
+    if grep -qi 'latest release' SECURITY.md; then fail "SECURITY.md speaks of releases, and the repository has none"; fi
+    grep -qF 'GSG_TEST_SERVICE_UNIT' CONTRIBUTING.md || fail "CONTRIBUTING.md does not document GSG_TEST_SERVICE_UNIT"
     grep -qF -- "[js""battig](https://github.com/js""battig)" README.md || fail "README.md does not name the maintainer as a link"
     for needle in 'DCO.txt' 'SECURITY.md' 'THIRD_PARTY_LICENSES'; do
         grep -qF -- "($needle)" README.md || fail "the README documentation table does not link $needle"

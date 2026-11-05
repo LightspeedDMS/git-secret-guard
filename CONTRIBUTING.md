@@ -25,6 +25,7 @@ Development is supported on all three platforms:
 | **Run the tests with** | `tests\run.cmd` (PowerShell, cmd) or `tests/run.sh` (Git Bash) | `tests/run.sh` | `tests/run.sh` |
 
 Older git silently ignores config hooks, so most tests would prove nothing; set `GSG_TEST_GIT=/path/to/git` to use another.
+`GSG_TEST_SERVICE_UNIT=<unit>` runs the service-environment tests against a systemd unit whose `User=` is you and that sets `PATH=`; unset, those tests skip.
 
 - [shellcheck](https://github.com/koalaman/shellcheck) **0.11.0** for the lint gate (`pipx install shellcheck-py==0.11.0.1`;
   on Windows also the `shellcheck.exe` of the [0.11.0 release](https://github.com/koalaman/shellcheck/releases/tag/v0.11.0),

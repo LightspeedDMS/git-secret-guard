@@ -24,8 +24,8 @@ Please include:
 ## What to expect
 
 We aim to acknowledge a report within 5 business days, and to tell you what we found and what we plan to do after
-that. Once a fix is released we will publish an advisory and, if you wish, credit you.
+that. Once a fix is merged to `main` we will publish an advisory and, if you wish, credit you.
 
 ## Supported versions
 
-Only the latest release on `main` is supported; fixes are made there and not backported.
+Only the current `main` branch is supported. Fixes land on `main` and are not backported.

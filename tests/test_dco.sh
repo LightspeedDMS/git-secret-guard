@@ -149,11 +149,46 @@ test_a_range_longer_than_the_bound_is_refused_not_truncated() {
     assert_contains "$ERR" "DCO_MAX_COMMITS" "names the knob"
 }
 
+test_a_sign_off_email_that_differs_only_in_case_passes_but_the_name_is_exact() {
+    dco_repo email_case || return 1
+    dco_commit $'mixed case mail\n\nSigned-off-by: Case Author <case@x.com>' --author "Case Author <Case@X.com>" || return 1
+    dco_check "$DCO_BASE" HEAD
+    assert_rc 0 "email addresses are compared without regard to case"
+    dco_commit $'mixed case name\n\nSigned-off-by: case author <case@x.com>' --author "Case Author <case@x.com>" || return 1
+    dco_check "$DCO_BASE" HEAD
+    assert_rc 1 "the name must match exactly"
+}
+
+test_a_zero_or_leading_zero_commit_bound_is_a_usage_error() {
+    dco_repo bad_bound || return 1
+    dco_commit "one" -s || return 1
+    local bad
+    for bad in 0 00 08 007; do
+        run_cap env -i "${GSG_ENV[@]}" DCO_MAX_COMMITS="$bad" "${TEST_BASH:-bash}" "$DCO_SCRIPT" "$DCO_BASE" HEAD
+        assert_rc 2 "DCO_MAX_COMMITS=$bad"
+        assert_contains "$ERR" "DCO_MAX_COMMITS must be a whole number from 1" "[$bad] gets a clear message"
+    done
+    run_cap env -i "${GSG_ENV[@]}" DCO_MAX_COMMITS=10 "${TEST_BASH:-bash}" "$DCO_SCRIPT" "$DCO_BASE" HEAD
+    assert_rc 0 "a plain number is accepted"
+}
+
+test_the_pass_line_uses_the_singular_for_one_commit() {
+    dco_repo singular || return 1
+    dco_commit "only" -s || return 1
+    dco_check "$DCO_BASE" HEAD
+    assert_rc 0 "one signed commit"
+    assert_contains "$OUT" "1 commit checked" "singular"
+    assert_not_contains "$OUT" "1 commits" "no '1 commits'"
+}
+
+# shellcheck disable=SC2016
 test_the_ci_workflow_runs_the_check_on_pull_requests_only() {
     local wf="$GSG_PROJECT/.github/workflows/tests.yml"
     grep -qF '.github/scripts/check-dco.sh' "$wf" || fail "the workflow does not run check-dco.sh"
     grep -qF "github.event_name == 'pull_request'" "$wf" || fail "the dco job is not limited to pull requests"
     grep -qF 'fetch-depth: 0' "$wf" || fail "the dco job does not fetch the history it compares"
+    grep -qF 'git show "$PR_BASE:.github/scripts/check-dco.sh"' "$wf" || fail "the dco job does not run the base commit's copy of the script"
+    grep -qF 'cat-file -e "$PR_BASE:.github/scripts/check-dco.sh"' "$wf" || fail "the dco job does not test whether the base has the script before falling back"
 }
 
 test_the_repository_ships_the_verbatim_certificate_and_documents_the_sign_off() {

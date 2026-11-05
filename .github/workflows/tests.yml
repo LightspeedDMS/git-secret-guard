@@ -63,7 +63,14 @@ jobs:
         env:
           PR_BASE: ${{ github.event.pull_request.base.sha }}
           PR_HEAD: ${{ github.event.pull_request.head.sha }}
-        run: bash .github/scripts/check-dco.sh "$PR_BASE" "$PR_HEAD"
+        run: |
+          # the base branch's copy of the script judges the pull request, so a change to the check cannot pass itself;
+          # the checked-out copy runs only when the base has none yet (the pull request that adds the script)
+          if git cat-file -e "$PR_BASE:.github/scripts/check-dco.sh" 2>/dev/null; then
+            git show "$PR_BASE:.github/scripts/check-dco.sh" | bash -s -- "$PR_BASE" "$PR_HEAD"
+          else
+            bash .github/scripts/check-dco.sh "$PR_BASE" "$PR_HEAD"
+          fi
 
   # The supported platform (docs/platforms.md): Ubuntu 24.04 with a git from the git-core PPA.
   # The suite runs on the head and, for pull requests, on the base, so a failure that exists already is not blamed on the change.

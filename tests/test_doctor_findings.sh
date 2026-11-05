@@ -401,7 +401,8 @@ repo${TAB}$DR_REAL/two${TAB}-${TAB}$(off_text two)" "a valid, complete file (the
 repo_line() { printf 'repo%s%s/%s%s-%s%s' "$TAB" "$DR_REAL" "$1" "$TAB" "$TAB" "$(off_text "$1")"; }
 
 test_a_full_run_keeps_recorded_repos_it_could_not_have_seen_under_its_roots() {
-    local deep=dev/g/s/d/deep nm=node_modules/pkg locked=locked/inner rc
+    local deep nm=node_modules/pkg locked=locked/inner rc
+    deep="$(deep_path dev)/deep"
     dr_begin && dr_repo "$deep" && dr_repo "$nm" && dr_repo "$locked" && dr_repo gone || return 1
     write_record "$(repo_line "$deep")" "$(repo_line "$nm")" "$(repo_line "$locked")" "$(repo_line gone)" || return 1
     rm -rf -- "$DR_ROOTS/gone" || return 1

@@ -1,8 +1,11 @@
 # shellcheck shell=bash disable=SC2153,SC2034
 
 # ^ invariant a repository is at most 3 directories below a root => its .git entry is at find depth 4
-GSG_DOCTOR_FIND_DEPTH=4
-GSG_DOCTOR_MAX_ENTRIES=2000
+# ^ why 32, not unbounded; the default root is the whole home, a depth this high finds any real repository and keeps the search bounded
+GSG_DOCTOR_FIND_DEPTH=32
+GSG_DOCTOR_MAX_ENTRIES=20000
+# ^ invariant find arguments skipping a directory on a default run, set by doctor_resolve_roots; empty with --roots
+DR_FIND_SKIP=()
 GSG_DOCTOR_MAX_NOTES=20
 
 DR_FIND=()
@@ -61,14 +64,15 @@ doctor_resolves_here() {
 }
 
 # ^ invariant rc 0 = every find stderr line (C locale) was "Permission denied" and a second find names the directories, added once to DR_UNREADABLE
-# ^ invariant rc 0 only when FILE holds a line and every line ends in a colon, a space and the words Permission denied
+# ^ external macOS privacy protection answers Operation not permitted for a folder the shell may not read => the same case as Permission denied
+# ^ invariant rc 0 only when FILE holds a line and every line ends in a colon, a space and one of those two answers
 doctor_only_permission_denied() {
     local line
     local -a lines=()
     mapfile -t lines <"$1" || return 1
     if [ "${#lines[@]}" -eq 0 ]; then return 1; fi
     for line in "${lines[@]}"; do
-        if [[ $line != *": Permission denied" ]]; then return 1; fi
+        if [[ $line != *": Permission denied" && $line != *": Operation not permitted" ]]; then return 1; fi
     done
 }
 
@@ -79,7 +83,7 @@ doctor_unreadable() {
     local dir rc
     local -a dirs=() bad=()
     doctor_only_permission_denied "$DR_WORK/find.err" || return 1
-    mapfile -d '' -t dirs < <(LC_ALL=C find "$1" -maxdepth "$((GSG_DOCTOR_FIND_DEPTH - 1))" -name node_modules -type d -prune -o -type d -print0 2>"$DR_WORK/find2.err")
+    mapfile -d '' -t dirs < <(LC_ALL=C find "$1" -maxdepth "$((GSG_DOCTOR_FIND_DEPTH - 1))" "${DR_FIND_SKIP[@]}" -name node_modules -type d -prune -o -type d -print0 2>"$DR_WORK/find2.err")
     wait "$!"
     rc=$?
     if [ "$rc" -ne 0 ]; then doctor_only_permission_denied "$DR_WORK/find2.err" || return 1; fi
@@ -165,7 +169,7 @@ doctor_discover() {
             if [[ -n ${seen[$dir]:-} ]]; then continue; fi
             seen[$dir]=1
             doctor_classify_dir "$dir"
-        done < <(LC_ALL=C find "$root" -maxdepth "$GSG_DOCTOR_FIND_DEPTH" -name node_modules -type d -prune -o -name .git -prune -print0 2>"$DR_WORK/find.err")
+        done < <(LC_ALL=C find "$root" -maxdepth "$GSG_DOCTOR_FIND_DEPTH" "${DR_FIND_SKIP[@]}" -name node_modules -type d -prune -o -name .git -prune -print0 2>"$DR_WORK/find.err")
         wait "$!"
         rc=$?
         if [ "$rc" -ne 0 ] && doctor_unreadable "$root"; then rc=0; fi

@@ -47,7 +47,7 @@ it over. To upgrade, run `install` again from a newer checkout; a machine instal
 ```bash
 git commit ...                          # scanned automatically
 git-secret-guard status                 # what is installed, and whether the config still matches
-git-secret-guard doctor                 # which repositories under ~/Dev are not protected, and why (records the PROBLEMs)
+git-secret-guard doctor                 # which repositories under your home directory are not protected, and why (records the PROBLEMs)
 git-secret-guard doctor --recheck       # re-check only the recorded PROBLEMs, no search
 git-secret-guard uninstall              # restore what was there before (--remove-tools: also the scanners it downloaded)
 ```

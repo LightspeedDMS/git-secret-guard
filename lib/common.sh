@@ -34,8 +34,8 @@ load_settings() {
     # shellcheck source=/dev/null
     source "$file" || return 1
     : "${SCAN_TIMEOUT_SECONDS=300}"
-    # ^ security no leading zero => GNU timeout reads 00 as no limit, a padded value would switch the scan time limit off
-    if [[ ! $SCAN_TIMEOUT_SECONDS =~ ^[1-9][0-9]*$ ]]; then
+    # ^ security no leading zero and at most 6 digits => GNU timeout reads 00 as no limit and fails open on a huge value, as DOCTOR_TIMEOUT_SECONDS
+    if [[ ! $SCAN_TIMEOUT_SECONDS =~ ^[1-9][0-9]{0,5}$ ]]; then
         printf 'SCAN_TIMEOUT_SECONDS must be a positive integer, got [%s]\n' "$SCAN_TIMEOUT_SECONDS" >&2
         return 1
     fi

@@ -21,7 +21,8 @@ commands:
         Exit 0 only when installed and the global config matches.
   doctor [--roots DIR...]
         Coverage report: the machine (install, hook config, tools, core.hooksPath, old git)
-        and every repository under the roots (default ~/Dev, at most 3 levels deep, node_modules skipped).
+        and every repository under the roots (default your home directory, at most 31 levels deep, node_modules
+        skipped; on macOS a default run also leaves out ~/Library).
         Lists only the repositories with findings. Exit 0 = covered, 1 = findings, 2 = doctor error.
         Changes nothing except its findings record, ${XDG_STATE_HOME:-~/.local/state}/git-secret-guard/findings
         (the PROBLEMs of this run; a run with --roots replaces only the records under its roots).

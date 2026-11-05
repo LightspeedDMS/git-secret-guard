@@ -4,9 +4,15 @@ The hook cannot report a repository where it never runs. `git-secret-guard docto
 every repository under the roots and lists what is not protected, with the config file responsible.
 
 ```bash
-git-secret-guard doctor                          # machine + every repository under ~/Dev
-git-secret-guard doctor --roots ~/Dev ~/work     # other roots (several allowed)
+git-secret-guard doctor                          # machine + every repository under your home directory
+git-secret-guard doctor --roots ~/Dev ~/work     # only these roots (several allowed), faster on a large home
 ```
+
+The default root is your home directory on every platform, so a repository is covered wherever it was cloned. The search
+goes through everything below it, hidden directories and caches included, and takes as long as your home is large; the
+repository checks then cost a few git calls each. `--roots` narrows it. **On macOS** a default run leaves out `~/Library`
+(system data, and reading it raises privacy prompts), and the first run still asks for access to folders such as Desktop,
+Documents and Downloads: allow it, or those folders are listed as unreadable. `--roots ~/Library` searches it anyway.
 
 **It is read-only except for its findings record** ([below](#the-findings-record-and---recheck)). It runs `git config`,
 `git hook list pre-commit`, `git rev-parse`, `git ls-tree`, `git cat-file`, `git ls-files`, `<tool> --version` and, for a
@@ -55,11 +61,11 @@ outer bound.
 
 ## Repository discovery
 
-Every `.git` entry (directory or file) at most **three levels** below a root is a repository: `ROOT/a`, `ROOT/a/b`,
+Every `.git` entry (directory or file) at most **31 levels** below a root is a repository: `ROOT/a`, `ROOT/a/b`,
 `ROOT/a/b/c`, and the root itself. `node_modules` directories are not entered. Symlinks are not followed. Repositories are
 deduplicated by `git rev-parse --git-common-dir`, so a **worktree** is reported once, under its main repository (shown as
 `worktrees: ...`; when the main repository is outside the roots it is still named, from its common dir). Bounds, all
-fail-closed: more than 2000 `.git` entries, a root that is not a directory, or a `find` failure that is not a permission
+fail-closed: more than 20000 `.git` entries, a root that is not a directory, or a `find` failure that is not a permission
 problem is a doctor error (exit status 2), never a silently shorter list. **A directory the user cannot read** (a database
 data dir, say) does not stop the report: it is listed under `not searched:` as `PROBLEM  cannot read <dir>; repositories
 below it are not checked`, the rest is checked, and the exit status is 1. A `.git` that git cannot open is **listed**
@@ -107,7 +113,7 @@ The machine section is always printed in full. Only repositories with a finding 
 |---|---|
 | exit status 0 | no PROBLEM anywhere (WARNING and info lines can still be printed) |
 | exit status 1 | at least one PROBLEM, on the machine or in a repository |
-| exit status 2 | doctor could not run or finish: git first on `PATH` older than 2.54, a root that is not a directory (`~/Dev` is the default root and must exist), a global git config that cannot be read, a bound exceeded, a `find` failure that is not a permission problem, a usage error. (An unreadable directory is a PROBLEM line and exit status 1, see discovery) |
+| exit status 2 | doctor could not run or finish: git first on `PATH` older than 2.54, a root that is not a directory, a global git config that cannot be read, a bound exceeded, a `find` failure that is not a permission problem, a usage error. (An unreadable directory is a PROBLEM line and exit status 1, see discovery) |
 
 PROBLEM, WARNING and info are the three severities; a PROBLEM names what to do (`run git-secret-guard install`, remove a
 key from a named file). Nothing from a file's content, a secret or the environment is printed: not a reason text, not a
@@ -119,7 +125,7 @@ value that fits is printed whole, so a cut path is never mistaken for a complete
 **Limits.** The hook-effective check runs in every worktree, but the HEAD files (`.secret-scan-ignore`, `.gitleaks.toml`)
 are read at the main repository's HEAD: a linked worktree on another branch can carry a different `.secret-scan-ignore`,
 which is not read. A linked worktree outside `--roots` is not checked: only `.git` entries under the roots are looked at, even when its
-main repository is inside them. Bare repositories and repositories deeper than three levels are not found.
+main repository is inside them. Bare repositories and repositories deeper than 31 levels are not found.
 Doctor reports what the config files say: before it looks it drops every variable that `git rev-parse --local-env-vars`
 lists, `GIT_CONFIG_PARAMETERS` and `GIT_CONFIG_COUNT` included, so a switch-off exported in your shell (or `--no-verify`)
 is not visible to it. A git older than 2.54 shows up only as the git warning above. `doctor` does not ask systemd whether
@@ -144,7 +150,7 @@ The scope is `machine` or `repo` with the absolute path and the worktree the fin
 checkout). The `time` line is the time of the last **full** search; a `--recheck` rewrites the findings but keeps it (the
 caller can say "as of <time>"). A full run replaces the machine records and the records of every repository it saw, and
 keeps the rest, also under its own roots: a record under the roots is dropped only when the repository is **proven gone**
-(no `.git` there and every directory above it searchable). A repository the search cannot reach (deeper than three levels,
+(no `.git` there and every directory above it searchable). A repository the search cannot reach (deeper than 31 levels,
 below `node_modules`, below an unreadable directory) therefore keeps its record across full runs until a recheck reaches it. A clean full run leaves a record with no
 findings. A repository whose path the record cannot hold (a control character) is named on stderr (`not recorded`), never
 silently lost. **Unreadable directories (`not searched:`) are listed as PROBLEMs by the full run but are not recorded**: only

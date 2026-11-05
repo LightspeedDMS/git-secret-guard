@@ -93,12 +93,15 @@ doctor_require_git() {
 doctor_resolve_roots() {
     local root
     DR_ROOT_LIST=()
+    DR_FIND_SKIP=()
     if [ "$#" -eq 0 ]; then
-        set -- "$HOME/Dev"
+        set -- "$HOME"
         if [ ! -d "$1" ]; then
             printf '%s: default root %s is not a directory; pass --roots DIR\n' "$GSG_NAME" "$1" >&2
             return 1
         fi
+        # ^ external ~/Library holds no working repositories and reading it raises macOS privacy prompts => a default run leaves it out, --roots can name it
+        if brew_is_macos; then DR_FIND_SKIP=(-path "$(realpath -- "$HOME")/Library" -prune -o); fi
     fi
     for root in "$@"; do
         if [ ! -d "$root" ]; then

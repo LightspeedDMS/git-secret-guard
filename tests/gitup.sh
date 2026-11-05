@@ -90,14 +90,25 @@ gu_module_env() {
 }
 
 # ^ invariant gu_pty INPUT CMD... runs CMD with stdin, stdout and stderr on a pseudo-terminal and feeds INPUT to it; OUT holds the terminal text, ERR is empty
-# ^ external util-linux script; the BSD script of macOS takes other arguments and the prompt tests skip there
+# ^ external util-linux script takes -qec on Linux; macOS has only the BSD /usr/bin/script (script -q FILE CMD...), Homebrew's util-linux ships no script
+GU_PTY_LEAD_SECONDS=1 GU_PTY_HOLD_SECONDS=3
+# ^ external BSD script sends EOF first when its stdin ends at once; input follows a lead and stdin stays open for a hold
+gu_pty_bsd() {
+    local input="$1"
+    shift
+    { sleep "$GU_PTY_LEAD_SECONDS"; printf '%s' "$input"; sleep "$GU_PTY_HOLD_SECONDS"; } | /usr/bin/script -q /dev/null "$@"
+}
+
 gu_pty() {
     local input="$1" cmd
     shift
-    command -v script >/dev/null 2>&1 || skip_test "script (util-linux) is not available for a pseudo-terminal"
-    if [ "$TEST_OS" = Darwin ]; then skip_test "the prompt tests use the util-linux script"; fi
-    printf -v cmd '%q ' "$@"
-    run_cap script -qec "$cmd" /dev/null <<<"$input"
+    if [ "$TEST_OS" = Darwin ]; then
+        run_cap gu_pty_bsd "$input" "$@"
+    else
+        command -v script >/dev/null 2>&1 || skip_test "script (util-linux) is not available for a pseudo-terminal"
+        printf -v cmd '%q ' "$@"
+        run_cap script -qec "$cmd" /dev/null <<<"$input"
+    fi
     OUT="${OUT//$'\r'/}"
 }
 

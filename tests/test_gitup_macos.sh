@@ -232,4 +232,25 @@ exit 1' || return 1
     assert_eq "$(grep -c 'GUI clients' <<<"$ERR")" 1 "the sentence is printed once"
 }
 
+# ^ external a dead proxy makes trufflehog's verification fail => result "unknown" (online, a fake credential is "unverified" and hidden)
+test_after_the_accepted_install_a_commit_with_a_fake_key_is_blocked() {
+    local token
+    [ -x "$REAL_TRUFFLEHOG" ] || skip_test "trufflehog not found at $REAL_TRUFFLEHOG"
+    [ -x "$REAL_BETTERLEAKS" ] || skip_test "betterleaks not found at $REAL_BETTERLEAKS"
+    gm_setup 2.40.0 && lc_seed_real_tools || return 1
+    set_env HTTPS_PROXY=http://127.0.0.1:9 HTTP_PROXY=http://127.0.0.1:9 https_proxy=http://127.0.0.1:9 http_proxy=http://127.0.0.1:9
+    gsg install --upgrade-git </dev/null
+    assert_rc 0 "install with the real scanners after the offer"
+    new_repo leak || return 1
+    token="$(fake_github_token)"
+    stage_file src/leak.txt one "token = \"$token\"" || return 1
+    commit_cap "leak"
+    assert_rc 1 "the commit is blocked"
+    assert_contains "$ERR" "trufflehog" "trufflehog reported"
+    assert_contains "$ERR" "betterleaks" "betterleaks reported"
+    assert_contains "$ERR" "src/leak.txt:2" "real file and line"
+    no_leak "$token"
+    assert_eq "$(gitx rev-parse -q --verify HEAD 2>/dev/null | wc -l | tr -d ' ')" 0 "no commit was created"
+}
+
 run_file_tests

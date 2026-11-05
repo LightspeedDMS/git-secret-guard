@@ -190,6 +190,7 @@ test_a_broken_record_prints_the_commands_to_undo_by_hand() {
 
 test_the_default_betterleaks_is_the_one_fetch_test_tools_downloads() {
     local home="$SANDBOX/bl-home" cache="$SANDBOX/bl-cache/git-secret-guard-test-tools" got
+    [ "$TEST_OS" != Darwin ] || skip_test "the ~/.local/bin fallback is the Linux branch of tests/lib.sh; macOS always uses the cache path"
     lc_begin || return 1
     rm -rf -- "$home" "$SANDBOX/bl-cache" && mkdir -p -- "$home/.local/bin" "$cache" || return 1
     printf '#!/bin/sh\n' >"$cache/betterleaks" && cp -- "$cache/betterleaks" "$home/.local/bin/betterleaks" && chmod 755 "$cache/betterleaks" "$home/.local/bin/betterleaks" || return 1

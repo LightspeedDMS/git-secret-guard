@@ -127,6 +127,8 @@ lc_make_git_fixtures() {
 # ^ security GSG_GITUP_ROOT moves /usr, /var and /etc into the sandbox and the build PATH finds the make stand-in => nothing outside the sandbox is reachable
 GU_ROOT=""
 gu_rpm_setup() {
+    # ^ why a skip, not a fix; the RPM module runs only on Rocky, RHEL and Fedora, and its source route lists files with GNU find -printf and -perm /111
+    if ! env PATH="$TEST_BASE_PATH" find / -maxdepth 0 -printf x >/dev/null 2>&1; then skip_test "the RPM source route needs GNU find; this PATH has only BSD find"; fi
     lc_begin && gu_os_release 'ID="rocky"' 'ID_LIKE="rhel centos fedora"' && gu_old_git "${1:-2.52.0}" || return 1
     lc_make_fixtures && lc_make_git_fixtures "${2:-2.56.0}" && lc_use_fixtures || return 1
     GU_ROOT="$SANDBOX/root"

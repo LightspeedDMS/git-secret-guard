@@ -219,20 +219,24 @@ echo "	not a dynamic executable" >&2
 exit 1
 EOF
     chmod 755 "$SANDBOX/pathbin/sudo" "$SANDBOX/pathbin/dnf" "$SANDBOX/pathbin/restorecon" "$SANDBOX/pathbin/make" "$SANDBOX/pathbin/df" "$SANDBOX/pathbin/ldd" "$SANDBOX/pathbin/rpm" || return 1
-    # ^ why copies, not symlinks; gitup_system_bin checks the owner of the target, and /usr/bin files belong to root, not to the test user
+    # ^ why exec wrappers, not symlinks or copies; gitup_system_bin wants a regular file owned by the test user, and macOS kills a copied system binary
+    # ^ why TEST_BASE_PATH, not /usr/bin; on macOS the GNU directory comes first, and the install needs GNU mv -T
+    local -a base_dirs
+    IFS=: read -r -a base_dirs <<<"$TEST_BASE_PATH"
     for tool in cp rm mv mkdir install ln rmdir touch; do
         src=""
-        for dir in /usr/bin /bin; do
+        for dir in "${base_dirs[@]}"; do
             if [ -x "$dir/$tool" ]; then
                 src="$dir/$tool"
                 break
             fi
         done
         if [ -z "$src" ]; then
-            printf 'lc_gitup_standins: no %s in /usr/bin or /bin\n' "$tool" >&2
+            printf 'lc_gitup_standins: no %s on TEST_BASE_PATH (%s)\n' "$tool" "$TEST_BASE_PATH" >&2
             return 1
         fi
-        cp -- "$src" "$SANDBOX/pathbin/$tool" || return 1
+        printf '#!/bin/sh\nexec %s "$@"\n' "$src" >"$SANDBOX/pathbin/$tool" || return 1
+        chmod 755 "$SANDBOX/pathbin/$tool" || return 1
     done
     printf '%s' "$GIT" >"$SANDBOX/real-git"
 }

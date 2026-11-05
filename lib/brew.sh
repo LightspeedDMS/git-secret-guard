@@ -117,13 +117,17 @@ brew_inspect() {
 # ^ external macOS ships BSD tools; realpath -m, mv -T and install -T need the GNU ones, kept by Homebrew in one directory outside PATH
 # ^ invariant macOS only; the settings file of an installed copy and brew are exclusive branches, a broken settings file is never papered over by brew
 brew_use_gnubin() {
-    local dir="" cmd="${1:-}" reason=""
+    local dir="" cmd="${1:-}" reason="" reason_max=200
     if ! brew_is_macos; then return 0; fi
     if [ -f "$GSG_ROOT/settings" ]; then
-        dir="$(load_settings "$GSG_ROOT/settings" 2>/dev/null && printf '%s' "${GNUBIN_DIR:-}")" || {
-            printf '%s: cannot read %s\n' "$GSG_NAME" "$GSG_ROOT/settings" >&2
+        # ^ security the reason echoes a settings value => control characters become ?, cut at reason_max
+        reason="$(load_settings "$GSG_ROOT/settings" 2>&1 >/dev/null)" || {
+            reason="${reason//[[:cntrl:]]/?}"
+            trunc_text "$reason" "$reason_max"
+            printf '%s: cannot read %s%s\n' "$GSG_NAME" "$GSG_ROOT/settings" "${REPLY:+: $REPLY}" >&2
             return 1
         }
+        dir="$(load_settings "$GSG_ROOT/settings" >/dev/null 2>&1 && printf '%s' "${GNUBIN_DIR:-}")"
     elif brew_find 2>/dev/null && brew_paths 2>/dev/null; then
         dir="$BREW_GNUBIN"
     fi

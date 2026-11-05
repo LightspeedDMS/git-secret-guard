@@ -10,6 +10,8 @@ DR_TIMEOUT_OK=0
 DR_LIMIT=""
 GSG_DOCTOR_TIMEOUT_DEFAULT=30
 DR_RECHECK=0
+# ^ invariant 1 = the run has no --roots and searches $HOME, on macOS without ~/Library and ~/.Trash; --roots sets it to 0 and searches exactly what it names
+DR_DEFAULT_ROOTS=0
 DR_REC_NEW=()
 
 # ^ invariant every machine line goes through here => severity is counted once and control characters never reach the terminal
@@ -93,8 +95,10 @@ doctor_require_git() {
 doctor_resolve_roots() {
     local root
     DR_ROOT_LIST=()
+    DR_DEFAULT_ROOTS=0
     if [ "$#" -eq 0 ]; then
-        set -- "$HOME/Dev"
+        DR_DEFAULT_ROOTS=1
+        set -- "$HOME"
         if [ ! -d "$1" ]; then
             printf '%s: default root %s is not a directory; pass --roots DIR\n' "$GSG_NAME" "$1" >&2
             return 1

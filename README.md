@@ -11,7 +11,7 @@ git config-based hook, so it runs alongside whatever hooks a repository brings (
   macOS arm64 with Homebrew (tested on macOS 26.7.1; macOS x86_64 is mapped but not tested).
 - **git 2.54 or newer, first on `PATH`.** Older git ignores config hooks without any message. Ubuntu 24.04 ships
   2.43: see [docs/platforms.md](docs/platforms.md) for the PPA or a source build.
-- bash, `jq`, `setsid`, `timeout`, and `curl` plus `tar` to download the scanners. On macOS, `install` installs the missing
+- bash 4.4 or newer, `jq`, `setsid`, `timeout`, and `curl` plus `tar` to download the scanners. On macOS, `install` installs the missing
   bash 4.4+, `coreutils`, `util-linux` and `jq` with `brew install`, after its other checks have passed.
 
 ## Install
@@ -35,13 +35,13 @@ it over. To upgrade, run `install` again from a newer checkout; a machine instal
 ```bash
 git commit ...                          # scanned automatically
 git-secret-guard status                 # what is installed, and whether the config still matches
-git-secret-guard doctor                 # which repositories under ~/Dev are not protected, and why (records the PROBLEMs)
+git-secret-guard doctor                 # which repositories under your home directory are not protected, and why (records the PROBLEMs)
 git-secret-guard doctor --recheck       # re-check only the recorded PROBLEMs, no search
 git-secret-guard uninstall              # restore what was there before (--remove-tools: also the scanners it downloaded)
 ```
 
 A blocked commit lists the scanner, rule, file and line of each finding, never the secret itself. A passing commit prints
-one line, so a clean scan can be told from a hook that never ran:
+one summary line (plus any exemption notices and the reminder below), so a clean scan can be told from a hook that never ran:
 
 ```
 git-secret-guard: scanned 3 files, 214 added lines (trufflehog 3.99.2, betterleaks 1.9.0): no findings, 1s
@@ -78,7 +78,8 @@ Details: [docs/exemptions.md](docs/exemptions.md).
 ## Limits
 
 - Commits made with git older than 2.54 (on this machine `/usr/bin/git` 2.52) are not scanned.
-- Only `pre-commit` runs the scan: merges, cherry-picks, rebases and `git am` are not scanned.
+- Only `pre-commit` runs the scan: automatic merge commits, cherry-picks, rebases and `git am` are not scanned (a merge
+  finished with `git commit` is).
 - Binary files, including UTF-16 text, are not scanned.
 - Offline, trufflehog cannot verify a candidate and reports it as `unknown`, which blocks.
 - About 2 seconds per commit that adds lines.

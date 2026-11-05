@@ -86,17 +86,17 @@ test_a_missing_global_hook_command_is_reported_per_repo_as_an_incomplete_hook_co
 
 dr_disable() { gitx -C "$DR_ROOTS/$1" config hook.git-secret-guard.enabled false; }
 
-test_discovery_stops_at_three_levels_and_skips_node_modules() {
+test_discovery_finds_nested_repositories_and_skips_node_modules() {
     dr_begin || return 1
     dr_repo a && dr_repo g/b && dr_repo g/s/c || return 1
-    dr_repo g/s/d/too-deep && dr_disable g/s/d/too-deep || return 1
+    dr_repo g/s/d/nested && dr_disable g/s/d/nested || return 1
     dr_repo node_modules/pkg && dr_disable node_modules/pkg || return 1
     dr_repo a/node_modules/dep && dr_disable a/node_modules/dep || return 1
     mkdir -p -- "$DR_ROOTS/plain/dir" || return 1
     doctor
-    assert_rc 0 "only repos within three levels count"
-    assert_contains "$OUT" "summary: 3 repos, 3 covered" "a, g/b and g/s/c"
-    assert_not_contains "$OUT" "too-deep" "four levels down is not searched"
+    assert_rc 1 "the repo four levels down is found and disabled"
+    assert_contains "$OUT" "summary: 4 repos, 3 covered" "a, g/b, g/s/c and g/s/d/nested"
+    assert_contains "$OUT" "  $DR_REAL/g/s/d/nested" "four levels down is searched"
     assert_not_contains "$OUT" "node_modules" "node_modules is pruned at any depth"
 }
 
@@ -224,15 +224,19 @@ test_more_repositories_than_the_bound_is_a_discovery_error() {
 
 # ^ invariant an unreadable directory is a finding, never a doctor error => one directory such as a database data dir cannot silence the whole report
 test_an_unreadable_directory_is_a_listed_problem_and_the_rest_is_still_checked() {
+    local limit="group" folders=30 i
     dr_begin && dr_repo fine && dr_repo off && dr_disable off || return 1
-    mkdir -p -- "$DR_ROOTS/locked" "$DR_ROOTS/group/nox" "$DR_ROOTS/group/deep/a/b" && chmod 000 "$DR_ROOTS/locked" && chmod 600 "$DR_ROOTS/group/nox" || return 1
-    chmod 000 "$DR_ROOTS/group/deep/a/b" || return 1
+    # ^ invariant group + 30 folders + limit = find depth 32, the search depth; find never opens it, its entries would be depth 33
+    for ((i = 0; i < folders; i++)); do limit+="/d"; done
+    limit+="/limit"
+    mkdir -p -- "$DR_ROOTS/locked" "$DR_ROOTS/group/nox" "$DR_ROOTS/$limit" && chmod 000 "$DR_ROOTS/locked" && chmod 600 "$DR_ROOTS/group/nox" || return 1
+    chmod 000 "$DR_ROOTS/$limit" || return 1
     doctor
     assert_rc 1 "an unreadable directory under the roots is a PROBLEM"
     assert_not_contains "$ERR" "could not read everything" "and not a doctor error"
     assert_contains "$OUT" "PROBLEM  cannot read $DR_REAL/locked; repositories below it are not checked" "named, with what it means"
     assert_contains "$OUT" "PROBLEM  cannot read $DR_REAL/group/nox; repositories below it are not checked" "also a directory that can be listed but not searched"
-    assert_not_contains "$OUT" "group/deep" "a directory at the search depth limit is never opened, so it is no finding"
+    assert_not_contains "$OUT" "limit" "a directory at the search depth limit is never opened, so it is no finding"
     assert_contains "$OUT" "PROBLEM  disabled in local config" "the other repositories were still judged"
     assert_contains "$OUT" "summary: 2 repos, 1 covered" "and the summary counts them"
 }

@@ -20,10 +20,14 @@ commands:
         Exit 0 only when installed and the global config matches.
   doctor [--roots DIR...]
         Coverage report: the machine (install, hook config, tools, core.hooksPath, old git)
-        and every repository under the roots (default ~/Dev, at most 3 levels deep, node_modules skipped).
-        Lists only the repositories with findings. Exit 0 = covered, 1 = findings, 2 = doctor error.
-        Changes nothing except its findings record, ${XDG_STATE_HOME:-~/.local/state}/git-secret-guard/findings
-        (the PROBLEMs of this run; a run with --roots replaces only the records under its roots).
+        and every repository under the roots (default: your home directory, on macOS without ~/Library and ~/.Trash;
+        at most 31 levels deep, node_modules skipped).
+        Lists only the repositories with findings. Exit 0 = no PROBLEM, 1 = a PROBLEM, 2 = doctor error
+        (a CLI startup failure exits 1 with no report).
+        Changes nothing except its findings record (plus its lock and the state dir if missing),
+        ${XDG_STATE_HOME:-~/.local/state}/git-secret-guard/findings
+        (PROBLEMs only: the machine and every repository this run checked are replaced, other records are
+        kept until their repository is proven gone).
   doctor --recheck
         Re-check only what the findings record holds (the machine and each recorded repository), no search.
         Prints what is still a PROBLEM, drops what was fixed or no longer exists (said on stderr), rewrites the record.

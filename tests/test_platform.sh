@@ -399,7 +399,8 @@ mountinfo_fixture() {
     done
 }
 
-# ^ external the 33 mount points and fstypes of an unmodified rootless podman 5 container under CONTAINERS_CONF; doc:CLAUDE.md#Review round 3
+# ^ external the 33 mount points and fstypes of an unmodified rootless podman 5 container under CONTAINERS_CONF
+# ^ see doc:docs/platforms.md#what-the-platform-run-enforces
 BASELINE_MOUNTS=(/=overlay /dev=tmpfs /dev/full=devtmpfs /dev/mqueue=mqueue /dev/null=devtmpfs /dev/pts=devpts /dev/random=devtmpfs /dev/shm=tmpfs /dev/tty=devtmpfs
     /dev/urandom=devtmpfs /dev/zero=devtmpfs /etc/hostname=tmpfs /etc/hosts=tmpfs /etc/resolv.conf=tmpfs /proc=proc /proc/acpi=tmpfs /proc/asound=proc /proc/bus=proc
     /proc/fs=proc /proc/interrupts=devtmpfs /proc/irq=proc /proc/kcore=devtmpfs /proc/keys=devtmpfs /proc/scsi=tmpfs /proc/sys=proc /proc/sysrq-trigger=proc
@@ -565,7 +566,8 @@ test_the_mount_check_names_a_mount_point_that_is_mounted_twice() {
     no_leak "secret-root"
 }
 
-# ^ external the 17 entries of /dev (depth <= 4) in an unmodified rootless podman 5 container; probed under CONTAINERS_CONF, doc:CLAUDE.md#Review round 3
+# ^ external the 17 entries of /dev (depth <= 4) in an unmodified rootless podman 5 container; probed under CONTAINERS_CONF
+# ^ see doc:docs/platforms.md#what-the-platform-run-enforces
 dev_baseline() {
     local name
     local -a dirs=(mqueue pts shm)

@@ -1,8 +1,8 @@
 # shellcheck shell=bash disable=SC2153,SC2034
 
-# ^ invariant a repository is at most 3 directories below a root => its .git entry is at find depth 4
-GSG_DOCTOR_FIND_DEPTH=4
-GSG_DOCTOR_MAX_ENTRIES=2000
+# ^ invariant a repository is at most 31 directories below a root => its .git entry is at find depth 32; the search stays bounded
+GSG_DOCTOR_FIND_DEPTH=32
+GSG_DOCTOR_MAX_ENTRIES=20000
 GSG_DOCTOR_MAX_NOTES=20
 
 DR_FIND=()
@@ -54,15 +54,30 @@ doctor_resolves_here() {
     return 1
 }
 
-# ^ invariant rc 0 = every find stderr line (C locale) was "Permission denied" and a second find names the directories, added once to DR_UNREADABLE
-# ^ invariant rc 0 only when FILE holds a line and every line ends in a colon, a space and the words Permission denied
+# ^ invariant rc 0 = every find stderr line (C locale) said Permission denied or Operation not permitted; a second find names the directories for DR_UNREADABLE
+# ^ invariant rc 0 only when FILE holds a line and every line ends in a colon, a space and one of those two phrases
+# ^ external macOS find says Operation not permitted for a folder its privacy protection blocks, Linux says Permission denied
 doctor_only_permission_denied() {
     local line
     local -a lines=()
     mapfile -t lines <"$1" || return 1
     if [ "${#lines[@]}" -eq 0 ]; then return 1; fi
     for line in "${lines[@]}"; do
-        if [[ $line != *": Permission denied" ]]; then return 1; fi
+        if [[ $line != *": Permission denied" && $line != *": Operation not permitted" ]]; then return 1; fi
+    done
+}
+
+# ^ external ~/Library holds system data and raises privacy prompts, ~/.Trash is blocked without Full Disk Access and would be a PROBLEM on every run
+GSG_DOCTOR_MAC_SKIP=(Library .Trash)
+
+# ^ invariant sets DR_PRUNE = find words skipping each existing $1/<name> of GSG_DOCTOR_MAC_SKIP; only a default macOS run gets any
+# ^ why -samefile, not -path; a root holding a glob character would be read as a pattern, and a Library folder deeper down (Unity) must stay searched
+doctor_prune_args() {
+    local name
+    DR_PRUNE=()
+    if [ "$DR_DEFAULT_ROOTS" -ne 1 ] || ! brew_is_macos; then return 0; fi
+    for name in "${GSG_DOCTOR_MAC_SKIP[@]}"; do
+        if [ -d "$1/$name" ]; then DR_PRUNE+=(-samefile "$1/$name" -prune -o); fi
     done
 }
 
@@ -73,7 +88,8 @@ doctor_unreadable() {
     local dir rc
     local -a dirs=() bad=()
     doctor_only_permission_denied "$DR_WORK/find.err" || return 1
-    mapfile -d '' -t dirs < <(LC_ALL=C find "$1" -maxdepth "$((GSG_DOCTOR_FIND_DEPTH - 1))" -name node_modules -type d -prune -o -type d -print0 2>"$DR_WORK/find2.err")
+    doctor_prune_args "$1"
+    mapfile -d '' -t dirs < <(LC_ALL=C find "$1" -maxdepth "$((GSG_DOCTOR_FIND_DEPTH - 1))" "${DR_PRUNE[@]}" -name node_modules -type d -prune -o -type d -print0 2>"$DR_WORK/find2.err")
     wait "$!"
     rc=$?
     if [ "$rc" -ne 0 ]; then doctor_only_permission_denied "$DR_WORK/find2.err" || return 1; fi
@@ -149,6 +165,7 @@ doctor_discover() {
     local -A seen=()
     doctor_discover_reset
     for root in "${DR_ROOT_LIST[@]}"; do
+        doctor_prune_args "$root"
         while IFS= read -r -d '' entry; do
             found=$((found + 1))
             if [ "$found" -gt "$GSG_DOCTOR_MAX_ENTRIES" ]; then
@@ -159,7 +176,7 @@ doctor_discover() {
             if [[ -n ${seen[$dir]:-} ]]; then continue; fi
             seen[$dir]=1
             doctor_classify_dir "$dir"
-        done < <(LC_ALL=C find "$root" -maxdepth "$GSG_DOCTOR_FIND_DEPTH" -name node_modules -type d -prune -o -name .git -prune -print0 2>"$DR_WORK/find.err")
+        done < <(LC_ALL=C find "$root" -maxdepth "$GSG_DOCTOR_FIND_DEPTH" "${DR_PRUNE[@]}" -name node_modules -type d -prune -o -name .git -prune -print0 2>"$DR_WORK/find.err")
         wait "$!"
         rc=$?
         if [ "$rc" -ne 0 ] && doctor_unreadable "$root"; then rc=0; fi

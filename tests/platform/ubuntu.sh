@@ -2,7 +2,7 @@
 set -u
 set -o pipefail
 
-# ^ external digest = OCI index (manifest list) of ubuntu:24.04 from the registry; lookup and bump steps in doc:CLAUDE.md#Portability and follow-ups
+# ^ external digest = OCI index (manifest list) of ubuntu:24.04 from the registry; lookup and bump steps in doc:docs/platforms.md#maintainer-notes
 IMAGE=docker.io/library/ubuntu:24.04@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852
 TOTAL_TIMEOUT_SECONDS=5400
 PULL_TIMEOUT_SECONDS=600

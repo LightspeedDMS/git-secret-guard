@@ -192,7 +192,7 @@ test_the_docs_document_doctor_and_the_timer() {
     cd -- "$GSG_PROJECT" || return 1
     local needle
     # shellcheck disable=SC2016
-    for needle in '# Coverage report: `doctor`' 'git-secret-guard doctor' '--roots' 'node_modules' 'three levels' '--git-common-dir' 'worktree' \
+    for needle in '# Coverage report: `doctor`' 'git-secret-guard doctor' '--roots' 'node_modules' '31 levels' '--git-common-dir' 'worktree' \
         'git hook list pre-commit' 'disabled in local config' 'command overridden' 'pre-commit install not run' 'read-only' \
         'machine:' 'repos with findings:' 'summary:' 'exit status 0' 'exit status 1' 'exit status 2' 'PROBLEM' 'WARNING' 'info' \
         '/usr/bin/git' '.secret-scan-ignore' 'catch-all' '.gitleaks.toml' 'tools_placed' 'core.hooksPath' 'GIT_NO_REPLACE_OBJECTS' \

@@ -131,6 +131,8 @@ jobs:
 
   # The suite on Windows, through the front end a Windows developer uses. Tests that cannot apply there are listed with a reason in tests/windows-skips.list.
   windows-suite:
+    # A pull request and main only: one run of this job takes about 40 minutes, and a push to a feature branch with a PR would run it twice.
+    if: github.event_name != 'push' || github.ref == 'refs/heads/main'
     runs-on: windows-2025
     timeout-minutes: 150
     steps:

@@ -61,7 +61,7 @@ test_a_git_tarball_that_does_not_match_its_pin_is_refused_and_removed() {
     mkdir -p -- "$SANDBOX/dl" "$SANDBOX/fx" || return 1
     printf 'not the real tarball\n' >"$SANDBOX/fx/git-2.56.0.tar.xz" || return 1
     want="$(sha256sum "$SANDBOX/fx/git-2.56.0.tar.xz" | cut -d' ' -f1)"
-    set_env GSG_TOOLS_BASE_URL="file://$SANDBOX/fx"
+    set_env GSG_TOOLS_BASE_URL="$(lc_file_url "$SANDBOX/fx")"
     tl tools_fetch_verified git 2.56.0 source "$want" "$SANDBOX/dl"
     assert_rc 0 "a matching digest passes"
     tl tools_fetch_verified git 2.56.0 source "$(printf '0%.0s' {1..64})" "$SANDBOX/dl"

@@ -4,6 +4,7 @@ set -o pipefail
 
 TESTS_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)" || exit 2
 FILE_TIMEOUT_SECONDS="${GSG_TEST_FILE_TIMEOUT:-900}"
+JOBS="${GSG_TEST_JOBS:-1}"
 
 # ^ external macOS ships bash 3.2 and BSD tools; Homebrew's bash and the GNU coreutils directory must come first for timeout and env --default-signal
 if [ "$(uname -s)" = Darwin ]; then
@@ -16,9 +17,22 @@ if [ "$(uname -s)" = Darwin ]; then
     export PATH
 fi
 
+# ^ external on Windows the pinned jq and scanners live in a test cache, fetched and SHA-256 checked once; a failed fetch leaves the real-scanner tests to skip
+case "$(uname -s)" in
+    MINGW64_NT-*)
+        FILE_TIMEOUT_SECONDS="${GSG_TEST_FILE_TIMEOUT:-2400}"
+        JOBS="${GSG_TEST_JOBS:-$(nproc)}"
+        tools_cache="${XDG_CACHE_HOME:-$HOME/.cache}/git-secret-guard-test-tools"
+        if [ ! -x "$tools_cache/jq.exe" ] || [ ! -x "$tools_cache/trufflehog.exe" ] || [ ! -x "$tools_cache/betterleaks.exe" ]; then
+            "$TESTS_DIR/fetch-test-tools.sh" || printf 'WARNING the test tools could not be fetched\n'
+        fi
+        ;;
+esac
+
 files=()
 if [ "$#" -gt 0 ]; then
-    files=("$@")
+    # ^ external tests\run.cmd passes what cmd typed; bash reads a backslash path, basename does not
+    files=("${@//\\//}")
 else
     for f in "$TESTS_DIR"/test_*.sh; do
         [ -e "$f" ] && files+=("$f")
@@ -32,10 +46,44 @@ fi
 passed=0
 failed=0
 skipped=0
-for f in "${files[@]}"; do
+
+# ^ why parallel only on request off Windows, not everywhere; each file has its own sandbox, the Linux and macOS output stays as it always was
+# ^ external starting a process costs far more on Windows; the suite takes hours one file at a time
+start_files() {
+    local i running=0
+    for i in "${!files[@]}"; do
+        while [ "$running" -ge "$JOBS" ]; do
+            wait -n
+            running=$((running - 1))
+        done
+        (
+            timeout "$FILE_TIMEOUT_SECONDS" bash "${files[$i]}" >"$out_dir/$i.log" 2>&1
+            echo "$?" >"$out_dir/$i.rc.tmp"
+            mv -- "$out_dir/$i.rc.tmp" "$out_dir/$i.rc"
+        ) &
+        running=$((running + 1))
+    done
+    wait
+}
+
+if [ "$JOBS" -gt 1 ]; then
+    out_dir="$(mktemp -d)" || exit 2
+    trap 'rm -rf -- "$out_dir"' EXIT
+    start_files &
+fi
+
+for i in "${!files[@]}"; do
+    f="${files[$i]}"
     results="$(mktemp)" || exit 2
-    timeout "$FILE_TIMEOUT_SECONDS" bash "$f" 2>&1 | tee "$results"
-    file_rc="${PIPESTATUS[0]}"
+    if [ "$JOBS" -gt 1 ]; then
+        while [ ! -f "$out_dir/$i.rc" ]; do sleep 1; done
+        cp -- "$out_dir/$i.log" "$results" || exit 2
+        cat -- "$results"
+        file_rc="$(<"$out_dir/$i.rc")"
+    else
+        timeout "$FILE_TIMEOUT_SECONDS" bash "$f" 2>&1 | tee "$results"
+        file_rc="${PIPESTATUS[0]}"
+    fi
     counted=0
     file_failed=0
     while IFS= read -r line; do

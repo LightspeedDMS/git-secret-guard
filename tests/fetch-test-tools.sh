@@ -17,17 +17,21 @@ os="$(uname -s)" && arch="$(uname -m)" || exit 2
 mkdir -p -- "$dest" || exit 2
 stage="$(mktemp -d)" || exit 2
 trap 'rm -rf -- "$stage"' EXIT
-for tool in "${GSG_TOOL_NAMES[@]}"; do
+# ^ external Windows has no jq package to rely on => the test tools include the pinned jq.exe; elsewhere jq stays a system prerequisite
+tools=("${GSG_TOOL_NAMES[@]}")
+if tools_is_windows; then tools+=(jq); fi
+for tool in "${tools[@]}"; do
+    bin="$(tools_binary_name "$tool")" || exit 2
     plat="$(tools_platform_key "$tool" "$os" "$arch")" || exit 1
     row="$(tools_lock_lookup "$(tools_lock_path)" "$tool" "$plat")" || exit 1
     ver="${row%% *}"
-    if tools_has_version "$dest/$tool" "$ver" "${TEST_TIMEOUT_BIN:-timeout}"; then
+    if tools_has_version "$dest/$bin" "$ver" "${TEST_TIMEOUT_BIN:-timeout}"; then
         printf '%s %s already in %s\n' "$tool" "$ver" "$dest"
         continue
     fi
     tarball="$(tools_fetch_verified "$tool" "$ver" "$plat" "${row##* }" "$stage")" || exit 1
     mkdir -p -- "$stage/out" || exit 1
     tools_extract_binary "$tarball" "$tool" "$stage/out" || exit 1
-    mv -f -- "$stage/out/$tool" "$dest/$tool" || exit 1
+    mv -f -- "$stage/out/$bin" "$dest/$bin" || exit 1
     printf '%s %s fetched into %s\n' "$tool" "$ver" "$dest"
 done

@@ -5,8 +5,14 @@ every repository under the roots and lists what is not protected, with the confi
 
 ```bash
 git-secret-guard doctor                          # machine + every repository under your home directory
-git-secret-guard doctor --roots ~/Dev ~/work     # only these roots (several allowed)
+git-secret-guard doctor --roots ~/Dev ~/work     # only these roots (several allowed), faster on a large home
 ```
+
+The default root is your home directory on every platform, so a repository is covered wherever it was cloned. The search
+goes through everything below it, hidden directories and caches included, and takes as long as your home is large; the
+repository checks then cost a few git calls each. `--roots` narrows it. **On macOS** a default run leaves out `~/Library`
+(system data, and reading it raises privacy prompts), and the first run still asks for access to folders such as Desktop,
+Documents and Downloads: allow it, or those folders are listed as unreadable. `--roots ~/Library` searches it anyway.
 
 **It is read-only except for its findings record** ([below](#the-findings-record-and---recheck)). It runs `git config`,
 `git hook list pre-commit`, `git rev-parse`, `git ls-tree`, `git cat-file`, `git ls-files`, `<tool> --version` and, for a
@@ -52,7 +58,7 @@ outer bound.
 | Hook config | `hook.git-secret-guard.event` is not exactly one `pre-commit`, `.command` is not exactly one value equal to the installed `hooks/secret-scan`, that file is missing or not executable, or `enabled` is false in the global or system config. A wrong count is reported as `has 2 values (global <file>; global <file>), 1 of them the installed hook`: **never the values**, a global command can hold a token and the timer writes this output to the journal |
 | Tools | the settings file is missing, or `TRUFFLEHOG_BIN`, `BETTERLEAKS_BIN`, `JQ_BIN`, `SETSID_BIN` (`TASKKILL_BIN` on Git for Windows), `TIMEOUT_BIN` is not an absolute executable, or a scanner does not report the version `tools.lock` pins (judged exactly like `install` and `status`); on macOS also a recorded `BASH_BIN` that is not executable or is older than bash 4.4 |
 | `core.hooksPath` | any global value is left, including one in the XDG config or in an included file (the file is named) |
-| git | WARNING for every reachable git older than 2.54: all `git` on `PATH` plus `/usr/bin/git` (2.52 on this machine), by path and version. Such a git ignores config hooks silently, so commits made with it are **not scanned**. Doctor itself needs the git first on `PATH` to be 2.54 or newer (otherwise it exits 2) |
+| git | WARNING for every reachable git older than 2.54: all `git` on `PATH` plus `/usr/bin/git` (2.52 on the RHEL host), by path and version. Such a git ignores config hooks silently, so commits made with it are **not scanned**. Doctor itself needs the git first on `PATH` to be 2.54 or newer (otherwise it exits 2) |
 | Timer | only when the state says a timer is installed: both unit files exist, were written by install, and `SYSTEMCTL_BIN` in the settings is usable; on macOS the LaunchAgent plist exists, was written by install, and `LAUNCHCTL_BIN` is usable |
 
 ## Repository discovery
@@ -265,6 +271,21 @@ the machine has a finding, which is what a timer can act on.
   they use, write units into a scratch `XDG_CONFIG_HOME`, and validate the generated units with the real
   `systemd-analyze --user verify` (a parser; it runs in an in-process test manager with a scratch `XDG_RUNTIME_DIR`).
 
+## A weekly run on Windows (Task Scheduler)
+
+Windows has no `--with-timer` (`install --with-timer` stops with a message), so nothing is scheduled for you. A scheduled task you create yourself does the same job and
+works with the installed command. From cmd:
+
+```bat
+schtasks /Create /SC WEEKLY /D MON /ST 09:00 /TN git-secret-guard-doctor /TR "\"%USERPROFILE%\.local\bin\git-secret-guard.cmd\" doctor"
+schtasks /Query /TN git-secret-guard-doctor
+schtasks /Delete /TN git-secret-guard-doctor /F
+```
+
+- The task keeps the coverage reminder current: doctor rewrites its findings record on every run, and commits read it.
+- Like a failed systemd unit, the task shows last result `1` whenever doctor found a PROBLEM.
+- This task is yours: `uninstall` does not know about it, so delete it before you uninstall, or it fails every week.
+
 ## The weekly timer on macOS (launchd)
 
 On macOS `install --with-timer` schedules the same weekly doctor run with a LaunchAgent instead of systemd units.
@@ -337,7 +358,8 @@ starts with a bare environment). Stdout and stderr go to `doctor.log` in the sta
 - **Discovery**: `find ROOT -maxdepth 32 ... -name node_modules -type d -prune -o -name .git -prune -print0` under
   `LC_ALL=C`, bound `GSG_DOCTOR_MAX_ENTRIES`; `doctor_prune_args` adds the macOS skips (`-samefile`, see its comment) to
   both finds. Repositories are grouped by `--git-common-dir` (two separate `rev-parse` calls; names may hold newlines).
-  `doctor_resolves_here` catches an empty `.git` that git answers for the parent. A find that fails only with
+  `doctor_resolves_here` catches an empty `.git` that git answers for the parent (on Windows it compares in git's `C:/` long
+  form, `cygpath -m -l`). A find that fails only with
   `Permission denied` or `Operation not permitted` goes to `doctor_unreadable`, which returns 1 (exit 2) unless its second
   find names 1 to `GSG_DOCTOR_MAX_ENTRIES` unreadable directories; any other failure exits 2. Tests:
   `tests/test_doctor_home.sh`, `tests/test_doctor_repos.sh`.
@@ -358,7 +380,7 @@ starts with a bare environment). Stdout and stderr go to `doctor.log` in the sta
   record before `doctor_require_git` (`test_recheck_with_no_record_or_an_empty_one_prints_nothing_and_runs_no_git`). It runs
   no discovery `find`; the lock-age check and the temp cleanup still use `find`.
 - **Lock** (`doctor_rec_lock`): stale when the holder is dead or the link is older than a minute (`doctor_rec_lock_old`).
-  Tests shorten the wait with a stand-in `sleep` on the sandbox `PATH`, not a production flag. `uninstall_run` takes the lock
+  Git Bash `ln -s` refuses a missing target, so the lock sets `MSYS=winsymlinks:sys` inline; uninstall needs this lock too. Tests shorten the wait with a stand-in `sleep` on the sandbox `PATH`, not a production flag. `uninstall_run` takes the lock
   right after `state_read`, holds it through `uninstall_steps`, releases it on every return path and only then removes the
   state dir; the refused-lock test reruns with the **installed** CLI (a checkout-run test once hid a half-done uninstall).
   The lock-scope guard is a source test, because the probes are bash builtins no `PATH` stand-in can see.

@@ -86,7 +86,7 @@ test_a_replace_ref_cannot_hide_the_ignore_file_that_is_really_at_head() {
 test_an_ignore_file_that_is_not_a_regular_file_at_head_is_a_problem() {
     dr_begin && dr_repo linked || return 1
     cd -- "$DR_ROOTS/linked" || return 1
-    ln -s /etc/passwd .secret-scan-ignore && gitx add .secret-scan-ignore && gitx commit -q --no-verify -m link || return 1
+    stage_symlink /etc/passwd .secret-scan-ignore && gitx commit -q --no-verify -m link || return 1
     doctor
     assert_rc 1 "a symlink at HEAD"
     assert_contains "$OUT" "PROBLEM  .secret-scan-ignore at HEAD must be a regular file (a symlink or directory is refused); every commit in this repository is blocked" "refused like the hook does"

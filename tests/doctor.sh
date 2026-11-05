@@ -36,6 +36,13 @@ dr_repo() {
 
 doctor() { gsg doctor --roots "$DR_ROOTS"; }
 
+# ^ coupled lib/doctor_repos.sh:GSG_DOCTOR_FIND_DEPTH is 32; prints $1 plus $2 single-letter directories, 32 by default = past the limit whatever $1 is
+deep_path() {
+    local p="$1" i
+    for ((i = 0; i < ${2:-32}; i++)); do p+=/d; done
+    printf '%s' "$p"
+}
+
 # ^ external a socket on stdin makes the RHEL bash read ~/.bashrc even under env -i; HOME in the sandbox and stdin from /dev/null keep the lookup clean
 # shellcheck disable=SC2016
 dr_which() { env -i HOME="$SANDBOX/home" PATH="$SANDBOX/pathbin:$TEST_BASE_PATH" bash -c 'type -P "$1"' _ "$1" </dev/null; }

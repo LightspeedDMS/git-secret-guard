@@ -158,11 +158,24 @@ share_recorded_bash() {
     )
 }
 
+# ^ external native git hands the hook XDG_* as C:/dir and only HOME, PATH and TMP are turned back; a Windows user also writes C:\dir => one POSIX form
+gsg_posix_path() {
+    case "$1" in
+        [A-Za-z]:[\\/]*)
+            if gsg_is_windows; then
+                cygpath -u "$1"
+                return
+            fi
+            ;;
+    esac
+    printf '%s' "$1"
+}
+
 # ^ invariant prints the state directory (XDG_STATE_HOME or ~/.local/state, plus git-secret-guard); rc 1 = neither is set; paths_init and the hook both use it
 # ^ why one function in common.sh, not a copy in the hook; the hook finds the findings record without loading the CLI-only state library
 state_dir_path() {
     if [ -n "${XDG_STATE_HOME:-}" ]; then
-        printf '%s/git-secret-guard' "$XDG_STATE_HOME"
+        printf '%s/git-secret-guard' "$(gsg_posix_path "$XDG_STATE_HOME")"
     elif [ -n "${HOME:-}" ]; then
         printf '%s/.local/state/git-secret-guard' "$HOME"
     else

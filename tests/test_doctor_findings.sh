@@ -12,6 +12,8 @@ REC_HEADER_LINES=2
 TAB=$'\t'
 MANY_REPOS=55
 HOLDER_SECONDS=60
+# ^ external each lock attempt starts a few processes => on Windows the 300 attempts outlast 60 seconds and a dead holder is rightly broken
+if [ "$TEST_IS_WINDOWS" -eq 1 ]; then HOLDER_SECONDS=900; fi
 DEAD_PID=99999999
 OLD_GIT_VERSION=2.40.0
 CONCURRENT_PAIRS=4
@@ -399,10 +401,8 @@ repo${TAB}$DR_REAL/two${TAB}-${TAB}$(off_text two)" "a valid, complete file (the
 repo_line() { printf 'repo%s%s/%s%s-%s%s' "$TAB" "$DR_REAL" "$1" "$TAB" "$TAB" "$(off_text "$1")"; }
 
 test_a_full_run_keeps_recorded_repos_it_could_not_have_seen_under_its_roots() {
-    local deep=d nm=node_modules/pkg locked=locked/inner rc folders=31 i
-    # ^ invariant 31 d folders plus deep = 32 levels below the root, one past what the search reaches
-    for ((i = 1; i < folders; i++)); do deep+="/d"; done
-    deep+="/deep"
+    local deep nm=node_modules/pkg locked=locked/inner rc
+    deep="$(deep_path dev)/deep"
     dr_begin && dr_repo "$deep" && dr_repo "$nm" && dr_repo "$locked" && dr_repo gone || return 1
     write_record "$(repo_line "$deep")" "$(repo_line "$nm")" "$(repo_line "$locked")" "$(repo_line gone)" || return 1
     rm -rf -- "$DR_ROOTS/gone" || return 1

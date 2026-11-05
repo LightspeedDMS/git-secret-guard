@@ -4,14 +4,15 @@ Machine-wide pre-commit secret scanning (trufflehog + betterleaks) through a git
 
 commands:
   install [--replace-hooks-path] [--with-timer]
-        Install, or upgrade when already installed. Needs git >= 2.54 and jq.
-        Puts the pinned scanners in ~/.local/bin (checksum-verified), copies the hook to
+        Install, or upgrade when already installed. Needs git >= 2.54 and jq (on Windows a missing jq is
+        downloaded). Puts the pinned scanners in ~/.local/bin (checksum-verified), copies the hook to
         ${XDG_DATA_HOME:-~/.local/share}/git-secret-guard, and sets the global hook.git-secret-guard.* config.
         A global core.hooksPath is refused unless --replace-hooks-path is given: its value is
         recorded verbatim, the directory is backed up as a tarball, and the setting is unset.
         --with-timer also installs and enables a systemd user timer that runs doctor weekly
         (output in the journal), or on macOS a LaunchAgent (output in doctor.log in the state
-        directory); without it nothing is installed. Uninstall removes the timer.
+        directory); without it nothing is installed. Uninstall removes the timer. Not on Windows,
+        where docs/doctor.md has a Task Scheduler recipe.
   uninstall [--remove-tools]
         Remove what install added and restore the recorded core.hooksPath.
         --remove-tools also removes the scanners that install itself downloaded.

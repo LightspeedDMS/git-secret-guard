@@ -99,6 +99,9 @@ doctor_rec_read() {
 }
 
 GSG_FINDINGS_LOCK_ATTEMPTS=300
+# ^ hazard 300 attempts outlast GSG_FINDINGS_LOCK_MAX_AGE_MIN on Windows (probed) => a live holder would be broken, never refused
+# ^ why seconds, not fewer attempts; 40 attempts gave a queued run under load too little time (test_concurrent_runs_over_different_roots_keep_both_sets)
+GSG_FINDINGS_LOCK_WAIT_SECONDS_WINDOWS=45
 GSG_FINDINGS_LOCK_STEP=0.1
 GSG_FINDINGS_LOCK_ABSENT_MAX=3
 GSG_FINDINGS_LOCK_TEXT_MAX=40
@@ -135,7 +138,8 @@ doctor_rec_break() {
 
 # ^ why a symlink named after the pid, not flock or mkdir plus a pid file; macOS ships no flock, and a symlink is created and given its owner in one atomic step
 doctor_rec_try_lock() {
-    if ln -s "$$" "$GSG_FINDINGS_LOCK" 2>/dev/null; then
+    # ^ external Git Bash ln -s refuses a missing target (probed) => winsymlinks:sys links without admin rights; other platforms ignore MSYS
+    if MSYS=winsymlinks:sys ln -s "$$" "$GSG_FINDINGS_LOCK" 2>/dev/null; then
         DR_REC_LOCKED=1
         return 0
     fi
@@ -145,8 +149,10 @@ doctor_rec_try_lock() {
 # ^ invariant the lock is held for the read-merge-rename only, never during checks; the bound is a safety net, not a time limit on doctor
 # ^ invariant no sleep follows the last look at the holder; a holder named in the refusal was seen alive just before, a dead one is broken and the lock retried
 doctor_rec_lock() {
-    local i holder="" absent=0 last=$((GSG_FINDINGS_LOCK_ATTEMPTS - 1))
+    local i holder="" absent=0 last=$((GSG_FINDINGS_LOCK_ATTEMPTS - 1)) stop_at=""
+    if gsg_is_windows; then stop_at=$((SECONDS + GSG_FINDINGS_LOCK_WAIT_SECONDS_WINDOWS)); fi
     for ((i = 0; i < GSG_FINDINGS_LOCK_ATTEMPTS; i++)); do
+        if [ -n "$stop_at" ] && [ "$SECONDS" -ge "$stop_at" ]; then break; fi
         if doctor_rec_try_lock; then return 0; fi
         holder="$(readlink -- "$GSG_FINDINGS_LOCK" 2>/dev/null)" || holder=""
         if [ -z "$holder" ]; then
@@ -168,7 +174,7 @@ doctor_rec_lock() {
         return 1
     fi
     trunc_text "$holder" "$GSG_FINDINGS_LOCK_TEXT_MAX"
-    printf '%s: another run holds %s (process %s); gave up after %s attempts; if no doctor run is active, remove %s\n' "$GSG_NAME" "$GSG_FINDINGS_LOCK" "$REPLY" "$GSG_FINDINGS_LOCK_ATTEMPTS" "$GSG_FINDINGS_LOCK" >&2
+    printf '%s: another run holds %s (process %s); gave up after %s attempts; if no doctor run is active, remove %s\n' "$GSG_NAME" "$GSG_FINDINGS_LOCK" "$REPLY" "$i" "$GSG_FINDINGS_LOCK" >&2
     return 1
 }
 

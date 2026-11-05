@@ -94,6 +94,7 @@ repos:
         pass_filenames: false
         always_run: true
 EOF
+    env -i "${GSG_ENV[@]}" bash -c 'type -P pre-commit' >/dev/null || skip_test "pre-commit is not installed"
     run_cap env -i "${GSG_ENV[@]}" pre-commit install
     assert_rc 0 "pre-commit install"
     assert_file .git/hooks/pre-commit "framework shim installed"
@@ -110,6 +111,7 @@ test_pre_commit_framework_repo_finding_is_blocked_by_the_scan() {
     printf '#!/bin/sh\ntouch "%s/framework-ran2"\n' "$SANDBOX" >"$SANDBOX/framework-check2.sh"
     chmod +x "$SANDBOX/framework-check2.sh"
     printf 'repos:\n  - repo: local\n    hooks:\n      - id: c\n        name: c\n        entry: %s/framework-check2.sh\n        language: system\n        pass_filenames: false\n        always_run: true\n' "$SANDBOX" >.pre-commit-config.yaml
+    env -i "${GSG_ENV[@]}" bash -c 'type -P pre-commit' >/dev/null || skip_test "pre-commit is not installed"
     run_cap env -i "${GSG_ENV[@]}" pre-commit install
     assert_rc 0 "pre-commit install"
     stage_file a.txt one

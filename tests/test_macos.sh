@@ -364,7 +364,7 @@ brew_less_fixture() {
     lc_begin && as_macos && lc_brew_reset || return 1
     for opt in "$@"; do
         case "$opt" in
-            hooks) mkdir -p -- "$SANDBOX/hooks-dir" && gitx config --global core.hooksPath "$SANDBOX/hooks-dir" || return 1 ;;
+            hooks) mkdir -p -- "$SANDBOX/hooks-dir" && git_literal_config --global core.hooksPath "$SANDBOX/hooks-dir" || return 1 ;;
             git=*) lc_fake_git "${opt#git=}" || return 1 ;;
             *) return 1 ;;
         esac

@@ -84,6 +84,8 @@ paths_init() {
     for name in HOME XDG_DATA_HOME XDG_STATE_HOME XDG_CONFIG_HOME; do
         val="${!name:-}"
         if [ -z "$val" ] && [ "$name" != HOME ]; then continue; fi
+        val="$(gsg_posix_path "$val")"
+        printf -v "$name" '%s' "$val"
         if [ "${val#/}" = "$val" ]; then
             printf '%s: %s must be an absolute path, got [%s]\n' "$GSG_NAME" "$name" "$val" >&2
             return 1

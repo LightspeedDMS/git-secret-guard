@@ -18,14 +18,16 @@
    instead. Child scripts (`lib/run-scanner.sh`, the coverage re-check) run under the same bash binary as the hook
    (`$BASH`), not through a new lookup.
 3. `git diff --cached` (fixed flags, `-U0`) is turned into a private scan tree under `${TMPDIR:-$HOME/.tmp}`
-   (mode 700, removed on exit and on HUP/INT/TERM): each touched file at its real relative path, each **added** line
+   (on Windows a `TMPDIR` outside your home is ignored and `~/.tmp` is used, because NTFS ignores `chmod` and only your
+   profile's permissions keep the staged lines private) (mode 700, removed on exit and on HUP/INT/TERM): each touched file at its real relative path, each **added** line
    at its real line number, every other line blank. Nothing added (empty commit, deletions only, binary only) means no
    scan is started and the commit proceeds. The exemptions are loaded before that point, so a repository with a
    `.gitleaks.toml` at HEAD still gets its betterleaks pre-flight ([Exemptions](exemptions.md)), and a config that
    does not load blocks even a commit with nothing to scan.
 4. `trufflehog filesystem` and `betterleaks dir` run in parallel, each through `lib/run-scanner.sh` in its own session
-   (`setsid`; on Git for Windows a background process stopped with `taskkill /T /F`) and under a timeout. On HUP/INT/TERM the hook signals both process groups, waits for them, and only
-   then removes the temp dir, so no scanner outlives the commit. Results become rows of scanner, detector, status
+   (`setsid`) and under a timeout. On HUP/INT/TERM the hook signals both process groups, waits for them, and only
+   then removes the temp dir, so no scanner outlives the commit. Windows has no process groups: there the hook finds every
+   process below each scanner and stops them with `taskkill /T /F`, without a grace period. Results become rows of scanner, detector, status
    (`verified`, `unknown` or `finding`), file and line. Only those are printed, never a value; log lines are reduced
    to their message words. betterleaks never validates a finding against a live API (its `--validation` flag is never
    passed), so it makes no network request. A repository with its own `.gitleaks.toml` at HEAD gets a second, small
@@ -93,7 +95,7 @@ git-secret-guard: 2 coverage problems still open (doctor run 2026-11-03):
 ## The settings file
 
 The hook reads `<share>/settings` (`<share>` = two levels above the resolved script path), written by `install`:
-absolute `TRUFFLEHOG_BIN`, `BETTERLEAKS_BIN`, `JQ_BIN`, `SETSID_BIN`, `TIMEOUT_BIN`, the pinned `TRUFFLEHOG_VERSION` and
+absolute `TRUFFLEHOG_BIN`, `BETTERLEAKS_BIN`, `JQ_BIN`, `SETSID_BIN` (`TASKKILL_BIN` on Windows), `TIMEOUT_BIN`, the pinned `TRUFFLEHOG_VERSION` and
 `BETTERLEAKS_VERSION` (shown on the pass line only) and `SCAN_TIMEOUT_SECONDS`. The `GITLEAKS_*` keys of the previous
 build are neither written nor read (an inherited `GITLEAKS_BIN` is discarded like any other). A missing,
 relative or non-executable tool path blocks the commit and says nothing was scanned. A missing `SCAN_TIMEOUT_SECONDS`
@@ -119,11 +121,12 @@ not reachable. The doctor suites (`test_doctor.sh`, `test_doctor_repos.sh`, `tes
 `test_doctor_betterleaks.sh`, `test_doctor_info.sh`, `test_doctor_readonly.sh`) and `test_timer.sh` use the same sandbox,
 with repositories under a scratch root; every lifecycle test finds a recording `systemctl` stand-in first on its `PATH`.
 
-Runtime needs bash 4.4 or newer, `setsid` (util-linux), `timeout` (coreutils), awk, `jq` and, for `install`, `curl` and `tar`. The
-tests drive `GSG_TEST_GIT` (default `/usr/local/bin/git` on Linux, `/usr/bin/git` on macOS; it must be >= 2.54).
+Runtime needs bash 4.4 or newer, `setsid` (util-linux; `taskkill` on Windows), `timeout` (coreutils), awk, `jq` and, for
+`install`, `curl` and `tar`. The tests drive `GSG_TEST_GIT` (default `/usr/local/bin/git` on Linux, `/usr/bin/git` on macOS,
+the one on `PATH` on Windows; it must be >= 2.54).
 `shellcheck` 0.11.0, `pre-commit` and the real `trufflehog` and `betterleaks` are optional: the tests that need one skip
 with a reason when it is absent. `tests/fetch-test-tools.sh` downloads the pinned scanners (SHA-256 checked) into
-`~/.cache/git-secret-guard-test-tools`, where the macOS harness looks by default; on Linux point
+`~/.cache/git-secret-guard-test-tools`, where the Windows and macOS harness looks by default; on Linux point
 `GSG_TEST_TRUFFLEHOG` and `GSG_TEST_BETTERLEAKS` at them. Other overrides: `GSG_TEST_JQ`, `GSG_TEST_SHELLCHECK`,
 `GSG_TEST_SETSID`, `GSG_TEST_TIMEOUT`.
 
@@ -256,7 +259,10 @@ Why the scan code is shaped this way; each point was probed on the pinned versio
   through `proc_stop_group`. `cleanup` sends TERM to the group, waits, polls (bounded), sends KILL, and only then removes
   the work dir (a surviving `cp -a` could re-create files holding added lines). Adapters use `timeout --foreground`: plain
   `timeout` makes its own group, which the group kill misses. The process groups and the TERM-then-KILL sequence are Linux and macOS;
-  on Git for Windows `proc_stop_group` runs `taskkill /T /F` on the runner's process tree instead (no grace period). Background jobs start with SIGINT ignored, so INT tests run
+  on Git for Windows there are no groups. MSYS `exec` replaces the Windows process but keeps the MSYS pid, so a Windows pid read
+  at start goes stale and `taskkill /T` stops at the gap: `proc_windows_tree` walks `/proc/*/ppid` at stop time and
+  `proc_stop_group` names each current `winpid` to `taskkill /T /F` (no grace period). A survivor keeps the work dir busy, so the staged lines stay on disk
+  (`test_windows_only_an_interrupted_scan_leaves_no_native_process_and_no_work_dir`). The coverage reminder starts through plain `"$BASH"` there, because the settings hold no `SETSID_BIN`. Background jobs start with SIGINT ignored, so INT tests run
   git with `env --default-signal=INT`.
 - **Pass line.** `report_pass_line` and `report_nothing_line`; tests use `assert_pass_line_only`. Finding rows print the
   scanner in an 11-character column (`betterleaks` is 11).

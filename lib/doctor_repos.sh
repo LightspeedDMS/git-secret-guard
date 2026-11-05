@@ -36,7 +36,11 @@ doctor_repo_finding() {
 }
 
 # ^ invariant sets REPLY = the file of a config origin; a relative file origin is relative to the repository the check runs in
+# ^ external native Windows git prints absolute origins as file:C:/dir, relative ones resolve to /c/dir => one spelling, else a finding repeats per worktree
 doctor_origin_text() {
+    if [[ $1 == file:[A-Za-z]:/* ]] && gsg_is_windows; then
+        REPLY="$(cygpath -u "${1#file:}")" && return 0
+    fi
     case "$1" in
         file:/*) REPLY="${1#file:}" ;;
         file:*) REPLY="$PWD/${1#file:}" ;;
@@ -47,9 +51,11 @@ doctor_origin_text() {
 # ^ why a check after rev-parse succeeds, not trust in rev-parse alone; git walks UP from an empty .git and answers for the parent repository
 # ^ invariant rc 0 = $1 is the work tree git reports or its git dir is $1/.git; rc 1 writes the reason into rev.err for first_message
 doctor_resolves_here() {
-    local dir="$1" gitdir="$2" top
+    local dir="$1" gitdir="$2" top here="$1"
+    # ^ external native Windows git answers C:/dir with long names, find keeps the POSIX form (probed) => compared in the form of git
+    if gsg_is_windows; then here="$(cygpath -m -l "$dir")" || here="$dir"; fi
     top="$("$GSG_GIT" -C "$dir" rev-parse --show-toplevel 2>/dev/null)" || top=""
-    if [ "$top" = "$dir" ] || [ "$gitdir" = "$dir/.git" ]; then return 0; fi
+    if [ "$top" = "$here" ] || [ "$gitdir" = "$here/.git" ]; then return 0; fi
     printf 'the .git entry here is not a git directory (git resolves it to %s)\n' "${top:-$gitdir}" >"$DR_WORK/rev.err"
     return 1
 }

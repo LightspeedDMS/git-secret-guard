@@ -59,7 +59,7 @@ test_load_settings_discards_an_inherited_doctor_time_limit() {
 test_load_settings_reads_setsid_and_timeout_and_discards_inherited_values() {
     write_settings /a/t /a/g /a/j
     set_env SETSID_BIN=/env/setsid TIMEOUT_BIN=/env/timeout
-    in_common "load_settings '$SHARE/settings' && printf '[%s][%s]' \"\$SETSID_BIN\" \"\$TIMEOUT_BIN\""
+    in_common "load_settings '$SHARE/settings' && printf '[%s][%s]' \"\${SETSID_BIN:-}\" \"\$TIMEOUT_BIN\""
     assert_eq "$OUT" "[$TEST_SETSID][$TEST_TIMEOUT]" "settings win"
     printf 'JQ_BIN=/a/j\n' >"$SHARE/settings"
     in_common "load_settings '$SHARE/settings' && printf '[%s][%s]' \"\${SETSID_BIN:-}\" \"\${TIMEOUT_BIN:-}\""

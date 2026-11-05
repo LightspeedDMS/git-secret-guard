@@ -60,7 +60,7 @@ test_a_betterleaks_that_cannot_run_makes_the_config_check_an_explicit_warning() 
 
 test_a_gitleaks_config_that_is_a_symlink_at_head_is_a_problem() {
     dr_real_betterleaks linked || return 1
-    ln -s /etc/hostname .gitleaks.toml && gitx add .gitleaks.toml && gitx commit -q --no-verify -m link || return 1
+    stage_symlink /etc/hostname .gitleaks.toml && gitx commit -q --no-verify -m link || return 1
     doctor
     assert_rc 1 "a symlink at HEAD"
     assert_contains "$OUT" "PROBLEM  .gitleaks.toml at HEAD must be a regular file (a symlink or directory is refused); every commit in this repository is blocked" "refused like the hook does"

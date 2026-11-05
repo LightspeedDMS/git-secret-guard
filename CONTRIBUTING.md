@@ -25,6 +25,7 @@ Development is supported on all three platforms:
 | **Run the tests with** | `tests\run.cmd` (PowerShell, cmd) or `tests/run.sh` (Git Bash) | `tests/run.sh` | `tests/run.sh` |
 
 Older git silently ignores config hooks, so most tests would prove nothing; set `GSG_TEST_GIT=/path/to/git` to use another.
+`GSG_TEST_SERVICE_UNIT=<unit>` runs the service-environment tests against a systemd unit whose `User=` is you and that sets `PATH=`; unset, those tests skip.
 
 - [shellcheck](https://github.com/koalaman/shellcheck) **0.11.0** for the lint gate (`pipx install shellcheck-py==0.11.0.1`;
   on Windows also the `shellcheck.exe` of the [0.11.0 release](https://github.com/koalaman/shellcheck/releases/tag/v0.11.0),
@@ -141,10 +142,28 @@ break it. Read it before changing the hook, extraction, exemptions or install. I
 5. **The docs** to update: `docs/platforms.md` (the platform section), `docs/install.md`, `lib/usage.md`, `CLAUDE.md` (layout and facts), and the install hint in
    `install_git_hint` for the class.
 
+## Sign your commits (DCO)
+
+Contributions are accepted under the [Developer Certificate of Origin](DCO.txt) 1.1: by signing off, you certify that you wrote
+the change or have the right to submit it under this project's license. Every commit needs a `Signed-off-by:` line with the
+name and email of its author:
+
+```
+Signed-off-by: Your Name <you@example.com>
+```
+
+- **New commits:** `git commit -s` adds the line from your `user.name` and `user.email`.
+- **The last commit:** `git commit --amend -s --no-edit`.
+- **A whole branch:** `git rebase --signoff origin/main`, then `git push --force-with-lease`.
+
+CI checks every commit of a pull request (`.github/scripts/check-dco.sh BASE HEAD`, merge commits skipped) and fails, naming
+the commits, when the sign-off is missing or does not match the commit's author. Commits already on `main` are not checked.
+Run it yourself with `.github/scripts/check-dco.sh origin/main HEAD`.
+
 ## Pull requests
 
 1. Open or pick an issue first for anything larger than a small fix, so the approach can be agreed.
-2. Branch from `main`, keep the change focused, and write commit messages that say why, not only what.
+2. Branch from `main`, keep the change focused, write commit messages that say why, not only what, and sign off every commit (see above).
 3. Run the suite before pushing and mention in the PR anything you could not run (for example macOS, or Windows).
 4. CI runs the suite on Ubuntu 24.04 for both your branch and the base and compares their `FAIL` lines (timings
    stripped): it fails when your branch has a `FAIL` line the base does not (a new failure, or an old one whose message

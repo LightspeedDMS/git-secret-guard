@@ -99,7 +99,7 @@ absolute `TRUFFLEHOG_BIN`, `BETTERLEAKS_BIN`, `JQ_BIN`, `SETSID_BIN` (`TASKKILL_
 `BETTERLEAKS_VERSION` (shown on the pass line only) and `SCAN_TIMEOUT_SECONDS`. The `GITLEAKS_*` keys of the previous
 build are neither written nor read (an inherited `GITLEAKS_BIN` is discarded like any other). A missing,
 relative or non-executable tool path blocks the commit and says nothing was scanned. A missing `SCAN_TIMEOUT_SECONDS`
-means 300; an empty value, one with a non-digit or exactly `0` blocks (a zero-padded value such as `00` is accepted); missing or non-numeric versions only drop the versions from
+means 300; anything that is not a positive integer without leading zeros blocks (empty, a non-digit, `0`, and `00` or `007`, because GNU `timeout` reads a zero duration as no limit); missing or non-numeric versions only drop the versions from
 the pass line. An inherited environment variable of the same name as any key is discarded before the file is read.
 Skip once with `git commit --no-verify`; automation can disable only this hook with
 `GIT_CONFIG_PARAMETERS="'hook.git-secret-guard.enabled'='false'"` (the repository's own hooks still run).

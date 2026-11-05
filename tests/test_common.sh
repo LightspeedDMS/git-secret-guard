@@ -74,12 +74,31 @@ test_strip_ansi_removes_colour_sequences_and_nothing_else() {
 }
 
 test_load_settings_rejects_bad_timeouts() {
-    local bad
-    for bad in 0 abc -5 "" 1.5; do
+    local bad good
+    # ^ why 00 and 007 are refused, not accepted; GNU timeout reads an all-zero duration as no limit
+    for bad in 0 00 000 007 abc -5 "" 1.5; do
         write_settings /a/t /a/g /a/j "SCAN_TIMEOUT_SECONDS=\"$bad\""
         in_common "load_settings '$SHARE/settings'"
         assert_rc 1 "timeout [$bad] refused"
-        assert_contains "$ERR" "SCAN_TIMEOUT_SECONDS" "names the setting"
+        assert_contains "$ERR" "SCAN_TIMEOUT_SECONDS must be a positive integer, got [$bad]" "names the setting"
+    done
+    for good in 1 10 300 86400; do
+        write_settings /a/t /a/g /a/j "SCAN_TIMEOUT_SECONDS=\"$good\""
+        in_common "load_settings '$SHARE/settings'"
+        assert_rc 0 "timeout [$good] accepted"
+    done
+}
+
+test_hook_blocks_on_a_zero_padded_timeout_setting() {
+    local bad
+    new_repo zeropad || return 1
+    for bad in 00 000 007; do
+        use_stubs "SCAN_TIMEOUT_SECONDS=$bad"
+        stage_file a.txt one
+        commit_cap "x"
+        assert_rc 1 "[$bad] blocks"
+        assert_contains "$ERR" "SCAN_TIMEOUT_SECONDS must be a positive integer, got [$bad]" "[$bad] named"
+        assert_contains "$ERR" "nothing was scanned" "[$bad] says nothing was scanned"
     done
 }
 

@@ -100,7 +100,7 @@ test_xml_special_characters_in_a_path_are_escaped_and_a_control_character_is_ref
     assert_no_file "$(plist_path)" "no plist"
 }
 
-# ^ external the plist passes no --roots; doctor reads its default root $HOME
+# ^ external the plist passes no --roots; doctor reads its default root $HOME, set by launchd for a user agent
 # ^ external skip_test exits the test subshell; the plutil guard here skips the calling test
 install_agent_for_run() {
     command -v plutil >/dev/null 2>&1 || skip_test "plutil is not available to read the plist like launchd"

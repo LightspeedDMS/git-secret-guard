@@ -7,7 +7,18 @@ DR_ROOTS="" DR_REAL=""
 
 # ^ external the fixtures install fake tools printing only their version; tests needing a real binary rewrite the settings
 dr_begin() {
-    lc_begin && lc_make_fixtures && lc_use_fixtures || return 1
+    lc_begin || return 1
+    dr_install
+}
+
+# ^ external a Mac answers Darwin from the real uname, other hosts from a fake one (as_macos); install runs on this flow
+dr_begin_macos() {
+    lc_begin && as_macos || return 1
+    dr_install
+}
+
+dr_install() {
+    lc_make_fixtures && lc_use_fixtures || return 1
     DR_ROOTS="$SANDBOX/roots"
     rm -rf -- "$DR_ROOTS" || return 1
     mkdir -p -- "$DR_ROOTS" || return 1

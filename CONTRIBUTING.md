@@ -32,8 +32,10 @@ Older git silently ignores config hooks, so most tests would prove nothing; set 
 - Optional: `pre-commit`, for the framework coexistence tests.
 
 The real trufflehog and betterleaks are needed only by the tests that pin their behaviour; without them those tests
-skip with a reason. `tests/fetch-test-tools.sh` downloads the versions pinned in `tools.lock` and checks their SHA-256.
-On Windows, `tests/run.sh` does this for you the first time, and fetches `jq.exe` too, so Git for Windows is all you install.
+skip with a reason. `tests/fetch-test-tools.sh` downloads the versions pinned in `tools.lock` into
+`~/.cache/git-secret-guard-test-tools` and checks their SHA-256. On Windows and macOS the tests look there by default; on
+Linux set `GSG_TEST_TRUFFLEHOG` and `GSG_TEST_BETTERLEAKS` to those files (or to your own copies of the pinned versions).
+On Windows, `tests/run.sh` fetches them for you the first time, and `jq.exe` too, so Git for Windows is all you install.
 
 ## Running the tests
 
@@ -73,7 +75,7 @@ in [docs/platforms.md](docs/platforms.md); they are not part of `tests/run.sh`.
 - **Fail closed.** If the hook cannot scan, it blocks the commit and says why; it never lets a commit through
   unscanned. Check every return value, keep loops bounded, use `set -u`.
 - **Lint clean:** shellcheck 0.11.0 with no findings (info included). Comments use the coded form `# ^ tag clause`,
-  checked by `tests/comment-rules.awk` (`tests/run.sh tests/test_quality.sh` runs both).
+  checked by `awk -f tests/comment-rules.awk FILE` (`tests/run.sh tests/test_quality.sh` runs both).
 - **Keep files under 1000 lines;** split by responsibility when one grows past that.
 - **Document behaviour changes** in the matching file under `docs/` (and `README.md` when it is part of the overview).
   `tests/test_quality.sh` checks several documented promises.
@@ -92,8 +94,11 @@ break it. Read it before changing the hook, extraction, exemptions or install. I
 1. Open or pick an issue first for anything larger than a small fix, so the approach can be agreed.
 2. Branch from `main`, keep the change focused, and write commit messages that say why, not only what.
 3. Run the suite before pushing and mention in the PR anything you could not run (for example macOS, or Windows).
-4. CI runs the suite on Ubuntu 24.04 for both your branch and the base, and fails only on tests that pass on the base
-   and fail on your branch. On Windows it runs the suite and a clean-machine install, leak and uninstall check.
+4. CI runs the suite on Ubuntu 24.04 for both your branch and the base and compares their `FAIL` lines (timings
+   stripped): it fails when your branch has a `FAIL` line the base does not (a new failure, or an old one whose message
+   changed), or when your branch's log has no `SUMMARY` line. A push to the default branch runs that branch alone, so any
+   failure counts. On Windows it runs the whole suite (pull requests and the default branch only) and, on every run, a
+   clean-machine install, leak and uninstall check; a failure in either fails the job.
 5. Link the issue in the PR description.
 
 ## License

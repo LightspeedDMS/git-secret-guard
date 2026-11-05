@@ -12,7 +12,7 @@ bin/git-secret-guard install --with-timer   # optional: also run doctor weekly (
 git-secret-guard uninstall          # put back what was there before
 ```
 
-**Requirements.** Linux on x86_64 or arm64, macOS arm64 with Homebrew (macOS x86_64 is mapped, not tested), or Windows x86_64 with Git for Windows (details in [platforms.md](platforms.md#windows-git-for-windows): there `install` downloads a missing `jq`, and `taskkill` replaces `setsid`). bash,
+**Requirements.** Linux on x86_64 or arm64, macOS arm64 with Homebrew (macOS x86_64 is mapped, not tested), or Windows x86_64 with Git for Windows (details in [platforms.md](platforms.md#windows-git-for-windows): there `install` downloads a missing `jq`, and `taskkill` replaces `setsid`). bash 4.4 or newer,
 **git >= 2.54 first on `PATH`**, `jq`, `setsid`, `timeout`, and `curl` plus `tar` when a scanner has to be downloaded. On
 macOS, `install` lists whichever of bash 4.4 or newer, `coreutils` (`timeout`), `util-linux` (`setsid`) and `jq` is missing, installs them
 with `brew install` only after its other checks have passed, the `tools.lock` lookup included (with a GNU `timeout` already present, the scanner
@@ -33,12 +33,12 @@ ignores config hooks without any message.
 
 | Step | Result |
 |---|---|
-| Prechecks | git >= 2.54 on `PATH`, `jq`, `setsid` (`taskkill` on Windows), `timeout` found (their **absolute paths** are written to the settings file, the hook never resolves them through `PATH`), a supported platform, absolute `HOME`/`XDG_*`. Any refusal happens before anything is changed. |
+| Prechecks | git >= 2.54 on `PATH`, `jq`, `setsid` (`taskkill` on Windows), `timeout` found (their **absolute paths** are written to the settings file, the hook never resolves them through `PATH`), a supported platform, absolute `HOME`/`XDG_*`. Any refusal happens before anything is changed (on macOS under bash 3.2 the one exception is the `brew install bash` that runs first, see above). |
 | Scanners | `~/.local/bin/trufflehog` and `~/.local/bin/betterleaks` (`trufflehog.exe` and `betterleaks.exe` on Windows, where a missing `jq` is downloaded the same way as `jq.exe`). A tool that already reports the pinned version (`trufflehog` 3.99.2, `betterleaks` 1.9.0) is **kept**. Otherwise the platform tarball is downloaded from the vendor's GitHub release, its **SHA-256 is checked against `tools.lock`**, only the tool binary is extracted, and its `--version` is checked against the pin. A checksum mismatch deletes the download, installs nothing (neither scanner) and refuses. curl runs with `-q` as its first argument, so a `~/.curlrc` (proxy, protocol, output or `head` settings) cannot change a verified download. **A file already at that path that does not report the pinned version (your own build, a symlink, an older release) is never overwritten:** it is moved aside to `<tool>.gsg-replaced-<UTC stamp>` in the same directory (byte-identical, same mode), the output says where, and the state records the aside name with the SHA-256 of what install put in its place. Such a tool is never recorded as downloaded by install, so it is never "ours to delete". Install also records the SHA-256 of **every** file it places (`tools_placed` in the state), also on an empty path. On an upgrade that bumps the pins, a file that still has that hash is install's own and is **replaced in place** (no aside file, and a downloaded tool stays removable with `--remove-tools`); only a file install did not place is moved aside, and the first original ever moved aside is the one uninstall restores. The aside names and hashes are written to the state **before** the file is moved, so a failure afterwards (state write, second tool, share dir) cannot lose the original: a later uninstall, or a rerun of install, still finds it. |
-| Files | `hooks/`, `lib/`, `bin/`, `tools.lock`, `VERSION` copied to `${XDG_DATA_HOME:-~/.local/share}/git-secret-guard/` (the new tree is built beside the old one and swapped in, so a commit during an upgrade sees the old or the new hook, never half of either; if the final rename fails, the previous tree is moved back, so the share dir is never left missing), plus the generated `settings` file with absolute `TRUFFLEHOG_BIN`, `BETTERLEAKS_BIN`, `JQ_BIN`, `SETSID_BIN`, `TIMEOUT_BIN`, the pinned `TRUFFLEHOG_VERSION` and `BETTERLEAKS_VERSION` (the hook prints them on a passing commit) and `SCAN_TIMEOUT_SECONDS=300` (on macOS also the absolute `BASH_BIN` and `GNUBIN_DIR`; on Windows `TASKKILL_BIN` in place of `SETSID_BIN`, and `JQ_BIN` names a small wrapper in the share dir). `settings` is rewritten by every install. |
+| Files | `hooks/`, `lib/`, `bin/`, `tools.lock`, `VERSION` copied to `${XDG_DATA_HOME:-~/.local/share}/git-secret-guard/` (the new tree is built complete beside the old one and swapped in with two renames, old out, new in, so a commit during an upgrade runs the old or the new hook, never half of either; in the instant between the two renames the hook path is missing and a commit started then fails. If the second rename fails the previous tree is moved back; if that fails too, the message names where it is, `<share>.old.XXXXXX/previous`), plus the generated `settings` file with absolute `TRUFFLEHOG_BIN`, `BETTERLEAKS_BIN`, `JQ_BIN`, `SETSID_BIN`, `TIMEOUT_BIN`, the pinned `TRUFFLEHOG_VERSION` and `BETTERLEAKS_VERSION` (the hook prints them on a passing commit) and `SCAN_TIMEOUT_SECONDS=300` (on macOS also the absolute `BASH_BIN` and `GNUBIN_DIR`; on Windows `TASKKILL_BIN` in place of `SETSID_BIN`, and `JQ_BIN` names a small wrapper in the share dir). `settings` is rewritten by every install. |
 | Global git config | `hook.git-secret-guard.event=pre-commit` and `hook.git-secret-guard.command=<absolute path of the installed hooks/secret-scan>`, written with `git config --global --replace-all`, so each stays single-valued however often you run `install`. On macOS the command is `'<recorded bash>' '<installed hooks/secret-scan>'`, so the hook runs under bash 4.4 or newer whatever `PATH` the git client has. On Windows the path is in the mixed form `C:/Users/...`, the form native git keeps. |
 | CLI | `~/.local/bin/git-secret-guard` is a symlink to the installed copy. On Windows it is a small wrapper script instead, next to `git-secret-guard.cmd` for PowerShell and cmd. Make sure `~/.local/bin` is on your `PATH`. |
-| Timer | Only with `--with-timer`: two systemd **user** units and `systemctl --user enable --now git-secret-guard-doctor.timer`, see [The weekly timer](doctor.md#the-weekly-timer). Without the flag no unit is written and `systemctl` is never called. On macOS the flag installs a LaunchAgent plist in `~/Library/LaunchAgents` and loads it with `launchctl bootstrap gui/<uid>`, see [the launchd section](doctor.md#the-weekly-timer-on-macos-launchd). Windows has no `--with-timer`: see [the Task Scheduler recipe](doctor.md#a-weekly-run-on-windows-task-scheduler). |
+| Timer | Only with `--with-timer`: two systemd **user** units and `systemctl --user enable --now git-secret-guard-doctor.timer`, see [The weekly timer](doctor.md#the-weekly-timer). Without the flag no unit is written and `systemctl` is never called (when the state already records a timer, its own units or plist are only refreshed if their text changed, never enabled). On macOS the flag installs a LaunchAgent plist in `~/Library/LaunchAgents` and loads it with `launchctl bootstrap gui/<uid>`, see [the launchd section](doctor.md#the-weekly-timer-on-macos-launchd). Windows has no `--with-timer`: see [the Task Scheduler recipe](doctor.md#a-weekly-run-on-windows-task-scheduler). |
 | State | `${XDG_STATE_HOME:-~/.local/state}/git-secret-guard/state` (mode 600 in a 700 directory): version, the previous `core.hooksPath` (or `unset`), which tools install itself downloaded, the backup path, and `timer_installed` (`yes` or `no`). |
 
 Install is idempotent. A second run replaces the files, keeps the config single-valued, downloads nothing that is
@@ -60,7 +60,9 @@ commit during the upgrade is never left without a scanner):
   onto the empty path, byte for byte with its mode, and the record of the move is dropped.
 - A `gitleaks` at that path that is **not** the file the old install placed (you replaced it since) is never deleted:
   install prints `... is not the file an earlier install placed; left in place` and keeps the aside record.
-- The state loses every gitleaks entry (`tools_installed_by_us`, `tools_placed`, `tools_replaced`).
+- The state drops the gitleaks entries it settled (`tools_installed_by_us`, `tools_placed`, and the aside record of a
+  restored original). An aside record whose original stays aside (the foreign file case above, or a second aside file
+  after the first was restored) is kept, so `uninstall` can still report it.
 
 `uninstall` after the upgrade returns the machine to its state before the first install. `uninstall` also accepts a
 state file the gitleaks build wrote (it still restores your moved-aside gitleaks and, with `--remove-tools`, removes
@@ -106,15 +108,17 @@ directory to back up or record. If the directory does not exist there is nothing
   note naming the file they use. If the global config cannot be read, the message carries git's own first error line,
   and names `GIT_CONFIG` when that variable is set (it makes `git config --global` refuse with exit 129).
 - **The backup is bounded.** A `core.hooksPath` that resolves to your home directory or `/`, to a directory over 50 MB
-  (52428800 bytes) or to one holding more than 10000 files is refused before anything changes, so a mistaken `~`
+  (52428800 bytes, the sum of the `lstat` sizes of every entry below it) or to one holding more than 10000 files
+  (every entry counts: files, directories and symlinks) is refused before anything changes, so a mistaken `~`
   cannot be archived into the state directory.
 
 ## Pinned tools: `tools.lock`
 
 `tools.lock` holds one line per tool and platform: name, version, platform, SHA-256 of the vendor's release tarball
 (the vendors' checksums, fetched 2026-10-30; vendors name platforms differently, `linux_amd64` against `linux_x64`).
-Linux x86_64 and arm64, macOS arm64 and Windows x86_64 are used; the macOS x86_64 rows are mapped but not tested. The `jq` row is Windows only: elsewhere `jq` is a system prerequisite. A lock that is unreadable, malformed
-or ambiguous (two rows for one tool and platform) is refused as a whole, and a missing row is a refusal, never a skip.
+Linux x86_64 and arm64, macOS arm64 and Windows x86_64 are used; the macOS x86_64 rows are mapped but not tested. The `jq` row is Windows only: elsewhere `jq` is a system prerequisite. A lock that is unreadable or has a
+malformed line anywhere is refused as a whole; two rows for the tool and platform being looked up are refused as
+ambiguous (duplicates for another platform are not looked at), and a missing row is a refusal, never a skip.
 
 **Test-only overrides.** `GSG_TOOLS_BASE_URL` (a directory URL such as `file:///tmp/fixtures`, tarballs named like the
 vendor's) and `GSG_TOOLS_LOCK` (a lock file) let the test suite install from local fake tarballs. They are announced
@@ -178,3 +182,55 @@ pinned version. A tool counts as `ok` only when it reports the pinned version th
 as a whole word, or with a `v` prefix), so `8.30.1-rc1` is a `MISMATCH` here exactly as install would replace it. It exits 0 when everything matches and 1 when it is not installed or a line says `MISMATCH` or
 `MISSING`. `git-secret-guard version` prints `git-secret-guard <x.y.z>`. `git-secret-guard help` lists the commands. `status` looks at the installation only; the repositories are the job
 of [`doctor`](doctor.md).
+
+## Maintainer notes
+
+- **`git config` exit codes** (2.56): a plain set exits 5 on a multi-valued key (hence `--replace-all`); `--get-all` exits 1
+  when the key is absent and also when `GIT_CONFIG_GLOBAL` is a directory; `--global --list` exits 128 for a missing file
+  and for a directory, so "unwritable" is probed by setting and removing a `gsg-install-probe` section
+  (`install_check_config_writable`). Values are read with `-z --get-all` and stored verbatim. To test "cannot write", make
+  the config **directory** unwritable (git writes through a lock file; a read-only file is not enough).
+- **Release tarballs**: `trufflehog_<v>_linux_{amd64,arm64}`, `betterleaks_<v>_linux_{x64,arm64}`; betterleaks ships
+  `.tar.gz` for Linux and macOS, with checksums in its `checksums.txt`. `tools_version_matches` accepts the pin only as a
+  whole word, `v<pin>` or `jq-<pin>`, after dropping carriage returns.
+- **jq on Windows** (`install_manage_jq`, after `state_read`): no jq on `PATH`, or `jq:` in `tools_placed`, appends `jq` to
+  `GSG_TOOL_NAMES` for this install run only, so lock, staging, ownership and asides come from the scanner path; status and
+  doctor keep seeing the two scanners, and `install_write_settings` skips its `_VERSION` key. The asset is a bare `.exe`
+  (`tools_extract_binary` copies it). A jq install did not place stays in use. Linux keeps its package-manager hint (no
+  silent sudo).
+- **Step order** (refusable steps before any lasting change; exceptions: the macOS `brew install bash` bootstrap, the
+  config write probe that sets and removes its section, and on a Mac without GNU `timeout` the staging that follows the
+  one `brew install`): `install_check_prerequisites`, platform, `core.hooksPath`
+  read and refusal, CLI link, config write probe, state, `install_plan_lock`, download + SHA-256 + `--version` into one
+  stage, `install_hash_staged`, backup, **state write**, tools, share tree, CLI link, `git config --replace-all`, unset
+  `core.hooksPath` **last** (`test_install_keeps_scanning_when_the_final_hooks_path_unset_fails`). Uninstall restores
+  `core.hooksPath` **first** (`test_uninstall_restores_core_hooks_path_before_removing_the_hook_config`): never leave a
+  machine with neither hook nor `core.hooksPath`.
+- **State keys**: `version`, `previous_hooks_path_set`, `previous_hooks_path`, `tools_installed_by_us`, `backup_path`,
+  `tools_replaced`, `tools_placed`, `timer_installed`. `state_write` writes all eight; `state_read` still accepts the older
+  five- and six-key files and refuses anything odd. A recorded `no` is replaced by a later takeover
+  (`test_a_hooks_path_taken_over_after_a_plain_install_is_recorded`); a differing recorded value refuses
+  (`install_check_recorded_hooks_path`).
+- **Scanner ownership.** `install_owns_file` = the file's hash is in `tools_placed`. `install_write_state pending` records
+  the old and the new hash before `install_commit_tools`, `final` keeps the new one. `mv -T -n` is followed by a check of
+  both paths (coreutils 8.32 exits 0 when `-n` skips). `uninstall_restore_replaced` validates records with `GSG_ASIDE_RE`
+  and `GSG_STATE_TOOL_NAMES`; `uninstall_tools` deletes only regular files whose hash is in `UN_PLACED`. Pin bumps are
+  tested in `tests/test_upgrade.sh` (`bump_pins`).
+- **Legacy gitleaks.** `GSG_STATE_TOOL_NAMES` (current plus `GSG_LEGACY_TOOL_NAMES`) is what uninstall and doctor validate
+  state words against. `install_note_legacy` keeps the legacy placed hashes in `GSG_LEGACY_PLACED` through the pending and
+  final writes; `install_retire_legacy_tools` runs last, after the new hook is live, and a failed step returns before the
+  clear so the next install retries. The state is rewritten without our hash **before** the user's file is moved back
+  (`test_an_interruption_after_the_restore_never_lets_the_rerun_delete_the_users_gitleaks`). Tests:
+  `tests/test_legacy_gitleaks.sh`.
+- **`core.hooksPath` reader**: `lifecycle_read_hooks_path` (sets only `GSG_HP_*`; `GSG_PREV`/`GSG_PREV_SET` are install's)
+  also runs `git -C / config --show-scope --show-origin -z --list`; `hp_walk_includes` reads every include target (bound
+  `GSG_HP_MAX_INCLUDES`), `hp_include_target` skips missing targets like git, `hp_report_unresolved` refuses unresolvable
+  ones. `lifecycle_realpath_m` works without GNU `realpath -m`; `lifecycle_note_global_config` prints the
+  `GIT_CONFIG_GLOBAL` note (every lifecycle test's stderr has it).
+- **Backup bounds** (`install_check_backup_bounds`): test `/` only at the resolver level
+  (`test_the_resolver_refuses_root_before_anything_could_back_it_up`), never by running install.
+- **Download override**: `GSG_TOOLS_BASE_URL` + `GSG_TOOLS_LOCK` cannot skip verification
+  (`test_the_base_url_override_cannot_skip_verification`); curl runs with `-q` first and `--proto =https --proto-redir =https`.
+- **`/etc/os-release` is data, never sourced** (`install_os_release_field`; `GSG_OS_RELEASE` in tests;
+  `test_the_container_script_reads_os_release_as_data`). Hints: `install_os_family`, `install_fix_hint`, `install_git_hint`
+  (`tests/test_prerequisites.sh`).

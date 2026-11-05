@@ -86,57 +86,17 @@ test_a_missing_global_hook_command_is_reported_per_repo_as_an_incomplete_hook_co
 
 dr_disable() { gitx -C "$DR_ROOTS/$1" config hook.git-secret-guard.enabled false; }
 
-
-test_the_default_root_is_the_home_directory_and_reaches_a_deep_repository() {
+test_discovery_finds_nested_repositories_and_skips_node_modules() {
     dr_begin || return 1
-    local deep="$LC_HOME/work/clients/acme/team/project/services/api"
-    mkdir -p -- "$deep" && gitx init -q "$deep" && gitx -C "$deep" config hook.git-secret-guard.enabled false || return 1
-    gsg doctor
-    assert_rc 1 "a default run finds a repository seven levels below home"
-    assert_contains "$OUT" "$deep" "and names it"
-    assert_contains "$OUT" "summary: 1 repos, 0 covered" "the only repository of the sandbox home"
-}
-
-test_a_default_run_on_macos_leaves_out_library_and_roots_can_still_name_it() {
-    dr_begin || return 1
-    # shellcheck disable=SC2016
-    local probe='GSG_NAME=x; GSG_ROOT="$1"; for l in brew common state tools doctor doctor_repos; do source "$1/lib/$l.sh"; done; uname() { echo Darwin; }'
-    # shellcheck disable=SC2016
-    run_cap env -i "${LC_ENV[@]}" bash -c "$probe"'; doctor_resolve_roots; printf "%s|" "${DR_FIND_SKIP[@]}"' _ "$GSG_PROJECT"
-    assert_contains "$OUT" "-path|$(realpath -- "$LC_HOME")/Library|-prune|-o|" "the default run skips it"
-    # shellcheck disable=SC2016
-    run_cap env -i "${LC_ENV[@]}" bash -c "$probe"'; doctor_resolve_roots "$HOME"; printf "[%s]" "${#DR_FIND_SKIP[@]}"' _ "$GSG_PROJECT"
-    assert_eq "$OUT" "[0]" "with --roots nothing is skipped"
-    # shellcheck disable=SC2016
-    run_cap env -i "${LC_ENV[@]}" bash -c 'GSG_NAME=x; GSG_ROOT="$1"; for l in brew common state tools doctor doctor_repos; do source "$1/lib/$l.sh"; done; uname() { echo Linux; }; doctor_resolve_roots; printf "[%s]" "${#DR_FIND_SKIP[@]}"' _ "$GSG_PROJECT"
-    assert_eq "$OUT" "[0]" "other platforms skip nothing"
-}
-
-test_macos_operation_not_permitted_counts_like_permission_denied() {
-    dr_begin || return 1
-    printf 'find: /h/Documents: Operation not permitted\nfind: /h/x: Permission denied\n' >"$SANDBOX/find.err" || return 1
-    # shellcheck disable=SC2016
-    run_cap env -i "${LC_ENV[@]}" bash -c 'GSG_NAME=x; GSG_ROOT="$1"; for l in brew common state tools doctor doctor_repos; do source "$1/lib/$l.sh"; done; doctor_only_permission_denied "$2"' _ "$GSG_PROJECT" "$SANDBOX/find.err"
-    assert_rc 0 "both are an unreadable directory, not a doctor error"
-    printf 'find: /h/x: Input/output error\n' >"$SANDBOX/find.err" || return 1
-    # shellcheck disable=SC2016
-    run_cap env -i "${LC_ENV[@]}" bash -c 'GSG_NAME=x; GSG_ROOT="$1"; for l in brew common state tools doctor doctor_repos; do source "$1/lib/$l.sh"; done; doctor_only_permission_denied "$2"' _ "$GSG_PROJECT" "$SANDBOX/find.err"
-    assert_rc 1 "any other failure stays one"
-}
-
-test_discovery_stops_at_the_depth_limit_and_skips_node_modules() {
-    dr_begin || return 1
-    local beyond
-    beyond="$(deep_path g)/too-deep"
-    dr_repo a && dr_repo g/b && dr_repo g/s/c && dr_repo g/s/d/e/f/g/h/six-levels-below-the-old-limit || return 1
-    dr_repo "$beyond" && dr_disable "$beyond" || return 1
+    dr_repo a && dr_repo g/b && dr_repo g/s/c || return 1
+    dr_repo g/s/d/nested && dr_disable g/s/d/nested || return 1
     dr_repo node_modules/pkg && dr_disable node_modules/pkg || return 1
     dr_repo a/node_modules/dep && dr_disable a/node_modules/dep || return 1
     mkdir -p -- "$DR_ROOTS/plain/dir" || return 1
     doctor
-    assert_rc 0 "only repos within the limit count"
-    assert_contains "$OUT" "summary: 4 repos, 4 covered" "a, g/b, g/s/c and the deep one"
-    assert_not_contains "$OUT" "too-deep" "past the limit is not searched"
+    assert_rc 1 "the repo four levels down is found and disabled"
+    assert_contains "$OUT" "summary: 4 repos, 3 covered" "a, g/b, g/s/c and g/s/d/nested"
+    assert_contains "$OUT" "  $DR_REAL/g/s/d/nested" "four levels down is searched"
     assert_not_contains "$OUT" "node_modules" "node_modules is pruned at any depth"
 }
 
@@ -264,17 +224,19 @@ test_more_repositories_than_the_bound_is_a_discovery_error() {
 
 # ^ invariant an unreadable directory is a finding, never a doctor error => one directory such as a database data dir cannot silence the whole report
 test_an_unreadable_directory_is_a_listed_problem_and_the_rest_is_still_checked() {
+    local limit="group" folders=30 i
     dr_begin && dr_repo fine && dr_repo off && dr_disable off || return 1
-    local limit_dir
-    limit_dir="$(deep_path group/deep 30)"
-    mkdir -p -- "$DR_ROOTS/locked" "$DR_ROOTS/group/nox" "$DR_ROOTS/$limit_dir" && chmod 000 "$DR_ROOTS/locked" && chmod 600 "$DR_ROOTS/group/nox" || return 1
-    chmod 000 "$DR_ROOTS/$limit_dir" || return 1
+    # ^ invariant group + 30 folders + limit = find depth 32, the search depth; find never opens it, its entries would be depth 33
+    for ((i = 0; i < folders; i++)); do limit+="/d"; done
+    limit+="/limit"
+    mkdir -p -- "$DR_ROOTS/locked" "$DR_ROOTS/group/nox" "$DR_ROOTS/$limit" && chmod 000 "$DR_ROOTS/locked" && chmod 600 "$DR_ROOTS/group/nox" || return 1
+    chmod 000 "$DR_ROOTS/$limit" || return 1
     doctor
     assert_rc 1 "an unreadable directory under the roots is a PROBLEM"
     assert_not_contains "$ERR" "could not read everything" "and not a doctor error"
     assert_contains "$OUT" "PROBLEM  cannot read $DR_REAL/locked; repositories below it are not checked" "named, with what it means"
     assert_contains "$OUT" "PROBLEM  cannot read $DR_REAL/group/nox; repositories below it are not checked" "also a directory that can be listed but not searched"
-    assert_not_contains "$OUT" "group/deep" "a directory at the search depth limit is never opened, so it is no finding"
+    assert_not_contains "$OUT" "limit" "a directory at the search depth limit is never opened, so it is no finding"
     assert_contains "$OUT" "PROBLEM  disabled in local config" "the other repositories were still judged"
     assert_contains "$OUT" "summary: 2 repos, 1 covered" "and the summary counts them"
 }

@@ -234,12 +234,13 @@ INSTALL_TIMEOUT_BIN=/t INSTALL_BASH_BIN="" INSTALL_GNUBIN_DIR="" INSTALL_TIMER_B
 }
 
 test_the_lock_wait_on_windows_ends_before_a_live_holder_counts_as_old() {
-    win 'echo "$GSG_FINDINGS_LOCK_ATTEMPTS_WINDOWS $GSG_FINDINGS_LOCK_STEP $GSG_FINDINGS_LOCK_MAX_AGE_MIN"'
-    local attempts step minutes
-    read -r attempts step minutes <<<"$OUT"
-    assert_eq "$((attempts <= 40))" 1 "few enough attempts for slow process starts"
-    assert_eq "$step" 0.1 "the step the bound was measured with"
-    assert_eq "$minutes" 1 "and the age it has to stay under"
+    win 'echo "$GSG_FINDINGS_LOCK_WAIT_SECONDS_WINDOWS $GSG_FINDINGS_LOCK_MAX_AGE_MIN"'
+    local seconds minutes
+    read -r seconds minutes <<<"$OUT"
+    assert_eq "$((seconds < minutes * 60))" 1 "the wait stops before the lock of a live holder counts as old"
+    assert_eq "$((seconds >= 30))" 1 "and leaves a queued run the same time as the 300 attempts elsewhere"
+    win 'GSG_FINDINGS_LOCK="$1/findings.lock" GSG_FINDINGS_LOCK_WAIT_SECONDS_WINDOWS=0; sleep 300 & h=$!; MSYS=winsymlinks:sys ln -s "$h" "$GSG_FINDINGS_LOCK"; doctor_rec_lock; rc=$?; kill "$h"; echo "rc=$rc"' "$SANDBOX"
+    assert_contains "$OUT" "rc=1" "once the time is up the lock is refused"
 }
 
 test_the_reminder_starts_without_setsid_on_windows() {

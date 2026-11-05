@@ -145,7 +145,7 @@ because the hook lives in the global git config.
 - **UTF-16.** Windows PowerShell 5.1 can write UTF-16 with `>` and `Out-File`. Git treats such a file as binary, so it is
   [not scanned](scan.md#limits). Use `Set-Content -Encoding utf8`, or PowerShell 7.
 - **Stopping a scan.** There are no process groups: on an interrupt or a timeout the hook finds every process below each
-  scanner and stops them with `taskkill /F`, without a grace period, then removes its work dir.
+  scanner and stops them with `taskkill /T /F`, without a grace period, then removes its work dir.
 - **What was checked by hand.** On Windows Server 2019 with git 2.56.0.windows.4, from a machine with no jq: install from Git
   Bash and from PowerShell, a rerun, `status`, `doctor` (including a worktree and a repository with the hook disabled),
   `doctor --recheck`, the coverage reminder, `--replace-hooks-path` and the restore on uninstall, `uninstall --remove-tools`

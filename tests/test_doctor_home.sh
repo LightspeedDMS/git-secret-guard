@@ -224,8 +224,10 @@ test_operation_not_permitted_is_explained_only_when_every_line_says_so() {
         doctor_unreadable "$2"; a=$?
         printf "find: x: Operation not permitted\nfind: y: No such file or directory\n" >"$DR_WORK/find.err"
         doctor_unreadable "$2"; b=$?
-        rm -rf -- "$DR_WORK"; printf "%s %s" "$a" "$b"' _ "$GSG_PROJECT" "$DR_ROOTS"
-    assert_eq "$OUT" "0 1" "an all-permission log names the locked folder, a mixed one is left unexplained"
+        printf "find: x: Operation not permitted\nfind: y: Permission denied\n" >"$DR_WORK/find.err"
+        doctor_unreadable "$2"; c=$?
+        rm -rf -- "$DR_WORK"; printf "%s %s %s" "$a" "$b" "$c"' _ "$GSG_PROJECT" "$DR_ROOTS"
+    assert_eq "$OUT" "0 1 0" "an all-permission log (EPERM, or EPERM mixed with EACCES) names the locked folder, any other line leaves it unexplained"
 }
 
 test_a_home_that_names_no_directory_needs_roots() {

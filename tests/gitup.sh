@@ -92,6 +92,8 @@ gu_module_env() {
 # ^ invariant gu_pty INPUT CMD... runs CMD with stdin, stdout and stderr on a pseudo-terminal and feeds INPUT to it; OUT holds the terminal text, ERR is empty
 # ^ external util-linux script takes -qec on Linux; macOS has only the BSD /usr/bin/script (script -q FILE CMD...), Homebrew's util-linux ships no script
 GU_PTY_LEAD_SECONDS=1 GU_PTY_HOLD_SECONDS=3
+# ^ invariant a Mac test file sets GU_PTY_BSD=1 to run its prompt tests; the RPM and core prompt tests stay skipped on a Mac
+: "${GU_PTY_BSD:=0}"
 # ^ external BSD script sends EOF first when its stdin ends at once; input follows a lead and stdin stays open for a hold
 gu_pty_bsd() {
     local input="$1"
@@ -102,6 +104,7 @@ gu_pty_bsd() {
 gu_pty() {
     local input="$1" cmd
     shift
+    if [ "$TEST_OS" = Darwin ] && [ "$GU_PTY_BSD" != 1 ]; then skip_test "the prompt tests use the util-linux script"; fi
     if [ "$TEST_OS" = Darwin ]; then
         run_cap gu_pty_bsd "$input" "$@"
     else

@@ -10,6 +10,7 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/gitup_macos.sh"
 
 # ^ external the macOS module drives Homebrew; Windows has its own module and test file
 if [ "$TEST_IS_WINDOWS" -eq 1 ]; then FILE_SKIP_REASON="Homebrew flows"; fi
+GU_PTY_BSD=1
 
 test_a_mac_with_an_old_git_installs_the_homebrew_git_and_goes_on_when_the_flag_says_yes() {
     gm_setup 2.40.0 || return 1

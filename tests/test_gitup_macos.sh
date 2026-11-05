@@ -213,4 +213,23 @@ test_a_declined_offer_after_the_bash_bootstrap_names_the_brew_install_of_bash() 
     assert_eq "$(gm_calls)" "" "no brew call in this process"
 }
 
+# shellcheck disable=SC2016
+test_the_apple_git_sentence_is_not_printed_for_an_old_git_elsewhere_and_only_once_for_usr_bin() {
+    gm_setup "" || return 1
+    gm_brew_git 2.56.0 || return 1
+    gm_stub "$SANDBOX/oldbin/git" 'if [ "$1" = --version ]; then echo "git version 2.30.0"; exit 0; fi
+exit 1' || return 1
+    set_env GSG_GITUP_ROOT="$SANDBOX/root" PATH="$GM_PREFIX/bin:$SANDBOX/pathbin:$SANDBOX/oldbin:$TEST_BASE_PATH"
+    gsg install </dev/null
+    assert_rc 0 "install with an old git in a user directory"
+    assert_contains "$ERR" "$SANDBOX/oldbin/git is git 2.30.0" "the old git is named"
+    assert_not_contains "$ERR" "GUI clients" "no Apple Git sentence for a git that is not /usr/bin/git"
+    gm_stub "$SANDBOX/root/usr/bin/git" 'if [ "$1" = --version ]; then echo "git version 2.39.5 (Apple Git-154)"; exit 0; fi
+exit 1' || return 1
+    set_env PATH="$GM_PREFIX/bin:$SANDBOX/pathbin:$SANDBOX/oldbin:$SANDBOX/root/usr/bin:$TEST_BASE_PATH"
+    gsg install </dev/null
+    assert_rc 0 "install with the old Apple Git as well"
+    assert_eq "$(grep -c 'GUI clients' <<<"$ERR")" 1 "the sentence is printed once"
+}
+
 run_file_tests

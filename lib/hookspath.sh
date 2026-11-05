@@ -190,3 +190,32 @@ lifecycle_read_hooks_path() {
     done
     hp_walk_includes
 }
+
+# ^ invariant prints the files git --global may create, GIT_CONFIG_GLOBAL alone when set, else ~/.gitconfig and the XDG git/config
+install_global_config_files() {
+    if [ -n "${GIT_CONFIG_GLOBAL:-}" ]; then
+        printf '%s\n' "$GIT_CONFIG_GLOBAL"
+        return 0
+    fi
+    printf '%s\n' "${HOME:-/nonexistent}/.gitconfig" "${XDG_CONFIG_HOME:-${HOME:-/nonexistent}/.config}/git/config"
+}
+
+# ^ why a write probe, not git config --list; --list exits 128 for a missing file too = a normal fresh machine
+# ^ order before the first download or copy => an unwritable global config leaves nothing half installed
+# ^ invariant a config file the probe created is removed again when it is empty => a refusal after the probe still leaves the machine as it was
+install_check_config_writable() {
+    local f ok=1
+    local -a absent=()
+    while IFS= read -r f; do
+        if [ ! -e "$f" ] && [ ! -L "$f" ]; then absent+=("$f"); fi
+    done < <(install_global_config_files)
+    if "$GSG_GIT" config --global gsg-install-probe.ok 1 2>/dev/null; then
+        if "$GSG_GIT" config --global --remove-section gsg-install-probe 2>/dev/null; then ok=0; fi
+    fi
+    for f in "${absent[@]}"; do
+        if [ -f "$f" ] && [ ! -L "$f" ] && [ ! -s "$f" ]; then rm -f -- "$f" || printf '%s: could not remove the empty %s the probe created\n' "$GSG_NAME" "$f" >&2; fi
+    done
+    if [ "$ok" -eq 0 ]; then return 0; fi
+    printf '%s: cannot write the global git config; %s\n' "$GSG_NAME" "$(brew_unchanged_text)" >&2
+    return 1
+}

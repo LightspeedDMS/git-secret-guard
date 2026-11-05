@@ -12,5 +12,5 @@ run_rc="${PIPESTATUS[0]}"
 cd -- "$PROJECT" || exit 2
 awk -v trace="$trace" -f tests/coverage.awk hooks/secret-scan bin/git-secret-guard lib/common.sh lib/brew.sh lib/extract.sh lib/exempt.sh lib/report.sh \
     lib/scanners/trufflehog.sh lib/scanners/betterleaks.sh lib/tools.sh lib/state.sh lib/hookspath.sh lib/install.sh lib/install_tools.sh lib/uninstall.sh lib/status.sh \
-    lib/timer.sh lib/launchd.sh lib/doctor.sh lib/doctor_repos.sh lib/doctor_findings.sh
+    lib/timer.sh lib/launchd.sh lib/doctor.sh lib/doctor_repos.sh lib/doctor_findings.sh lib/gitup*.sh
 exit "$run_rc"

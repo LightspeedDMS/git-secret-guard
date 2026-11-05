@@ -9,6 +9,140 @@
 | macOS x86_64 (Intel) | Mapped (`darwin_amd64` / `darwin_x64` rows of `tools.lock`) but **not tested**. |
 | Other Linux | Not tested. `install` names what is missing and falls back to generic advice when `/etc/os-release` is not Ubuntu or Debian. |
 
+## RHEL, Rocky and Fedora (RPM)
+
+`dnf` systems (the `rpm` class: `ID` or `ID_LIKE` names `rhel`, `fedora`, `centos`, `rocky` or `almalinux`) get a git upgrade from `install`.
+Config hooks need git 2.54 or newer, and RHEL 9 ships 2.52. `git-secret-guard install` refuses an older git as before, and now **offers
+the upgrade**; it never prompts without a terminal, and the default answer is No:
+
+```bash
+git-secret-guard install --upgrade-git        # consent up front (also the way to say yes with no terminal)
+git-secret-guard install                      # in a terminal: prints the plan, asks "Upgrade git now with the plan above? [y/N]"
+```
+
+Every refusable check a git can run (jq, setsid, timeout, the global git config being writable, the state file, `core.hooksPath`, the CLI link, and with `--with-timer` the timer unit or launchd agent checks) runs
+before the first privileged command, so a malformed state file or a read-only global config is refused with the machine untouched. A missing git, or one
+older than 2.26 (it cannot run `git config --show-scope`), has its hooks-path and state checks right after the upgrade; a refusal there says what
+the upgrade changed.
+
+**Which route.**
+
+| Situation | Route |
+|---|---|
+| `/usr/local/bin/git` is already 2.54 or newer but not first on `PATH` | `path-fix`: install prints the exact `export PATH="/usr/local/bin:$PATH"` line and refuses; no profile is edited. |
+| An enabled repository offers `git-core` 2.54 or newer (Fedora) | `package`: `dnf install -y git-core`. |
+| Otherwise (RHEL 9, Rocky 9: the repositories carry 2.52) | `source`: the pinned source build below. |
+| `dnf` is missing | no route; the usual refusal follows. |
+
+**The repository query cannot hang or import a key.** It is `dnf --assumeno -q repoquery --latest-limit=1 --queryformat '%{version}\n' git-core`
+(the same on dnf 4 on Rocky 9 and dnf 5 on Fedora 44), with stdin from `/dev/null`, bounded by a timeout (60 seconds, kept short in tests by
+`GSG_GITUP_QUERY_TIMEOUT`), and `--assumeno` answers every prompt, a GPG key import included, with no. A third-party repository whose key is
+not imported (the `acli` repository on the reference host stops at such a prompt) makes the query fail; install then asks each enabled
+repository alone, **names the ones that fail**, imports nothing, and takes the source route. That per-repository retry has a total budget
+(twice the query timeout); repositories beyond it are not tried and the plan says so.
+
+**The privileged `dnf install -y` is different.** `-y` answers yes to every prompt, a repository GPG key import included (read from dnf's
+`cli/output.py`, `CliKeyImport._confirm`, which returns true under `assumeyes`; not run). A key that is pending for a configured repository would
+therefore be imported by that step, on the package route and on the source route (the dependency install), and the plan says so before asking.
+Root runs the `dnf` found only in the fixed system path (`/usr/bin:/bin:/usr/sbin:/sbin`), never the one first on your `PATH`; it must be a root-owned file that
+group and others cannot write, and the plan prints its full path (`as root: /usr/bin/dnf install -y ...`). `sudo` and `restorecon` are found the same way
+(`restorecon` lives in `/usr/sbin`, which is why the sbin directories are in the list). The build keeps its own `PATH` of `/usr/bin:/bin`.
+
+**The source route** follows the procedure that worked on the reference host, in this order:
+
+1. Check the free space (about 570 MB in the build directory, 300 MB for `/usr/local`) before anything changes.
+2. Download `git-<version>.tar.xz` and `git-manpages-<version>.tar.xz` from kernel.org and check both SHA-256 digests against `tools.lock`
+   (`git` and `git-manpages`, platform `source`). A mismatch stops here with the machine untouched. (The story listed the dependency install
+   first; the downloads come first because a tampered tarball then changes nothing.)
+3. As root: `dnf install -y gcc make perl xz tar openssl-devel zlib-devel libcurl-devel expat-devel pcre2-devel perl-ExtUtils-MakeMaker`.
+4. As the invoking user, in a `mktemp` directory, under `env -i PATH=/usr/bin:/bin` with a scratch `HOME` and `TMPDIR`:
+   `make prefix=/usr/local NO_RUST=1 NO_TCLTK=1 NO_GETTEXT=1 USE_LIBPCRE2=1 all`, then the same with `DESTDIR=<stage> install`; the man pages
+   are unpacked into `<stage>/usr/local/share/man`. Homebrew's tools and libraries on the caller's `PATH` cannot reach the build (a Homebrew
+   `PATH` made the linker fail on the reference host). `NO_RUST=1` is needed: without it git 2.56 wants cargo.
+5. Every built binary is checked with `ldd`: a Homebrew path or a missing library refuses.
+6. The manifest of staged files is compared with `/usr/local`: a path that exists there and is **not listed in an earlier `MANIFEST` of ours**
+   (`/usr/local/share/doc/git-*-local/MANIFEST`) refuses and is named; nothing is overwritten. A build made by hand with a
+   `MANIFEST` at that path (the reference host's `git-2.56.0-local`) counts as ours.
+7. As root, under `umask 022` (the stage is built under it too, so a hardened `umask 027` cannot make root-owned directories unreadable to you or rewrite
+   the mode of a shared one such as `share/man`): save the `MANIFEST` as `MANIFEST.partial`, run `cp -dR --preserve=timestamps,links
+   <stage>/usr/local/. /usr/local/` (no `mode`: an existing directory keeps its mode), then rename `MANIFEST.partial` to `MANIFEST`. A copy that stops leaves the
+   partial file; it counts as ours for the foreign-file check and as unfinished for the plan, so `install --upgrade-git` again finishes the copy (it is offered as a
+   rebuild even when `git` itself already landed). Files an earlier MANIFEST listed and the new one does not are removed. A relative `TMPDIR` is refused.
+8. The build directory is removed on every exit path, an interrupt included. The old git keeps working until `/usr/local/bin/git` is in place.
+
+The package-owned git in `/usr/bin` is **not touched** by any of this: `rpm -q git-core` reports the same version and `rpm -V git-core`
+reports nothing. `/usr/local/bin/git` comes first on `PATH` in a login shell, under `sudo` and in the systemd manager, **not** in cron
+(`/etc/crontab` sets `PATH=/sbin:/bin:/usr/sbin:/usr/bin`): a script that calls `/usr/bin/git` by its full path is not scanned, and `install`
+keeps warning about it and names `--take-over-system-git`. A Homebrew git is never a route on Linux (it needs Homebrew's glibc and loads
+code from a tree the user owns).
+
+**A newer pin.** When `tools.lock` pins a newer git than the build of ours that is first on `PATH`, `install` offers the rebuild (same
+consent rules; declining or having no terminal continues). A git newer than the pin, or one that is not listed in a MANIFEST of ours, is left alone.
+
+**The system git takeover (opt-in).** Where `/usr/bin/git` stays old, `install --take-over-system-git` (or the prompt `Take over ... [y/N]`, default
+No, offered on every install that finds the old package git next to a qualifying build of ours) points it and its five siblings at
+`/usr/local/bin`:
+
+- Refused unless `/usr/bin/git` is owned by `git-core` and older than 2.54, `/usr/local/bin/git` and its siblings exist, are listed in a **finished**
+  MANIFEST of ours (a `MANIFEST.partial` does not count), are owned by root and not writable by group or others, every file below
+  `libexec/git-core` has the same owner and write bits and no symlink there leaves the prefix, and `ldd` of every program shows no Homebrew path, no missing
+  library and no library outside `/lib`, `/lib64`, `/usr/lib`, `/usr/lib64`, `/usr/local/lib` and the prefix's own `lib` directories.
+- Order (a safety rule): add the `excludepkgs` entry to `/etc/dnf/dnf.conf` behind a marker comment (nothing is written when a marker is already there, and
+  the file is replaced by a rename that keeps its mode); copy the originals with `cp -a` (modes and SELinux labels) to
+  `orig.new` beside `/var/lib/git-secret-guard/system-git/orig`, check each copy, write `record.new`, and only then rename them into place; for each path
+  that is not already our link make a temporary symlink beside it and `mv -T` it over the path (there is no moment without a git), then `restorecon`; verify that `/usr/bin/git --version`
+  is 2.54 or newer, that a commit through it reaches a hook in a scratch repository and that `git-upload-pack` runs. Three of the six RPM files are relative
+  symlinks to `git` (`git-receive-pack`, `git-upload-archive`, `git-upload-pack`); they are saved as links and compared by link target, never followed.
+  **The saved originals are never replaced as long as any `/usr/bin` file is a link of ours:** a takeover that finds such links with a record it
+  cannot trust refuses and changes nothing. Any failure, and an INT, TERM or HUP, runs the same undo as `restore-system-git` (below), hash checked.
+- **The six files** are what `rpm -ql git-core` lists in `/usr/bin` on Rocky 9.7 and on Fedora 44: `git`, `git-receive-pack`, `git-shell`,
+  `git-upload-archive`, `git-upload-pack` and `scalar`. `/usr/libexec/git-core/git` is an RPM symlink to `../../bin/git`, so it follows.
+- **`excludepkgs` must name every installed package built from the same source RPM** (`git git-core git-core-doc perl-Git`, read from
+  `rpm -qa --qf '%{NAME} %{SOURCERPM}\n'`). Probed against a local repository holding newer packages: `excludepkgs=git-core` alone, or `git git-core`,
+  makes `dnf update` fail on dnf 4 ("package git-core-doc requires git-core = ..., filtered out by exclude filtering") and skip the broken
+  packages on dnf 5; with all four, the rest of the update resolves. dnf 5 reads the same `/etc/dnf/dnf.conf`. An `excludepkgs` line that already
+  exists is extended, and `restore-system-git` puts the original line back.
+- **The cost, printed before asking:** dnf stops updating git, so git updates arrive only through a pin bump in `tools.lock` and `install --upgrade-git`;
+  `rpm -V` reports the files as changed; a broken build in `/usr/local` breaks everything that uses git, `gh` and `glab` included. The RPM stays installed
+  (other packages need it).
+- **Undo:** `git-secret-guard restore-system-git` acts on what is on disk (the record, the `dnf.conf` marker, the links). It puts back every recorded file that is
+  our link or missing (hash checked), accepts a file that is neither ours nor the saved original only when `rpm -qf` names `git-core` as its owner and
+  `rpm -V git-core` does not list it (otherwise it says so and the backup stays), removes the `dnf.conf` entry from the marker alone (a package you added
+  to the line stays, and an unrelated line below the marker is kept), and removes the backup directory last, then the empty `/var/lib/git-secret-guard`. A Ctrl-C or SIGTERM during the restore ends it with
+  the state of the machine and the command to run next (`restore-system-git` again; the backup is removed last, so a repeat is safe), and no temporary directory is left
+  behind. The upgrade plan and the takeover plan list every privileged command by its full path, `mkdir` included, and those are the files that run. It needs no
+  network and no dnf, and says `nothing to restore` on a second run. `uninstall` stops in every takeover state except none (active, partial, undone, broken) and names
+  `restore-system-git` and `uninstall --keep-system-git` (which prints the by-hand commands). When the record cannot be read, `restore-system-git` and
+  `install --take-over-system-git` refuse and print those commands, built from the saved originals in `orig/` (or `dnf reinstall` when the originals are gone). `active`
+  needs the `excludepkgs` line itself below the marker, not only the marker comment; a rerun of `install --take-over-system-git` puts a deleted line back.
+  `status` and `doctor` report an active takeover and a
+  leftover one as a problem, with the fix: `PARTIAL` (`/usr/bin/git` is still our link, so commits are scanned; finish with `install --take-over-system-git`
+  or undo with `restore-system-git`) and `UNDONE` (`/usr/bin/git` is not our link, so commits through it are no longer scanned).
+- **A rebuild under an active takeover is refused**, before any privileged command: `cp` would replace the files the links point at in place, and an
+  interruption there would break `/usr/bin/git`. The way out is `restore-system-git`, `install --upgrade-git`, then the takeover again.
+- A takeover is recorded on the machine only by its backup directory and its symlinks; no key was added to the install state.
+
+**Pins.** `tools.lock` holds `git 2.56.0 source` and `git-manpages 2.56.0 source`. The digests came from kernel.org's `sha256sums.asc` over HTTPS
+from two hosts (`www.kernel.org`, `mirrors.edge.kernel.org`) on 2026-11-04; **the GPG signature of that file was not verified** (the key that
+signs it, the one kernel.org lists on its signing-keys page, has no user ID on keys.openpgp.org). To bump: fetch both files from both hosts, compare the digests, change the two
+rows together (a lock whose two versions differ is refused), and run `tests/platform/rpm.sh rocky`.
+
+**The container runs (Linux host).** `tests/platform/rpm.sh rocky|fedora [--dry-run]` starts a podman container the way `tests/platform/ubuntu.sh`
+does (private copy of the tracked files, `env -i`, `CONTAINERS_CONF` with an empty `hooks_dir`, an empty `mounts.conf`, the host namespace ids as arguments,
+`--init`, a kill-after timeout, no proxy variables) and runs the real E2E as a non-root user with sudo: `tests/platform/rpm-upgrade-e2e.sh`.
+
+- Rocky 9.7 (`docker.io/rockylinux/rockylinux:9.7@sha256:53f4c6dcb34e1403bd93207351f0af9a593610faeb7165cb8a037346765199b0`, the pin of `mac-linux.sh`):
+  the stock RPM git 2.52, the refusal without the flag, `install --upgrade-git` with a real build, a blocked fake key, a rerun, the takeover offer and
+  `--take-over-system-git`, a blocked key and `git-upload-pack` through `/usr/bin`, `dnf update` against a local repository holding git 2.99.0
+  packages (control run first), `status`, `uninstall`, `restore-system-git`, `rpm -V` clean, and a real rollback (the sixth rename fails after five
+  links were swapped).
+- Fedora 44 (`registry.fedoraproject.org/fedora:44@sha256:4688bc8003a1a6a7815e5f9d1f1b5c6bc9cafa582654af7cec61435d91655e3b`): the image has no git;
+  `install --upgrade-git` takes the package route (dnf 5), a blocked fake key, a rerun, and the takeover has nothing to do.
+  To bump the digest: `curl -I -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json'
+  https://registry.fedoraproject.org/v2/fedora/manifests/44` and read `docker-content-digest` (it equals the DIGEST column of `podman images --digests`).
+- **Not proved:** SELinux. The containers run without an enforcing policy, so `restorecon` is called and logged but its effect, and `sshd` serving
+  `git-upload-pack` through the taken-over path, need the manual run on an enforcing Rocky VM. The takeover and the Rocky E2E were not run against the reference host.
+
 ## Ubuntu 24.04: prerequisites
 
 Ubuntu 24.04 ships git 2.43, which ignores config-based hooks without any message. `install` refuses it, changes nothing and

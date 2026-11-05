@@ -3,7 +3,12 @@ usage: git-secret-guard <command> [options]
 Machine-wide pre-commit secret scanning (trufflehog + betterleaks) through a git config hook.
 
 commands:
-  install [--replace-hooks-path] [--with-timer]
+  install [--replace-hooks-path] [--with-timer] [--upgrade-git] [--take-over-system-git]
+        --upgrade-git lets install upgrade or rebuild git where its module can (RHEL, Rocky, Fedora): it prints the plan with
+        each privileged command, then runs it. In a terminal install asks first (default No); without a terminal the flag
+        is the only way to say yes. Exit 3 = a module hands the upgrade off to finish outside install; nothing else changed.
+        --take-over-system-git (RPM systems) points the old package /usr/bin/git and its siblings at the new /usr/local build,
+        keeps the originals, and makes dnf skip the git packages; undo with restore-system-git.
         Install, or upgrade when already installed. Needs git >= 2.54 and jq (on Windows a missing jq is
         downloaded). Puts the pinned scanners in ~/.local/bin (checksum-verified), copies the hook to
         ${XDG_DATA_HOME:-~/.local/share}/git-secret-guard, and sets the global hook.git-secret-guard.* config.
@@ -13,9 +18,13 @@ commands:
         (output in the journal), or on macOS a LaunchAgent (output in doctor.log in the state
         directory); without it nothing is installed. Uninstall removes the timer. Not on Windows,
         where docs/doctor.md has a Task Scheduler recipe.
-  uninstall [--remove-tools]
+  uninstall [--remove-tools] [--keep-system-git]
         Remove what install added and restore the recorded core.hooksPath.
         --remove-tools also removes the scanners that install itself downloaded.
+        Stops, changing nothing, while a system git takeover is active; --keep-system-git lets it finish and prints the undo by hand.
+  restore-system-git
+        Undo a system git takeover: puts the saved RPM files back (hash checked), removes the dnf excludepkgs entry and the backup
+        directory. Needs no network. Says "nothing to restore" and exits 0 when there is no takeover.
   status
         Show the installed version, hook command, tool versions and the recorded core.hooksPath.
         Exit 0 only when installed and the global config matches.

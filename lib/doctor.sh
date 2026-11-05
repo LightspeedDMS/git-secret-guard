@@ -383,6 +383,21 @@ doctor_check_git() {
     done
 }
 
+# ^ invariant a takeover undone by something else (RPM files back, dnf entry gone) leaves commits through /usr/bin/git unscanned => a PROBLEM
+doctor_check_system_git() {
+    if ! gitup_system_git_state; then return 0; fi
+    case "$GITUP_TK_STATE" in
+        active) doctor_machine_line ok "system git takeover: $GITUP_TK_TEXT" ;;
+        none) ;;
+        *) doctor_machine_line PROBLEM "system git takeover: $GITUP_TK_TEXT" ;;
+    esac
+}
+
+# ^ invariant an interrupted source copy (MANIFEST.partial) is a WARNING with its next step, never a PROBLEM
+doctor_check_unfinished_copy() {
+    if gitup_source_unfinished_copy; then doctor_machine_line WARNING "git build: $REPLY"; fi
+}
+
 doctor_summary() {
     printf 'summary: %s repos, %s covered\n' "$DR_REPO_TOTAL" "$DR_REPO_COVERED"
     if [ "$DR_WARNINGS" -gt 0 ]; then
@@ -397,6 +412,8 @@ doctor_machine_checks() {
     doctor_check_tools
     doctor_check_timer
     doctor_check_hooks_path || return 1
+    doctor_check_system_git
+    doctor_check_unfinished_copy
     if [ "$DR_RECHECK" -ne 1 ]; then doctor_check_git; fi
 }
 

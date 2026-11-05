@@ -39,7 +39,7 @@ launchd_check_values() {
     for what in "${values[@]}"; do
         case "$what" in
             *[[:cntrl:]]*)
-                printf '%s: %s cannot be written into a launchd plist (it holds a control character); nothing was changed\n' "$GSG_NAME" "${what//[[:cntrl:]]/?}" >&2
+                printf '%s: %s cannot be written into a launchd plist (it holds a control character); %s\n' "$GSG_NAME" "${what//[[:cntrl:]]/?}" "$(brew_unchanged_text)" >&2
                 return 1
                 ;;
         esac
@@ -55,7 +55,7 @@ GSG_LAUNCHD_RETRY_SECONDS=1
 launchd_check_target() {
     launchd_check_values "$1" || return 1
     if { [ -e "$GSG_AGENT_PLIST" ] || [ -L "$GSG_AGENT_PLIST" ]; } && ! launchd_plist_is_ours "$GSG_AGENT_PLIST"; then
-        printf '%s: %s exists and was not written by git-secret-guard; move it away and run install again; nothing was changed\n' "$GSG_NAME" "$GSG_AGENT_PLIST" >&2
+        printf '%s: %s exists and was not written by git-secret-guard; move it away and run install again; %s\n' "$GSG_NAME" "$GSG_AGENT_PLIST" "$(brew_unchanged_text)" >&2
         return 1
     fi
 }

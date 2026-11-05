@@ -62,7 +62,7 @@ test_debian_gets_a_source_build_pointer_and_no_ppa_command() {
 
 test_other_distributions_and_a_missing_os_release_get_a_generic_text() {
     local release
-    for release in 'ID="rhel"|ID_LIKE="fedora"' 'ID=alpine' ''; do
+    for release in 'ID=alpine' 'ID="arch"|ID_LIKE="archlinux"' ''; do
         lc_begin && lc_fake_git 2.43.0 || return 1
         if [ -n "$release" ]; then
             IFS='|' read -r -a lines <<<"$release"
@@ -75,6 +75,35 @@ test_other_distributions_and_a_missing_os_release_get_a_generic_text() {
         assert_contains "$ERR" "git >= 2.54 from your distribution" "a generic hint"
         assert_contains "$ERR" "see docs/platforms.md" "and the build pointer"
         assert_not_contains "$ERR" "apt" "no apt command for [$release]"
+    done
+}
+
+test_an_old_git_on_an_rpm_system_names_upgrade_git_and_the_platform_doc() {
+    local release
+    for release in 'ID="rocky"|ID_LIKE="rhel centos fedora"' 'ID=fedora' 'ID="rhel"|ID_LIKE="fedora"'; do
+        lc_begin && lc_fake_git 2.52.0 || return 1
+        IFS='|' read -r -a lines <<<"$release"
+        os_release "${lines[@]}" || return 1
+        set_env GSG_GITUP_ROOT="$SANDBOX/root"
+        gsg install
+        assert_rc 1 "old git, os-release [$release]"
+        assert_contains "$ERR" "git 2.52.0; config-based hooks need git >= 2.54, install refused" "the existing refusal"
+        assert_contains "$ERR" "install --upgrade-git" "names the flag that offers the upgrade"
+        assert_contains "$ERR" "docs/platforms.md" "and the RPM section"
+        assert_not_contains "$ERR" "apt" "no apt command for [$release]"
+        nothing_changed "old git on [$release]"
+    done
+}
+
+test_a_missing_tool_on_an_rpm_system_names_the_dnf_package() {
+    local pair tool pkg
+    for pair in jq:jq setsid:util-linux timeout:coreutils; do
+        tool="${pair%%:*}" pkg="${pair#*:}"
+        lc_begin && lc_path_without "$tool" && os_release 'ID="rocky"' 'ID_LIKE="rhel centos fedora"' || return 1
+        gsg install
+        assert_rc 1 "$tool missing"
+        assert_contains "$ERR" "$tool is required but was not found on PATH; install it with: sudo dnf install $pkg" "the exact line for $tool"
+        nothing_changed "$tool missing"
     done
 }
 
@@ -103,7 +132,7 @@ test_a_missing_systemctl_for_the_timer_names_the_apt_package() {
 }
 
 test_a_missing_tool_elsewhere_says_to_use_the_package_manager() {
-    lc_begin && lc_path_without jq && os_release 'ID=fedora' || return 1
+    lc_begin && lc_path_without jq && os_release 'ID=alpine' || return 1
     gsg install
     assert_rc 1 "jq missing"
     assert_contains "$ERR" "jq is required but was not found on PATH; install it with your package manager" "generic"
@@ -134,7 +163,7 @@ test_a_missing_or_unreadable_os_release_prints_no_raw_shell_error() {
 
 os_field() {
     # shellcheck disable=SC2016
-    run_cap env -i PATH="$TEST_BASE_PATH" bash -c 'source "$1/lib/install.sh" && install_os_release_field "$2" "$3" && printf "%s" "$REPLY"' _ "$GSG_PROJECT" "$1" "$2"
+    run_cap env -i PATH="$TEST_BASE_PATH" bash -c 'source "$1/lib/install.sh" && install_os_release_field "$2" "$3" && printf "%s" "$REPLY"' _ "$GSG_PROJECT" "$1" "$2" </dev/null
 }
 
 test_os_release_fields_are_read_as_data() {

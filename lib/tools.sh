@@ -78,6 +78,11 @@ tools_platform_key() {
 # ^ external jq ships a bare executable, jq-windows-amd64.exe, with no version in its name
 tools_tarball_name() {
     local tool="$1" version="$2" platform="$3" ext=tar.gz
+    # ^ external kernel.org ships git and its man pages as .tar.xz named <tool>-<version>, one tarball for every platform
+    if [ "$tool" = git ] || [ "$tool" = git-manpages ]; then
+        printf '%s-%s.tar.xz\n' "$tool" "$version"
+        return 0
+    fi
     if [ "$tool" = jq ]; then
         printf 'jq-%s.exe\n' "${platform//_/-}"
         return 0
@@ -97,10 +102,13 @@ tools_release_url() {
         trufflehog) repo=trufflesecurity/trufflehog ;;
         betterleaks) repo=betterleaks/betterleaks ;;
         jq) repo=jqlang/jq tag="jq-$version" ;;
+        git | git-manpages) repo="" ;;
         *) printf '%s: unknown tool [%s]\n' "$GSG_NAME" "$tool" >&2; return 1 ;;
     esac
     if [ -n "${GSG_TOOLS_BASE_URL:-}" ]; then
         printf '%s/%s\n' "${GSG_TOOLS_BASE_URL%/}" "$name"
+    elif [ -z "$repo" ]; then
+        printf 'https://www.kernel.org/pub/software/scm/git/%s\n' "$name"
     else
         printf 'https://github.com/%s/releases/download/%s/%s\n' "$repo" "$tag" "$name"
     fi

@@ -5,8 +5,14 @@ set -o pipefail
 GIT_SOURCE=auto
 GIT_MIN_MAJOR=2
 GIT_MIN_MINOR=54
-GIT_BUILD_VERSION=2.56.0
-GIT_BUILD_SHA256=26c56c296b38c0695b26fa95f475f1d01704d2d38e73465ca30b0b2f5dc789d3
+# ^ coupled the git pin has one copy, the git source row of tools.lock
+GIT_BUILD_LOCK="$(dirname -- "${BASH_SOURCE[0]}")/../../tools.lock"
+GIT_BUILD_VERSION="$(awk '$1 == "git" && $3 == "source" { print $2 }' "$GIT_BUILD_LOCK")"
+GIT_BUILD_SHA256="$(awk '$1 == "git" && $3 == "source" { print $4 }' "$GIT_BUILD_LOCK")"
+if [ -z "$GIT_BUILD_VERSION" ] || [ -z "$GIT_BUILD_SHA256" ]; then
+    printf 'ubuntu-container.sh: no git source row in %s\n' "$GIT_BUILD_LOCK" >&2
+    exit 2
+fi
 GIT_BUILD_URL="https://www.kernel.org/pub/software/scm/git/git-$GIT_BUILD_VERSION.tar.xz"
 GIT_BUILD_FLAGS=(NO_RUST=1 NO_TCLTK=1 NO_GETTEXT=1)
 SHELLCHECK_VERSION=0.11.0
@@ -92,7 +98,7 @@ parse_args() {
                 ;;
             --phase)
                 shift
-                case "${1:-}" in prepare | e2e | suite) PHASES+=("$1") ;; *) usage >&2; exit 2 ;; esac
+                case "${1:-}" in prepare | e2e | suite | upgrade) PHASES+=("$1") ;; *) usage >&2; exit 2 ;; esac
                 ;;
             --suite-file)
                 shift
@@ -334,6 +340,8 @@ ISOLATION_MOUNTINFO=/proc/self/mountinfo
 ISOLATION_DEVDIR=/dev
 ISOLATION_NSDIR=/proc/1/ns
 ISOLATION_HOST_NS=()
+ISOLATION_OS_ID=ubuntu
+ISOLATION_OS_VERSION=24.04
 
 # ^ invariant isolation_report KIND WHAT CMD... = one failure line on stray entries (rc 1) or an unreadable source (rc 2), else ok
 isolation_report() {
@@ -379,12 +387,12 @@ check_isolation() {
     done
     id="$(os_field ID)"
     version="$(os_field VERSION_ID)"
-    if [ "$id" != ubuntu ] || [ "$version" != 24.04 ]; then
-        record_fail "this is $id $version, not ubuntu 24.04"
+    if [ "$id" != "$ISOLATION_OS_ID" ] || [[ $version != "$ISOLATION_OS_VERSION"* ]]; then
+        record_fail "this is $id $version, not $ISOLATION_OS_ID $ISOLATION_OS_VERSION"
         leaked=1
     fi
     if [ "$leaked" -ne 0 ]; then return 1; fi
-    printf 'ok      ubuntu %s: checked variable names, mount points and fstypes, /dev entries, namespaces and /run/secrets; /src read-only, no ssh or git config;\n' "$version"
+    printf 'ok      %s %s: checked variable names, mount points and fstypes, /dev entries, namespaces and /run/secrets; /src read-only, no ssh or git config;\n' "$ISOLATION_OS_ID" "$version"
     printf '        containers.conf layers ignored by the launcher via CONTAINERS_CONF\n'
 }
 

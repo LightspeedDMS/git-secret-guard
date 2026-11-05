@@ -7,7 +7,7 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/lifecycle.sh"
 # shellcheck disable=SC2016
 tl() { run_cap env -i "${GSG_ENV[@]}" "${EXTRA_ENV[@]}" bash -c 'set -u; source "$1/lib/common.sh" && source "$1/lib/tools.sh" && shift && "$@"' _ "$GSG_PROJECT" "$@"; }
 
-test_the_lock_holds_exactly_the_eleven_pinned_rows() {
+test_the_lock_holds_exactly_the_thirteen_pinned_rows() {
     local rows
     rows="$(grep -v -e '^[[:space:]]*#' -e '^[[:space:]]*$' "$GSG_PROJECT/tools.lock" | LC_ALL=C sort)" || return 1
     assert_eq "$rows" "$(LC_ALL=C sort <<'EOF'
@@ -22,8 +22,52 @@ betterleaks 1.9.0 darwin_arm64 83dd7eaab13d44a1e8e347a17064cdef153a1478db473276d
 trufflehog 3.99.2 windows_amd64 494672f03ef4c1c07887bd626f2f68cc5f55305ea961685207d349e273a238e8
 betterleaks 1.9.0 windows_x64 b765daec9fda475b031b5a5159798cbe4294a3f2a50683cbc0471226e376d3da
 jq 1.8.2 windows_amd64 a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627
+git 2.56.0 source 26c56c296b38c0695b26fa95f475f1d01704d2d38e73465ca30b0b2f5dc789d3
+git-manpages 2.56.0 source 1f62a7fabaa36a0469c4d51fe247d12e7e246b890d2b8b49aec91df610f417c7
 EOF
 )" "the lock rows match the story's table"
+}
+
+test_the_git_pins_are_source_rows_that_the_lookup_finds_and_the_scanner_list_ignores() {
+    tl tools_lock_lookup "$GSG_PROJECT/tools.lock" git source
+    assert_rc 0 "git row"
+    assert_eq "$OUT" "2.56.0 26c56c296b38c0695b26fa95f475f1d01704d2d38e73465ca30b0b2f5dc789d3" "version and digest of the tarball"
+    tl tools_lock_lookup "$GSG_PROJECT/tools.lock" git-manpages source
+    assert_rc 0 "manpages row"
+    assert_eq "$OUT" "2.56.0 1f62a7fabaa36a0469c4d51fe247d12e7e246b890d2b8b49aec91df610f417c7" "version and digest of the man pages"
+    tl declare -p GSG_TOOL_NAMES GSG_STATE_TOOL_NAMES
+    assert_not_contains "$OUT" '"git"' "git is not a scanner, so no scanner loop and no state record names it"
+    assert_not_contains "$OUT" '"git-manpages"' "nor the man pages"
+    tl tools_platform_key git Linux x86_64
+    assert_rc 1 "a scanner platform key is not asked for git"
+}
+
+test_the_git_downloads_are_named_and_located_like_the_kernel_org_release() {
+    tl tools_tarball_name git 2.56.0 source
+    assert_eq "$OUT" git-2.56.0.tar.xz "source tarball"
+    tl tools_tarball_name git-manpages 2.56.0 source
+    assert_eq "$OUT" git-manpages-2.56.0.tar.xz "man page tarball"
+    tl tools_release_url git 2.56.0 source
+    assert_eq "$OUT" https://www.kernel.org/pub/software/scm/git/git-2.56.0.tar.xz "kernel.org URL"
+    tl tools_release_url git-manpages 2.56.0 source
+    assert_eq "$OUT" https://www.kernel.org/pub/software/scm/git/git-manpages-2.56.0.tar.xz "man page URL"
+    set_env GSG_TOOLS_BASE_URL=file:///fixtures
+    tl tools_release_url git 2.56.0 source
+    assert_eq "$OUT" file:///fixtures/git-2.56.0.tar.xz "the test override replaces only the prefix, as for the scanners"
+}
+
+test_a_git_tarball_that_does_not_match_its_pin_is_refused_and_removed() {
+    local want
+    mkdir -p -- "$SANDBOX/dl" "$SANDBOX/fx" || return 1
+    printf 'not the real tarball\n' >"$SANDBOX/fx/git-2.56.0.tar.xz" || return 1
+    want="$(sha256sum "$SANDBOX/fx/git-2.56.0.tar.xz" | cut -d' ' -f1)"
+    set_env GSG_TOOLS_BASE_URL="file://$SANDBOX/fx"
+    tl tools_fetch_verified git 2.56.0 source "$want" "$SANDBOX/dl"
+    assert_rc 0 "a matching digest passes"
+    tl tools_fetch_verified git 2.56.0 source "$(printf '0%.0s' {1..64})" "$SANDBOX/dl"
+    assert_rc 1 "a wrong digest is refused"
+    assert_contains "$ERR" "SHA-256 mismatch for git-2.56.0.tar.xz" "names the file"
+    assert_no_file "$SANDBOX/dl/git-2.56.0.tar.xz" "and the download is removed"
 }
 
 test_lock_lookup_returns_the_version_and_sha_for_a_tool_and_platform() {

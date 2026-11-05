@@ -329,12 +329,13 @@ uninstall_state() {
 # ^ invariant uninstall_steps returns on many paths; the lock is released here, once, on all of them, and the state dir goes after it
 # ^ why rmdir, not rm -r; a non-empty state dir holds the user's backup tarballs and must stay
 uninstall_run() {
-    local remove_tools="$1" rc
+    local remove_tools="$1" keep_system_git="${2:-0}" rc
     GSG_UNINSTALL_ACTIONS=0
     paths_init || return 1
     lifecycle_note_global_config
     lifecycle_require_git || return 1
     state_read || return 1
+    if [ "$ST_EXISTS" -eq 1 ]; then gitup_takeover_guard "$keep_system_git" || return 1; fi
     if [ "$ST_EXISTS" -eq 1 ] && ! doctor_rec_lock; then
         printf '%s: uninstall changed nothing; run %s uninstall again once no doctor run is active\n' "$GSG_NAME" "$GSG_NAME" >&2
         return 1

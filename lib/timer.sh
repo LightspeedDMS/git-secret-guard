@@ -30,7 +30,7 @@ timer_check_config_global() {
     if [ -n "${GIT_CONFIG_GLOBAL:-}" ] && [ "${GIT_CONFIG_GLOBAL#/}" = "$GIT_CONFIG_GLOBAL" ]; then
         what="${GIT_CONFIG_GLOBAL//[[:cntrl:]]/?}"
         trunc_text "$what" 120
-        printf '%s: GIT_CONFIG_GLOBAL must be an absolute path to go into the timer unit (got [%s]); nothing was changed\n' "$GSG_NAME" "$REPLY" >&2
+        printf '%s: GIT_CONFIG_GLOBAL must be an absolute path to go into the timer unit (got [%s]); %s\n' "$GSG_NAME" "$REPLY" "$(brew_unchanged_text)" >&2
         return 1
     fi
 }
@@ -50,7 +50,7 @@ timer_check_values() {
             *[[:cntrl:]]*) ;;
             *) continue ;;
         esac
-        printf '%s: %s cannot be written into a systemd unit (it holds a quote, a backslash, %% or $, or a control character); nothing was changed\n' "$GSG_NAME" "${what//[[:cntrl:]]/?}" >&2
+        printf '%s: %s cannot be written into a systemd unit (it holds a quote, a backslash, %% or $, or a control character); %s\n' "$GSG_NAME" "${what//[[:cntrl:]]/?}" "$(brew_unchanged_text)" >&2
         return 1
     done
 }
@@ -61,7 +61,7 @@ timer_check_target() {
     for unit in "$GSG_SERVICE_UNIT" "$GSG_TIMER_UNIT"; do
         path="$GSG_UNIT_DIR/$unit"
         if { [ -e "$path" ] || [ -L "$path" ]; } && ! timer_unit_is_ours "$path"; then
-            printf '%s: %s exists and was not written by git-secret-guard; move it away and run install again; nothing was changed\n' "$GSG_NAME" "$path" >&2
+            printf '%s: %s exists and was not written by git-secret-guard; move it away and run install again; %s\n' "$GSG_NAME" "$path" "$(brew_unchanged_text)" >&2
             return 1
         fi
     done

@@ -16,10 +16,15 @@ BREW_INSTALLED=""
 
 # ^ invariant prints the claim for a refusal, "nothing was changed" until BREW_INSTALLED is set, afterwards what changed
 brew_unchanged_text() {
-    if [ -z "$BREW_INSTALLED" ]; then
+    local gitup="${GITUP_CHANGED:-}"
+    if [ -z "$BREW_INSTALLED" ] && [ -z "$gitup" ]; then
         printf 'nothing was changed'
-    else
+    elif [ -z "$gitup" ]; then
         printf 'the only change made was the Homebrew install of %s in this run' "$BREW_INSTALLED"
+    elif [ -z "$BREW_INSTALLED" ]; then
+        printf 'the only change made was the git upgrade of this run (%s)' "$gitup"
+    else
+        printf 'the changes made in this run were the Homebrew install of %s and the git upgrade (%s)' "$BREW_INSTALLED" "$gitup"
     fi
 }
 

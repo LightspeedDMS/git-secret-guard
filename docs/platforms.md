@@ -438,7 +438,8 @@ get git (PPA, else the SHA-256 verified tarball above), create a **non-root user
 (`tests/platform/ubuntu-e2e.sh`: install with real downloads, a runtime-built fake token blocked by trufflehog and betterleaks, upgrade, uninstall,
 second uninstall, no value printed) and `tests/run.sh` (some tests use `chmod 000`, which root ignores). Every step runs under `timeout`; the
 run ends with a summary, the list of skipped tests with their reasons, and exits nonzero on any failure. Tests that need something the container
-lacks skip with a reason (`cidx-server unit cannot be read` is the host's own service); none is faked.
+lacks skip with a reason; none is faked. The service-environment tests emulate a systemd unit's `User=` and `PATH=` and run only when
+`GSG_TEST_SERVICE_UNIT` names such a unit on the machine (and it runs as the current user); unset, they skip with `GSG_TEST_SERVICE_UNIT is not set`.
 
 ### What the container run trusts
 

@@ -49,6 +49,22 @@ jobs:
           echo "targets=$targets" >>"$GITHUB_OUTPUT"
           echo "base_ref=$base_ref" >>"$GITHUB_OUTPUT"
 
+  # Developer Certificate of Origin (DCO.txt): every commit of the pull request, merge commits aside, carries a Signed-off-by line equal to its author.
+  dco:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Check the sign-offs
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: bash .github/scripts/check-dco.sh "$PR_BASE" "$PR_HEAD"
+
   # The supported platform (docs/platforms.md): Ubuntu 24.04 with a git from the git-core PPA.
   # The suite runs on the head and, for pull requests, on the base, so a failure that exists already is not blamed on the change.
   suite:

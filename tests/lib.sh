@@ -218,15 +218,17 @@ make_scan_tree() {
     mkdir -p -- "$1/src" && printf 'one\ntwo\nthree\n' >"$1/src/a.txt"
 }
 
-# ^ external cidx-server unit has User=jsbattig, PATH with /usr/local/bin before /usr/bin and no TMPDIR; read only via systemctl show
+# ^ external GSG_TEST_SERVICE_UNIT names a systemd unit with a User= and a PATH= (a service environment, no TMPDIR); read only via systemctl show
 service_prepare() {
+    local unit="${GSG_TEST_SERVICE_UNIT:-}"
+    [ -n "$unit" ] || skip_test "GSG_TEST_SERVICE_UNIT is not set (a systemd unit whose environment the service tests emulate)"
     command -v systemctl >/dev/null 2>&1 || skip_test "systemctl is not available"
     local show svc_user
-    show="$(systemctl show cidx-server -p User -p Environment 2>/dev/null)" || skip_test "cidx-server unit cannot be read"
+    show="$(systemctl show "$unit" -p User -p Environment 2>/dev/null)" || skip_test "unit $unit cannot be read"
     svc_user="$(sed -n 's/^User=//p' <<<"$show")"
     SVC_PATH="$(sed -n 's/^Environment=\(.* \)\{0,1\}PATH=\([^ ]*\).*/\2/p' <<<"$show")"
-    [ -n "$svc_user" ] && [ -n "$SVC_PATH" ] || skip_test "cidx-server unit has no User/PATH"
-    [ "$svc_user" = "$(id -un)" ] || skip_test "cidx-server runs as $svc_user, not the current user"
+    [ -n "$svc_user" ] && [ -n "$SVC_PATH" ] || skip_test "unit $unit has no User/PATH"
+    [ "$svc_user" = "$(id -un)" ] || skip_test "unit $unit runs as $svc_user, not the current user"
     SVC_HOME="$(getent passwd "$svc_user" | cut -d: -f6)"
     [ -d "$SVC_HOME" ] || skip_test "no home directory for $svc_user"
     mkdir -p -- "$SANDBOX/passthrough-empty"

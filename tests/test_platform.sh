@@ -412,10 +412,10 @@ test_the_mount_check_lists_only_stray_mount_points_and_fails_closed_on_unreadabl
     container_fn isolation_stray_mounts "$SANDBOX/mi"
     assert_rc 0 "the unmodified container baseline is accepted"
     assert_empty "$OUT" "nothing is named"
-    mountinfo_fixture "$SANDBOX/mi" "${BASELINE_MOUNTS[@]}" /root/injected '/root/with\040space' /src/sub /srcx /etc /run/secrets /devices/x /home/jsbattig /dev/dri/card0 /procx || return 1
+    mountinfo_fixture "$SANDBOX/mi" "${BASELINE_MOUNTS[@]}" /root/injected '/root/with\040space' /src/sub /srcx /etc /run/secrets /devices/x /home/someuser /dev/dri/card0 /procx || return 1
     container_fn isolation_stray_mounts "$SANDBOX/mi"
     assert_rc 1 "stray mount points fail the check"
-    assert_eq "$OUT" $'/root/injected\n/root/with?040space\n/src/sub\n/srcx\n/etc\n/run/secrets\n/devices/x\n/home/jsbattig\n/dev/dri/card0\n/procx' \
+    assert_eq "$OUT" $'/root/injected\n/root/with?040space\n/src/sub\n/srcx\n/etc\n/run/secrets\n/devices/x\n/home/someuser\n/dev/dri/card0\n/procx' \
         "only the stray mount points, sanitized, /dev/dri/card0 included"
     no_leak "secret-source-dir"
     no_leak "secret-root"

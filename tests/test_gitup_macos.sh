@@ -15,8 +15,8 @@ test_a_mac_with_an_old_git_installs_the_homebrew_git_and_goes_on_when_the_flag_s
     gm_setup 2.40.0 || return 1
     gsg install --upgrade-git </dev/null
     assert_rc 0 "install --upgrade-git on a Mac with an old git"
-    assert_contains "$OUT" "installing the missing prerequisites with Homebrew: brew install git" "brew announces the command"
-    assert_contains "${OUT%%installing the missing prerequisites*}" "route: brew install git" "the plan is printed before brew runs"
+    assert_contains "$OUT" "installing git with Homebrew: brew install git" "the module announces the command"
+    assert_contains "${OUT%%installing git with Homebrew*}" "route: brew install git" "the plan is printed before brew runs"
     assert_eq "$(gm_calls)" "install git" "brew install git ran, not an upgrade"
     assert_eq "$("$GM_PREFIX/bin/git" --version)" "git version 2.56.0" "the Homebrew git is in the prefix"
     assert_file "$LC_STATE/state" "install ran to the end"
@@ -99,7 +99,9 @@ test_a_refusal_after_the_offer_names_the_homebrew_install_of_git() {
     gsg install --upgrade-git </dev/null
     assert_rc 1 "the later brew install of util-linux fails"
     assert_eq "$(gm_calls)" $'install git\ninstall util-linux' "git first, then the other formulae in their own call"
-    assert_contains "$ERR" "Homebrew install of git" "names what changed"
+    assert_contains "$ERR" "Homebrew installed git at $GM_PREFIX/bin/git" "names what changed"
+    assert_not_contains "$ERR" "install of git" "and does not call it an install twice"
+    assert_not_contains "$ERR" "(upgraded)" "and has no upgrade marker"
     assert_not_contains "$ERR" "nothing was changed" "never claims nothing changed"
 }
 
@@ -111,6 +113,7 @@ test_a_failing_brew_install_of_git_shows_brews_message_refuses_and_says_what_may
     assert_contains "$ERR" "Error: injected brew failure" "brew's own message"
     assert_contains "$ERR" "Homebrew may have installed part of git" "says Homebrew may have installed part of it"
     assert_contains "$ERR" "install refused" "install refuses"
+    assert_eq "$(grep -o 'install refused' <<<"$ERR" | wc -l | tr -d ' ')" 1 "and only the core says so, once"
     assert_not_contains "$ERR" "nothing was changed" "and does not claim nothing changed"
     assert_no_file "$LC_STATE" "no state"
 }
@@ -124,6 +127,7 @@ test_a_failing_brew_upgrade_of_git_shows_brews_message_and_says_what_may_have_ch
     assert_contains "$ERR" "Error: injected brew failure" "brew's own message"
     assert_contains "$ERR" "brew upgrade git failed" "names the command"
     assert_contains "$ERR" "Homebrew may have installed part of" "says what brew may have done"
+    assert_eq "$(grep -o 'install refused' <<<"$ERR" | wc -l | tr -d ' ')" 1 "only the core refuses, once"
     assert_not_contains "$ERR" "nothing was changed" "no claim that nothing changed"
 }
 

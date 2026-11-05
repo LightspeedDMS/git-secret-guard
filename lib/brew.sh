@@ -92,7 +92,7 @@ brew_run_install() {
     printf '%s: installing the missing prerequisites with Homebrew: brew install %s\n' "$GSG_NAME" "$1"
     IFS=' ' read -r -a need <<<"$1"
     "$BREW_BIN" install "${need[@]}" || {
-        if [ -n "$BREW_INSTALLED" ]; then before="before that, $(brew_unchanged_text)"; fi
+        if [ -n "$BREW_INSTALLED${GITUP_CHANGED:-}" ]; then before="before that, $(brew_unchanged_text)"; fi
         printf '%s: brew install %s failed (brew'"'"'s message is above); install refused. Homebrew may have installed part of %s before failing (see brew list); %s\n' \
             "$GSG_NAME" "$1" "$1" "$before" >&2
         return 1

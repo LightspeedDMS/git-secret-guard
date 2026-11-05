@@ -46,33 +46,27 @@ gitup_macos_plan() {
     esac
 }
 
-# ^ invariant brew_run_install covers the install; this is its twin for upgrade, with the same failure wording
-# ^ invariant a good upgrade is recorded in BREW_INSTALLED too; a later refusal never claims nothing changed
-gitup_macos_brew_upgrade() {
-    printf '%s: upgrading git with Homebrew: brew upgrade git\n' "$GSG_NAME"
-    "$BREW_BIN" upgrade git || {
-        gitup_changed_add "brew upgrade git was started and failed, so Homebrew may have changed the git package (see brew list git)"
-        printf '%s: brew upgrade git failed (brew'"'"'s message is above); install refused. Homebrew may have installed part of the new git before failing (see brew list git); %s\n' \
-            "$GSG_NAME" "$(brew_unchanged_text)" >&2
+# ^ why a runner of its own, not brew_run_install; a failure there prints its own refusal line and the contract leaves the one refusal to the core
+# ^ invariant VERB is install or upgrade; GITUP_CHANGED carries the change, a later refusal names it once (BREW_INSTALLED is left to the formulae install)
+# ^ invariant a failure prints brew's own message (it goes straight to the terminal) and the facts, never a refusal
+gitup_macos_brew_run() {
+    local verb="$1" past=installed
+    if [ "$verb" = upgrade ]; then past=upgraded; fi
+    printf '%s: %sing git with Homebrew: brew %s git\n' "$GSG_NAME" "${verb%e}" "$verb"
+    "$BREW_BIN" "$verb" git || {
+        gitup_changed_add "brew $verb git was started and failed, Homebrew may have changed the git package (see brew list git)"
+        printf '%s: brew %s git failed (brew'"'"'s message is above); Homebrew may have installed part of git before failing (see brew list git)\n' \
+            "$GSG_NAME" "$verb" >&2
         return 1
     }
-    BREW_INSTALLED="${BREW_INSTALLED:+$BREW_INSTALLED }git (upgraded)"
-    gitup_changed_add "brew upgrade git replaced the old Homebrew git"
-}
-
-gitup_macos_apply_install() {
-    brew_run_install git || {
-        gitup_changed_add "brew install git was started and failed, so Homebrew may have installed part of it (see brew list git)"
-        return 1
-    }
-    gitup_changed_add "brew install git put a git at $BREW_PREFIX/bin/git"
+    gitup_changed_add "Homebrew $past git at $BREW_PREFIX/bin/git"
 }
 
 gitup_macos_apply() {
     gitup_macos_prepare || return 1
     case "$GITUP_ROUTE" in
-        brew-install) gitup_macos_apply_install || return 1 ;;
-        brew-upgrade) gitup_macos_brew_upgrade || return 1 ;;
+        brew-install) gitup_macos_brew_run install || return 1 ;;
+        brew-upgrade) gitup_macos_brew_run upgrade || return 1 ;;
         *)
             printf '%s: the macos module has no route [%s] to apply\n' "$GSG_NAME" "$GITUP_ROUTE" >&2
             return 1

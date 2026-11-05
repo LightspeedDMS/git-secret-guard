@@ -391,8 +391,10 @@ Both run the whole suite and the install E2E as a non-root user, in a podman-mac
   `install_tools_ready`), after every refusable check except the staging, which follows it when no GNU `timeout` exists; `install_stage_refused` handles a stage that fails after brew ran. Every install refusal uses `brew_unchanged_text`
   (`test_every_install_refusal_wording_is_honest_after_a_brew_install`, two allow-listed exceptions); `curl_order_recorder` proves the
   download order. The hook command comes from `hook_command_text`, shared through `share_recorded_bash` and `DR_HOOK_CMD`; the hook has a
-  bash 3.2 syntax guard at the top; `brew_use_gnubin`
-  (`test_a_command_that_needs_the_gnu_tools_refuses_when_their_directory_is_missing`).
+  bash 3.2 syntax guard at the top. `brew_use_gnubin` prepends the recorded `GNUBIN_DIR` for the CLI and refuses every command but
+  `install`, `version` and `help` without a GNU directory
+  (`test_a_command_that_needs_the_gnu_tools_refuses_when_their_directory_is_missing`); a settings file `load_settings` refuses
+  prints `cannot read <file>: <reason>`, the reason sanitised and cut (`test_a_refused_settings_file_names_the_reason_on_macos`).
 - **BSD differences that shaped code**: no `realpath -m`, `mktemp --suffix`, `mv -T`, `stat -c`, `env --default-signal`; `install -T`
   means tags; `chmod 700 -- DIR` fails; `find` lacks `-printf`/`-readable`/`-executable` (sizes via `install_entry_sizes`; never
   `find -ls`: `test_the_backup_bounds_do_not_depend_on_the_owner_columns_of_find_ls`); `wc -l` pads.

@@ -750,6 +750,7 @@ and not part of `tests.yml`. It runs only by `workflow_dispatch`.
 - **The Rocky VM guest runs with `/usr/local/bin` first on `PATH`**, as the product tells a user to do; a Rocky 9 login shell lists `/usr/bin` first.
 
 ### Results
+The final full run, on the branch head before this table was edited: `gh workflow run platforms.yml --ref ci/real-platform-runs`, run 42292455229, every job green (23 jobs, 1150 passed, 0 failed, 67 skipped in each of the three suites). Older run ids below are the first appearance of a result.
 
 | Item | Result | Run | Real output |
 |---|---|---|---|
@@ -765,7 +766,7 @@ and not part of `tests.yml`. It runs only by `workflow_dispatch`.
 | Takeover restore with the network off (`--network none` after `podman commit`) | PASS | same | stage 1 `41 passed, 0 failed`; stage 2 (only `lo`, `curl` and name lookup fail) `12 passed, 0 failed` |
 | Direct root run of the full flow, no `sudo` installed | PASS | same | `E2E SUMMARY: 65 passed, 0 failed` |
 | Real pin bump (git 2.55.0 built, then the current pin 2.56.0) | PASS | 42273585581 | `E2E SUMMARY: 17 passed, 0 failed` |
-| Rocky 9.8 VM, SELinux enforcing, KVM (`/dev/kvm` present) | PASS, with one recorded finding | 42282871381 | `SELinux is enforcing`; `E2E SUMMARY: 84 passed, 0 failed`; `ROCKY VM TEST: PASS (... accel kvm)` |
+| Rocky 9.8 VM, SELinux enforcing, KVM (`/dev/kvm` present) | PASS; the label finding is fixed and checked | 42292455229 | `SELinux is enforcing`; `E2E SUMMARY: 88 passed, 0 failed`; `ROCKY VM TEST: PASS (... accel kvm)` |
 | GitHub Desktop's bundled git | measured | 42259957123, 42273585581 | `old git: exit 0; output: []` for 2.45.3 built from the tarball and for the git in the Desktop 3.4.13 `.deb` |
 | Windows scenarios | see "Windows" | | |
 

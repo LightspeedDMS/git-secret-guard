@@ -167,7 +167,7 @@ test_the_git_bundled_with_github_desktop_is_named_and_said_to_skip_the_scan_as_m
     assert_rc 0 "a warning does not fail install"
     assert_contains "$ERR" "/usr/lib/github-desktop/resources/app/git/bin/git is git 2.45.3" "the bundled git and its version"
     assert_contains "$ERR" "GitHub Desktop" "says whose it is"
-    assert_contains "$ERR" "commits made from GitHub Desktop are not scanned" "and that, as measured, its commits are not scanned"
+    assert_contains "$ERR" "commits made with it are not scanned (measured with 2.45.3)" "and that, as measured, its commits are not scanned"
     assert_not_contains "$ERR" "has not been tested" "the warning no longer says the question is open"
     assert_contains "$ERR" "oldgit/git is git 2.52.0; it ignores config-based hooks" "the second old git still gets the plain warning"
 }
@@ -185,7 +185,7 @@ test_doctor_lists_the_bundled_git_as_a_warning_with_the_same_wording() {
     fu_old_git_dir || return 1
     fu_root "$FU_OLD_ON_PATH"'doctor_machine_line() { printf "%s|%s\n" "$1" "$2"; }; doctor_check_git' "$SANDBOX/oldgit"
     assert_contains "$OUT" "WARNING|git: $SANDBOX/root/usr/lib/github-desktop/resources/app/git/bin/git is git 2.45.3" "doctor names it"
-    assert_contains "$OUT" "commits made from GitHub Desktop are not scanned" "and says, as measured, its commits are not scanned"
+    assert_contains "$OUT" "commits made with it are not scanned (measured with 2.45.3)" "and says, as measured, its commits are not scanned"
     assert_not_contains "$OUT" "has not been tested" "the warning no longer says the question is open"
     assert_contains "$OUT" "oldgit/git is git 2.52.0; it ignores config-based hooks" "the second old git still gets the plain warning"
 }

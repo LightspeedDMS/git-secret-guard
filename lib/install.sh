@@ -155,7 +155,7 @@ install_git_is_bundled() { [ "$1" = "$(install_bundled_git_path)" ]; }
 # ^ invariant prints why a git older than 2.54 matters; the bundled git is named and measured, any other git gets the plain claim
 install_old_git_effect() {
     if install_git_is_bundled "$1"; then
-        printf 'it is the git GitHub Desktop bundles; it ignores config-based hooks without any message, so commits made from GitHub Desktop are not scanned (measured with 2.45.3)'
+        printf 'it is the git GitHub Desktop bundles; it ignores config-based hooks without any message, so commits made with it are not scanned (measured with 2.45.3)'
     else
         printf 'it ignores config-based hooks without any message, so commits made with it are not scanned'
     fi

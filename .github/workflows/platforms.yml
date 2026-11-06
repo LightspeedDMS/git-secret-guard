@@ -241,3 +241,30 @@ jobs:
           name: rocky-vm
           path: ${{ runner.temp }}/logs
 
+
+  # #30: the Git for Windows upgrade on a disposable windows-2025 runner (docs/platforms.md#ci-on-real-platforms). The script replaces Git for Windows with an old release first.
+  windows:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[heavy]') || contains(github.event.head_commit.message, '[win]')
+    runs-on: windows-2025
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: [winget, inuse, killed, signature, rerun, prompt]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: ${{ matrix.scenario }}
+        shell: pwsh
+        env:
+          SCENARIO: ${{ matrix.scenario }}
+        run: |
+          New-Item -ItemType Directory -Force -Path "$env:RUNNER_TEMP\logs" | Out-Null
+          & "$PWD\tests\platform\windows-gitup-e2e.ps1" -Scenario $env:SCENARIO 2>&1 | Tee-Object -FilePath "$env:RUNNER_TEMP\logs\windows-$env:SCENARIO.log"
+          exit $LASTEXITCODE
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: windows-${{ matrix.scenario }}
+          path: ${{ runner.temp }}\logs

@@ -7,6 +7,7 @@ GSG_MIN_GIT_MINOR=54
 # ^ see test:test_the_hook_never_looks_tools_up_on_PATH
 install_git_version() {
     local out
+    if brew_git_shim_unusable "$1"; then return 1; fi
     # ^ external git 2.56 --version dies on a syntactically broken global config; the probe must not read user config
     out="$(GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null "$1" --version 2>/dev/null)" || return 1
     if [[ $out =~ ^git\ version\ ([0-9]+)\.([0-9]+)(\.[0-9]+)? ]]; then
@@ -102,6 +103,10 @@ install_git_hint() {
         return 0
     fi
     install_os_family
+    if brew_is_macos; then
+        printf '%s: on macOS run: %s install --upgrade-git; it installs or upgrades git with Homebrew, see docs/platforms.md\n' "$GSG_NAME" "$GSG_NAME" >&2
+        return 0
+    fi
     case "$REPLY" in
         ubuntu)
             printf '%s: on Ubuntu get a current git with: sudo add-apt-repository ppa:git-core/ppa && sudo apt install git\n' "$GSG_NAME" >&2
@@ -171,6 +176,7 @@ install_report_other_gits() {
         ver="$(install_git_version "$cand")" || ver="of unknown version"
         printf '%s: warning: %s is git %s; it ignores config-based hooks without any message, so commits made with it are not scanned (the git in use is %s, git %s)%s\n' \
             "$GSG_NAME" "$cand" "$ver" "$GSG_GIT" "$(install_git_version "$GSG_GIT")" "$(gitup_takeover_note "$cand")" >&2
+        brew_old_git_note "$cand"
     done
 }
 

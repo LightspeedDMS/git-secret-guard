@@ -198,9 +198,17 @@ bin/git-secret-guard install        # lists what is missing, installs it with br
   the global-config write probe, the state and recorded-`core.hooksPath` checks, the `tools.lock` lookup of every scanner for this platform).
   When a GNU `timeout` already exists (`coreutils` installed), the tool plan, the download, the SHA-256 check and the `--version` check run
   before that `brew install` as well, so a bad download refuses with nothing changed. Only on a Mac without `coreutils` do they follow it, because
-  the version probes need a bounded `timeout`; a failed download there is a refusal that names what brew installed. An old git, an
-  unsupported CPU, a `--with-timer` without `launchctl`, a set `core.hooksPath`, a lock without a row for this platform and the other refusals therefore install
+  the version probes need a bounded `timeout`; a failed download there is a refusal that names what brew installed. An old git you
+  do not agree to upgrade (see the next item), an unsupported CPU, a `--with-timer` without `launchctl`, a set `core.hooksPath`, a lock without a row for this platform and the other refusals therefore install
   nothing beyond the bootstrap's `bash`.
+- **An old git: `install --upgrade-git`.** A git older than 2.54 (Apple Git older than 2.54, or none) is offered an upgrade through Homebrew, after
+  the other refusable checks, with the plan printed first and the answer defaulting to No (no terminal: the flag is the only yes). Routes: a Homebrew git
+  (`$(brew --prefix)/bin/git`) that is >= 2.54 but not first on `PATH` gets a refusal with the exact `export PATH="<prefix>/bin:$PATH"` line (no shell
+  profile is ever edited); an older Homebrew git runs `brew upgrade git`; none runs `brew install git`. `brew` runs as your user, never as root and
+  never through `sudo`; Homebrew only has the latest git, so nothing is pinned. This `brew install git` is its own call, before the one for
+  `coreutils`, `util-linux` and `jq` (a later refusal names both: `the only change made was the git upgrade of this run (Homebrew installed git at <prefix>/bin/git)`). **`/usr/bin/git` cannot be replaced**
+  (SIP), so `--take-over-system-git` says so and install goes on. After the upgrade, GUI clients and tools that start with `PATH=/usr/bin:/bin` still use the old Apple Git and
+  are not scanned (the warning says so); the LaunchAgent's `PATH` starts with the Homebrew git's directory.
 - **The CLI needs the GNU directory.** On macOS every command except `install`, `version` and `help` refuses, naming `brew install coreutils`,
   when no GNU directory is known (the installed copy's settings have no `GNUBIN_DIR`, or a checkout finds no `brew` on `PATH`). A global-config
   `include` whose target does not exist (a dangling symlink) is skipped, as git does; one that exists but cannot be resolved is refused.
@@ -530,6 +538,21 @@ Both run the whole suite and the install E2E as a non-root user, in a podman-mac
   `install`, `version` and `help` without a GNU directory
   (`test_a_command_that_needs_the_gnu_tools_refuses_when_their_directory_is_missing`); a settings file `load_settings` refuses
   prints `cannot read <file>: <reason>`, the reason sanitised and cut (`test_a_refused_settings_file_names_the_reason_on_macos`).
+- **macOS git upgrade** (`lib/gitup_macos.sh`, story #32; routes `path-fix`, `brew-upgrade`, `brew-install`, state read from the file `$(brew --prefix)/bin/git`).
+  *Ordering (decided):* git runs through the core's offer alone, not inside the single `brew install` of the other formulae. The offer must come first
+  (the `core.hooksPath` checks, the re-verification and the PATH line need the new git) and the single install is the last step after every refusable
+  check. The module's own runner `gitup_macos_brew_run` (not `brew_run_install`, whose failure line is a second refusal) records the change only in `GITUP_CHANGED`
+  (`Homebrew installed|upgraded git at <prefix>/bin/git`); `brew_unchanged_text` combines it with a later `BREW_INSTALLED`, and `brew_run_install` counts
+  `GITUP_CHANGED` when it says what happened before a failing formulae install. A failed git run prints brew's message and the facts; the core prints the one refusal.
+  *Proven on a Mac (arm64, macOS 26.7.1, Apple Git 2.54.0, no Homebrew git):* SIP is enabled, `/usr/bin/git` carries the `restricted` flag and `touch /usr/bin/x`
+  fails with `Operation not permitted` (no takeover; the module has `gitup_macos_takeover_unavailable`). `/etc/paths` and `path_helper` give
+  `/usr/local/bin:/System/Cryptexes/App/usr/bin:/usr/bin:/bin:...` with no Homebrew directory; `$(brew --prefix)/bin` is on `PATH` only through the user's profile
+  (`eval "$(brew shellenv)"` in `~/.zprofile`), so the path-fix route is the normal case. `/usr/bin/git` is a shim (78 hard links, one binary) that exits at once
+  (rc 1, 2 ms) when its developer directory is unusable. *Inferred, not proven here (CLT cannot be removed on this Mac):* a Mac with no Command Line Tools
+  answers `git --version` through that shim by opening the install dialog and exiting 1, so it cannot hang, but it would open the dialog; GUI clients start
+  with launchd's `PATH` (`launchctl getenv PATH` is empty, the default is `/usr/bin:/bin:/usr/sbin:/sbin`) and so keep running Apple Git. *Guard:* `brew_git_shim_unusable` (lib/brew.sh) never
+  runs the system directory's `git` on macOS when its `xcode-select -p` (no dialog) reports no developer directory; that git counts as unknown version
+  (`test_a_mac_without_developer_tools_never_runs_the_git_shim_and_still_shows_the_offer` uses a shim that records and sleeps). No version probe has a timeout of its own. The macOS prompt test (`gu_pty_bsd`) uses the BSD `/usr/bin/script`, since Homebrew's util-linux ships no `script` (probed), and feeds the answer after a lead with stdin held open (BSD `script` sends EOF first when stdin ends at once).
 - **BSD differences that shaped code**: no `realpath -m`, `mktemp --suffix`, `mv -T`, `stat -c`, `env --default-signal`; `install -T`
   means tags; `chmod 700 -- DIR` fails; `find` lacks `-printf`/`-readable`/`-executable` (sizes via `install_entry_sizes`; never
   `find -ls`: `test_the_backup_bounds_do_not_depend_on_the_owner_columns_of_find_ls`); `wc -l` pads.

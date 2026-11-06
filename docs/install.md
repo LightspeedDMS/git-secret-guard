@@ -99,6 +99,7 @@ with no git at all they run right after it.
 - **A rerun does nothing to git:** a git that qualifies, at the pin or not a build of ours, with no old package git behind it, means no prompt, no download of git and no
   `sudo`, `dnf` or `make` call.
 - **Exit status 3** is reserved for a module that must finish the upgrade outside the install process; install stops, prints the next step and changes nothing else.
+- **macOS** has an upgrade module too (`brew install git` or `brew upgrade git` as your user, no takeover since `/usr/bin/git` is protected), so the lists above that say macOS keeps the refusal are out of date: [the macOS section of platforms.md](platforms.md#macos-homebrew).
 - **Takeover.** `git-secret-guard restore-system-git` undoes it from the saved originals without a network. `uninstall` stops while a takeover is active
   (it would take the restore command with it) and names `restore-system-git` and `uninstall --keep-system-git`. `status` and `doctor` report the takeover, and one that
   something else undid, which leaves commits through `/usr/bin/git` unscanned.

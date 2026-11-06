@@ -293,6 +293,19 @@ case "$1" in
         done
         exit 0
         ;;
+    upgrade)
+        fail_upgrade=0
+        if [ -f "$d/brew.fail" ]; then fail_upgrade=1; fi
+        if [ -f "$d/brew.failon" ]; then
+            case " $* " in *"$(cat "$d/brew.failon")"*) fail_upgrade=1 ;; esac
+        fi
+        if [ "$fail_upgrade" -eq 1 ]; then
+            echo "Error: injected brew failure" >&2
+            exit 1
+        fi
+        if [ -f "$d/brew.upgrade_src" ]; then ln -sfn "$(cat "$d/brew.upgrade_src")" "$d/brewprefix/bin/git" || exit 1; fi
+        exit 0
+        ;;
 esac
 echo "Error: the brew stand-in does not know the subcommand [$1]" >&2
 exit 1
@@ -313,7 +326,7 @@ lc_brew_map() {
     } >"$SANDBOX/brew.map"
 }
 
-lc_brew_reset() { rm -rf -- "$SANDBOX/brewprefix" "$SANDBOX/brew.log" "$SANDBOX/brew.fail" "$SANDBOX/brew.failon" "$SANDBOX/brew.nopopulate" && mkdir -p -- "$SANDBOX/brewprefix"; }
+lc_brew_reset() { rm -rf -- "$SANDBOX/brewprefix" "$SANDBOX/brew.log" "$SANDBOX/brew.fail" "$SANDBOX/brew.failon" "$SANDBOX/brew.nopopulate" "$SANDBOX/brew.upgrade_src" && mkdir -p -- "$SANDBOX/brewprefix"; }
 
 # ^ invariant populates the fake prefix with the given formulae and leaves brew.log absent; a test sees only the calls install makes
 lc_brew_have() {

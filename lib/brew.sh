@@ -28,6 +28,23 @@ brew_unchanged_text() {
     fi
 }
 
+# ^ invariant true only for the git of the system directory, on macOS
+brew_is_system_git() { [ "$1" = "${GITUP_USRBIN:-/usr/bin}/git" ] && brew_is_macos; }
+
+# ^ external /usr/bin/git on a Mac without developer tools is a shim opening an install dialog; xcode-select -p answers without one
+# ^ invariant true only for the system git on macOS when its xcode-select reports no developer directory; such a git is never run
+brew_git_shim_unusable() {
+    local usrbin="${GITUP_USRBIN:-/usr/bin}"
+    if ! brew_is_system_git "$1" || [ ! -x "$usrbin/xcode-select" ]; then return 1; fi
+    ! "$usrbin/xcode-select" -p >/dev/null 2>&1
+}
+
+# ^ invariant prints the old Apple Git sentence for $1 only when it is the system git on macOS; the system volume cannot be changed
+brew_old_git_note() {
+    if ! brew_is_system_git "$1"; then return 0; fi
+    printf '%s: on macOS the old git stays where it is (the system volume cannot be changed); GUI clients and tools that start with PATH=/usr/bin:/bin still use it and are not scanned\n' "$GSG_NAME" >&2
+}
+
 # ^ external the only lookup of brew; install-time only, the hook never resolves a tool through PATH
 # ^ invariant sets BREW_BIN = the absolute path of brew; a missing or relative one prints the refusal and returns 1
 brew_find() {
@@ -92,7 +109,7 @@ brew_run_install() {
     printf '%s: installing the missing prerequisites with Homebrew: brew install %s\n' "$GSG_NAME" "$1"
     IFS=' ' read -r -a need <<<"$1"
     "$BREW_BIN" install "${need[@]}" || {
-        if [ -n "$BREW_INSTALLED" ]; then before="before that, $(brew_unchanged_text)"; fi
+        if [ -n "$BREW_INSTALLED${GITUP_CHANGED:-}" ]; then before="before that, $(brew_unchanged_text)"; fi
         printf '%s: brew install %s failed (brew'"'"'s message is above); install refused. Homebrew may have installed part of %s before failing (see brew list); %s\n' \
             "$GSG_NAME" "$1" "$1" "$before" >&2
         return 1

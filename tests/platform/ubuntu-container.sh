@@ -15,6 +15,8 @@ if [ -z "$GIT_BUILD_VERSION" ] || [ -z "$GIT_BUILD_SHA256" ]; then
 fi
 GIT_BUILD_URL="https://www.kernel.org/pub/software/scm/git/git-$GIT_BUILD_VERSION.tar.xz"
 GIT_BUILD_FLAGS=(NO_RUST=1 NO_TCLTK=1 NO_GETTEXT=1)
+# ^ why a prefix of its own on Debian, not /usr/local; a /usr/local/bin/git there alters what the tests see when they hide git from PATH
+GIT_BUILD_PREFIX=/usr/local
 SHELLCHECK_VERSION=0.11.0
 SHELLCHECK_SHA256_X86_64=8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198
 SHELLCHECK_SHA256_AARCH64=12b331c1d2db6b9eb13cfca64306b1b157a86eb69db83023e261eaa7e7c14588
@@ -423,8 +425,8 @@ build_git_from_tarball() {
     step "download git $GIT_BUILD_VERSION" "$DOWNLOAD_TIMEOUT" curl -fsSL -o "$dir/git.tar.xz" "$GIT_BUILD_URL" || return 1
     step "verify the SHA-256 of the tarball" 60 bash -c 'cd "$1" && printf "%s  git.tar.xz\n" "$2" | sha256sum -c -' _ "$dir" "$GIT_BUILD_SHA256" || return 1
     step "unpack the tarball" 300 tar -C "$dir" -xf "$dir/git.tar.xz" || return 1
-    step "make git" "$BUILD_TIMEOUT" make -C "$dir/git-$GIT_BUILD_VERSION" -j "$(nproc)" prefix=/usr/local "${GIT_BUILD_FLAGS[@]}" all || return 1
-    step "make install git" "$BUILD_TIMEOUT" make -C "$dir/git-$GIT_BUILD_VERSION" prefix=/usr/local "${GIT_BUILD_FLAGS[@]}" install || return 1
+    step "make git" "$BUILD_TIMEOUT" make -C "$dir/git-$GIT_BUILD_VERSION" -j "$(nproc)" prefix="$GIT_BUILD_PREFIX" "${GIT_BUILD_FLAGS[@]}" all || return 1
+    step "make install git" "$BUILD_TIMEOUT" make -C "$dir/git-$GIT_BUILD_VERSION" prefix="$GIT_BUILD_PREFIX" "${GIT_BUILD_FLAGS[@]}" install || return 1
     GIT_SOURCE_DESC="source tarball git-$GIT_BUILD_VERSION.tar.xz from $GIT_BUILD_URL, SHA-256 $GIT_BUILD_SHA256 verified, built with ${GIT_BUILD_FLAGS[*]} into /usr/local"
 }
 
@@ -434,6 +436,7 @@ obtain_git() {
     local ok=0 ppa_rc
     # ^ why source for Debian in auto mode, not a PPA try; Launchpad serves Ubuntu releases, and the product's Debian class takes the source route
     if [ "$GIT_SOURCE" = auto ] && [ "$(os_field ID)" = debian ]; then GIT_SOURCE=source; fi
+    if [ "$(os_field ID)" = debian ]; then GIT_BUILD_PREFIX=/opt/gsg-git; fi
     if [ "$GIT_SOURCE" != source ]; then
         if [ "$GIT_SOURCE" = auto ]; then STEP_SOFT=1; fi
         install_git_ppa
@@ -452,7 +455,8 @@ obtain_git() {
     fi
     if [ "$ok" -eq 0 ]; then
         install_git_source || return 1
-        git_is_new_enough /usr/local/bin/git || { record_fail "the source build is not git >= $GIT_MIN_MAJOR.$GIT_MIN_MINOR"; return 1; }
+        git_is_new_enough "$GIT_BUILD_PREFIX/bin/git" || { record_fail "the source build is not git >= $GIT_MIN_MAJOR.$GIT_MIN_MINOR"; return 1; }
+        export PATH="$GIT_BUILD_PREFIX/bin:$PATH"
     fi
     GIT_BIN="$(type -P git)"
     printf 'git: %s (%s)\ngit source: %s\n' "$GIT_BIN" "$("$GIT_BIN" --version)" "$GIT_SOURCE_DESC"
@@ -515,7 +519,7 @@ stage_checkout() {
 
 # ^ security env -i and a fixed variable list => the test user's shell starts with nothing from this container's process environment
 as_user() {
-    runuser -u "$TEST_USER" -- env -i HOME="$USER_HOME" PATH="$USER_HOME/.local/bin:/usr/local/bin:/usr/bin:/bin" LANG=C.UTF-8 \
+    runuser -u "$TEST_USER" -- env -i HOME="$USER_HOME" PATH="$USER_HOME/.local/bin:$GIT_BUILD_PREFIX/bin:/usr/local/bin:/usr/bin:/bin" LANG=C.UTF-8 \
         GSG_TEST_GIT="$GIT_BIN" GSG_TEST_SHELLCHECK="$(type -P shellcheck)" GSG_TEST_JQ="$(type -P jq)" \
         GSG_TEST_TRUFFLEHOG="$USER_HOME/.local/bin/trufflehog" GSG_TEST_BETTERLEAKS="$USER_HOME/.local/bin/betterleaks" "$@"
 }

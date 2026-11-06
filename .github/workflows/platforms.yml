@@ -208,7 +208,7 @@ jobs:
       - name: Fetch the GitHub Desktop .deb
         env:
           DESKTOP_URL: https://github.com/shiftkey/desktop/releases/download/release-3.4.13-linux1/GitHubDesktop-linux-amd64-3.4.13-linux1.deb
-          DESKTOP_SHA256: ""
+          DESKTOP_SHA256: 8b5577761c7900cac2896b5fbc1d88f5aea48b6ce771437262be2a66ab38d987
         run: |
           mkdir -p "$RUNNER_TEMP/desktop"
           curl -fsSL -o "$RUNNER_TEMP/desktop.deb" "$DESKTOP_URL"
@@ -281,8 +281,9 @@ jobs:
             echo "--- pam sudo"; cat /etc/pam.d/sudo; grep -E "^account" /etc/pam.d/system-auth
             echo "--- chkpwd as the user"; runuser -u gsguser -- /usr/sbin/unix_chkpwd gsguser nullok </dev/null; echo "rc=$?"
             echo "--- strace of sudo, denied calls"; runuser -u gsguser -- strace -f -e trace=openat,execve,open -o /tmp/st sudo -n true >/dev/null 2>&1; grep -E "EACCES|EPERM" /tmp/st | head -20
-            echo "--- all failed syscalls of sudo (user gsguser)"; runuser -u gsguser -- strace -f -Z -s 100 -o /tmp/st2 sudo -n true >/dev/null 2>&1; grep -vE "ENOENT" /tmp/st2 | head -40
-            echo "--- shadow / chkpwd lines"; grep -E "shadow|chkpwd|setuid|setresuid|capset" /tmp/st2 | head -30
+            echo "--- can root read shadow"; head -c 4 /etc/shadow >/dev/null; echo "rc=$?"
+            echo "--- chkpwd chkexpiry as the user"; runuser -u gsguser -- /usr/sbin/unix_chkpwd gsguser chkexpiry </dev/null; echo "rc=$?"
+            echo "--- strace as root, following the setuid sudo"; strace -f -Z -s 120 -o /tmp/st3 runuser -u gsguser -- sudo -n true >/dev/null 2>&1; grep -vE "ENOENT|ENOTTY" /tmp/st3 | grep -E "EACCES|EPERM|shadow|chkpwd|EAGAIN" | head -30
             echo "--- after chmod u+s unix_chkpwd"; chmod 4755 /usr/sbin/unix_chkpwd; runuser -u gsguser -- sudo -n true; echo "rc=$?"
             echo "--- nosuid mounts"; grep -E " / | /usr" /proc/self/mountinfo | head -3
             echo "--- aging"; chage -l gsguser; grep gsguser /etc/shadow | cut -d: -f1,3-9

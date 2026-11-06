@@ -139,7 +139,7 @@ git -C "$PROJECT" ls-files -z -co --exclude-standard | tar -C "$PROJECT" --null 
     printf 'rocky-vm.sh: cannot copy the checkout into the guest\n' >&2
     exit 2
 }
-"${SSH[@]}" "timeout $GUEST_TIMEOUT bash checkout/tests/platform/rocky-vm-e2e.sh" 2>&1 | tee "$logdir/guest.log"
+"${SSH[@]}" "timeout $GUEST_TIMEOUT bash -l checkout/tests/platform/rocky-vm-e2e.sh" 2>&1 | tee "$logdir/guest.log"
 rc="${PIPESTATUS[0]}"
 "${SSH[@]}" 'sudo poweroff' >/dev/null 2>&1
 if [ "$rc" -eq 0 ]; then

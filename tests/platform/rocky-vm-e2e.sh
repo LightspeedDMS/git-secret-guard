@@ -25,7 +25,14 @@ no_new_avc() {
 type_of() { stat -c %C -- "$1" 2>/dev/null | awk -F: '{ print $3 }'; }
 
 # ^ invariant restorecon -n names every path it would relabel; no output means every label is the policy's default
-nothing_to_relabel() { [ -z "$(sudo restorecon -n -v "$@" 2>&1)" ]; }
+nothing_to_relabel() {
+    local out
+    out="$(sudo restorecon -n -v "$@" 2>&1)"
+    if [ -n "$out" ]; then
+        show "restorecon would change: $(printf '%s' "$out" | head -n 5)"
+        return 1
+    fi
+}
 
 vm_prepare() {
     printf '== Rocky VM: SELinux and the prerequisites\n'
@@ -35,7 +42,7 @@ vm_prepare() {
     check "the prerequisites install" bash -c 'sudo dnf install -y --setopt=install_weak_deps=False jq rpm-build createrepo_c policycoreutils audit libselinux-utils git >/dev/null 2>&1'
     check "auditd is running, so denials are recorded" sudo systemctl is-active auditd
     check "sshd is running" sudo systemctl is-active sshd
-    AVC_MARK="$(date '+%m/%d/%Y %H:%M:%S')"
+    AVC_MARK="$(date '+%x %T')"
     show "AVC records are searched from $AVC_MARK"
     mkdir -p "$HOME/.ssh" "$HOME/srv" || return 1
     ssh-keygen -q -t ed25519 -N '' -f "$SSH_KEY" && cat "$SSH_KEY.pub" >>"$HOME/.ssh/authorized_keys" && chmod 600 "$HOME/.ssh/authorized_keys"
@@ -66,7 +73,7 @@ push_over_ssh() {
     git init -q "$work" && git -C "$work" config user.name gsg && git -C "$work" config user.email gsg@example.invalid || return 1
     printf 'clean content\n' >"$work/a.txt" && git -C "$work" add a.txt && git -C "$work" commit -q -m first || return 1
     GIT_SSH_COMMAND="ssh -i $SSH_KEY -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes -o LogLevel=ERROR" \
-        git -C "$work" push -q --receive-pack "$1" "ssh://$ME@127.0.0.1$SRV" HEAD:refs/heads/main >"$OUTF" 2>&1
+        git -C "$work" push -q --receive-pack "$1" "ssh://$ME@127.0.0.1$SRV" HEAD:refs/heads/master >"$OUTF" 2>&1
 }
 
 vm_taken_over() {

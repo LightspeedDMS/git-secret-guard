@@ -773,8 +773,10 @@ The final full run, on the branch head before this table was edited: `gh workflo
 | Windows scenarios | see "Windows" | | |
 
 **Suite failures this work found and fixed.** Debian 13 failed the prepare step (above); once it ran, `test_prerequisites` (four tests) saw the real `/usr/local/bin/git` of the machine and now moves the system paths into the sandbox
-like the other gitup tests, and the doctor test needs the stock `/usr/bin/git`, which the Debian prepare step now installs. Six `test_exemptions_real` tests failed on two of eight runs because a random 32-character draw sometimes holds a dictionary stopword that the
-built-in `generic-api-key` rule skips; the draw is now vowel-free.
+like the other gitup tests, and the doctor test needs the stock `/usr/bin/git`, which the Debian prepare step now installs.
+Six `test_exemptions_real` tests failed on two of eight runs: they shared one random 32-character `generic-api-key` draw per run. The logs of those runs do not record the key, so the cause is inferred, not proven: the built-in rule
+skips a value holding a dictionary stopword (`vpn` is one), and a 62-symbol draw meets one of the many three-letter stopwords far more often than a vowel-free draw does. A vowel-free draw was tried first and still misses by chance (about 1 run in 300 by the reviewer's count), so
+the key is now fixed, built from fragments at run time, and the whole file passes with the real betterleaks (27 passed, 0 failed, 1 skipped).
 
 ### Rocky VM (SELinux enforcing)
 

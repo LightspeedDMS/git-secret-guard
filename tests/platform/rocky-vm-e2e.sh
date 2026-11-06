@@ -20,7 +20,6 @@ ME="$(id -un)"
 
 # ^ invariant true when ausearch finds no AVC or USER_AVC record since AVC_MARK; the records themselves go to OUT for the log
 no_new_avc() {
-    vm_policy_allows
     # shellcheck disable=SC2086
     OUT="$(sudo ausearch -m AVC,USER_AVC -ts $AVC_MARK 2>&1)"
     [[ $OUT == *"<no matches>"* ]]
@@ -143,6 +142,7 @@ vm_restorecon_effect() {
     check "restorecon -n -R /usr/local/bin now reports nothing" nothing_to_relabel -R /usr/local/bin
     clone_over_ssh /usr/local/bin/git-upload-pack
     show "clone served through /usr/local/bin/git-upload-pack after the relabel: exit $RC; $CLONE_OUT"
+    vm_policy_allows
     check "the clone still works" test "$RC" -eq 0
     # shellcheck disable=SC2086
     show "AVC records since: $(sudo ausearch -m AVC,USER_AVC -ts $mark 2>&1 | head -n 6 | cut -c1-240)"

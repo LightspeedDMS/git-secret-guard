@@ -5,6 +5,8 @@ set -u
 # ^ security the fake credential is built at runtime from fragments and never printed; every output is checked for its absence before any of it is shown
 # ^ coupled phases are prepare facts probe upgrade mount-for-user mntc installed-cli tests, one per step; WS, MAIN, LOGS and CONSENT come from the workflow
 
+# ^ external wsl.exe -e bash gives SHELL=bash, a bare name, and script -c failed on it (run 42280191940); a login shell has SHELL=/bin/bash
+export SHELL=/bin/bash
 PHASE="${1:-}"
 WS="${WS:-}"
 MAIN="${MAIN:-}"
@@ -118,7 +120,7 @@ phase_facts() {
         printf 'tools: sudo=%s jq=%s setsid=%s timeout=%s add-apt-repository=%s\n' "$(command -v sudo)" "$(command -v jq)" "$(command -v setsid)" "$(command -v timeout)" "$(command -v add-apt-repository)"
         printf 'windows git on PATH: %s\n' "$(type -P git.exe || echo none)"
     } 2>&1 | tee "$LOGS/facts.log"
-    # ^ external script -c printed "-c: COMMAND: No such file or directory" on WSL 1 (run 42278536933); these probes show which pty route works there
+    # ^ external script -c failed on WSL 1 with No such file or directory for its command (run 42278536933); the pty routes are probed here
     {
         printf 'script version: %s\n' "$(script --version 2>&1 | head -n 1)"
         printf 'SHELL=[%s] /bin/sh -> %s\n' "${SHELL:-}" "$(readlink -f /bin/sh)"

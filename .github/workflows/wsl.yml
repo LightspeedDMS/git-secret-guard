@@ -123,6 +123,26 @@ jobs:
               }
             }
           }
+          # Diagnostic only, Rocky on WSL 1: the vendor container rootfs (not the WSL tar) tells whether WSL 1 can import any Rocky tar. It is not pinned (the file moves);
+          # its SHA-256 is checked against the vendor's CHECKSUM file fetched in the same step, which proves the transfer and nothing more.
+          if ((-not $done) -and $env:WSLV -eq '1' -and $env:DISTRIBUTION -eq 'Rocky-9') {
+            $base = 'https://dl.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-Container-Base.latest.x86_64.tar.xz'
+            $xz = Join-Path $env:RUNNER_TEMP 'container.tar.xz'
+            curl.exe -fsSL --retry 3 -o $xz $base
+            $chk = (curl.exe -fsSL "$base.CHECKSUM") -join "`n"
+            if ($chk -notmatch 'SHA256 \([^)]*\) = ([0-9a-f]{64})') { throw 'no SHA256 line in the vendor CHECKSUM file' }
+            $want = $Matches[1]
+            $have = (Get-FileHash -Algorithm SHA256 -LiteralPath $xz).Hash.ToLower()
+            "diagnostic container rootfs: sha256 $have, vendor CHECKSUM says $want"
+            if ($have -eq $want) {
+              $xzdir = Join-Path $env:RUNNER_TEMP 'xzout'
+              & 'C:\Program Files\7-Zip\7z.exe' e $xz "-o$xzdir" -y | Select-Object -Last 3
+              $ctar = Get-ChildItem -Path $xzdir -File | Select-Object -First 1
+              wsl.exe --import $env:WSL_TARGET 'C:\wsl-rpm' $ctar.FullName --version 1
+              "diagnostic import of the container rootfs exit $LASTEXITCODE"
+              if ($LASTEXITCODE -eq 0) { $done = $true }
+            }
+          }
           if (-not $done) { throw "wsl --import failed in every form" }
           wsl.exe --list --verbose
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8

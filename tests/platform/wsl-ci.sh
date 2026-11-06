@@ -149,7 +149,7 @@ phase_probe() {
     rm -rf -- "${base:?}"
 }
 
-# ^ invariant typed_install ANSWER LABEL CMD... runs CMD on a pty (script), typing ANSWER and Enter at the prompt; RC is the command rc, the log LOGS/LABEL.log
+# ^ invariant typed_install ANSWER LABEL CMD... runs CMD on a pty (script), typing ANSWER and Enter; backslash n in ANSWER makes lines
 # ^ why a fifo held open by a writer, not a pipe from printf; EOF on the stdin of script ends the session before a long install is done
 typed_install() {
     local answer="$1" label="$2" dir writer
@@ -157,7 +157,7 @@ typed_install() {
     dir="$(mktemp -d "$HOME/typed.XXXXXX")" || return 1
     case "$dir" in /?*/?*) ;; *) return 1 ;; esac
     mkfifo "$dir/in" || return 1
-    { printf '%s\n' "$answer"; exec sleep 3000; } >"$dir/in" &
+    { printf '%b\n' "$answer"; exec sleep 3000; } >"$dir/in" &
     writer=$!
     RUN_STDIN="$dir/in" run "$label" timeout 3000 script -qefc "$*" /dev/null
     kill "$writer" 2>/dev/null
@@ -192,7 +192,8 @@ phase_upgrade() {
         run upgrade-refuse "$LINUX_CK/bin/git-secret-guard" install
         check "install without a terminal and without --upgrade-git refuses on the old git" test "$RC" -ne 0
         if [ "${CONSENT:-flag}" = typed ]; then
-            typed_install y upgrade "$LINUX_CK/bin/git-secret-guard" install
+            # ^ why y then n, not y alone; an RPM distribution asks again about the takeover of /usr/bin/git, where n answers it
+            typed_install 'y\nn' upgrade "$LINUX_CK/bin/git-secret-guard" install
             check "typed yes: the prompt is shown" has "Upgrade git now with the plan above? [y/N]"
             check "typed yes: install exits 0 (rc $RC)" rc_is 0
         else

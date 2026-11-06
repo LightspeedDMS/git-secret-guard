@@ -653,6 +653,10 @@ test_a_leftover_old_tree_that_cannot_be_removed_is_reported() {
 }
 
 test_an_install_run_from_the_installed_copy_upgrades_in_place() {
+    # ^ external measured on real WSL 1 (build 20348); renaming the directory of a running script fails there, and the plain-kernel path below cannot pass
+    if grep -q 'Microsoft' /proc/sys/kernel/osrelease 2>/dev/null; then
+        skip_test "real WSL 1 (4.4.0-20348-Microsoft): mv of the directory of a running script fails with Permission denied; the next test runs the WSL 1 path through the fixture seams"
+    fi
     fresh_install
     assert_rc 0 "first install"
     local before
@@ -660,6 +664,25 @@ test_an_install_run_from_the_installed_copy_upgrades_in_place() {
     gsg_installed install
     assert_rc 0 "install run through the symlink, replacing the tree it runs from"
     assert_eq "$(tree_digest "$LC_DATA")" "$before" "the source is the installed copy itself, so the tree is identical"
+    gsg_installed version
+    assert_rc 0 "the CLI still runs afterwards"
+    assert_empty "$(find "$LC_DATA/.." -maxdepth 1 -name 'git-secret-guard.*')" "no staging or old-tree leftovers"
+}
+
+# ^ external WSL 1 refuses to rename the directory of a running script (measured, build 20348); an install from the installed copy rewrites only the settings
+# ^ invariant the WSL 1 kernel text comes through the fixture seams => the pinned path runs on any host, real WSL 1 included
+test_an_install_run_from_the_installed_copy_on_wsl1_rewrites_only_the_settings_and_never_renames_the_tree() {
+    printf '%s\n' "4.4.0-20348-Microsoft" >"$SANDBOX/wsl1-kernel" || return 1
+    fresh_install
+    assert_rc 0 "first install"
+    set_env GSG_WSL_OSRELEASE="$SANDBOX/wsl1-kernel"
+    printf 'kept\n' >"$LC_DATA/sentinel" || return 1
+    printf 'stale\n' >"$LC_DATA/settings" || return 1
+    gsg_installed install
+    assert_rc 0 "install run through the symlink on WSL 1"
+    assert_eq "$(<"$LC_DATA/sentinel")" kept "the tree it runs from was not replaced"
+    assert_not_contains "$(<"$LC_DATA/settings")" stale "the settings were written again"
+    assert_contains "$(<"$LC_DATA/settings")" "JQ_BIN=" "with their keys"
     gsg_installed version
     assert_rc 0 "the CLI still runs afterwards"
     assert_empty "$(find "$LC_DATA/.." -maxdepth 1 -name 'git-secret-guard.*')" "no staging or old-tree leftovers"

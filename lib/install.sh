@@ -512,7 +512,7 @@ install_copy_share() {
     local old item
     GSG_SHARE_NEW=""
     # ^ external Windows refuses to rename a directory with a running script in it (probed) => from the installed copy only generated files change
-    if tools_is_windows && [ "$GSG_ROOT" -ef "$GSG_SHARE" ]; then
+    if install_pins_running_script && [ "$GSG_ROOT" -ef "$GSG_SHARE" ]; then
         install_write_settings "$GSG_SHARE/settings.new" && mv -T -f -- "$GSG_SHARE/settings.new" "$GSG_SHARE/settings" || return 1
         if [ -n "${INSTALL_JQ_WRAPPER:-}" ]; then install_write_jq_wrapper "$GSG_SHARE/jq" "$INSTALL_JQ_BIN" || return 1; fi
         return 0
@@ -927,6 +927,7 @@ INSTALL_HP_MIN_GIT=2.26
 install_precheck_timer() {
     local dir="/usr/local/bin"
     if [ "$1" -ne 1 ]; then return 0; fi
+    wsl_check_timer "$1" || return 1
     if [ -n "$GSG_GIT" ]; then dir="${GSG_GIT%/*}"; fi
     if brew_is_macos; then launchd_check_target "$dir"; else timer_check_target "$dir"; fi
 }
@@ -934,7 +935,7 @@ install_precheck_timer() {
 # ^ order the git offers run after every refusable check a git can run; a missing git, or one too old for --show-scope, runs them after the offers
 # ^ invariant install_run returns 3 when a git upgrade module hands off to finish outside this process
 install_run() {
-    local replace="$1" timer="$2" upgrade="${3:-0}" takeover="${4:-0}" rc early=0 ver
+    local replace="$1" timer="$2" upgrade="${3:-0}" takeover="${4:-0}" early=0 ver
     # ^ invariant the flags of this run besides --upgrade-git, as text for the next step a module prints; the new git makes --upgrade-git unnecessary
     GSG_INSTALL_FLAGS=""
     if [ "$replace" -eq 1 ]; then GSG_INSTALL_FLAGS+=" --replace-hooks-path"; fi
@@ -958,9 +959,7 @@ install_run() {
         install_refuse_hooks_path "$replace" || return 1
         install_run_state_checks || return 1
     fi
-    gitup_offers "$upgrade" "$takeover"
-    rc=$?
-    if [ "$rc" -ne 0 ]; then return "$rc"; fi
+    gitup_offers "$upgrade" "$takeover" || return $?
     if [ "$early" -eq 0 ]; then
         install_check_hooks_path || return 1
         install_refuse_hooks_path "$replace" || return 1
@@ -982,5 +981,6 @@ install_run() {
     install_unset_hooks_path || return 1
     install_retire_legacy_tools || return 1
     install_summary
+    install_wsl_notice
     install_enable_timer
 }

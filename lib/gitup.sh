@@ -2,7 +2,7 @@
 # ^ coupled install-time only; the CLI loads it after lib/install.sh and the hook never does (test:test_the_hook_never_loads_the_install_time_libraries)
 # ^ coupled the contract a module implements is in CONTRIBUTING.md "Adding an OS module"; test:test_every_registered_module_implements_the_contract
 
-GITUP_CLASSES=(rpm ubuntu debian macos windows other)
+GITUP_CLASSES=(rpm ubuntu debian macos windows wsl other)
 GITUP_REQUIRED_FNS=(plan apply)
 GITUP_TAKEOVER_FNS=(takeover_supported takeover_plan takeover_apply takeover_restore takeover_status)
 
@@ -21,9 +21,11 @@ GITUP_SUDO=""
 GITUP_UPGRADE_FLAG=0 GITUP_TAKEOVER_FLAG=0
 GITUP_PLAN_REFUSED=0
 
-# ^ invariant sets REPLY = rpm, ubuntu, debian, macos, windows or other; uname decides macOS and Windows, os-release (data, never sourced) the Linux class
-# ^ external later stories change this only to add the WSL signal (#31); every planned class is detected here before its module exists
+# ^ invariant sets REPLY = rpm, ubuntu, debian, macos, windows, wsl or other; uname decides macOS and Windows, os-release (data, never sourced) the Linux class
+# ^ invariant wsl = the kernel files say WSL and the distribution inside is rpm, ubuntu or debian; any other WSL distribution stays other, with today's refusal
+# ^ coupled the wsl module wraps the module of the inner class (lib/gitup_wsl.sh); a module needing its own class reads gitup_inner_class
 gitup_os_class() {
+    local family
     if tools_is_windows; then
         REPLY=windows
         return 0
@@ -37,7 +39,14 @@ gitup_os_class() {
         rpm | ubuntu | debian) ;;
         *) REPLY=other ;;
     esac
+    family="$REPLY"
+    if [ "$family" != other ] && wsl_is; then family=wsl; fi
+    REPLY="$family"
 }
+
+# ^ invariant a wrapper module (wsl) sets GITUP_INNER_CLASS before it delegates; gitup_inner_class sets REPLY to it, else to GITUP_CLASS
+GITUP_INNER_CLASS=""
+gitup_inner_class() { REPLY="${GITUP_INNER_CLASS:-$GITUP_CLASS}"; }
 
 # ^ invariant the one table of modules; sets REPLY = the module name of a class, "" = no module yet (today's refusal and hint); rc 1 = not a class
 # ^ coupled a module is lib/gitup_<module>.sh plus one line here; a comment line between class lines => adjacent edits conflict in git merge
@@ -54,6 +63,8 @@ gitup_registry() {
         macos) REPLY=macos ;;
         # ^ see doc:CONTRIBUTING.md
         windows) REPLY=windows ;;
+        # ^ see doc:CONTRIBUTING.md
+        wsl) REPLY=wsl ;;
         # ^ see doc:CONTRIBUTING.md
         other) REPLY="" ;;
         *) return 1 ;;

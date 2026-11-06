@@ -107,6 +107,8 @@ sandbox_create() {
     # shellcheck disable=SC2034
     if [ "$TEST_IS_WINDOWS" -eq 1 ]; then TEST_WORK_BASE="$SANDBOX/home/.tmp"; fi
     mkdir -p -- "$SANDBOX/home" "$SANDBOX/tmp" "$SHARE" "$SANDBOX/repos" || exit 2
+    # ^ invariant every test sees a plain Linux kernel through the WSL seams => no result depends on the machine running the suite (a test of WSL sets its own)
+    printf '%s\n' "6.8.0-45-generic" >"$SANDBOX/wsl-kernel" || exit 2
     cp -r -- "$GSG_PROJECT/hooks" "$GSG_PROJECT/lib" "$SHARE/" || exit 2
     # ^ invariant jq on the sandbox PATH like a system jq elsewhere => install keeps it; a test wanting the download path removes it with lc_path_without
     if [ "$TEST_IS_WINDOWS" -eq 1 ]; then
@@ -122,6 +124,9 @@ sandbox_create() {
         LC_ALL=C
         GIT_TERMINAL_PROMPT=0
         PYTHONUSERBASE="$REAL_HOME/.local"
+        GSG_WSL_OSRELEASE="$SANDBOX/wsl-kernel"
+        GSG_WSL_INTEROP="$SANDBOX/wsl-no-interop"
+        GSG_WSL_SYSTEMD_DIR="$SANDBOX/wsl-no-systemd"
     )
     if [ "$TEST_IS_WINDOWS" -eq 1 ]; then
         TEST_SANDBOX_MIXED="$(cygpath -m "$SANDBOX")" || exit 2
@@ -326,6 +331,19 @@ assert_file() { [ -e "$1" ] || fail "${2:-assert_file}: missing $1"; }
 assert_no_file() { [ ! -e "$1" ] || fail "${2:-assert_no_file}: unexpected $1"; }
 
 skip_test() { printf '%s\n' "$1" >"$SANDBOX/.skip"; exit 0; }
+
+# ^ external measured on WSL 1 (build 20348); without systemd, systemd-analyze --user verify complains of a device monitor and a system bus, and exits 0
+# ^ invariant analyze_blocked_reason [BIN] prints why BIN cannot verify anything here, nothing when it can; it verifies a good unit => a bad unit is no reason
+analyze_blocked_reason() {
+    local bin="${1:-systemd-analyze}" out
+    case "${SANDBOX:-}" in /?*) ;; *) return 1 ;; esac
+    mkdir -p -- "$SANDBOX/run-probe" && chmod 700 "$SANDBOX/run-probe" || return 1
+    printf '[Service]\nExecStart=/usr/bin/true\n' >"$SANDBOX/run-probe/probe.service" || return 1
+    out="$(env -i HOME="$SANDBOX/home" PATH=/usr/bin:/bin XDG_RUNTIME_DIR="$SANDBOX/run-probe" "$bin" --user verify "$SANDBOX/run-probe/probe.service" 2>&1)" || true
+    case "$out" in
+        *"Failed to start device monitor"* | *"Failed to connect to system bus"*) printf 'systemd-analyze cannot run here, no systemd (%s)' "${out%%$'\n'*}" ;;
+    esac
+}
 
 no_leak() { assert_not_contains "$OUT" "$1" "stdout leak"; assert_not_contains "$ERR" "$1" "stderr leak"; }
 

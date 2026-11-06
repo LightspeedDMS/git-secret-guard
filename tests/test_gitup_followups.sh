@@ -4,7 +4,7 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
 
 # ^ why GSG_ENV and a bare prelude, not lc_begin; these tests call product functions only, and run on Git for Windows too (the class there is windows)
 FU_PRELUDE='set -u; GSG_ROOT="$1"; shift
-for lib in brew common state tools hookspath install install_tools gitup gitup_source gitup_takeover exempt timer launchd doctor; do source "$GSG_ROOT/lib/$lib.sh" || exit 9; done
+for lib in brew common state tools hookspath wsl install install_tools gitup gitup_source gitup_takeover exempt timer launchd doctor; do source "$GSG_ROOT/lib/$lib.sh" || exit 9; done
 '
 
 fu() {

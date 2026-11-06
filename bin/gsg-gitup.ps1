@@ -1,6 +1,6 @@
 # ^ external powershell -NoProfile -ExecutionPolicy Bypass -File gsg-gitup.ps1 HANDOFF-FILE does the Git for Windows upgrade install --upgrade-git planned
 # ^ hazard it runs outside any Git for Windows bash, as the upgrade replaces it; code of the same user can edit this file and is not defended against
-# ^ invariant no environment variable steers its checks; lock and signer are the tools.lock beside bin (only winget is found through PATH), tests change a copy
+# ^ invariant no environment variable is read or steers its checks; lock and signer sit in the tools.lock beside bin, and PSModulePath is reset
 
 # ^ invariant exit 0 done; 10 installer refused (digest, signature, link, missing) and nothing ran; 11 elevation declined; 12 installer or winget failed
 
@@ -10,8 +10,8 @@ param([Parameter(Mandatory = $true)][string]$Handoff)
 Set-StrictMode -Version 2
 $ErrorActionPreference = 'Stop'
 # ^ external a PowerShell 7 parent leaves its module path to this 5.1 process, and the Security module (Get-AuthenticodeSignature) fails to load
-# ^ invariant the process gets the module path 5.1 starts with (user and machine values, its built-in directory); nothing is read from the caller
-[System.Environment]::SetEnvironmentVariable('PSModulePath', ((@([System.Environment]::GetEnvironmentVariable('PSModulePath', 'User'), [System.Environment]::GetEnvironmentVariable('PSModulePath', 'Machine'), "$PSHOME\Modules") | Where-Object { $_ }) -join ';'), 'Process')
+# ^ security the module path is the built-in directory alone; a module in a directory the user can write cannot answer for Get-AuthenticodeSignature
+[System.Environment]::SetEnvironmentVariable('PSModulePath', "$PSHOME\Modules", 'Process')
 # ^ invariant one definition of the silent flags; lib/gitup_windows.sh holds the same list and a test compares the two
 $InstallerFlags = '/VERYSILENT', '/NORESTART', '/NOCANCEL', '/SP-'
 $WingetBase = 'upgrade', '--id', 'Git.Git', '--exact', '--silent', '--accept-source-agreements', '--accept-package-agreements'
@@ -127,7 +127,7 @@ function Invoke-Winget([hashtable]$H) {
         Stop-Run 15 "winget could not be started ($($_.Exception.Message.Trim())); nothing was changed. Run: $Retry"
     }
     if ($p.ExitCode -ne 0) {
-        Stop-Run 12 "winget returned $($p.ExitCode); Git for Windows may be unchanged or partly updated, check 'git --version', then run: $Retry"
+        Stop-Run 12 "winget returned $($p.ExitCode); Git for Windows may be unchanged or partly updated, check 'git --version'. If git-secret-guard cannot start any more (Git Bash is gone), run winget upgrade --id Git.Git --exact by hand, then run: $Retry"
     }
 }
 
@@ -214,7 +214,7 @@ function Invoke-Installer([hashtable]$H) {
         Stop-Run 10 "$failure; the file matches the pinned SHA-256, so downloading it again will not help. The installer was NOT run and Git for Windows is unchanged. This machine cannot validate the vendor signature (certificate chain or clock); install Git for Windows by hand from https://git-scm.com/download/win, then run install again"
     }
     if ($p.ExitCode -ne 0) {
-        Stop-Run 12 "the installer returned $($p.ExitCode); Git for Windows may be unchanged or partly updated, check 'git --version', then run: $Retry"
+        Stop-Run 12 "the installer returned $($p.ExitCode); Git for Windows may be unchanged or partly updated, check 'git --version'. If git-secret-guard cannot start any more (Git Bash is gone), run the installer file $path by hand with $($InstallerFlags -join ' '), then run: $Retry"
     }
     Remove-Quietly $path
 }

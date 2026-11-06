@@ -157,14 +157,11 @@ function Scenario-InUse([bool]$WithWinget) {
     foreach ($gp in @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path -like "$GitDir*" })) { Stop-Process -Id $gp.Id -Force -ErrorAction SilentlyContinue }
     Start-Sleep -Seconds 3
     Check "the run finished by itself (the installer neither hung nor was killed by the timeout)" (-not $r.TimedOut)
-    if ($r.Rc -ne 0) {
-        Write-Host "OBSERVED: the upgrade failed with Git files in use; rerun without the holder to see recovery"
-        $r2 = Invoke-Gsg @('install', '--upgrade-git') 900
-        Show ($r2.Out -split "`n" | Select-Object -Last 12 | Out-String)
-        Full-Upgrade-Checks $r2
-    } else {
-        Full-Upgrade-Checks $r
-    }
+    Check "the runner stopped with exit 19 before it started anything" ($r.Rc -eq 19)
+    Check "the hand-off is kept, so closing the program and running the command again works" (Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'git-secret-guard\git-upgrade\handoff.txt'))
+    $r2 = Invoke-Gsg @('install', '--upgrade-git') 900
+    Show ($r2.Out -split "`n" | Select-Object -Last 12 | Out-String)
+    Full-Upgrade-Checks $r2
 }
 
 function Scenario-Killed {

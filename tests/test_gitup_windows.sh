@@ -268,6 +268,8 @@ test_a_missing_installer_or_a_failing_one_is_reported_with_how_to_retry() {
     assert_rc 12 "the installer's own failure"
     assert_contains "$ERR" "returned 3" "its exit code"
     assert_contains "$ERR" "git --version" "what to check"
+    assert_contains "$ERR" "by hand" "and what to do when git-secret-guard cannot start any more"
+    assert_contains "$ERR" "Git-2.56.0.4-64-bit.exe" "naming the installer file the run kept"
     cp -- "$WU_DIR/handoff.copy" "$WU_STATE_HANDOFF" || return 1
     rm -f -- "$WU_HANDOFF_DIR/Git-2.56.0.4-64-bit.exe" || return 1
     wu_runner "$WU_STATE_HANDOFF"
@@ -601,6 +603,7 @@ test_the_cmd_front_end_does_not_run_a_stale_hand_off_that_this_run_did_not_write
 
 test_the_runner_reads_no_environment_variable() {
     assert_eq "$(grep -c '\$env:' "$GSG_PROJECT/bin/gsg-gitup.ps1")" 0 "no environment variable is read, so none can weaken a check"
+    assert_eq "$(grep -c "GetEnvironmentVariable" "$GSG_PROJECT/bin/gsg-gitup.ps1")" 0 "and none through the .NET call either (the user value of PSModulePath came in that way)"
     assert_eq "$(grep -c 'gsg-signer git-for-windows' "$GSG_PROJECT/tools.lock")" 1 "the signer is data in tools.lock next to the digest row"
 }
 
@@ -762,7 +765,7 @@ test_a_start_failure_other_than_a_declined_prompt_is_not_called_a_decline() {
 }
 
 test_real_the_pinned_installer_passes_every_production_check_and_is_never_started() {
-    local ver cached prod installed want_rc
+    local ver cached prod installed want_rc instdir me
     if [ "$TEST_IS_WINDOWS" -ne 1 ]; then skip_test "checks the real Windows installer with Windows PowerShell"; fi
     ver="$(awk '$1 == "git-for-windows" && $3 == "windows_amd64" { print $2 }' "$GSG_PROJECT/tools.lock")"
     cached="${TEST_TOOLS_CACHE:-}/Git-$ver-64-bit.exe"
@@ -775,6 +778,13 @@ test_real_the_pinned_installer_passes_every_production_check_and_is_never_starte
     installed="$(MSYS2_ARG_CONV_EXCL='*' "$TEST_SYSTEM32/reg.exe" query 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Git_is1' /v DisplayVersion 2>/dev/null | tr -d '\r' | awk '$1 == "DisplayVersion" { print $3 }')"
     want_rc=0
     if [ -n "$installed" ] && [ "$(printf '%s\n%s\n' "$ver" "$installed" | sort -V | tail -1)" = "$installed" ]; then want_rc=17; fi
+    # ^ hazard the harness runs from the install directory, and its own Git Bash counts as a holder on a host with git below the pin
+    if [ "$want_rc" -eq 0 ]; then
+        instdir="$(MSYS2_ARG_CONV_EXCL='*' "$TEST_SYSTEM32/reg.exe" query 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Git_is1' /v InstallLocation 2>/dev/null | tr -d '\r' | awk '$1 == "InstallLocation" { $1 = ""; $2 = ""; sub(/^ +/, ""); print }')"
+        me="$(cygpath -w "$(command -v bash)")"
+        instdir="${instdir%\\}"
+        if [ -n "$instdir" ] && [[ ${me,,} == "${instdir,,}\\"* ]]; then want_rc=19; fi
+    fi
     wu_begin machine 2.52.0.1 || return 1
     mkdir -p -- "$WU_DIR/prod/bin" "$WU_DIR/prod/hand" || return 1
     cp -- "$GSG_PROJECT/bin/gsg-gitup.ps1" "$WU_DIR/prod/bin/" && cp -- "$GSG_PROJECT/tools.lock" "$WU_DIR/prod/" || return 1
@@ -789,6 +799,9 @@ test_real_the_pinned_installer_passes_every_production_check_and_is_never_starte
     assert_contains "$OUT" "SHA-256 and signature of Git-$ver-64-bit.exe verified" "all checks passed, before the version check"
     if [ "$want_rc" -eq 0 ]; then
         assert_contains "$(<"$WU_DIR/verbs.log")" "args=/VERYSILENT /NORESTART /NOCANCEL /SP-" "the start line was reached with the story's flags, and replaced by a stand-in"
+    elif [ "$want_rc" -eq 19 ]; then
+        assert_contains "$ERR" "programs of" "this harness runs from the install directory, and the runner names its programs"
+        assert_no_file "$WU_DIR/verbs.log" "and never reached the start"
     else
         assert_contains "$ERR" "nothing is needed" "this host already has the pinned Git for Windows, so the runner refuses the stale start"
         assert_no_file "$WU_DIR/verbs.log" "and never reached the start"
@@ -958,7 +971,7 @@ test_a_half_installed_git_for_windows_is_named_and_not_run_as_if_it_were_missing
     local g="$SANDBOX/halfgit" w32
     if [ "$TEST_IS_WINDOWS" -ne 1 ]; then skip_test "gsg-bash.cmd is a Windows batch file"; fi
     mkdir -p -- "$g/cmd" "$g/bin" "$SANDBOX/pf" "$SANDBOX/lad" || return 1
-    : >"$g/cmd/git.exe" && : >"$g/bin/bash.exe" || return 1
+    : >"$g/cmd/git.exe" && : >"$g/bin/bash.exe" && : >"$g/unins000.exe" || return 1
     w32="$(cygpath -w "$TEST_SYSTEM32")"
     run_cap env -i SystemRoot="$(cygpath -w "$(dirname "$TEST_SYSTEM32")")" PATH="$(cygpath -w "$g/cmd");$w32" ProgramFiles="$(cygpath -w "$SANDBOX/pf")" \
         LocalAppData="$(cygpath -w "$SANDBOX/lad")" "$TEST_SYSTEM32/cmd.exe" //c "$(cygpath -w "$GSG_PROJECT/bin/gsg-bash.cmd")" -c "echo ran"
@@ -966,6 +979,39 @@ test_a_half_installed_git_for_windows_is_named_and_not_run_as_if_it_were_missing
     assert_not_contains "$OUT$ERR" "ran" "nothing ran"
     assert_contains "$OUT$ERR" "half installed" "the message says Git for Windows looks half installed"
     assert_contains "$OUT$ERR" "git-scm.com" "and where to get it again"
+    assert_contains "$OUT$ERR" "git-upgrade" "and the folder that keeps the installer of a stopped upgrade"
+    assert_contains "$OUT$ERR" "Git for Windows at $(cygpath -w "$g") looks" "with the folder written plainly, no bin\.. in it"
+}
+
+
+# ^ external a Cygwin or MSYS tree has bin\bash.exe and no usr\bin\bash.exe either; it is not Git for Windows, whose Inno setup leaves unins000.exe
+test_a_bash_tree_that_is_not_git_for_windows_is_reported_as_not_found_and_not_as_half_installed() {
+    local g="$SANDBOX/cygtree" w32
+    if [ "$TEST_IS_WINDOWS" -ne 1 ]; then skip_test "gsg-bash.cmd is a Windows batch file"; fi
+    mkdir -p -- "$g/bin" "$SANDBOX/pf" "$SANDBOX/lad" || return 1
+    : >"$g/bin/git.exe" && : >"$g/bin/bash.exe" || return 1
+    w32="$(cygpath -w "$TEST_SYSTEM32")"
+    run_cap env -i SystemRoot="$(cygpath -w "$(dirname "$TEST_SYSTEM32")")" PATH="$(cygpath -w "$g/bin");$w32" ProgramFiles="$(cygpath -w "$SANDBOX/pf")" \
+        LocalAppData="$(cygpath -w "$SANDBOX/lad")" "$TEST_SYSTEM32/cmd.exe" //c "$(cygpath -w "$GSG_PROJECT/bin/gsg-bash.cmd")" -c "echo ran"
+    assert_rc 127 "no Git for Windows"
+    assert_not_contains "$OUT$ERR" "half installed" "a tree that is not Git for Windows is not called half installed"
+    assert_contains "$OUT$ERR" "was not found" "it is reported as not found"
+}
+
+test_the_installed_cmd_names_a_half_installed_git_for_windows_before_it_starts_bash() {
+    local fake="$SANDBOX/fakeroot"
+    wu_e2e_setup || return 1
+    mkdir -p -- "$fake/bin" "$SANDBOX/instbin" "$SANDBOX/lad" || return 1
+    : >"$fake/bin/bash.exe" || return 1
+    wu 'FR="$3"; cygpath() { if [ "$1" = -w ] && [ "$2" = / ]; then printf "%s" "$FR"; else command cygpath "$@"; fi; }; GSG_SHARE="$1"; install_cli_cmd_text >"$2"' \
+        "$WU_PROJ" "$SANDBOX/instbin/git-secret-guard.cmd" "$(cygpath -w "$fake")"
+    run_cap env -i SystemRoot="$(cygpath -w "$(dirname "$TEST_SYSTEM32")")" LocalAppData="$(cygpath -w "$SANDBOX/lad")" \
+        "$TEST_SYSTEM32/cmd.exe" //c "$(cygpath -w "$SANDBOX/instbin/git-secret-guard.cmd")" status </dev/null
+    assert_rc 127 "the installed .cmd stops"
+    assert_contains "$OUT$ERR" "half installed" "and names the state"
+    assert_contains "$OUT$ERR" "git-upgrade" "and the folder that keeps the installer of a stopped upgrade"
+    assert_contains "$OUT$ERR" "Git for Windows at $(cygpath -w "$fake") looks" "and the Git it means"
+    assert_eq "$(grep -o 'run the installer kept in.*' "$SANDBOX/instbin/git-secret-guard.cmd" | tr -d '\r')" "$(grep -o 'run the installer kept in.*' "$GSG_PROJECT/bin/gsg-bash.cmd" | tr -d '\r')" "the installed .cmd and bin/gsg-bash.cmd give the same advice"
 }
 
 run_file_tests

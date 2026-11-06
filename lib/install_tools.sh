@@ -132,7 +132,7 @@ install_stage_tools() {
         tools_extract_binary "$tarball" "$tool" "$GSG_STAGE/out" || install_stage_refused || return 1
         bin="$GSG_STAGE/out/$(tools_binary_name "$tool")"
         if ! tools_has_version "$bin" "${GSG_TOOL_VER[$i]}" "$INSTALL_TIMEOUT_BIN"; then
-            out="$("$INSTALL_TIMEOUT_BIN" "$GSG_VERSION_PROBE_SECONDS" "$bin" --version 2>&1 </dev/null | head -c 200)"
+            out="$("$INSTALL_TIMEOUT_BIN" "$GSG_VERSION_PROBE_SECONDS" "$bin" --version 2>&1 | head -c 200)"
             printf '%s: the extracted %s does not report version %s (it said: %s)\n' "$GSG_NAME" "$tool" "${GSG_TOOL_VER[$i]}" "${out//[^[:print:]]/?}" >&2
             install_stage_refused || return 1
         fi

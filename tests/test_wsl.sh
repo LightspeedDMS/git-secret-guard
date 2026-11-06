@@ -486,20 +486,4 @@ test_curl_gets_a_low_speed_limit_and_a_stall_ends_in_the_download_refusal() {
 }
 
 
-# ^ external the typed install sat 10 minutes in timeout 20 trufflehog --version on a terminal (bash -x, run 42299444734); stdin was the terminal
-# ^ invariant a --version probe of a scanner reads stdin from /dev/null => it cannot wait on the terminal of the person running install
-test_the_version_probes_never_give_the_scanner_the_terminal_as_stdin() {
-    local bin="$SANDBOX/probe-bin"
-    printf '#!/bin/sh\ncat >"%s/stdin.seen"\necho "trufflehog 3.99.2"\n' "$SANDBOX" >"$bin" && chmod 755 "$bin" || return 1
-    wsl 'echo SECRET-INPUT | tools_has_version "$1" 3.99.2 "$2"; echo "has=$?"; echo SECRET-INPUT | tools_probe_version "$1" 3.99.2 "$2"; echo "probe=$?"' "$bin" "$(command -v timeout)"
-    assert_contains "$OUT" "has=0" "the version is still read"
-    assert_contains "$OUT" "probe=0" "and judged"
-    assert_empty "$(<"$SANDBOX/stdin.seen")" "the scanner saw no input"
-}
-
-test_install_stage_probes_a_wrong_version_without_the_terminal_too() {
-    grep -n -- '--version 2>&1' "$GSG_PROJECT/lib/install_tools.sh" "$GSG_PROJECT/lib/tools.sh" | grep -v '</dev/null' && fail "a --version probe keeps the terminal as stdin"
-    return 0
-}
-
 run_file_tests

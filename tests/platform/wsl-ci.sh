@@ -95,7 +95,7 @@ phase_prepare() {
     if command -v dnf >/dev/null 2>&1; then
         run prepare-update dnf upgrade -y --refresh
         check "dnf upgrade, as a developer distribution has had (rc $RC)" rc_is 0
-        run prepare-dnf dnf install -y git jq procps-ng shadow-utils sudo curl tar xz util-linux findutils strace
+        run prepare-dnf dnf install -y git jq procps-ng shadow-utils sudo curl tar xz util-linux findutils
         check "dnf installed the tools (rc $RC)" rc_is 0
     fi
     info "stock git: $(git --version); $(grep -E '^(ID|VERSION_ID)=' /etc/os-release | tr '\n' ' ')"
@@ -161,27 +161,36 @@ hang_snapshot() {
     done
 }
 
-# ^ invariant typed_install ANSWERS LABEL CMD... runs CMD on a pty (script) and types ANSWERS; backslash n splits answers; RC is the command rc
-# ^ why a fifo held open by a writer, not a pipe from printf; EOF on the stdin of script ends the session before a long install is done
+# ^ invariant typed_install ANSWERS LABEL CMD... runs CMD on a pty (script); each answer (backslash n splits them) is typed once the next prompt shows
+# ^ external run 42303388833: strace showed the install bash in read(0) at the takeover prompt for 240 s, the answer typed at the start never reached it
+# ^ why typed when the prompt shows, not queued at the start; a person answers a prompt they see, and why the queued answer was lost is not established
 typed_install() {
-    local answers="$1" label="$2" dir writer watcher tracer p
+    local answers="$1" label="$2" dir writer watcher a n=0
+    local -a list=()
     shift 2
+    mapfile -t list < <(printf '%b\n' "$answers")
     dir="$(mktemp -d "$HOME/typed.XXXXXX")" || return 1
     case "$dir" in /?*/?*) ;; *) return 1 ;; esac
     mkfifo "$dir/in" || return 1
-    { printf '%b\n' "$answers"; exec sleep 3000; } >"$dir/in" &
+    {
+        for a in "${list[@]}"; do
+            n=$((n + 1))
+            for _ in $(seq 1 3000); do
+                if [ "$(grep -ac '\[y/N\]' "$LOGS/$label.raw" 2>/dev/null)" -ge "$n" ]; then break; fi
+                sleep 1
+            done
+            sleep 1
+            printf '%s\n' "$a"
+        done
+        exec sleep 3000
+    } >"$dir/in" &
     writer=$!
     # ^ external a typed run once sat 10 minutes and its log was silent on where; a process snapshot is taken every 60 s (run 42292067132)
     { for _ in $(seq 1 50); do sleep 60; hang_snapshot >>"$LOGS/$label-ps.log" 2>&1; done; } &
     watcher=$!
-    # ^ external the hang follows the takeover prompt (runs 42299444734, 42301621519); strace attaches there and records what the install bash does next
-    { for _ in $(seq 1 3000); do if grep -aq 'Take over /usr/bin/git' "$LOGS/$label.raw" 2>/dev/null; then break; fi; sleep 1; done
-      p=$(pgrep -f 'bash .*git-secret-guard install' | head -n 1)
-      if [ -n "$p" ] && command -v strace >/dev/null; then timeout 240 strace -f -tt -s 160 -p "$p" -o "$LOGS/$label-strace.log" 2>/dev/null; fi; } &
-    tracer=$!
     RUN_STDIN="$dir/in" run "$label" timeout 3000 script -qefc "$*" /dev/null
-    kill "$watcher" "$tracer" 2>/dev/null
-    wait "$watcher" "$tracer" 2>/dev/null
+    kill "$watcher" 2>/dev/null
+    wait "$watcher" 2>/dev/null
     kill "$writer" 2>/dev/null
     wait "$writer" 2>/dev/null
     rm -rf -- "${dir:?}"

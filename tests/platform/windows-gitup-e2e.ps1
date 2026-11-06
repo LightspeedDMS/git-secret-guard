@@ -43,7 +43,7 @@ function Pinned-Version {
     }
     throw 'no git-for-windows row in tools.lock'
 }
-function Expected-Git { return ((Pinned-Version) -replace "^(d+.d+.d+).(d+)$", "`$1.windows.`$2") }
+function Expected-Git { return ((Pinned-Version) -replace '^(\d+\.\d+\.\d+)\.(\d+)$', '$1.windows.$2') }
 function Registry-Version {
     $k = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Git_is1'
     if (Test-Path $k) { return (Get-ItemProperty $k).DisplayVersion } else { return '(no Git_is1 record)' }

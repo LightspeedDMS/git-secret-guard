@@ -456,7 +456,7 @@ test_a_missing_awk_is_refused_by_install_with_its_package_not_found_out_at_the_f
 }
 
 
-# ^ external a stalled scanner download sat silent for up to 600 s on a WSL Rocky run (run 42286936636), and nothing named the step
+# ^ external install prints nothing during the scanner downloads => a quiet install gave no sign of the step it was in
 # ^ invariant install names the tool before its download starts => a quiet install and its log show the step
 test_install_names_each_scanner_before_it_downloads_it() {
     wsl 'GSG_STAGE=""; GSG_TOOL_NEED=(1 1 0); GSG_TOOL_NAMES=(trufflehog betterleaks jq); GSG_TOOL_VER=(3.99.2 1.9.0 1.6); GSG_TOOL_PLAT=(p p p); GSG_TOOL_SHA=(a b c)
@@ -470,19 +470,6 @@ install_stage_tools; echo "rc=$?"'
         *) fail "the line must come before the download: $ERR" ;;
     esac
     assert_not_contains "$ERR" "downloading jq" "a tool that is already there is not announced"
-}
-
-# ^ invariant a low-speed limit ends a stalled download with curl exit 28 and the existing refusal; a link at 1 KiB/s for 60 s still passes
-test_curl_gets_a_low_speed_limit_and_a_stall_ends_in_the_download_refusal() {
-    local bin="$SANDBOX/curlbin" sha
-    mkdir -p "$bin" || return 1
-    sha="$(printf 'x' | sha256sum | cut -d' ' -f1)"
-    printf '#!/bin/sh\nprintf "%%s\n" "$*" >"%s/curl.args"\nexit 28\n' "$SANDBOX" >"$bin/curl" && chmod 755 "$bin/curl" || return 1
-    wsl 'PATH="$1:$PATH"; tools_fetch_verified trufflehog 3.99.2 linux_amd64 "$2" "$3"; echo "rc=$?"' "$bin" "$sha" "$SANDBOX"
-    assert_contains "$OUT" "rc=1" "refused"
-    assert_contains "$ERR" "failed (curl exit 28)" "the existing refusal names the curl status"
-    assert_contains "$(<"$SANDBOX/curl.args")" "--speed-limit 1024 --speed-time 60" "a stalled link is cut after 60 s under 1 KiB/s"
-    assert_contains "$(<"$SANDBOX/curl.args")" "--max-time 600" "and the total limit stays"
 }
 
 

@@ -26,10 +26,6 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  # one group per run: manual runs of the same distribution may run side by side (repeated runs measure a hang), nothing is cancelled
-  group: wsl-${{ github.run_id }}
-
 jobs:
   wsl:
     # windows-2022 has WSL 1 enabled in the image (actions/runner-images Windows2022-Readme); both versions start there with setup-wsl (runs 42237326449 and later)

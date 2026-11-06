@@ -143,7 +143,7 @@ tools_fetch_verified() {
     if [ -n "${GSG_TOOLS_BASE_URL:-}" ]; then proto='=https,file'; fi
     # ^ hazard dropping curl -q => ~/.curlrc alters the verified download; test:test_curl_is_run_with_q_first_so_the_users_curlrc_is_ignored
     curl -q --fail --silent --show-error --location --proto "$proto" --proto-redir '=https' \
-        --speed-limit 1024 --speed-time 60 --max-time 600 --max-filesize 500000000 --output "$file" -- "$url"
+        --max-time 600 --max-filesize 500000000 --output "$file" -- "$url"
     rc=$?
     if [ "$rc" -ne 0 ]; then
         rm -f -- "$file" || return 1

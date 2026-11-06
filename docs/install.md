@@ -272,7 +272,7 @@ of [`doctor`](doctor.md).
 - **Backup bounds** (`install_check_backup_bounds`): test `/` only at the resolver level
   (`test_the_resolver_refuses_root_before_anything_could_back_it_up`), never by running install.
 - **Download override**: `GSG_TOOLS_BASE_URL` + `GSG_TOOLS_LOCK` cannot skip verification
-  (`test_the_base_url_override_cannot_skip_verification`); curl runs with `-q` first, `--proto =https --proto-redir =https`, `--speed-limit 1024 --speed-time 60` (a download under 1 KiB/s for 60 s ends with exit 28 and the usual "downloading ... failed" refusal) and `--max-time 600`; install prints `downloading TOOL VERSION` before each download (`test_install_names_each_scanner_before_it_downloads_it`, `test_curl_gets_a_low_speed_limit_and_a_stall_ends_in_the_download_refusal`).
+  (`test_the_base_url_override_cannot_skip_verification`); curl runs with `-q` first, `--proto =https --proto-redir =https`, `--max-time 600` and `--max-filesize`; install prints `downloading TOOL VERSION` before each scanner download (not before the git source or the other downloads of the upgrade), see `test_install_names_each_scanner_before_it_downloads_it`.
 - **`/etc/os-release` is data, never sourced** (`install_os_release_field`; `GSG_OS_RELEASE` in tests;
   `test_the_container_script_reads_os_release_as_data`). Hints: `install_os_family`, `install_fix_hint`, `install_git_hint`
   (`tests/test_prerequisites.sh`).

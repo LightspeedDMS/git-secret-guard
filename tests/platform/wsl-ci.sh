@@ -165,7 +165,7 @@ hang_snapshot() {
 # ^ external run 42303388833 had strace show the install bash in read(0) at the takeover prompt for 240 s; the answer typed at the start never reached it
 # ^ why typed when the prompt shows, not queued at the start; a person answers a prompt they see, and why the queued answer was lost is not established
 typed_install() {
-    local answers="$1" label="$2" dir writer watcher a n=0
+    local answers="$1" label="$2" dir writer watcher a n=0 seen
     local -a list=()
     shift 2
     mapfile -t list < <(printf '%b\n' "$answers")
@@ -176,7 +176,8 @@ typed_install() {
         for a in "${list[@]}"; do
             n=$((n + 1))
             for _ in $(seq 1 3000); do
-                if [ "$(grep -ac '\[y/N\]' "$LOGS/$label.raw" 2>/dev/null)" -ge "$n" ]; then break; fi
+                seen="$(grep -ac '\[y/N\]' "$LOGS/$label.raw" 2>/dev/null || true)"
+                if [ "${seen:-0}" -ge "$n" ]; then break; fi
                 sleep 1
             done
             sleep 1

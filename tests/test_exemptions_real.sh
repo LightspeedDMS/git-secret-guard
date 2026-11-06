@@ -143,9 +143,10 @@ test_real_a_marker_on_another_line_does_not_mute_the_secret() {
 }
 
 internal_id() { printf '%s%s' "ACMEINT" "-482915730264"; }
-# ^ security generated once per run, never a literal => nothing in the tree looks like a credential; 32 random alphanumerics clear the entropy filter
+# ^ security generated once per run, never a literal => nothing in the tree looks like a credential; 32 random consonants and digits clear the entropy filter
+# ^ why no vowels, not any alphanumerics; the rule skips a value holding a stopword, and vowel-free draws pass (6 tests failed in 2 of 8 CI runs)
 # ^ external betterleaks 1.9.0 reports this shape as generic-api-key (a built-in rule); trufflehog and our aws-access-key-id rule do not match it
-GENERIC_KEY="$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32 || true)"
+GENERIC_KEY="$(LC_ALL=C tr -dc 'B-DF-HJ-NP-TV-XZ0-9' </dev/urandom | head -c 32 || true)"
 generic_key() { printf '%s' "$GENERIC_KEY"; }
 builtin_line() { printf 'api_key = "%s"' "$(generic_key)"; }
 commit_gitleaks_toml() {

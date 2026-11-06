@@ -73,6 +73,7 @@ test_take_over_system_git_on_a_mac_says_it_cannot_be_done_changes_nothing_and_in
     assert_rc 0 "install continues"
     assert_contains "$OUT$ERR" "cannot be replaced on macOS" "says the system git cannot be replaced"
     assert_contains "$OUT$ERR" "/usr/bin/git" "names it"
+    assert_not_contains "$OUT$ERR" "uses the Homebrew git" "and does not claim a Homebrew git that is not in use"
     assert_file "$LC_STATE/state" "install finished"
     assert_eq "$(gm_calls)" "" "no brew call"
 }

@@ -1,11 +1,9 @@
 name: platforms
 
 # Real-platform runs on disposable hosted runners (docs/platforms.md#ci-on-real-platforms).
-# Not part of tests.yml and not a required check: nothing here runs on pull_request.
-# REMOVE BEFORE MERGE: the push trigger below exists only so the branch ci/real-platform-runs can run this file.
+# Not part of tests.yml and not a required check: it runs only by hand (gh workflow run platforms.yml --ref BRANCH). No push, pull_request or schedule trigger:
+# a full run takes about 45 minutes of hosted runners and its results change only when the product or a pinned image does.
 on:
-  push:
-    branches: [ci/real-platform-runs]
   workflow_dispatch:
 
 permissions:
@@ -36,7 +34,6 @@ jobs:
           path: ${{ runner.temp }}/logs
 
   containers-upgrade:
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[heavy]') || contains(github.event.head_commit.message, '[apt]')
     runs-on: ubuntu-24.04
     timeout-minutes: 100
     strategy:
@@ -65,7 +62,6 @@ jobs:
           name: containers-${{ matrix.os }}-${{ matrix.run }}
           path: ${{ runner.temp }}/logs
   containers-suite:
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[heavy]') || contains(github.event.head_commit.message, '[suite]')
     runs-on: ubuntu-24.04
     timeout-minutes: 100
     strategy:
@@ -94,7 +90,6 @@ jobs:
           name: containers-${{ matrix.os }}-${{ matrix.run }}
           path: ${{ runner.temp }}/logs
   rpm:
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[heavy]') || contains(github.event.head_commit.message, '[rpm]')
     runs-on: ubuntu-24.04
     timeout-minutes: 100
     strategy:
@@ -159,7 +154,6 @@ jobs:
 
   # #40: does a commit made by a git below 2.54 skip the scan? A real old git (built from the pinned tarball) and the git inside GitHub Desktop's .deb.
   old-git:
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[heavy]') || contains(github.event.head_commit.message, '[oldgit]')
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
@@ -211,7 +205,6 @@ jobs:
 
   # #40: Rocky 9 with SELinux enforcing, as a real VM. Hosted x64 runners expose /dev/kvm; without it rocky-vm.sh stops and says what TCG would cost.
   rocky-vm:
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[heavy]') || contains(github.event.head_commit.message, '[vm]')
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     steps:
@@ -244,7 +237,6 @@ jobs:
 
   # #30: the Git for Windows upgrade on a disposable windows-2025 runner (docs/platforms.md#ci-on-real-platforms). The script replaces Git for Windows with an old release first.
   windows:
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[heavy]') || contains(github.event.head_commit.message, '[win]')
     runs-on: windows-2025
     timeout-minutes: 60
     strategy:

@@ -730,11 +730,12 @@ Both run the whole suite and the install E2E as a non-root user, in a podman-mac
 ## CI on real platforms
 
 `.github/workflows/platforms.yml` runs what no unit test can: real containers, a real VM and real Windows installs, on disposable GitHub-hosted runners. It is not a pull request check
-and not part of `tests.yml`. Its `push:` trigger on the branch `ci/real-platform-runs` is temporary and goes before the merge; `workflow_dispatch` stays.
+and not part of `tests.yml`. It runs only by `workflow_dispatch`.
 
-- **Starting it.** The heavy jobs run for a manual dispatch or when the head commit message holds one of `[apt]` (Ubuntu and Debian `--phase upgrade`), `[suite]` (their default phases, the
-  whole suite), `[rpm]`, `[oldgit]`, `[vm]`, `[win]` or `[heavy]` (all). A push without a key runs only the launcher unit tests and the runner facts. Third-party actions are pinned by full SHA.
-  The concurrency group names the commit. Job logs are readable through the API only when the whole run has ended; every job uploads its log as an artifact (`gh run download RUN -n NAME`).
+- **Starting it.** By hand only: `gh workflow run platforms.yml --ref BRANCH` runs every job (about 45 minutes, the Rocky source builds and the three suites dominate). There is no push, pull request or schedule
+  trigger on purpose: a run costs hours of hosted runners and its answer changes only when the product or a pinned image does; run it before a release and when `lib/gitup*.sh`, the platform scripts or a pin change.
+  A branch can iterate with a temporary `push:` trigger, which must not be merged. Third-party actions are pinned by full SHA. The concurrency group names the commit.
+  Job logs are readable through the API only when the whole run has ended; every job uploads its log as an artifact (`gh run download RUN -n NAME`).
 - **The runner.** `ubuntu-24.04`, 4 vCPUs, 16 GB, rootless podman 4.9.3 with crun 1.14.1 and cgroups v2, `/dev/kvm` present (`crw-rw---- root kvm`; a udev rule makes it usable), qemu from apt.
   `windows-2025` is elevated and has winget 1.11 with `Git.Git`.
 

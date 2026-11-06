@@ -17,6 +17,7 @@ GITUP_ROUTE="" GITUP_FOUND_GIT="" GITUP_NEXT="" GITUP_REASON=""
 GITUP_PRIV_CMDS=()
 GITUP_SUDO=""
 GITUP_UPGRADE_FLAG=0 GITUP_TAKEOVER_FLAG=0
+GITUP_PLAN_REFUSED=0
 
 # ^ invariant sets REPLY = rpm, ubuntu, debian, macos, windows or other; uname decides macOS and Windows, os-release (data, never sourced) the Linux class
 # ^ external later stories change this only to add the WSL signal (#31); every planned class is detected here before its module exists
@@ -50,7 +51,7 @@ gitup_registry() {
         # ^ see doc:CONTRIBUTING.md
         macos) REPLY="" ;;
         # ^ see doc:CONTRIBUTING.md
-        windows) REPLY="" ;;
+        windows) REPLY=windows ;;
         # ^ see doc:CONTRIBUTING.md
         other) REPLY="" ;;
         *) return 1 ;;
@@ -453,6 +454,8 @@ gitup_offer_upgrade() {
     gitup_call plan upgrade
     rc=$?
     if [ "$rc" -ne 0 ]; then
+        # ^ invariant a refused plan means --upgrade-git would refuse too => the hint after it must not recommend the flag
+        GITUP_PLAN_REFUSED=1
         install_require_git
         return 1
     fi

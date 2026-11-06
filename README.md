@@ -19,6 +19,7 @@ When `install` finds an older or missing git, what happens depends on the platfo
 - **RHEL, Rocky, AlmaLinux and Fedora:** `install` shows its plan and offers to upgrade git (the default is No; with no terminal, pass `--upgrade-git`). It uses the
   distribution's package when that is new enough, and otherwise builds the pinned source into `/usr/local`. If an old package git stays in `/usr/bin`, `install` also offers
   `--take-over-system-git`, which points it at the new build (undo: `restore-system-git`). See [docs/platforms.md](docs/platforms.md#rhel-rocky-and-fedora-rpm).
+- **Windows:** `install` offers to upgrade Git for Windows (default No; no terminal: `--upgrade-git`) with winget or the pinned, checked installer: [docs/platforms.md](docs/platforms.md#upgrading-git-for-windows).
 - **Other platforms:** `install` refuses and prints how to get a newer git. Ubuntu 24.04 ships 2.43: see [docs/platforms.md](docs/platforms.md) for the PPA or a source build.
 
 ## Install

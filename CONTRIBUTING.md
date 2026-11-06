@@ -119,10 +119,11 @@ break it. Read it before changing the hook, extraction, exemptions or install. I
    - Optional, **all five or none** (`gitup_module_check` refuses half): `gitup_<module>_takeover_supported PATH` (compare real paths), `_takeover_plan PATH` (prints only on rc 0; on
      rc 1 refused and rc 2 nothing to do it sets `GITUP_REASON`), `_takeover_apply PATH`, `_takeover_restore`, `_takeover_status` (sets `GITUP_TK_STATE`, `GITUP_TK_TEXT`,
      `GITUP_TK_HOWTO` and `GITUP_TK_TARGET`).
-   - Optional, **both or neither**: `gitup_<module>_can_elevate` and `gitup_<module>_elevate CMD...`, for a platform without root or `sudo` (Windows UAC). The core's
-     `gitup_can_elevate` and `gitup_elevate` call them first; every privileged command runs under `umask 022`.
+   - Optional, **both or neither**: `gitup_<module>_can_elevate` and `gitup_<module>_elevate CMD...`, for a platform with its own way to elevate that runs privileged commands from this process. The core's
+     `gitup_can_elevate` and `gitup_elevate` call them first; every privileged command runs under `umask 022`. The `windows` module defines neither: it elevates in its PowerShell runner, after the process has ended.
    - Optional singles: `gitup_<module>_takeover_unavailable` prints why `--take-over-system-git` cannot be done on this platform, and the install continues instead of refusing;
      `gitup_<module>_abort` is called once when the process exits inside `apply` or `takeover_apply` (an interrupt), so the module can undo a half-made change.
+   - **Core variables a module may read:** `GITUP_PLAN_REFUSED` is 1 after a module's plan returned rc 1, set before `install_require_git` prints its hint, so a hint can avoid recommending `--upgrade-git` where the flag would refuse again (only the Windows hint reads it today). `GSG_INSTALL_FLAGS` holds the flags of the install run besides `--upgrade-git`, for a module that prints a next step.
    - **A module that wraps another class** (WSL) calls `gitup_delegate CLASS KIND ARGS...` to run the inner module's `plan` or `apply` and adds its own `gitup_plan_note`.
      **A wrapper must also forward `abort`** (`gitup_<wrapper>_abort() { gitup_delegate CLASS abort; }` when the inner module defines one) and the takeover functions it
      supports. Nothing checks this: a wrapper without it leaves the inner module's half-made change in place when the process is interrupted.

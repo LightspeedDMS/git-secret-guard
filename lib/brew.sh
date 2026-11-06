@@ -15,8 +15,10 @@ brew_is_macos() { [ "$(uname -s)" = Darwin ]; }
 BREW_INSTALLED=""
 
 # ^ invariant prints the claim for a refusal, "nothing was changed" until BREW_INSTALLED is set, afterwards what changed
+# ^ invariant GSG_GIT_UPGRADED=1 comes from git-secret-guard.cmd for the run after its hand-off; a rerun cannot know what the earlier run changed
 brew_unchanged_text() {
     local gitup="${GITUP_CHANGED:-}"
+    if [ "${GSG_GIT_UPGRADED:-}" = 1 ] && [ -z "$gitup" ]; then gitup="Git for Windows was upgraded just before this run"; fi
     if [ -z "$BREW_INSTALLED" ] && [ -z "$gitup" ]; then
         printf 'nothing was changed'
     elif [ -z "$gitup" ]; then

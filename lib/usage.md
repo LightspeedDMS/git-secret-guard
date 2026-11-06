@@ -4,9 +4,11 @@ Machine-wide pre-commit secret scanning (trufflehog + betterleaks) through a git
 
 commands:
   install [--replace-hooks-path] [--with-timer] [--upgrade-git] [--take-over-system-git]
-        --upgrade-git lets install upgrade or rebuild git where its module can (RHEL, Rocky, Fedora): it prints the plan with
-        each privileged command, then runs it. In a terminal install asks first (default No); without a terminal the flag
+        --upgrade-git lets install upgrade or rebuild git where its module can (RHEL, Rocky, Fedora, Windows): it prints the plan
+        with each privileged command, then runs it. In a terminal install asks first (default No); without a terminal the flag
         is the only way to say yes. Exit 3 = a module hands the upgrade off to finish outside install; nothing else changed.
+        On Windows git-secret-guard.cmd runs the hand-off itself and then runs the command again; from Git Bash the printed
+        PowerShell command does.
         --take-over-system-git (RPM systems) points the old package /usr/bin/git and its siblings at the new /usr/local build,
         keeps the originals, and makes dnf skip the git packages; undo with restore-system-git.
         Install, or upgrade when already installed. Needs git >= 2.54 and jq (on Windows a missing jq is

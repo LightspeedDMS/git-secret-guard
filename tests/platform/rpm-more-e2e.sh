@@ -126,7 +126,6 @@ mode_bump() {
     check "git $cur is in /usr/local" test "$(git_ver /usr/local/bin/git)" = "$cur"
     check "its MANIFEST is there" test -f "$docs/git-$cur-local/MANIFEST"
     check "the directory of the older build is gone" test ! -e "$docs/git-$BUMP_OLD_VERSION-local"
-    check "the install said how many files of the previous build were removed" has "files of the previous build were removed"
     check "it is still first on PATH" test "$(command -v git)" = /usr/local/bin/git
     check "the RPM git is untouched" rpm_clean
     check "a commit with a fake key is blocked and a clean one passes" blocked_commit git

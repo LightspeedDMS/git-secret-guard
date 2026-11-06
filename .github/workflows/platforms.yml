@@ -56,3 +56,22 @@ jobs:
         with:
           name: containers-${{ matrix.os }}
           path: ${{ runner.temp }}/logs
+
+  diag:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: mounts and devices of a default podman container
+        run: |
+          set +e
+          ph="$(mktemp -d)"; mkdir -p "$ph/.config/containers" "$ph/hooks.d"; : >"$ph/.config/containers/mounts.conf"
+          printf '[engine]\nhooks_dir = ["%s"]\n' "$ph/hooks.d" >"$ph/containers.conf"
+          P=(env -i HOME="$ph" PATH="$PATH" XDG_RUNTIME_DIR=/run/user/$(id -u) XDG_DATA_HOME="$HOME/.local/share" XDG_CONFIG_HOME="$ph/.config" CONTAINERS_CONF="$ph/containers.conf" LANG=C.UTF-8)
+          img=docker.io/library/ubuntu:24.04@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852
+          "${P[@]}" podman pull -q $img
+          "${P[@]}" podman run --name diag --init --pull=never --http-proxy=false $img bash -c '
+            echo "--- mountinfo (mountpoint fstype)"; while read -r _ _ _ _ mp _ rest; do echo "$mp ${rest#* - }" | cut -d" " -f1,2; done </proc/self/mountinfo
+            echo "--- dev"; find /dev -mindepth 1 -maxdepth 4 -printf "%P\n" | sort'
+          echo "--- spec"
+          cfg="$HOME/.local/share/containers/storage/overlay-containers/$("${P[@]}" podman inspect -f '{{.Id}}' diag)/userdata/config.json"
+          jq -c '{masked:.linux.maskedPaths, ro:.linux.readonlyPaths, mounts:[.mounts[]|{d:.destination,t:.type}]}' "$cfg"

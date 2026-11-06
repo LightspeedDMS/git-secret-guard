@@ -245,7 +245,10 @@ test_a_program_running_from_the_git_directory_stops_the_runner_before_anything_s
     "$gd/usr/bin/holdsgit.exe" //c "ping -n 60 127.0.0.1 >nul" >/dev/null 2>&1 &
     pid=$!
     sleep 2
-    GD_W="$(cygpath -w "$gd")" awk '/^function Get-InstalledDir/ { print "function Get-InstalledDir([string]$Scope) { return \x27" ENVIRON["GD_W"] "\x27 }"; next } { print }' "$WU_RT/bin/gsg-gitup.ps1" >"$WU_DIR/rt.ps1" && cp -- "$WU_DIR/rt.ps1" "$WU_RT/bin/gsg-gitup.ps1" || { kill "$pid" 2>/dev/null; return 1; }
+    if ! GD_W="$(cygpath -w "$gd")" awk '/^function Get-InstalledDir/ { print "function Get-InstalledDir([string]$Scope) { return \x27" ENVIRON["GD_W"] "\x27 }"; next } { print }' "$WU_RT/bin/gsg-gitup.ps1" >"$WU_DIR/rt.ps1" || ! cp -- "$WU_DIR/rt.ps1" "$WU_RT/bin/gsg-gitup.ps1"; then
+        kill "$pid" 2>/dev/null
+        return 1
+    fi
     wu_runner "$WU_STATE_HANDOFF"
     kill "$pid" 2>/dev/null
     assert_rc 19 "a program of the Git directory is running"

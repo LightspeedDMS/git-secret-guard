@@ -288,6 +288,9 @@ jobs:
             echo "--- shadow line as root"; grep -c gsguser /etc/shadow; getent shadow gsguser | cut -c1-12; sed -n "/^shadow/p" /etc/nsswitch.conf
             echo "--- strace as root, following the setuid sudo"; strace -f -Z -s 120 -o /tmp/st3 runuser -u gsguser -- sudo -n true >/dev/null 2>&1; grep -vE "ENOENT|ENOTTY" /tmp/st3 | grep -E "EACCES|EPERM|shadow|chkpwd|EAGAIN" | head -30
             echo "--- after chmod u+s unix_chkpwd"; chmod 4755 /usr/sbin/unix_chkpwd; runuser -u gsguser -- sudo -n true; echo "rc=$?"
+            echo "--- shadow 0400 owner-readable"; chmod 0400 /etc/shadow; runuser -u gsguser -- sudo -n true; echo "rc=$?"
+            echo "--- chkpwd again"; /usr/sbin/unix_chkpwd gsguser chkexpiry </dev/null; echo "rc=$?"
+            echo "--- who am i in the shell"; id; grep -E "^(NoNewPrivs|Seccomp|CapPrm|CapAmb)" /proc/self/status
             echo "--- nosuid mounts"; grep -E " / | /usr" /proc/self/mountinfo | head -3
             echo "--- aging"; chage -l gsguser; grep gsguser /etc/shadow | cut -d: -f1,3-9
           '

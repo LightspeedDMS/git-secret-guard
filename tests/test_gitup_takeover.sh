@@ -61,6 +61,25 @@ test_answering_yes_at_the_takeover_prompt_takes_over() {
     gu_all_symlinks || fail "the six files are not symlinks"
 }
 
+# ^ external with INSTALL_SYMLINKS=1 git installs its bin and libexec entries as symlinks to git; stat -c %a on such a link says 777, the target decides
+test_the_takeover_accepts_siblings_that_are_symlinks_to_git_and_refuses_one_that_leaves_the_prefix() {
+    local n
+    gu_tk_start || return 1
+    for n in git-receive-pack git-upload-archive git-upload-pack; do
+        rm -f -- "$GU_ROOT/usr/local/bin/$n" && ln -s git "$GU_ROOT/usr/local/bin/$n" || return 1
+    done
+    gsg install --take-over-system-git </dev/null
+    assert_rc 0 "the three siblings are relative symlinks to git"
+    gu_all_symlinks || fail "the six files are not symlinks"
+    gu_tk_start || return 1
+    rm -f -- "$GU_ROOT/usr/local/bin/git-upload-pack" && ln -s /bin/sh "$GU_ROOT/usr/local/bin/git-upload-pack" || return 1
+    gsg install --take-over-system-git </dev/null
+    assert_rc 1 "a sibling that points out of the prefix"
+    assert_contains "$ERR" "the system git takeover was refused" "refused"
+    gu_untouched "sibling out of the prefix"
+}
+
+
 test_the_takeover_states_its_cost_before_asking() {
     gu_tk_start || return 1
     gsg install </dev/null

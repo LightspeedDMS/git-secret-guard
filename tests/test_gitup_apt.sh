@@ -137,6 +137,7 @@ test_debian_uses_the_pinned_source_build_and_never_tries_a_ppa() {
     assert_not_contains "$(gu_log)" "add-apt-repository" "no PPA was attempted"
     assert_contains "$(apt_calls)" "install -y --no-install-recommends build-essential libcurl4-openssl-dev libssl-dev libexpat1-dev zlib1g-dev perl libpcre2-dev xz-utils tar" "the build dependencies come from apt"
     assert_contains "$(gu_log)" "prefix=$GU_ROOT/usr/local NO_RUST=1 NO_TCLTK=1 NO_GETTEXT=1 USE_LIBPCRE2=1" "the build goes into /usr/local with the proven flags"
+    assert_contains "$(gu_log)" "INSTALL_SYMLINKS=1" "git installs its siblings as symlinks, so no hard link ties bin/git to libexec"
     assert_eq "$("$GU_ROOT/usr/local/bin/git" --version)" "git version 2.56.0" "git is built"
     check_plan_matches_log "$OUT" "the Debian source route"
 }

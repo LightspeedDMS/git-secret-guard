@@ -27,6 +27,7 @@ test_a_rocky_machine_with_an_old_git_builds_the_pinned_source_when_the_user_acce
     assert_contains "$OUT" "/cp -dR --preserve=timestamps,links" "and the copy"
     assert_contains "$(gu_log)" "make -C" "make ran"
     assert_contains "$(gu_log)" "prefix=$GU_ROOT/usr/local NO_RUST=1 NO_TCLTK=1 NO_GETTEXT=1 USE_LIBPCRE2=1" "with the proven flags and the prefix"
+    assert_contains "$(gu_log)" "INSTALL_SYMLINKS=1" "git installs its siblings as symlinks, so no hard link ties bin/git to libexec"
     assert_contains "$(gu_log)" "DESTDIR=" "into a stage directory"
     assert_eq "$("$GU_ROOT/usr/local/bin/git" --version)" "git version 2.56.0" "git is built into /usr/local"
     assert_file "$LC_STATE/state" "install ran to the end"

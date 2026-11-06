@@ -692,150 +692,6 @@ test_the_isolation_check_accepts_exactly_the_container_defaults() {
 }
 
 # shellcheck disable=SC2016
-test_the_ppa_signing_key_fingerprint_is_checked_against_the_pinned_value() {
-    local gh="$SANDBOX/gnupg" dir="$SANDBOX/apt-sources" fpr script="$GSG_PROJECT/tests/platform/ubuntu-container.sh"
-    local -a gpg=(env -i HOME="$SANDBOX/home" GNUPGHOME="$gh" PATH="/usr/local/bin:/usr/bin:/bin" gpg --batch --quiet)
-    type -P gpg >/dev/null || skip_test "gpg is not installed"
-    mkdir -m 700 "$gh" && mkdir -p "$dir" || return 1
-    "${gpg[@]}" --pinentry-mode loopback --passphrase '' --quick-generate-key 'gsg test <t@example.invalid>' default default never 2>/dev/null || return 1
-    fpr="$("${gpg[@]}" --with-colons --list-keys | awk -F: '$1 == "fpr" { print $10; exit }')"
-    {
-        printf 'Types: deb\nURIs: https://ppa.launchpadcontent.net/git-core/ppa/ubuntu/\nSuites: noble\nComponents: main\nSigned-By:\n'
-        "${gpg[@]}" --armor --export | awk '{ if ($0 == "") print " ."; else print " " $0 }'
-    } >"$dir/git-core-ubuntu-ppa-noble.sources"
-    env -i GNUPGHOME="$gh" gpgconf --kill gpg-agent 2>/dev/null
-    run_cap env -i PATH="/usr/local/bin:/usr/bin:/bin" bash -c 'source "$1"; ppa_key_fingerprints "$2"' _ "$script" "$dir/git-core-ubuntu-ppa-noble.sources"
-    assert_eq "$OUT" "$fpr" "the primary key fingerprint is read from the Signed-By block"
-    run_cap env -i PATH="/usr/local/bin:/usr/bin:/bin" bash -c 'source "$1"; PPA_SOURCES_DIR="$2"; PPA_PINNED_FPR="$3"; ppa_key_matches' _ "$script" "$dir" "$fpr"
-    assert_rc 0 "the pinned fingerprint matches"
-    run_cap env -i PATH="/usr/local/bin:/usr/bin:/bin" bash -c 'source "$1"; PPA_SOURCES_DIR="$2"; PPA_PINNED_FPR="$3"; ppa_key_matches' _ "$script" "$dir" \
-        AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
-    assert_rc 1 "another pinned fingerprint is refused"
-    assert_contains "$OUT" "$fpr" "and the fingerprint found is named"
-    mkdir -p -- "$SANDBOX/no-sources" || return 1
-    run_cap env -i PATH="/usr/local/bin:/usr/bin:/bin" bash -c 'source "$1"; PPA_SOURCES_DIR="$2"; PPA_PINNED_FPR="$3"; ppa_key_matches' _ "$script" "$SANDBOX/no-sources" "$fpr"
-    assert_rc 1 "no git-core sources file is a refusal"
-}
-
-# ^ invariant ppa_stubs DIR = stand-ins for add-apt-repository, apt-get, dpkg-query, apt-cache; each apt call logs the git-core .sources file count
-# shellcheck disable=SC2016
-ppa_stubs() {
-    mkdir -p -- "$1" || return 1
-    printf '%s\n' '#!/bin/sh' 'printf "add-apt-repository %s | sources-present=%s\n" "$*" "$(ls "$STUB_DIR"/git-core-ubuntu-ppa-*.sources 2>/dev/null | wc -l)" >>"$STUB_LOG"' \
-        'cp "$STUB_SOURCES" "$STUB_DIR/git-core-ubuntu-ppa-noble.sources"' 'if [ -n "${STUB_LOCK:-}" ]; then chmod 555 "$STUB_DIR"; fi' 'exit "${STUB_ADD_RC:-0}"' >"$1/add-apt-repository"
-    printf '%s\n' '#!/bin/sh' 'n="$(ls "$STUB_DIR"/git-core-ubuntu-ppa-*.sources 2>/dev/null | wc -l)"' 'printf "apt-get %s | sources-present=%s\n" "$*" "$n" >>"$STUB_LOG"' \
-        'if [ "$1" = update ] && [ "$n" -gt 0 ] && [ -n "${STUB_UPDATE_FAIL_PPA:-}" ]; then exit 1; fi' \
-        'if [ "$1" = update ] && [ "$n" -eq 0 ] && [ -n "${STUB_UPDATE_FAIL_CLEAN:-}" ]; then exit 1; fi' 'exit 0' >"$1/apt-get"
-    printf '%s\n' '#!/bin/sh' 'printf "1:2.56.0-0ppa1~ubuntu24.04.2"' >"$1/dpkg-query"
-    printf '%s\n' '#!/bin/sh' 'printf "  *** 1:2.56.0 500\n        500 https://ppa.launchpadcontent.net/git-core/ppa/ubuntu noble/main\n"' >"$1/apt-cache"
-    chmod 755 "$1/add-apt-repository" "$1/apt-get" "$1/dpkg-query" "$1/apt-cache"
-}
-
-PPA_STUB_ENV=()
-# ^ invariant ppa_run FPR = install_git_ppa in auto mode against the stubs with FPR pinned (+ PPA_STUB_ENV knobs); apt calls land in $SANDBOX/ppa.log
-# shellcheck disable=SC2016
-ppa_run() {
-    ppa_stubs "$SANDBOX/ppa-bin" || return 1
-    chmod 755 "$SANDBOX/ppa-sources" 2>/dev/null
-    mkdir -p -- "$SANDBOX/ppa-sources" "$SANDBOX/ppa-log" && rm -f -- "$SANDBOX/ppa-sources"/* "$SANDBOX/ppa.log" || return 1
-    if [ -n "${PPA_LEGACY_LIST:-}" ]; then : >"$SANDBOX/ppa-sources/git-core-ubuntu-ppa-noble.list" || return 1; fi
-    run_cap env -i PATH="$SANDBOX/ppa-bin:/usr/local/bin:/usr/bin:/bin" HOME="$SANDBOX/home" STUB_DIR="$SANDBOX/ppa-sources" STUB_LOG="$SANDBOX/ppa.log" \
-        STUB_SOURCES="$SANDBOX/ppa-fixture.sources" "${PPA_STUB_ENV[@]}" bash -c \
-        'source "$1"; LOGDIR="$2"; PPA_SOURCES_DIR="$3"; PPA_PINNED_FPR="$4"; STEP_SOFT=1; install_git_ppa' \
-        _ "$GSG_PROJECT/tests/platform/ubuntu-container.sh" "$SANDBOX/ppa-log" "$SANDBOX/ppa-sources" "$1"
-}
-
-# ^ invariant ppa_fixture_key = a throwaway key and a git-core-ubuntu-ppa style .sources file at $SANDBOX/ppa-fixture.sources; REPLY = its fingerprint
-ppa_fixture_key() {
-    local gh="$SANDBOX/gnupg-ppa"
-    local -a gpg=(env -i HOME="$SANDBOX/home" GNUPGHOME="$gh" PATH="/usr/local/bin:/usr/bin:/bin" gpg --batch --quiet)
-    type -P gpg >/dev/null || skip_test "gpg is not installed"
-    rm -rf -- "$gh" && mkdir -m 700 "$gh" || return 1
-    "${gpg[@]}" --pinentry-mode loopback --passphrase '' --quick-generate-key 'gsg ppa test <t@example.invalid>' default default never 2>/dev/null || return 1
-    REPLY="$("${gpg[@]}" --with-colons --list-keys | awk -F: '$1 == "fpr" { print $10; exit }')"
-    {
-        printf 'Types: deb\nURIs: https://ppa.launchpadcontent.net/git-core/ppa/ubuntu/\nSuites: noble\nComponents: main\nSigned-By:\n'
-        "${gpg[@]}" --armor --export | awk '{ if ($0 == "") print " ."; else print " " $0 }'
-    } >"$SANDBOX/ppa-fixture.sources"
-    env -i GNUPGHOME="$gh" gpgconf --kill gpg-agent 2>/dev/null
-    return 0
-}
-
-test_a_ppa_key_mismatch_removes_the_sources_file_and_updates_apt_before_any_further_apt_call() {
-    ppa_fixture_key || return 1
-    ppa_run AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
-    assert_rc 1 "a key that is not the pinned one fails the PPA path"
-    assert_contains "$(<"$SANDBOX/ppa.log")" "add-apt-repository -y -n ppa:git-core/ppa" "the repository is added with -n: add-apt-repository runs no apt update by itself"
-    assert_empty "$(find "$SANDBOX/ppa-sources" -name 'git-core-ubuntu-ppa-*.sources')" "the unchecked sources file is gone"
-    assert_not_contains "$(<"$SANDBOX/ppa.log")" "apt-get update | sources-present=1" "no apt update ran while the unchecked PPA was enabled"
-    assert_not_contains "$(<"$SANDBOX/ppa.log")" "apt-get install" "nothing was installed from it"
-    assert_contains "$(<"$SANDBOX/ppa.log")" "apt-get update | sources-present=0" "the apt lists were refreshed after the PPA was removed"
-    assert_eq "$(tail -n 1 "$SANDBOX/ppa.log")" "apt-get update | sources-present=0" "and that is the last apt call before the source build starts"
-}
-
-test_a_matching_ppa_key_adds_the_repository_without_an_update_and_updates_after_the_check() {
-    ppa_fixture_key || return 1
-    ppa_run "$REPLY"
-    assert_rc 0 "the pinned key passes"
-    assert_eq "$(<"$SANDBOX/ppa.log")" $'add-apt-repository -y -n ppa:git-core/ppa | sources-present=0\napt-get update | sources-present=1\napt-get install -y --no-install-recommends git | sources-present=1' \
-        "add without update, then the check, then update, then install"
-}
-
-test_a_ppa_whose_sources_file_cannot_be_removed_returns_2_and_installs_nothing() {
-    ppa_fixture_key || return 1
-    PPA_STUB_ENV=(STUB_LOCK=1)
-    ppa_run AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
-    chmod 755 "$SANDBOX/ppa-sources"
-    PPA_STUB_ENV=()
-    assert_rc 2 "a key mismatch and a sources file that stays: the PPA may still be enabled"
-    assert_contains "$OUT" "cannot remove the git-core PPA" "the failure is named"
-    assert_file "$SANDBOX/ppa-sources/git-core-ubuntu-ppa-noble.sources" "control: the file really stayed, so the removal was attempted and failed"
-    assert_not_contains "$(<"$SANDBOX/ppa.log")" "apt-get install" "nothing was installed"
-}
-
-test_a_ppa_whose_removal_update_fails_returns_2() {
-    ppa_fixture_key || return 1
-    PPA_STUB_ENV=(STUB_UPDATE_FAIL_CLEAN=1)
-    ppa_run AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
-    PPA_STUB_ENV=()
-    assert_rc 2 "the sources file is gone but apt could not refresh its lists without the PPA"
-    assert_contains "$OUT" "cannot remove the git-core PPA" "the failure is named"
-    assert_empty "$(find "$SANDBOX/ppa-sources" -name 'git-core-ubuntu-ppa-*.sources')" "control: the sources file was removed"
-}
-
-test_add_apt_repository_failing_after_writing_a_sources_file_removes_it_before_any_apt_call() {
-    ppa_fixture_key || return 1
-    PPA_STUB_ENV=(STUB_ADD_RC=1)
-    ppa_run "$REPLY"
-    PPA_STUB_ENV=()
-    assert_rc 1 "a failed add is a soft failure of the PPA path (the source build may follow)"
-    assert_empty "$(find "$SANDBOX/ppa-sources" -name 'git-core-ubuntu-ppa-*.sources')" "the file the failed add left behind is removed"
-    assert_not_contains "$(<"$SANDBOX/ppa.log")" "apt-get update | sources-present=1" "no apt update ran while it existed"
-    assert_not_contains "$(<"$SANDBOX/ppa.log")" "apt-get install" "nothing was installed"
-    assert_eq "$(tail -n 1 "$SANDBOX/ppa.log")" "apt-get update | sources-present=0" "and the lists were refreshed without it"
-}
-
-test_a_failing_ppa_apt_update_removes_the_sources_file_and_installs_nothing() {
-    ppa_fixture_key || return 1
-    PPA_STUB_ENV=(STUB_UPDATE_FAIL_PPA=1)
-    ppa_run "$REPLY"
-    PPA_STUB_ENV=()
-    assert_rc 1 "apt-get update (PPA) failed: a soft failure of the PPA path"
-    assert_empty "$(find "$SANDBOX/ppa-sources" -name 'git-core-ubuntu-ppa-*.sources')" "the PPA is disabled again"
-    assert_not_contains "$(<"$SANDBOX/ppa.log")" "apt-get install" "nothing was installed"
-    assert_eq "$(tail -n 1 "$SANDBOX/ppa.log")" "apt-get update | sources-present=0" "the last apt call refreshed the lists without the PPA"
-}
-
-test_ppa_disable_also_removes_a_legacy_list_file() {
-    ppa_fixture_key || return 1
-    PPA_LEGACY_LIST=1
-    ppa_run AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
-    unset PPA_LEGACY_LIST
-    assert_rc 1 "a key mismatch"
-    assert_empty "$(find "$SANDBOX/ppa-sources" -name 'git-core-ubuntu-ppa-*')" "neither the .sources nor a one-line-style .list file of the PPA is left"
-}
-
-# shellcheck disable=SC2016
 test_obtain_git_does_not_build_from_source_when_the_ppa_could_not_be_disabled() {
     local script='source "$1"; LOGDIR="$2"; MARK="$2/source-build-ran"; GIT_SOURCE="$3"; PPA_RC="$4"
         install_git_source() { : >"$MARK"; return 0; }; git_is_new_enough() { return 0; }; install_git_ppa() { return "$PPA_RC"; }
@@ -916,6 +772,56 @@ test_the_run_has_an_init_process_and_a_kill_after_so_the_outer_timeout_fires() {
     fi
     assert_eq "${ARGS[$((podman_at + 1))]}" run "podman is called with run"
     if [ "$init_at" -le "$podman_at" ]; then fail "podman run without --init: bash is PID 1 and ignores the forwarded TERM"; fi
+}
+
+# ^ invariant each --os names one image pinned by manifest-list digest and names the os-release to expect; podman gets exactly one image
+test_the_launcher_selects_a_pinned_image_per_os_and_tells_the_container_what_to_expect() {
+    local row os prefix expect a images expected_arg
+    for row in "ubuntu-24.04|docker.io/library/ubuntu:24.04|ubuntu:24.04" "ubuntu-22.04|docker.io/library/ubuntu:22.04|ubuntu:22.04" "debian-13|docker.io/library/debian:13|debian:13"; do
+        IFS='|' read -r os prefix expect <<<"$row"
+        dry_run --os "$os"
+        assert_rc 0 "[$os] dry run"
+        images=0 expected_arg=""
+        for ((a = 0; a < ${#ARGS[@]}; a++)); do
+            case "${ARGS[$a]}" in
+                "$prefix"@sha256:*)
+                    [[ ${ARGS[$a]} =~ ^${prefix//./\.}@sha256:[0-9a-f]{64}$ ]] || fail "[$os] the image is not pinned by digest: [${ARGS[$a]}]"
+                    if [ "${ARGS[$((a - 1))]}" != --image ]; then images=$((images + 1)); fi
+                    ;;
+                --expect-os) expected_arg="${ARGS[$((a + 1))]}" ;;
+            esac
+        done
+        assert_eq "$images" 1 "[$os] exactly one image argument for podman"
+        assert_eq "$expected_arg" "$expect" "[$os] the container is told which os-release to expect"
+    done
+    dry_run --os fedora-44
+    assert_rc 2 "an image the launcher does not pin is refused"
+}
+
+# shellcheck disable=SC2016
+test_the_container_script_takes_the_expected_os_and_names_it_in_its_title() {
+    local bad
+    run_cap env -i PATH="/usr/local/bin:/usr/bin:/bin" bash -c \
+        'source "$1"; shift; parse_args "$@"; printf "%s|%s|%s" "$ISOLATION_OS_ID" "$ISOLATION_OS_VERSION" "$PLATFORM_TITLE"' _ "$GSG_PROJECT/tests/platform/ubuntu-container.sh" --expect-os debian:13
+    assert_eq "$OUT" "debian|13|DEBIAN 13" "the isolation check will compare against Debian 13"
+    for bad in "--expect-os" "--expect-os debian" "--expect-os debian:" "--expect-os :13" "--expect-os a;b:1"; do
+        # shellcheck disable=SC2086
+        parse_with $bad
+        assert_rc 2 "[$bad] is refused"
+    done
+}
+
+# shellcheck disable=SC2016
+test_the_container_script_has_an_upgrade_phase_for_stock_git_machines() {
+    run_cap env -i PATH="/usr/local/bin:/usr/bin:/bin" bash -c 'source "$1"; declare -F phase_upgrade apt_prepare_machine' _ "$GSG_PROJECT/tests/platform/ubuntu-container.sh"
+    assert_rc 0 "the apt flavour of phase_upgrade exists next to the prepare, e2e and suite phases"
+    assert_contains "$(<"$GSG_PROJECT/tests/platform/apt-upgrade-e2e.sh")" "install --upgrade-git" "and the E2E runs the real command"
+}
+
+test_the_container_script_calls_the_product_for_the_ppa_and_holds_no_copy_of_it() {
+    local f="$GSG_PROJECT/tests/platform/ubuntu-container.sh"
+    assert_contains "$(<"$f")" "gitup_apt_ppa_apply" "the PPA route is the product function"
+    assert_eq "$(grep -cE 'ppa_key_matches|ppa_disable|PPA_PINNED_FPR|add-apt-repository -y -n|git-core-ubuntu-ppa' "$f")" 0 "no key check, no disable and no pinned fingerprint of its own"
 }
 
 test_the_entry_script_runs_by_the_path_the_readme_documents() {

@@ -40,8 +40,14 @@ OS_RELEASE=/etc/os-release
 ISOLATION_SKIP_REASON=""
 PLATFORM_TITLE="UBUNTU 24.04"
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)" || exit 2
-# shellcheck source=lib/install.sh
-source "$HERE/../../lib/install.sh" || exit 2
+GSG_ROOT="$(cd -- "$HERE/../.." && pwd -P)" || exit 2
+# ^ coupled the PPA route is the product module lib/gitup_apt.sh, loaded in the order the CLI loads its libraries; no second copy of it lives here
+for lib in brew common state tools install gitup gitup_source gitup_apt; do
+    # shellcheck source=/dev/null
+    source "$GSG_ROOT/lib/$lib.sh" || exit 2
+done
+# shellcheck source=tests/platform/apt-phase.sh
+source "$HERE/apt-phase.sh" || exit 2
 
 # ^ security /etc/os-release is read as data by the installer's reader, never sourced; test:test_the_container_script_reads_os_release_as_data
 os_field() {
@@ -49,43 +55,10 @@ os_field() {
     printf '%s' "$REPLY"
 }
 
-# ^ external PPA key fingerprint as embedded in the .sources file add-apt-repository writes; lookup in doc:docs/platforms.md#maintainer-notes
-PPA_PINNED_FPR=F911AB184317630C59970973E363C90F8F1B6217
-PPA_SOURCES_DIR=/etc/apt/sources.list.d
-
-# ^ invariant prints the primary key fingerprint of the Signed-By armor; a scratch GNUPGHOME keeps ~/.gnupg untouched
-ppa_key_fingerprints() {
-    local gh rc
-    gh="$(mktemp -d)" || return 1
-    awk '/^Signed-By:/ { in_block = 1; next } in_block && /^ / { line = substr($0, 2); if (line == ".") line = ""; print line; next } { in_block = 0 }' "$1" \
-        | GNUPGHOME="$gh" gpg --batch --show-keys --with-colons 2>/dev/null \
-        | awk -F: '$1 == "pub" { want = 1 } $1 == "fpr" && want { print $10; want = 0 }'
-    rc=$?
-    rm -rf -- "$gh"
-    return "$rc"
-}
-
-# ^ security the PPA key is fetched from Launchpad over TLS on first use => its fingerprint must equal PPA_PINNED_FPR before apt trusts a package from it
-ppa_key_matches() {
-    local file got seen=0
-    for file in "$PPA_SOURCES_DIR"/git-core-ubuntu-ppa-*.sources; do
-        if [ ! -f "$file" ]; then continue; fi
-        seen=1
-        got="$(ppa_key_fingerprints "$file")"
-        if [ "$got" != "$PPA_PINNED_FPR" ]; then
-            printf 'the PPA signing key fingerprint is [%s], not the pinned one\n' "$got"
-            return 1
-        fi
-    done
-    if [ "$seen" -eq 0 ]; then
-        printf 'no git-core PPA .sources file found in %s\n' "$PPA_SOURCES_DIR"
-        return 1
-    fi
-}
-
 usage() {
-    printf 'usage: ubuntu-container.sh [--git ppa|source|auto] [--phase prepare|e2e|suite]... [--suite-file test_x.sh]... [--host-ns NAME=ID]... [--image REF]\n'
-    printf 'Runs as root inside ubuntu:24.04. Default phases: prepare e2e suite. Started by tests/platform/ubuntu.sh, which passes --host-ns (the ids of its own\n'
+    printf 'usage: ubuntu-container.sh [--git ppa|source|auto] [--phase prepare|e2e|suite|upgrade]... [--suite-file test_x.sh]... [--host-ns NAME=ID]... [--image REF] [--expect-os ID:VERSION]\n'
+    printf 'Runs as root inside ubuntu:24.04, or the image --expect-os names (ubuntu:22.04, debian:13). Default phases: prepare e2e suite; upgrade is the real install --upgrade-git\n'
+    printf 'E2E on a stock git and replaces them. Started by tests/platform/ubuntu.sh, which passes --host-ns (the ids of its own\n'
     printf 'cgroup, ipc, net, pid and uts namespaces; the isolation check fails without them) and --image (the pinned reference, shown in the summary).\n'
 }
 
@@ -114,6 +87,12 @@ parse_args() {
                 shift
                 [[ ${1:-} =~ ^[A-Za-z0-9._/:@-]+$ ]] || { usage >&2; exit 2; }
                 IMAGE_REF="$1"
+                ;;
+            --expect-os)
+                shift
+                [[ ${1:-} =~ ^([a-z]+):([0-9][0-9.]*)$ ]] || { usage >&2; exit 2; }
+                ISOLATION_OS_ID="${BASH_REMATCH[1]}" ISOLATION_OS_VERSION="${BASH_REMATCH[2]}"
+                PLATFORM_TITLE="${ISOLATION_OS_ID^^} $ISOLATION_OS_VERSION"
                 ;;
             --skip-isolation)
                 shift
@@ -406,32 +385,24 @@ git_is_new_enough() {
     [ "${BASH_REMATCH[1]}" -gt "$GIT_MIN_MAJOR" ] || { [ "${BASH_REMATCH[1]}" -eq "$GIT_MIN_MAJOR" ] && [ "${BASH_REMATCH[2]}" -ge "$GIT_MIN_MINOR" ]; }
 }
 
-# ^ order add-apt-repository -n before ppa_key_matches before apt-get update => no apt run sees an unchecked PPA
-# ^ security any failure removes the sources file and refreshes the lists => the source-build fallback runs apt as root without the PPA
-ppa_disable() {
-    rm -f -- "$PPA_SOURCES_DIR"/git-core-ubuntu-ppa-*.sources "$PPA_SOURCES_DIR"/git-core-ubuntu-ppa-*.list || return 1
-    step "apt-get update (PPA removed)" "$APT_TIMEOUT" apt-get update
-}
-
+# ^ invariant the PPA route is gitup_apt_ppa_apply of the product; this wrapper adds the log file and the record of where git came from
+# ^ invariant rc 0 = git from the PPA, rc 1 = failed and the PPA is disabled again, rc 2 = the PPA may still be enabled (product semantics)
+# shellcheck disable=SC2016,SC2034
 install_git_ppa() {
-    local ok=0
-    # shellcheck disable=SC2016
-    if step "add the git-core PPA (no apt update yet)" "$APT_TIMEOUT" add-apt-repository -y -n ppa:git-core/ppa \
-        && step "verify the git-core PPA signing key fingerprint" 60 bash -c 'source "$1" && PPA_SOURCES_DIR="$2" PPA_PINNED_FPR="$3" ppa_key_matches' \
-            _ "$HERE/ubuntu-container.sh" "$PPA_SOURCES_DIR" "$PPA_PINNED_FPR" \
-        && step "apt-get update (PPA)" "$APT_TIMEOUT" apt-get update \
-        && step "apt-get install git (PPA)" "$APT_TIMEOUT" apt-get install -y --no-install-recommends git; then
-        ok=1
+    local log="$LOGDIR/git_core_ppa.log" rc
+    printf '== git-core PPA (gitup_apt_ppa_apply of the product)\n'
+    GITUP_CLASS=ubuntu
+    INSTALL_TIMEOUT_BIN="$(type -P timeout)"
+    gitup_paths || return 1
+    gitup_apt_ppa_apply >"$log" 2>&1
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
+        tail -n 25 "$log" | sed 's/^/        | /'
+        printf 'failed  git-core PPA (exit %s, not counted here: the caller decides)\n' "$rc"
+        return "$rc"
     fi
-    if [ "$ok" -eq 0 ]; then
-        if ! ppa_disable; then
-            printf 'cannot remove the git-core PPA: it may still be enabled\n'
-            return 2
-        fi
-        return 1
-    fi
+    printf 'ok      git-core PPA\n'
     GIT_SOURCE_DESC="PPA ppa:git-core/ppa, package $(dpkg-query -W -f='${Version}' git), $(apt-cache policy git | sed -n '/\*\*\*/{n;s/^ *[0-9]* //;p}')"
-    return 0
 }
 
 # ^ security the tarball is accepted only when sha256sum -c matches the pinned digest => a changed or truncated download never reaches make

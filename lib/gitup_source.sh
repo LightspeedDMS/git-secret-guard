@@ -2,6 +2,8 @@
 # ^ coupled shared pinned source build of the upgrade modules; a module sets GITUP_SRC_DEPS and GITUP_SRC_FLAGS before gitup_source_apply
 # ^ external procedure of the reference host (2026-10-30) plus checks; CLAUDE.md "Git upgrade" has the facts behind each step
 
+# ^ invariant an optional privileged command a module runs before the dependency install (apt-get update); empty for modules without one
+GITUP_SRC_PRE=()
 GITUP_SRC_DEPS=()
 GITUP_SRC_FLAGS=()
 GITUP_BUILD_DIR=""
@@ -232,6 +234,14 @@ gitup_source_prepare() {
 
 # ^ invariant installs the build dependencies as root (the first change), builds and stages as the invoking user, writes the MANIFEST of the staged files
 gitup_source_compile() {
+    if [ "${#GITUP_SRC_PRE[@]}" -gt 0 ]; then
+        gitup_elevate "${GITUP_SRC_PRE[@]}" || {
+            gitup_changed_add "the step before the build dependencies (${GITUP_SRC_PRE[*]##*/}) was started and failed"
+            printf '%s: the step before the build dependencies failed\n' "$GSG_NAME" >&2
+            return 1
+        }
+        gitup_changed_add "the package lists were refreshed before the build dependencies"
+    fi
     gitup_elevate "${GITUP_SRC_DEPS[@]}" || {
         gitup_changed_add "the install of the build dependencies (${GITUP_SRC_DEPS[*]}) was started and failed, so the package manager may have installed part of them"
         printf '%s: the build dependencies could not be installed\n' "$GSG_NAME" >&2
@@ -333,6 +343,7 @@ gitup_source_print_plan() {
     printf '  build as %s in a temporary directory under env -i with PATH=%s (about %s MB of disk, several minutes)\n' "$(id -un)" "$GITUP_BUILD_PATH" "$GITUP_BUILD_NEED_MB"
     local docdir
     docdir="$(gitup_source_docdir)"
+    if [ "${#GITUP_SRC_PRE[@]}" -gt 0 ]; then gitup_plan_priv "${GITUP_SRC_PRE[*]}"; fi
     gitup_plan_priv "${GITUP_SRC_DEPS[*]}"
     gitup_plan_priv "mkdir -p -- $docdir"
     gitup_plan_priv "install -m 644 -- <build dir>/MANIFEST $docdir/MANIFEST.partial"

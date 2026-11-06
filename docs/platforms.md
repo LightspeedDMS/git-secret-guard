@@ -3,7 +3,8 @@
 | Platform | Status |
 |---|---|
 | RHEL 9-compatible (x86_64) | Supported. RHEL 9-compatible (tested on Rocky Linux 9.7); there `/usr/local/bin/git` is built from source and `/usr/bin/git` 2.52 is left alone. |
-| Ubuntu 24.04 LTS | Supported. The whole suite and an install E2E with real downloads run in a podman `ubuntu:24.04` container, as a non-root user, with mawk as the default awk: `tests/platform/ubuntu.sh`. |
+| Ubuntu 24.04 LTS | Supported. The whole suite and an install E2E with real downloads run in a podman `ubuntu:24.04` container, as a non-root user, with mawk as the default awk: `tests/platform/ubuntu.sh`. `install` offers the git upgrade: see [Ubuntu and Debian (apt)](#ubuntu-and-debian-apt). |
+| Ubuntu 22.04 LTS and Debian 13 | Offer tested against stand-ins (2.34.1 on 22.04 takes the PPA in its older `.list` form, Debian takes the source build) and, with real apt, in debootstrap chroots (22.04, 24.04, Debian 13, 20.04). Debian 13 also ran the `--phase upgrade` container E2E (source route, 21/0). **Not run:** an Ubuntu 22.04 container and an x86_64 container ([details](#ubuntu-and-debian-apt)). |
 | macOS arm64 (tested on macOS 26.7.1) | Supported, with Homebrew: see [macOS (Homebrew)](#macos-homebrew). The whole suite and an install E2E in a scratch home run on a real Mac. |
 | Windows x86_64 (tested on Windows Server 2019) | Supported with Git for Windows: see [Windows (Git for Windows)](#windows-git-for-windows). No weekly timer; the lifecycle test suites do not run there. |
 | macOS x86_64 (Intel) | Mapped (`darwin_amd64` / `darwin_x64` rows of `tools.lock`) but **not tested**. |
@@ -147,10 +148,92 @@ does (private copy of the tracked files, `env -i`, `CONTAINERS_CONF` with an emp
 - **Not proved:** SELinux. The containers run without an enforcing policy, so `restorecon` is called and logged but its effect, and `sshd` serving
   `git-upload-pack` through the taken-over path, need the manual run on an enforcing Rocky VM. The takeover and the Rocky E2E were not run against the reference host.
 
-## Ubuntu 24.04: prerequisites
+## Ubuntu and Debian (apt)
 
-Ubuntu 24.04 ships git 2.43, which ignores config-based hooks without any message. `install` refuses it, changes nothing and
-prints the fix below. Get a git >= 2.54 first:
+`apt` systems (the `ubuntu` class: `ID` or `ID_LIKE` names `ubuntu`, so Linux Mint and other derivatives follow Ubuntu's rules, except that Mint's `add-apt-repository` has no `-n` (read from the mintsources source, not run on Mint), which sends it to the source build; the `debian` class: names `debian`) get the same offer as the
+RPM systems. Ubuntu 22.04 ships git 2.34.1 and 24.04 ships 2.43, and both ignore config-based hooks without any message. `git-secret-guard install` finishes its
+other checks first, prints the plan and **offers the upgrade**; it never prompts without a terminal and the default answer is No:
+
+```bash
+git-secret-guard install --upgrade-git        # consent up front (also the way to say yes with no terminal)
+git-secret-guard install                      # in a terminal: prints the plan, asks "Upgrade git now with the plan above? [y/N]"
+```
+
+Without the flag and without a terminal `install` refuses, names `--upgrade-git` and changes nothing. The consent rules, the checks before the first privileged command, the
+"what changed" text of a later refusal and the rerun rule are the ones of [the RPM section](#rhel-rocky-and-fedora-rpm); only the route differs.
+
+**Which route.** The route comes from what apt can deliver, never from the release number, so a new release needs no code change:
+
+| Situation | Route |
+|---|---|
+| `/usr/local/bin/git` is already 2.54 or newer but not first on `PATH` | `path-fix`, as on RPM systems. |
+| apt's own candidate for `git` is 2.54 or newer | `package`: `apt-get update`, then `apt-get install -y --no-install-recommends git`; no PPA is added. The plan and the report name where the candidate comes from (its first source in `apt-cache policy`). |
+| Ubuntu class, otherwise | `ppa`: the git-core PPA, counted only if its candidate is 2.54 or newer after the key check and `apt-get update`; **otherwise the pinned source build follows**. |
+| Debian class, otherwise | `source`: the pinned source build (Debian has no PPA). |
+| `apt-get`, `apt-cache` or `env` is missing from the system path | no route; the usual refusal follows. |
+
+What the PPA carried on 2026-11-04 (`dists/<release>/main/binary-amd64/Packages.gz`) and the route that gives today: 20.04 focal 2.50.1 (source: a real focal run is refused at the floor, because the PPA's git stays below 2.54; its add-apt-repository 0.99.9.12 writes the key as `git-core_ubuntu_ppa.gpg` with underscores, which the key check reads as well), 22.04 jammy 2.56.0 (stock 2.34.1, measured; security updates stay on it), 24.04 noble 2.56.0 (stock 2.43), 25.10 questing 2.54.0 (at the floor),
+26.04 resolute, 26.10 stonking and 27.04 tenacious 2.56.0 (package or PPA). Supported: **22.04 and later**; earlier releases follow the same rule but are not tested. After a
+package route git updates arrive through the normal `apt upgrade`, and nothing is scheduled by `install`. WSL takes this same rule (it runs real Ubuntu packages) once story #31 lands.
+
+**The query cannot hang or change anything.** The candidate is read with `apt-cache policy git` (no `apt-get update`, no lock, nothing written), stdin from `/dev/null`, `LC_ALL=C`
+(the label is translated otherwise), bounded by the same timeout as the RPM query (60 seconds, `GSG_GITUP_QUERY_TIMEOUT` in tests). A version such as `1:2.34.1-1ubuntu1.11` or
+`1:2.56.0-0ppa1~ubuntu22.04.1` is reduced to its upstream release (epoch and packaging suffix dropped); a tilde right after the number (`2.54.0~rc1`) is a pre-release and does not
+pass the floor. The output is read in a loop with `break`, never through `sed ...q` under `pipefail` (the writer gets SIGPIPE, which once turned a good PPA install into a silent
+source build).
+
+**The PPA route, in this order (the order is a security rule).**
+
+0. **The PPA files already on the machine are looked at first**, before the candidate chooses a route (a wrong key with a 2.56 candidate must not take the package route). Files that pass the key check below are kept and used as they are: no `add-apt-repository`, nothing removed if the route fails. A file is no enabled PPA when it holds only a key left by `add-apt-repository -r`, an entry with `Enabled: no`, or commented-out lines. Apt reads the false words `no false without off disable 0` in any case. A leftover key or a disabled entry does not hide the distribution's own good package: when apt's candidate is new enough and not offered by a PPA, the leftover goes aside and the package route follows. Files that are no enabled PPA, or that carry another key, are moved to a root-owned `/var/lib/git-secret-guard/ppa-aside-<UTC>/` (never deleted; the output names the place and prints the `mv -n` commands that put each file back; `install` and `uninstall` keep that directory) and apt is refreshed before the fresh route starts. The rebuild route (a build of ours older than the pin) runs the same preflight and lists the same commands. The scan reads the URL on any non-comment line, so `URIs:https://...` and a folded `URIs:` value are found too. An entry for the PPA under any other file name (found by content in `sources.list`, `*.list` and `*.sources`) cannot be checked and stops the route with the file named.
+1. As root, only when `add-apt-repository` or `gpg` is missing: `apt-get update`, then `apt-get install -y --no-install-recommends software-properties-common gnupg`. An `add-apt-repository` whose `--help` does not name `--no-update` (Linux Mint's) is not used: the source build follows.
+2. `add-apt-repository -y -n ppa:git-core/ppa`. `-n` runs no `apt-get update`, so no apt run has seen the new key yet. The real tool keeps an entry that exists and imports the key into the existing keyring, so its result can hold more keys than the pin.
+The layouts add-apt-repository wrote on real systems (E2E of 2026-11-05, WSL 1 chroots):
+
+| Release | software-properties | Source file | Key |
+|---|---|---|---|
+| 20.04 focal | 0.99.9.12 | `git-core-ubuntu-ppa-focal.list` with `http://ppa.launchpad.net/...` | `trusted.gpg.d/git-core_ubuntu_ppa.gpg` (underscores) |
+| 22.04 jammy | 0.99.22.9 and 0.99.22.3 | `git-core-ubuntu-ppa-jammy.list` with `https://ppa.launchpadcontent.net/...` | `trusted.gpg.d/git-core-ubuntu-ppa.gpg`, plus a `.gpg~` backup left by gpg |
+| 24.04 noble | 0.99.49.4 | `git-core-ubuntu-ppa-noble.sources` (34 lines) | embedded in `Signed-By:`, nothing in `trusted.gpg.d` |
+
+Because the key file name differs between releases, the check does not rely on a name alone: it reads both known names, and it lists `sources.list.d` and `trusted.gpg.d` before and after `add-apt-repository`. A new file is the PPA's, and so removable on failure, only when that is proved: a known name, a sources file whose content names the PPA, or a key holding exactly the pin. Any other new file (a neighbour process's vendor source or key) is named, left alone and never deleted. It does not fail a PPA whose own key passed; but when the route fails and a new key remains that cannot be judged, the upgrade stops (no source build, no root apt install) and names it, because apt trusts that key for every repository. The "removed" sentence lists the files that were removed and nothing else.
+
+3. **Check the key fingerprint against the pin `F911AB184317630C59970973E363C90F8F1B6217`** (Launchpad's `signing_key_fingerprint` for the PPA), in the form this release wrote.
+   Ubuntu 24.04 writes `git-core-ubuntu-ppa-noble.sources` with the key embedded in the `Signed-By:` field; Ubuntu 22.04 (software-properties 0.99.22) writes
+   `git-core-ubuntu-ppa-jammy.list` and puts the key in `/etc/apt/trusted.gpg.d/git-core-ubuntu-ppa.gpg` (read from `softwareproperties/shortcuthandler.py`; the container run for
+   22.04 is what proves it for real). Both forms are read by `gpg --show-keys --with-colons` in a scratch `GNUPGHOME`; `trusted.gpg.d/git-core-ubuntu-ppa.gpg` is read whenever it exists, also next to a `.sources` file. Apt trusts every key in it for every repository, so a key file that holds the pin plus any other key, is over 1 MiB or is
+   missing for a `.list` file is not the pin; a gpg that exits non-zero is a failure, whatever it printed.
+4. `apt-get update`.
+5. **The PPA candidate must be 2.54 or newer** (a PPA can exist and still lag, as 20.04's does); below the floor counts as a failure.
+6. `apt-get install -y --no-install-recommends git`.
+
+Any failure from step 2 on **removes only what this run added** (the `.sources` and `.list` files and `/etc/apt/trusted.gpg.d/git-core-ubuntu-ppa.gpg`, which apt trusts for every repository; a PPA that was already there and verified stays),
+**refreshes apt** when lists or files were touched, and only then follows the pinned source build, whose root `apt-get install` therefore never runs with an unchecked PPA enabled. The output says why. Removal is proved by content, not by name: an entry of the PPA left in any sources file, a `rm` that exits 0 and leaves a file, or a failed removal stops the install (no source build, no root apt install) and the message says the PPA may still be enabled and what to remove by hand. A refresh that fails after a good removal also stops it, with its own text (the PPA is not enabled, apt just could not refresh). An interrupt (Ctrl-C) between step 2 and a passed key check removes what this run added and says why it stopped; signals are ignored during that clean-up.
+
+**After a successful install the PPA stays enabled**, so `apt upgrade` keeps git current; `uninstall` leaves the PPA, a `ppa-aside-*` directory and git as they are (uninstall keeps all of them). With neither root nor `sudo`, `install` does not list commands for you to type: the PPA route depends on checks between its commands (the key, the version floor), so it tells you to run `install --upgrade-git` as root. The package route and the Debian source route still list theirs, unless an old PPA has to be moved aside first (then the same message applies).
+
+**Every apt command is non-interactive, also under `sudo`.** `sudo` drops the caller's environment, so each is run as
+`env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a APT_LISTCHANGES_FRONTEND=none <apt-get> -o DPkg::Lock::Timeout=120 ...` with `-y`; the plan prints exactly those words, with the full
+paths of `env`, `apt-get` and `add-apt-repository` found only in the fixed system path (root-owned, not writable by group or others), and marks the commands that run only in some cases
+(`[only when ...]`), including the whole source build as the fallback of the PPA route.
+
+**The source route on Debian and as the Ubuntu fallback** is the shared one of [the RPM section](#rhel-rocky-and-fedora-rpm) (verified downloads first, build as your user under `env -i`, `MANIFEST`,
+copy into `/usr/local`). Its dependencies come from `apt-get update` followed by `apt-get install -y --no-install-recommends build-essential libcurl4-openssl-dev libssl-dev libexpat1-dev zlib1g-dev perl libpcre2-dev xz-utils tar`
+and the flags are `NO_RUST=1 NO_TCLTK=1 NO_GETTEXT=1 USE_LIBPCRE2=1` (the same as RPM; the container build of Debian 13 with `libpcre2-dev` was not run by the author). The source route leaves the
+distribution's `/usr/bin/git` in place, so `install` still warns about it; `--take-over-system-git` is refused on these classes.
+
+The container runs: `tests/platform/ubuntu.sh --phase upgrade` (24.04, `.sources` form), `tests/platform/ubuntu.sh --os ubuntu-22.04 --phase upgrade` (22.04, `.list` form) and
+`tests/platform/ubuntu.sh --os debian-13 --phase upgrade` (source route) start from the stock git, run `install --upgrade-git` as a non-root user with real apt, the real PPA and real downloads,
+check the file form of the PPA, a blocked fake key, a rerun and uninstall.
+
+Ran on 2026-11-06 (arm64 Mac, podman, branch head 29763a8). `mac-linux.sh` takes `ubuntu|rocky` only, has no `--os` and always starts the 24.04 image:
+- `ubuntu:24.04@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852`, via `mac-linux.sh ubuntu --phase upgrade`: E2E 27 passed, 0 failed, PPA route (2.43.0 to 2.56.0 from the PPA package).
+- `debian:13@sha256:9c6e381421d0f48d1b8133e573f33c185ee16cbf505eda9c4a8a4791b25ea8a6` (the `ubuntu.sh` pin), via the same podman command `mac-linux.sh` builds with that image and `ubuntu-container.sh --expect-os debian:13 --skip-isolation <reason> --phase upgrade`: E2E 21 passed, 0 failed, source route (2.47.3 to `/usr/local` 2.56.0).
+
+**Not run:** the Ubuntu 22.04 container (`--os` cannot be forwarded through `mac-linux.sh`) and any x86_64 container. Earlier real-apt chroot runs (22.04, 24.04, Debian 13, 20.04) covered the file forms.
+
+### By hand
+
+If you prefer to do it yourself, or `install` cannot (no sudo, no apt), get a git >= 2.54 first:
 
 ```bash
 sudo apt install jq curl ca-certificates          # setsid (util-linux) and timeout (coreutils) are already there
@@ -172,8 +255,7 @@ curl -fsSLO https://www.kernel.org/pub/software/scm/git/git-2.56.0.tar.xz \
 ```
 
 Then `git clone <this repository> && cd git-secret-guard && bin/git-secret-guard install` works as on RHEL. `install` names the missing
-prerequisite with its fix, always before it changes anything: git (the PPA command on Ubuntu and its derivatives, a build pointer on
-Debian, generic text elsewhere), `jq` (`sudo apt install jq`), `setsid` (`util-linux`), `timeout` (`coreutils`), `curl`, and
+prerequisite with its fix, always before it changes anything: git (the offer above on Ubuntu, Debian and their derivatives, with the manual PPA command as the second line, generic text elsewhere), `jq` (`sudo apt install jq`), `setsid` (`util-linux`), `timeout` (`coreutils`), `curl`, and
 `systemctl` for `--with-timer` (`systemd`; on macOS `launchctl` instead, which ships with the system). It checks all of them first and names **every** missing one with its fix in a single refusal
 (with the count when there are several), so one run is enough to see everything to install. The distribution is read from `/etc/os-release`
 as data (never sourced); a missing or unreadable file gives the generic hint and no shell error.
@@ -339,6 +421,7 @@ that could be a bug gets fixed.
 
 ```bash
 tests/platform/ubuntu.sh                 # PPA first, source build when the PPA has no git >= 2.54 (--git ppa|source|auto)
+tests/platform/ubuntu.sh --phase upgrade  # the real install --upgrade-git on a stock git (--os ubuntu-22.04 or debian-13 pick the other pinned images)
 tests/platform/ubuntu.sh --dry-run       # prints the exact podman command and the facts about the copy, runs nothing
 ```
 
@@ -456,9 +539,10 @@ lacks skip with a reason; none is faked. The service-environment tests emulate a
 ### What the container run trusts
 
 - **The PPA signing key** is fetched from Launchpad over TLS by `add-apt-repository` the first time, so the channel is TLS plus Launchpad itself. The
-  run adds the repository with `add-apt-repository -y -n` (which runs no apt update), compares the fingerprint of the key in
-  `/etc/apt/sources.list.d/git-core-ubuntu-ppa-*.sources` with the pinned `F911AB184317630C59970973E363C90F8F1B6217`, and only then runs
-  `apt-get update`. A mismatch fails the PPA path: the `.sources` file is deleted and `apt-get update` runs again, so the SHA-256 verified source
+  run calls `gitup_apt_ppa_apply` of the product (`lib/gitup_apt.sh`, the same code `install --upgrade-git` runs, no second copy): it adds the repository with
+  `add-apt-repository -y -n` (which runs no apt update), compares the fingerprint of the key (embedded in `/etc/apt/sources.list.d/git-core-ubuntu-ppa-*.sources`, or in
+  `/etc/apt/trusted.gpg.d/git-core-ubuntu-ppa.gpg` for a `.list` file) with the pinned `F911AB184317630C59970973E363C90F8F1B6217`, and only then runs
+  `apt-get update`. A mismatch fails the PPA path: the sources or list file and the `trusted.gpg.d` key are deleted and `apt-get update` runs again, so the SHA-256 verified source
   build that follows in `auto` mode never runs apt as root with the unchecked PPA enabled.
 - **apt packages are not version-pinned.** `jq`, `curl`, `gawk`, `mawk`, `pre-commit`, `dbus` and the others come from the Ubuntu archive (signed by
   apt's own keyring) and the PPA at whatever version they carry on the day; the summary prints the versions that were used.
@@ -501,10 +585,14 @@ Both run the whole suite and the install E2E as a non-root user, in a podman-mac
   not the list). Then `podman pull` the new reference, change `IMAGE` and the digest in this file (`test_the_docs_state_the_platform_test_trust_decisions`
   asserts it). The Rocky image (`ROCKY_IMAGE` in `tests/platform/mac-linux.sh`, `test_the_mac_runner_uses_the_pinned_images`) is bumped the same way.
 - **Bumping the PPA key fingerprint.** On 24.04 `add-apt-repository` writes `/etc/apt/sources.list.d/git-core-ubuntu-ppa-noble.sources` with the
-  key inlined in an indented `Signed-By:` block (blank armor lines as ` .`) and nothing under `trusted.gpg.d`. `ppa_key_fingerprints` feeds that
-  armor to `gpg --show-keys --with-colons` in a scratch `GNUPGHOME` and prints field 10 of the first `fpr` record after each `pub`. To bump
-  `PPA_PINNED_FPR` (in `tests/platform/ubuntu-container.sh`), read the new fingerprint the same way inside a container and compare it with
-  Launchpad's page for the PPA before changing the constant.
+  key inlined in an indented `Signed-By:` block (blank armor lines as ` .`) and nothing under `trusted.gpg.d`; on 22.04 it writes `git-core-ubuntu-ppa-jammy.list` and
+  the key goes to `/etc/apt/trusted.gpg.d/git-core-ubuntu-ppa.gpg`. `gitup_apt_show_keys` (`lib/gitup_apt.sh`) feeds either to `gpg --show-keys --with-colons` in a
+  scratch `GNUPGHOME` and prints field 10 of the first `fpr` record after each `pub`. To bump `GITUP_APT_PPA_FPR` (same file), read the new fingerprint the same way inside a
+  container and compare it with Launchpad's page for the PPA before changing the constant. `test_real_gpg_reads_the_fingerprint_of_both_ppa_file_forms` runs the real gpg on
+  both forms; the other tests use a stand-in gpg that prints the real colon format for a `STUBKEY:` marker.
+- **Bumping the 22.04 and Debian images.** `IMAGE_2204` and `IMAGE_DEBIAN` in `tests/platform/ubuntu.sh` are bumped like `IMAGE` above (repository `library/ubuntu` with tag
+  `22.04`, `library/debian` with tag `13`; the method reproduced the pinned 24.04 digest on 2026-11-05). The mount and `/dev` baselines (`ISOLATION_MOUNT_RULES`,
+  `ISOLATION_ALLOWED_DEV`) were derived on the 24.04 image; check them on each new image before trusting a run, and add an image for each new LTS.
 - **shellcheck digests.** koalaman publishes no digests for the release tarballs; `SHELLCHECK_SHA256_X86_64` and `SHELLCHECK_SHA256_AARCH64` in
   `tests/platform/ubuntu-container.sh` were computed once from the downloads.
 - **Deriving the mount table.** Podman's default masked and read-only paths are strings in its binary:
@@ -518,9 +606,10 @@ Both run the whole suite and the install E2E as a non-root user, in a podman-mac
 - **Container script chain.** `ubuntu.sh` (host launcher, the trust boundary) -> `ubuntu-container.sh` (root; sourceable, `main`
   runs only when executed) -> `ubuntu-e2e.sh` (`gsguser`), tested through `--dry-run` and sourced functions by `tests/test_platform.sh`
   (skipped on Darwin). Helpers there: `isolation_with`, `dev_baseline`, `ns_fixture`, `baseline_with`, `mountinfo_fixture MP[=FSTYPE]`,
-  `PPA_STUB_ENV` (`STUB_LOCK` needs non-root). `ubuntu.sh` must never mention `--skip-isolation` (`tests/test_mac_runner.sh`). A failed
-  `ppa_disable` makes `install_git_ppa` return 2 and no source build runs (its root `apt-get install` would trust a PPA that may still be
-  enabled). Rocky also installs the stock distro git, because a doctor test calls `/usr/bin/git` directly.
+  `gua_container_ppa` (`tests/test_gitup_apt_ppa.sh`). `ubuntu.sh` must never mention `--skip-isolation` (`tests/test_mac_runner.sh`). `install_git_ppa` is a
+  wrapper over the product's `gitup_apt_ppa_apply`; a failed disable makes it return 2 and no source build runs (its root `apt-get install` would trust a PPA that may still be
+  enabled). `--phase upgrade` (`tests/platform/apt-phase.sh`, then `apt-upgrade-e2e.sh` as `gsguser` with sudo) is the real `install --upgrade-git`; `ubuntu.sh --os`
+  chooses the pinned image and passes `--expect-os ID:VERSION` for the isolation check. Rocky also installs the stock distro git, because a doctor test calls `/usr/bin/git` directly.
 - **Mac runner gotchas.** `stage_checkout` runs `git init` in the copy (`tests/test_quality.sh` uses `git ls-files`); BSD `mktemp -t`
   appends a suffix; macOS bash rejects a regex repetition over 255.
 - **Shell traps that bit.** `set -o pipefail` plus `sed ...q` inside `$( )` is a race (the writer gets SIGPIPE); it once turned a good

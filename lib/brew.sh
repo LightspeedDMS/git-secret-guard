@@ -13,6 +13,8 @@ brew_is_macos() { [ "$(uname -s)" = Darwin ]; }
 
 # ^ invariant BREW_INSTALLED = the formulae a brew install put on this machine during this invocation, bootstrap included; "" = brew install never ran
 BREW_INSTALLED=""
+# ^ invariant 1 once a git upgrade apply failed => the refusal text names what the failed attempt left, and does not claim an upgrade
+GITUP_APPLY_FAILED=0
 
 # ^ invariant prints the claim for a refusal, "nothing was changed" until BREW_INSTALLED is set, afterwards what changed
 brew_unchanged_text() {
@@ -22,9 +24,17 @@ brew_unchanged_text() {
     elif [ -z "$gitup" ]; then
         printf 'the only change made was the Homebrew install of %s in this run' "$BREW_INSTALLED"
     elif [ -z "$BREW_INSTALLED" ]; then
-        printf 'the only change made was the git upgrade of this run (%s)' "$gitup"
+        if [ "$GITUP_APPLY_FAILED" = 1 ]; then
+            printf 'the only changes are what the failed git upgrade of this run left behind (%s)' "$gitup"
+        else
+            printf 'the only change made was the git upgrade of this run (%s)' "$gitup"
+        fi
     else
-        printf 'the changes made in this run were the Homebrew install of %s and the git upgrade (%s)' "$BREW_INSTALLED" "$gitup"
+        if [ "$GITUP_APPLY_FAILED" = 1 ]; then
+            printf 'the changes made in this run were the Homebrew install of %s and what the failed git upgrade of this run left behind (%s)' "$BREW_INSTALLED" "$gitup"
+        else
+            printf 'the changes made in this run were the Homebrew install of %s and the git upgrade (%s)' "$BREW_INSTALLED" "$gitup"
+        fi
     fi
 }
 

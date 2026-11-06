@@ -250,7 +250,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        scenario: [winget, inuse, killed, signature, rerun, prompt]
+        scenario: [winget, inuse, inuse-winget, killed, signature, rerun, prompt]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -267,4 +267,4 @@ jobs:
         if: always()
         with:
           name: windows-${{ matrix.scenario }}
-          path: ${{ runner.temp }}\logs
+          path: ci-logs

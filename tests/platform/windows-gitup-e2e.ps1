@@ -3,7 +3,7 @@
 # One scenario per run, chosen by -Scenario; the output ends with 'E2E SUMMARY: N passed, M failed'. The fake credential is built at run time and never printed.
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('winget', 'inuse', 'killed', 'signature', 'rerun', 'prompt')]
+    [ValidateSet('winget', 'inuse', 'inuse-winget', 'killed', 'signature', 'rerun', 'prompt')]
     [string]$Scenario
 )
 Set-StrictMode -Version 2
@@ -24,7 +24,7 @@ $script:Fail = 0
 function Show([string]$Text) {
     foreach ($line in ($Text -split "`r?`n")) { if ($line.Trim().Length -gt 0) { Write-Host ("        | " + $line) } }
 }
-function Check([string]$Name, [bool]$Cond) {
+function Check([string]$Name, [object]$Cond) {
     if ($Cond) { Write-Host "ok      $Name"; $script:Pass++ } else { Write-Host "FAIL    $Name"; $script:Fail++ }
 }
 function Finish {
@@ -49,9 +49,16 @@ function Registry-Version {
     if (Test-Path $k) { return (Get-ItemProperty $k).DisplayVersion } else { return '(no Git_is1 record)' }
 }
 function Pending-Git-Renames {
-    $v = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager' -ErrorAction SilentlyContinue).PendingFileRenameOperations
+    $p = Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager' -ErrorAction SilentlyContinue
+    $v = $null
+    if ($p -and $p.PSObject.Properties['PendingFileRenameOperations']) { $v = $p.PendingFileRenameOperations }
     if (-not $v) { return @() }
     return @($v | Where-Object { $_ -match 'Git' })
+}
+# The product takes winget when it is on PATH; the installer route (digest, signature, kill, files in use) needs it off PATH for the product process only.
+function Hide-Winget {
+    $env:PATH = (($env:PATH -split ';') | Where-Object { $_ -notlike '*\Microsoft\WindowsApps*' }) -join ';'
+    Check "winget is not on PATH for the product, so it takes the installer route" (-not (Get-Command winget.exe -ErrorAction SilentlyContinue))
 }
 
 # Starts the old release over whatever Git for Windows the image has. /ALLOWDOWNGRADE=1 is for this fixture only; the product never passes it.
@@ -103,7 +110,7 @@ function Commit-Blocked {
     return ($rc -ne 0 -and $o -like '*potential secret*' -and -not $leaked)
 }
 function Assert-No-Key([string]$Name, [string]$Text) { Check $Name (-not $Text.Contains((Fake-Key))) }
-function Installer-Files { return @(Get-ChildItem -Path (Join-Path $env:LOCALAPPDATA 'git-secret-guard') -Recurse -Filter '*.exe' -ErrorAction SilentlyContinue) }
+function Installer-Files { return ,@(Get-ChildItem -Path (Join-Path $env:LOCALAPPDATA 'git-secret-guard') -Recurse -Filter '*.exe' -ErrorAction SilentlyContinue) }
 
 function Full-Upgrade-Checks($r) {
     Check "install --upgrade-git ends with exit 0" ($r.Rc -eq 0 -and -not $r.TimedOut)
@@ -133,10 +140,11 @@ function Scenario-Winget {
     Full-Upgrade-Checks $r
 }
 
-function Scenario-InUse {
+function Scenario-InUse([bool]$WithWinget) {
     Install-OldGit
+    if (-not $WithWinget) { Hide-Winget }
     $bash = Join-Path $GitDir 'usr\bin\bash.exe'
-    $holder = Start-Process -FilePath $bash -ArgumentList '-c', 'sleep 1800' -PassThru -WindowStyle Hidden
+    $holder = Start-Process -FilePath $bash -ArgumentList '-c "exec sleep 1800"' -PassThru -WindowStyle Hidden
     Start-Sleep -Seconds 3
     Check "a Git Bash process holds the Git files open during the upgrade" (-not $holder.HasExited)
     $r = Invoke-Gsg @('install', '--upgrade-git') 900
@@ -160,6 +168,7 @@ function Scenario-InUse {
 
 function Scenario-Killed {
     Install-OldGit
+    Hide-Winget
     $script:killed = $false
     $mid = {
         param($proc)
@@ -189,12 +198,13 @@ function Scenario-Killed {
 
 function Scenario-Signature {
     Install-OldGit
+    Hide-Winget
     $sb = Join-Path $Work 'sandbox'
     & robocopy.exe $Root $sb /E /XD .git /NFL /NDL /NJH /NJS /NP | Out-Null
     $lock = Join-Path $sb 'tools.lock'
     $lines = Get-Content $lock | ForEach-Object { if ($_ -match '^# gsg-signer git-for-windows (\S+) ') { "# gsg-signer git-for-windows $($Matches[1]) CN=Not The Pinned Signer, O=Nobody, C=ZZ" } else { $_ } }
     [System.IO.File]::WriteAllText($lock, (($lines -join "`n") + "`n"))
-    Check "the sandbox copy pins another signer than the file has" ((Get-Content $lock) -match 'Not The Pinned Signer')
+    Check "the sandbox copy pins another signer than the file has" ([bool]((Get-Content $lock) -match "Not The Pinned Signer"))
     $before = Git-Version
     $r = Invoke-Gsg @('install', '--upgrade-git') 900 $null $sb
     Show ($r.Out -split "`n" | Select-Object -Last 12 | Out-String)
@@ -209,20 +219,41 @@ function Scenario-Signature {
     Full-Upgrade-Checks $r2
 }
 
+# The two legs of git-secret-guard.cmd run by hand, so that only the second one can be given a hostile environment: leg 1 (bash, exit 3 and a hand-off),
+# the runner, leg 2 with GSG_GIT_UPGRADED=1 and a dead proxy, which makes the scanner downloads of the rerun fail after the upgrade really happened.
 function Scenario-Rerun {
     Install-OldGit
-    $hooks = Join-Path $Work 'foreign-hooks'
-    New-Item -ItemType Directory -Force -Path $hooks | Out-Null
-    & $GitExe config --global core.hooksPath $hooks
-    $r = Invoke-Gsg @('install', '--upgrade-git') 1500
-    Show ($r.Out -split "`n" | Select-Object -Last 14 | Out-String)
-    Write-Host ("RESULT rerun: exit {0}" -f $r.Rc)
-    Check "git was upgraded by the first leg" ((Git-Version) -like ("*" + (Expected-Git) + "*"))
-    Check "the rerun after the hand-off refuses (a global core.hooksPath is set)" ($r.Rc -ne 0)
-    Check "and does not claim that nothing was changed" ($r.Out -notlike '*nothing was changed*')
-    & $GitExe config --global --unset core.hooksPath
+    Hide-Winget
+    $handoff = Join-Path $env:LOCALAPPDATA 'git-secret-guard\git-upgrade\handoff.txt'
+    $bashCmd = Join-Path $Root 'bin\gsg-bash.cmd'
+    $cli = Join-Path $Root 'bin\git-secret-guard'
+    $env:GSG_HANDOFF = $handoff
+    $o1 = Join-Path $Work 'leg1.txt'
+    $p1 = Start-Process -FilePath "$env:SystemRoot\System32\cmd.exe" -ArgumentList "/c $bashCmd $cli install --upgrade-git > $o1 2>&1" -Wait -PassThru -WindowStyle Hidden
+    Show ((Read-Shared $o1) -split "`n" | Select-Object -Last 4 | Out-String)
+    Check "leg 1 stops with exit 3 and leaves a hand-off" (($p1.ExitCode -eq 3) -and (Test-Path -LiteralPath $handoff))
+    $o2 = Join-Path $Work 'runner.txt'
+    $p2 = Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File $(Join-Path $Root 'bin\gsg-gitup.ps1') $handoff" -Wait -PassThru -WindowStyle Hidden -RedirectStandardOutput $o2
+    Show ((Read-Shared $o2) -split "`n" | Select-Object -Last 4 | Out-String)
+    Check "the runner upgrades git (exit 0)" ($p2.ExitCode -eq 0)
+    Check "git is the pinned version now" ((Git-Version) -like ("*" + (Expected-Git) + "*"))
+    $env:GSG_HANDOFF = ''
+    $env:GSG_GIT_UPGRADED = '1'
+    $env:HTTPS_PROXY = 'http://127.0.0.1:9'
+    $o3 = Join-Path $Work 'leg2.txt'
+    $p3 = Start-Process -FilePath "$env:SystemRoot\System32\cmd.exe" -ArgumentList "/c $bashCmd $cli install --upgrade-git > $o3 2>&1" -Wait -PassThru -WindowStyle Hidden
+    $t3 = Read-Shared $o3
+    Show ($t3 -split "`n" | Select-Object -Last 14 | Out-String)
+    Write-Host ("RESULT rerun: leg 2 exit {0}" -f $p3.ExitCode)
+    Check "leg 2 refuses (the scanner downloads cannot reach the network)" ($p3.ExitCode -ne 0)
+    Check "and does not claim that nothing was changed, git was upgraded before it" ($t3 -notlike '*nothing was changed*')
+    Remove-Item Env:HTTPS_PROXY
+    Remove-Item Env:GSG_GIT_UPGRADED
+    $r = Invoke-Gsg @('install') 900
+    Show ($r.Out -split "`n" | Select-Object -Last 6 | Out-String)
+    Check "the same command without the hostile environment completes (recovery)" ($r.Rc -eq 0)
+    Check "a commit with a fake key is blocked" (Commit-Blocked)
 }
-
 $ConptySource = @'
 using System;
 using System.IO;
@@ -299,6 +330,12 @@ public static class GsgPty
 function Scenario-Prompt {
     Install-OldGit
     Add-Type -TypeDefinition $ConptySource -Language CSharp
+    # Does MSYS bash see a terminal on the pseudo console? One probe per way of starting it, before the product is judged.
+    foreach ($probe in @("$GitDir\bin\bash.exe", "$GitDir\usr\bin\bash.exe")) {
+        $t = ''
+        $prc = [GsgPty]::Run("`"$probe`" -c `"[ -t 0 ] && echo stdin-is-a-tty; [ -t 2 ] && echo stderr-is-a-tty; echo done`"", $Root, 'done', "`r", 60, [ref]$t)
+        Show ("probe " + $probe + ": exit $prc; " + ([regex]::Replace($t, '\x1b\[[0-9;?]*[ -/]*[@-~]', '') -replace '\s+', ' '))
+    }
     $cli = Join-Path $Root 'bin\git-secret-guard.cmd'
     $transcript = ''
     $rc = [GsgPty]::Run("$env:SystemRoot\System32\cmd.exe /c $cli install", $Root, '[y/N]', "y`r", 1500, [ref]$transcript)
@@ -316,7 +353,8 @@ function Scenario-Prompt {
 Write-Host "== Windows scenario: $Scenario ($([System.Environment]::OSVersion.VersionString))"
 switch ($Scenario) {
     'winget' { Scenario-Winget }
-    'inuse' { Scenario-InUse }
+    'inuse' { Scenario-InUse $false }
+    'inuse-winget' { Scenario-InUse $true }
     'killed' { Scenario-Killed }
     'signature' { Scenario-Signature }
     'rerun' { Scenario-Rerun }

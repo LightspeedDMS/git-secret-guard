@@ -162,7 +162,7 @@ hang_snapshot() {
 }
 
 # ^ invariant typed_install ANSWERS LABEL CMD... runs CMD on a pty (script); each answer (backslash n splits them) is typed once the next prompt shows
-# ^ external run 42303388833: strace showed the install bash in read(0) at the takeover prompt for 240 s, the answer typed at the start never reached it
+# ^ external run 42303388833 had strace show the install bash in read(0) at the takeover prompt for 240 s; the answer typed at the start never reached it
 # ^ why typed when the prompt shows, not queued at the start; a person answers a prompt they see, and why the queued answer was lost is not established
 typed_install() {
     local answers="$1" label="$2" dir writer watcher a n=0

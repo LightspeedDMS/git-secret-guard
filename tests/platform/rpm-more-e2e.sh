@@ -109,11 +109,21 @@ mode_bump() {
         '$1 == "git" && $3 == "source" { print "git " v " source " s; next } $1 == "git-manpages" && $3 == "source" { print "git-manpages " v " source " m; next } { print }' \
         "$HOME/tools.lock.current" >"$lock"
     check "the checkout pins $BUMP_OLD_VERSION for now" grep -q "^git $BUMP_OLD_VERSION source " "$lock"
+    # ^ why a first build without the flag, not the current code; it stands for a build made before INSTALL_SYMLINKS=1, whose files are hard links
+    cp "$CK/lib/gitup_source.sh" "$HOME/gitup_source.sh.current" || { bad "gitup_source.sh cannot be copied"; return 1; }
+    sed -i 's/ INSTALL_SYMLINKS=1//g' "$CK/lib/gitup_source.sh"
+    check "the first build is made without INSTALL_SYMLINKS=1" test -z "$(grep -c INSTALL_SYMLINKS=1 "$CK/lib/gitup_source.sh" | grep -v "^0$")"
     run "$GSG" install --upgrade-git </dev/null
     show "$(printf '%s' "$OUT" | grep -E 'route:|download git|installed git-secret-guard' | head -n 4 | cut -c1-140)"
     check "install at the older pin exits 0" rc_is 0
     check "git $BUMP_OLD_VERSION is in /usr/local" test "$(git_ver /usr/local/bin/git)" = "$BUMP_OLD_VERSION"
     check "and its MANIFEST is in a directory named for it" test -f "$docs/git-$BUMP_OLD_VERSION-local/MANIFEST"
+    check "that build has hard links: git has more than one name" test "$(stat -c %h /usr/local/bin/git)" -gt 1
+    cp "$HOME/gitup_source.sh.current" "$CK/lib/gitup_source.sh" || { bad "gitup_source.sh cannot be restored"; return 1; }
+    check "the code is the current one again, with the flag" grep -q 'INSTALL_SYMLINKS=1' "$CK/lib/gitup_source.sh"
+    run "$GSG" install --upgrade-git </dev/null
+    check "at the same pin the hard-link build is not rebuilt: no plan" not has "plan"
+    check "and it still has hard links" test "$(stat -c %h /usr/local/bin/git)" -gt 1
     cp "$HOME/tools.lock.current" "$lock"
     check "the checkout pins $cur again" grep -q "^git $cur source " "$lock"
     run "$GSG" install </dev/null
@@ -126,6 +136,9 @@ mode_bump() {
     check "git $cur is in /usr/local" test "$(git_ver /usr/local/bin/git)" = "$cur"
     check "its MANIFEST is there" test -f "$docs/git-$cur-local/MANIFEST"
     check "the directory of the older build is gone" test ! -e "$docs/git-$BUMP_OLD_VERSION-local"
+    check "the rebuild turned the hard links into symlinks: git has one name" test "$(stat -c %h /usr/local/bin/git)" = 1
+    check "and the libexec entry git-merge is a symlink" test -L /usr/local/libexec/git-core/git-merge
+    check "no libexec entry is a second name of git" test -z "$(find /usr/local/libexec/git-core -maxdepth 1 -type f -samefile /usr/local/bin/git)"
     check "it is still first on PATH" test "$(command -v git)" = /usr/local/bin/git
     check "the RPM git is untouched" rpm_clean
     check "a commit with a fake key is blocked and a clean one passes" blocked_commit git

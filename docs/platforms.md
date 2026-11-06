@@ -4,7 +4,7 @@
 |---|---|
 | RHEL 9-compatible (x86_64) | Supported. RHEL 9-compatible (tested on Rocky Linux 9.7); there `/usr/local/bin/git` is built from source and `/usr/bin/git` 2.52 is left alone. |
 | Ubuntu 24.04 LTS | Supported. The whole suite and an install E2E with real downloads run in a podman `ubuntu:24.04` container, as a non-root user, with mawk as the default awk: `tests/platform/ubuntu.sh`. `install` offers the git upgrade: see [Ubuntu and Debian (apt)](#ubuntu-and-debian-apt). |
-| Ubuntu 22.04 LTS and Debian 13 | Offer tested against stand-ins (2.34.1 on 22.04 takes the PPA in its older `.list` form, Debian takes the source build) and, with real apt, in debootstrap chroots (22.04, 24.04, Debian 13, 20.04). Debian 13 also ran the `--phase upgrade` container E2E (source route, 21/0). **Not run:** an Ubuntu 22.04 container and x86_64 ([details](#ubuntu-and-debian-apt)). |
+| Ubuntu 22.04 LTS and Debian 13 | Offer tested against stand-ins (2.34.1 on 22.04 takes the PPA in its older `.list` form, Debian takes the source build) and, with real apt, in debootstrap chroots (22.04, 24.04, Debian 13, 20.04). Debian 13 also ran the `--phase upgrade` container E2E (source route, 21/0). **Not run:** an Ubuntu 22.04 container and an x86_64 container ([details](#ubuntu-and-debian-apt)). |
 | macOS arm64 (tested on macOS 26.7.1) | Supported, with Homebrew: see [macOS (Homebrew)](#macos-homebrew). The whole suite and an install E2E in a scratch home run on a real Mac. |
 | Windows x86_64 (tested on Windows Server 2019) | Supported with Git for Windows: see [Windows (Git for Windows)](#windows-git-for-windows). No weekly timer; the lifecycle test suites do not run there. |
 | macOS x86_64 (Intel) | Mapped (`darwin_amd64` / `darwin_x64` rows of `tools.lock`) but **not tested**. |
@@ -221,11 +221,11 @@ The container runs: `tests/platform/ubuntu.sh --phase upgrade` (24.04, `.sources
 `tests/platform/ubuntu.sh --os debian-13 --phase upgrade` (source route) start from the stock git, run `install --upgrade-git` as a non-root user with real apt, the real PPA and real downloads,
 check the file form of the PPA, a blocked fake key, a rerun and uninstall.
 
-Ran on 2026-11-06 (arm64 Mac, podman, branch head 29763a8) through `mac-linux.sh`, which takes `ubuntu|rocky` only and has no `--os`:
-- `ubuntu:24.04@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852`, `--phase upgrade`: E2E 27 passed, 0 failed, PPA route (2.43.0 to 2.56.0 from the PPA package).
-- `debian:13@sha256:9c6e381421d0f48d1b8133e573f33c185ee16cbf505eda9c4a8a4791b25ea8a6`, `--phase upgrade`: E2E 21 passed, 0 failed, source route (2.47.3 to `/usr/local` 2.56.0).
+Ran on 2026-11-06 (arm64 Mac, podman, branch head 29763a8). `mac-linux.sh` takes `ubuntu|rocky` only, has no `--os` and always starts the 24.04 image:
+- `ubuntu:24.04@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852`, via `mac-linux.sh ubuntu --phase upgrade`: E2E 27 passed, 0 failed, PPA route (2.43.0 to 2.56.0 from the PPA package).
+- `debian:13@sha256:9c6e381421d0f48d1b8133e573f33c185ee16cbf505eda9c4a8a4791b25ea8a6` (the `ubuntu.sh` pin), via the same podman command `mac-linux.sh` builds with that image and `ubuntu-container.sh --expect-os debian:13 --skip-isolation <reason> --phase upgrade`: E2E 21 passed, 0 failed, source route (2.47.3 to `/usr/local` 2.56.0).
 
-**Not run:** the Ubuntu 22.04 container (`--os` cannot be forwarded through `mac-linux.sh`) and any x86_64 host. Earlier real-apt chroot runs (22.04, 24.04, Debian 13, 20.04) covered the file forms.
+**Not run:** the Ubuntu 22.04 container (`--os` cannot be forwarded through `mac-linux.sh`) and any x86_64 container. Earlier real-apt chroot runs (22.04, 24.04, Debian 13, 20.04) covered the file forms.
 
 ### By hand
 

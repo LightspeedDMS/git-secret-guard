@@ -6,7 +6,7 @@
 # ^ invariant the libraries the CLI loads for install, in its order (install_tools holds install_cleanup, also removing the build dir)
 # shellcheck disable=SC2016
 GU_PRELUDE='set -u; GSG_ROOT="$1"; shift
-for lib in brew common state tools hookspath wsl install install_tools gitup gitup_source; do source "$GSG_ROOT/lib/$lib.sh" || exit 9; done
+for lib in brew common state tools hookspath wsl install install_cmd install_tools gitup gitup_source; do source "$GSG_ROOT/lib/$lib.sh" || exit 9; done
 '
 
 # ^ invariant gu_run BODY ARGS... runs BODY after the CLI libraries load in a clean shell; the lifecycle env and PATH apply

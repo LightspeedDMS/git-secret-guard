@@ -343,8 +343,28 @@ uninstall_run() {
     uninstall_steps "$remove_tools"
     rc=$?
     doctor_rec_unlock || rc=1
-    if [ "$rc" -eq 0 ] && [ "$ST_EXISTS" -eq 1 ]; then rmdir -- "$GSG_STATE_DIR" 2>/dev/null || true; fi
+    if [ "$rc" -eq 0 ]; then rmdir -- "$GSG_STATE_DIR" 2>/dev/null || true; fi
     return "$rc"
+}
+
+# ^ invariant removes the files an upgrade hand-off leaves (handoff.txt, Git-*-64-bit.exe) from its two places, and the empty directories after them
+# ^ security only files named like ours go, and a git-upgrade directory held by a link stays => nothing outside the hand-off directory can be deleted
+uninstall_gitup_handoff() {
+    local d f local_app="" removed=0
+    if ! tools_is_windows; then return 0; fi
+    if [ -n "${LOCALAPPDATA:-}" ]; then local_app="$(gsg_posix_path "$LOCALAPPDATA")/git-secret-guard"; fi
+    for d in "$GSG_STATE_DIR/git-upgrade" ${local_app:+"$local_app/git-upgrade"}; do
+        if [ ! -d "$d" ] || [ -L "$d" ]; then continue; fi
+        for f in "$d"/handoff.txt "$d"/handoff.txt.* "$d"/Git-*-64-bit.exe; do
+            if [ -f "$f" ] && [ ! -L "$f" ]; then
+                rm -f -- "$f" || return 1
+                removed=1
+            fi
+        done
+        rmdir -- "$d" 2>/dev/null || true
+    done
+    if [ -n "$local_app" ]; then rmdir -- "$local_app" 2>/dev/null || true; fi
+    if [ "$removed" -eq 1 ]; then uninstall_say "removed the files of a git upgrade hand-off"; fi
 }
 
 uninstall_steps() {
@@ -358,6 +378,7 @@ uninstall_steps() {
     uninstall_read_placed || return 1
     uninstall_restore_replaced || return 1
     if [ "$remove_tools" -eq 1 ]; then uninstall_tools || return 1; fi
+    uninstall_gitup_handoff || return 1
     uninstall_state || return 1
     if [ "$GSG_UNINSTALL_ACTIONS" -eq 0 ]; then
         printf '%s: nothing to do, git-secret-guard is not installed\n' "$GSG_NAME"

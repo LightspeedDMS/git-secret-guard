@@ -395,13 +395,24 @@ test_the_hook_never_looks_tools_up_on_PATH() {
     assert_eq "$rc" 1 "no PATH lookup of a tool outside lib/install.sh and lib/brew.sh (grep exit 1 = no match; 0 = found one, 2 = grep failed)"
 }
 
+# ^ invariant the pattern of the hook guard; the guard and the test of its coverage share this one definition
+GSG_LIFECYCLE_RE='(install[a-z_]*|uninstall|status|state|tools|hookspath|brew|wsl|gitup[a-z_]*)\.sh|usage\.md'
+
+test_the_hook_guard_pattern_names_every_install_time_library() {
+    cd -- "$GSG_PROJECT" || return 1
+    local f
+    for f in lib/install*.sh lib/uninstall.sh lib/gitup*.sh; do
+        grep -qE "$GSG_LIFECYCLE_RE" <<<"source \"\$GSG_ROOT/$f\"" || fail "the hook guard does not name $f"
+    done
+}
+
 test_the_hook_never_loads_the_install_time_libraries() {
     cd -- "$GSG_PROJECT" || return 1
     local -a files
     local rc
     mapfile -t files < <(hook_load_path)
     [ "${#files[@]}" -ge 8 ] || fail "only ${#files[@]} hook files found"
-    grep -nE '(install|uninstall|status|state|tools|hookspath|brew|wsl|gitup[a-z_]*)\.sh|usage\.md' "${files[@]}"
+    grep -nE "$GSG_LIFECYCLE_RE" "${files[@]}"
     rc=$?
     assert_eq "$rc" 1 "the hook's load path never reaches a lifecycle library (grep exit 1 = no match)"
 }

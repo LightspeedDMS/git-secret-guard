@@ -392,6 +392,21 @@ test_fresh_install_records_the_state() {
     assert_eq "$(wc -l <"$LC_STATE/state")" 8 "exactly the eight keys"
 }
 
+# ^ invariant what install writes is independent of the caller umask; WSL 1 starts every shell at 0000, the normal case there
+test_install_under_umask_000_leaves_nothing_writable_by_group_or_others() {
+    local bad
+    if [ "$TEST_IS_WINDOWS" -eq 1 ]; then skip_test "NTFS has no unix modes"; fi
+    lc_begin && lc_make_fixtures && lc_use_fixtures || return 1
+    run_cap bash -c 'umask 000; exec "$@"' _ env -i "${LC_ENV[@]}" "${EXTRA_ENV[@]}" "$GSG_PROJECT/bin/git-secret-guard" install
+    assert_rc 0 "install under umask 000"
+    assert_file "$LC_DATA/settings" "the settings file exists"
+    find "$LC_DATA" "$LC_STATE" "$LC_HOME/.local/bin" ! -type l \( -perm -020 -o -perm -002 \) >"$SANDBOX/perm.out" 2>"$SANDBOX/perm.err"
+    assert_eq "$?" 0 "find itself ran ($(<"$SANDBOX/perm.err"))"
+    bad="$(LC_ALL=C sort "$SANDBOX/perm.out")"
+    assert_empty "$bad" "no file or directory install wrote is writable by group or others"
+    assert_eq "$(stat -c %a "$LC_DATA/settings")" 644 "settings is 644, as under the usual umask 022"
+}
+
 seed_old_hooks() {
     mkdir -p -- "$1/sub" && printf '#!/bin/sh\necho old pre-commit\n' >"$1/pre-commit" && chmod 755 "$1/pre-commit" \
         && printf 'nested\n' >"$1/sub/data.txt"

@@ -114,11 +114,13 @@ install_git_hint() {
     fi
     case "$REPLY" in
         ubuntu)
-            printf '%s: on Ubuntu get a current git with: sudo add-apt-repository ppa:git-core/ppa && sudo apt install git\n' "$GSG_NAME" >&2
-            printf '%s: add-apt-repository comes from the software-properties-common package; or build git from source, see docs/platforms.md\n' "$GSG_NAME" >&2
+            printf '%s: on Ubuntu run: %s install --upgrade-git; it takes git >= 2.54 from your repositories or the git-core PPA, or builds the pinned source, see docs/platforms.md\n' \
+                "$GSG_NAME" "$GSG_NAME" >&2
+            printf '%s: by hand: sudo add-apt-repository ppa:git-core/ppa && sudo apt install git (add-apt-repository comes from the software-properties-common package)\n' "$GSG_NAME" >&2
             ;;
         debian)
-            printf '%s: Debian has no PPA; install git >= 2.54 from a newer release or backports, or build it from source, see docs/platforms.md\n' "$GSG_NAME" >&2
+            printf '%s: on Debian run: %s install --upgrade-git; it takes git >= 2.54 from your repositories or builds the pinned source (Debian has no PPA), see docs/platforms.md\n' \
+                "$GSG_NAME" "$GSG_NAME" >&2
             ;;
         rpm)
             printf '%s: on RHEL-compatible systems and Fedora, run: %s install --upgrade-git; it takes git >= 2.54 from your repositories or builds the pinned source, see docs/platforms.md\n' \
@@ -521,6 +523,8 @@ install_copy_share() {
     for item in "${GSG_SHARE_ITEMS[@]}"; do
         cp -a -- "$GSG_ROOT/$item" "$GSG_SHARE_NEW/" || return 1
     done
+    # ^ security cp -a keeps the modes of the checkout (777 on a WSL drive) => nothing the hook sources or runs may stay writable by group or others
+    chmod -R go-w -- "$GSG_SHARE_NEW" || return 1
     install_write_settings "$GSG_SHARE_NEW/settings" || return 1
     if [ -n "${INSTALL_JQ_WRAPPER:-}" ]; then install_write_jq_wrapper "$GSG_SHARE_NEW/jq" "$INSTALL_JQ_BIN" || return 1; fi
     if [ -e "$GSG_SHARE" ]; then
@@ -936,6 +940,8 @@ install_run() {
     if [ "$replace" -eq 1 ]; then GSG_INSTALL_FLAGS+=" --replace-hooks-path"; fi
     if [ "$timer" -eq 1 ]; then GSG_INSTALL_FLAGS+=" --with-timer"; fi
     if [ "$takeover" -eq 1 ]; then GSG_INSTALL_FLAGS+=" --take-over-system-git"; fi
+    # ^ security umask only tightens (022 or stricter) => settings, share tree, CLI link and state are never group or other writable; WSL 1 starts at 0000
+    umask "$(printf '%03o' "$((8#$(umask) | 8#022))")"
     paths_init || return 1
     lifecycle_note_global_config
     trap install_cleanup EXIT

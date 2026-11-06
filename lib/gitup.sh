@@ -15,6 +15,8 @@ GITUP_CLASS="" GITUP_MODULE=""
 # ^ invariant plan sets GITUP_ROUTE (and GITUP_FOUND_GIT for path-fix), apply sets GITUP_NEXT on rc 2, a takeover plan sets GITUP_REASON on rc 1 and 2
 GITUP_ROUTE="" GITUP_FOUND_GIT="" GITUP_NEXT="" GITUP_REASON=""
 GITUP_PRIV_CMDS=()
+# ^ invariant 0 = commands depend on checks made between them (a key, a version floor); with no way to elevate the user is told to run install as root
+GITUP_PRIV_BYHAND=1
 GITUP_SUDO=""
 GITUP_UPGRADE_FLAG=0 GITUP_TAKEOVER_FLAG=0
 GITUP_PLAN_REFUSED=0
@@ -45,9 +47,9 @@ gitup_registry() {
     case "$1" in
         rpm) REPLY=rpm ;;
         # ^ see doc:CONTRIBUTING.md
-        ubuntu) REPLY="" ;;
+        ubuntu) REPLY=apt ;;
         # ^ see doc:CONTRIBUTING.md
-        debian) REPLY="" ;;
+        debian) REPLY=apt ;;
         # ^ see doc:CONTRIBUTING.md
         macos) REPLY=macos ;;
         # ^ see doc:CONTRIBUTING.md
@@ -349,6 +351,11 @@ gitup_need_elevation() {
     local cmd skipped=0
     if [ "${#GITUP_PRIV_CMDS[@]}" -eq 0 ] || gitup_can_elevate; then return 0; fi
     printf '%s: neither root nor sudo is available, so nothing was run; %s\n' "$GSG_NAME" "$(brew_unchanged_text)" >&2
+    if [ "${GITUP_PRIV_BYHAND:-1}" -eq 0 ]; then
+        printf '%s: run %s install --upgrade-git as root, or install sudo; its commands depend on checks that only install makes between them (a signing key, a version floor), so they are not listed to be typed by hand\n' \
+            "$GSG_NAME" "$GSG_NAME" >&2
+        return 1
+    fi
     printf '%s: run these commands as root, then run install again:\n' "$GSG_NAME" >&2
     for cmd in "${GITUP_PRIV_CMDS[@]}"; do
         # ^ why a skip, not a rewrite; a <placeholder> names a file or directory only the run knows, an [only when ...] line is no command of its own
@@ -424,6 +431,7 @@ gitup_abort_cleanup() {
     if [ "$GITUP_IN_APPLY" -ne 1 ]; then return 0; fi
     GITUP_IN_APPLY=0
     if gitup_has abort; then gitup_call abort || printf '%s: the %s module could not undo its unfinished step\n' "$GSG_NAME" "$GITUP_MODULE" >&2; fi
+    GITUP_APPLY_FAILED=1
     if [ "$rc" -ge 129 ] && [ -n "$GITUP_CHANGED" ]; then printf '%s: interrupted; %s\n' "$GSG_NAME" "$(brew_unchanged_text)" >&2; fi
 }
 
@@ -442,6 +450,7 @@ gitup_run_apply() {
             return 3
             ;;
         *)
+            GITUP_APPLY_FAILED=1
             printf '%s: the git upgrade failed (the %s module returned %s); install refused, %s\n' "$GSG_NAME" "$GITUP_MODULE" "$rc" "$(brew_unchanged_text)" >&2
             return 1
             ;;
@@ -450,7 +459,7 @@ gitup_run_apply() {
 
 gitup_offer_upgrade() {
     local rc crc extra=""
-    GITUP_PRIV_CMDS=() GITUP_ROUTE="" GITUP_FOUND_GIT="" GITUP_NEXT=""
+    GITUP_PRIV_CMDS=() GITUP_PRIV_BYHAND=1 GITUP_ROUTE="" GITUP_FOUND_GIT="" GITUP_NEXT=""
     printf '%s: %s; config-based hooks need git >= 2.54\n' "$GSG_NAME" "$(gitup_describe_git)"
     printf '%s: git upgrade plan for this %s system (module %s):\n' "$GSG_NAME" "$GITUP_CLASS" "$GITUP_MODULE"
     gitup_call plan upgrade
@@ -488,7 +497,7 @@ gitup_offer_upgrade() {
 # ^ invariant a refresh plan prints nothing and returns 1 when nothing is stale; declining or having no terminal continues the install
 gitup_offer_refresh() {
     local crc rc
-    GITUP_PRIV_CMDS=() GITUP_PLAN_NOTES=() GITUP_ROUTE="" GITUP_FOUND_GIT="" GITUP_NEXT=""
+    GITUP_PRIV_CMDS=() GITUP_PRIV_BYHAND=1 GITUP_PLAN_NOTES=() GITUP_ROUTE="" GITUP_FOUND_GIT="" GITUP_NEXT=""
     gitup_call plan refresh
     rc=$?
     if [ "$rc" -eq 2 ]; then

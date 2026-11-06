@@ -30,6 +30,7 @@ test_an_old_git_on_ubuntu_names_the_ppa_command_and_changes_nothing() {
     assert_contains "$ERR" "git 2.43.0; config-based hooks need git >= 2.54, install refused" "the existing refusal"
     assert_contains "$ERR" "$UBUNTU_FIX" "the exact command"
     assert_contains "$ERR" "software-properties-common" "and the package add-apt-repository comes from"
+    assert_contains "$ERR" "install --upgrade-git" "and the offer that does it for you"
     assert_contains "$ERR" "see docs/platforms.md" "and where the build path is described"
     nothing_changed "old git on ubuntu"
 }
@@ -57,6 +58,7 @@ test_debian_gets_a_source_build_pointer_and_no_ppa_command() {
     assert_contains "$ERR" "Debian" "names the distribution"
     assert_contains "$ERR" "see docs/platforms.md" "points at the build instructions"
     assert_not_contains "$ERR" "add-apt-repository" "a PPA exists for Ubuntu only"
+    assert_contains "$ERR" "install --upgrade-git" "the hint names the offer"
     nothing_changed "old git on debian"
 }
 
@@ -209,10 +211,9 @@ test_an_old_git_and_a_missing_jq_are_both_named_in_one_refusal() {
     lc_begin && farm_strip jq && farm_old_git jq 2.43.0 && ubuntu_release || return 1
     gsg install
     assert_rc 1 "old git and no jq"
-    assert_contains "$ERR" "git 2.43.0; config-based hooks need git >= 2.54, install refused" "the git refusal"
-    assert_contains "$ERR" "$UBUNTU_FIX" "with its fix"
-    assert_contains "$ERR" "jq is required but was not found on PATH; install it with: sudo apt install jq" "and the jq line in the same run"
-    assert_contains "$ERR" "2 prerequisites are missing; install refused, nothing was changed" "one summary"
+    assert_contains "$ERR" "jq is required but was not found on PATH; install it with: sudo apt install jq" "the jq line"
+    assert_contains "$ERR" "git 2.43.0; once the problems above are fixed install offers to upgrade it" "the old git is deferred to the offer, the apt module has a route for it"
+    assert_contains "$ERR" "install --upgrade-git" "and names the flag"
     nothing_changed "old git and no jq"
 }
 

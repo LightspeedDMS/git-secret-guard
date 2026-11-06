@@ -102,7 +102,7 @@ break it. Read it before changing the hook, extraction, exemptions or install. I
    that touch as one conflict (real merges showed it), and with a comment line between them any two class branches merge cleanly
    (`test_branches_that_each_take_one_reserved_registry_line_merge_without_conflicts` runs those merges). The registry is a plain `case`; there is no globbing and no
    generated name outside `gitup_call`. `gitup_os_class` already detects every class; only the WSL signal (#31) will touch detection. Shared files a module branch does
-   not edit: `tests/coverage.sh` globs `lib/gitup*.sh`, the registry test reads the class list from the library, the CLI loads only the shared `gitup` and
+   not edit: `tests/coverage.sh` globs `lib/gitup*.sh`, the registry test reads the class list from the library, the merge test (`test_branches_that_each_take_one_reserved_registry_line_merge_without_conflicts`) takes the classes still reserved from the library, the CLI loads only the shared `gitup` and
    `gitup_source`, a module sources its own helper libraries (`gitup_rpm.sh` does it for `gitup_takeover.sh`), and the contract tests use synthetic classes
    (`gu_tree_add_class` in `tests/gitup.sh`), so they need no edit. **What a class branch does edit:** the tests that pin today's refusal for that class, because the
    refusal goes away when the class gets a module (`test_a_class_with_no_module_keeps_todays_refusal_and_offers_nothing` in `tests/test_gitup.sh`, the cases of that class
@@ -132,10 +132,10 @@ break it. Read it before changing the hook, extraction, exemptions or install. I
      planned with `gitup_plan_priv`. Both resolve a tool given by name with `gitup_system_bin` (the fixed system path, root-owned, not writable by others), so the plan prints
      the full path that runs. A root run never finds a tool through the caller's `PATH`, and a name missing from the system path is refused by name. The plan lists every
      command, `mkdir` included, and takes its words from the same place as the apply step (the `cp` words of the source route are one array, `GITUP_SRC_CP`, used by both). Reuse `gitup_source_apply`, `gitup_source_print_plan` and
-     `gitup_source_plan_refresh PREPARE_FN` (set `GITUP_SRC_DEPS` and `GITUP_SRC_FLAGS` in `PREPARE_FN`), `tools_fetch_verified` (SHA-256 against `tools.lock`) and
+     `gitup_source_plan_refresh PREPARE_FN` (set `GITUP_SRC_DEPS` and `GITUP_SRC_FLAGS` in `PREPARE_FN`, and `GITUP_SRC_PRE` when a privileged command must run before the dependency install, as `apt-get update` does; the plan and `gitup_source_compile` both take it from there). A plan whose commands depend on checks made between them (a signing key, a version floor) sets `GITUP_PRIV_BYHAND=0`: with neither root nor `sudo` the core then tells the user to run install as root instead of listing commands to type. `gitup_offer_upgrade` and `gitup_offer_refresh` reset it to 1 before each plan, `tools_fetch_verified` (SHA-256 against `tools.lock`) and
      `gitup_version_at_least`.
 4. **The tests.** `tests/gitup.sh` has the helpers (`gu_tree_with_module` builds a copy of the product with your module and its one registry line, `gu_tree_add_module` adds a
-   second one), and `lc_begin` puts recording stand-ins for `sudo`, `dnf`, `rpm`, `restorecon`, `make`, `df` and `ldd` first on `PATH` and as the only places the fixed system path
+   second one), and `lc_begin` puts recording stand-ins for `sudo`, `dnf`, `rpm`, `restorecon`, `make`, `df`, `ldd` and (`tests/apt.sh`) `apt-get`, `apt-cache`, `add-apt-repository` and `gpg` first on `PATH` and as the only places the fixed system path
    looks in; a real tool is never reached. `test_every_registered_module_implements_the_contract` (in `tests/test_gitup.sh`) loads every module in the registry and fails
    naming the module and the missing function, so a new module is checked by being added. `tests/test_gitup_contract.sh` shows each optional capability driven through a test
    module. System paths come from `GSG_GITUP_ROOT` (a sandbox directory in tests), never from `/usr`, `/etc` or `/var` directly. **Fixtures copy the real layout**: the RPM

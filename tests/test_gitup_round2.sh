@@ -98,8 +98,11 @@ test_the_timer_and_launchd_refusals_use_the_changed_wording() {
 }
 
 test_branches_that_each_take_one_reserved_registry_line_merge_without_conflicts() {
-    local repo="$SANDBOX/merge" classes=(ubuntu debian macos windows) a b merged
+    local repo="$SANDBOX/merge" classes=() a b merged
     lc_begin || return 1
+    # ^ why the classes still reserved in the library, not a fixed list; a class branch with its module would otherwise edit this line
+    mapfile -t classes < <(sed -nE 's/^ +([a-z]+)\) REPLY="" ;;$/\1/p' "$GSG_PROJECT/lib/gitup.sh")
+    if [ "${#classes[@]}" -lt 2 ]; then skip_test "fewer than two classes are still reserved, so there is nothing left to merge"; fi
     rm -rf -- "$repo" && mkdir -p -- "$repo/lib" && cp -- "$GSG_PROJECT/lib/gitup.sh" "$repo/lib/gitup.sh" || return 1
     gitx -C "$repo" init -q -b main && gitx -C "$repo" add lib/gitup.sh && gitx -C "$repo" commit -q -m base || return 1
     for a in "${classes[@]}"; do

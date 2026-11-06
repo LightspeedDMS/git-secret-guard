@@ -6,6 +6,9 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/lifecycle.sh"
 # shellcheck source=tests/gitup_windows.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/gitup_windows.sh"
 
+# ^ invariant the entries at the root of the file system when this file was loaded (on Git Bash the Git for Windows install); the last test compares them
+WU_ROOT_NAMES="$(wu_names /)"
+
 # ^ why a uname function, not lc_begin; the module runs on Git for Windows itself and everywhere else through the same fake as tests/test_windows.sh
 # ^ security every Windows tool the module reaches (reg.exe, whoami.exe, winget, curl) is a stand-in in the sandbox => no test can touch the real machine
 
@@ -608,10 +611,10 @@ test_an_installer_that_is_unsigned_or_signed_by_another_signer_is_refused_though
 test_a_junction_in_the_two_directories_install_made_is_refused_and_a_good_installer_stays() {
     wu_need_windows_runner
     wu_prepare_handoff machine || return 1
-    "$TEST_SYSTEM32/cmd.exe" //c mklink //J "$(cygpath -w "$WU_DIR/jx")" "$(cygpath -w "$WU_HANDOFF_DIR")" >/dev/null || return 1
+    wu_mklink "$WU_DIR/jx" "$WU_HANDOFF_DIR" || return 1
     printf 'gsg-git-upgrade-handoff 1\nroute=installer\nscope=machine\nversion=2.56.0.4\ninstaller=%s\n' "$(cygpath -w "$WU_DIR/jx")\\Git-2.56.0.4-64-bit.exe" >"$WU_STATE_HANDOFF" || return 1
     wu_runner "$WU_DIR/jx/handoff.txt"
-    "$TEST_SYSTEM32/cmd.exe" //c rmdir "$(cygpath -w "$WU_DIR/jx")" >/dev/null
+    wu_rmlink "$WU_DIR/jx"
     assert_rc 10 "refused"
     assert_contains "$ERR" "junction or symbolic link" "says why"
     assert_contains "$ERR" "Remove or replace that directory link" "and what to do"
@@ -625,12 +628,12 @@ test_a_junction_above_the_profile_root_is_accepted_by_bash_and_by_the_runner() {
     wu_fixture_exe || return 1
     wu_elevated no
     mkdir -p -- "$WU_DIR/pjreal/Local" || return 1
-    "$TEST_SYSTEM32/cmd.exe" //c mklink //J "$(cygpath -w "$WU_DIR/pj")" "$(cygpath -w "$WU_DIR/pjreal")" >/dev/null || return 1
+    wu_mklink "$WU_DIR/pj" "$WU_DIR/pjreal" || return 1
     set_env LOCALAPPDATA="$(cygpath -w "$WU_DIR/pj")\\Local" GSG_HANDOFF="$(cygpath -w "$WU_DIR/pj")\\Local\\git-secret-guard\\git-upgrade\\handoff.txt"
     wu 'gitup_select; GSG_GIT="$1"; gitup_windows_plan upgrade >/dev/null; gitup_windows_apply; echo "rc=$?"' "$WU_GIT"
     assert_contains "$OUT" "rc=2" "bash accepts a place behind a moved profile"
     wu_runner "$WU_DIR/pj/Local/git-secret-guard/git-upgrade/handoff.txt"
-    "$TEST_SYSTEM32/cmd.exe" //c rmdir "$(cygpath -w "$WU_DIR/pj")" >/dev/null
+    wu_rmlink "$WU_DIR/pj"
     assert_rc 0 "and so does the runner"
     assert_eq "$(wu_installer_log)" "/VERYSILENT /NORESTART /NOCANCEL /SP-" "the installer ran"
 }
@@ -848,15 +851,16 @@ test_the_tools_cache_check_wants_the_installer_named_by_the_lock_not_any_install
 }
 
 test_a_junction_on_the_git_secret_guard_level_is_refused_too() {
-    local top="$WU_DIR/top" real="$WU_DIR/greal"
+    local top real
     wu_need_windows_runner
     wu_prepare_handoff machine || return 1
+    top="$WU_DIR/top" real="$WU_DIR/greal"
     mkdir -p -- "$top" "$real/git-upgrade" || return 1
     cp -- "$WU_HANDOFF_DIR/Git-2.56.0.4-64-bit.exe" "$real/git-upgrade/" || return 1
-    "$TEST_SYSTEM32/cmd.exe" //c mklink //J "$(cygpath -w "$top/git-secret-guard")" "$(cygpath -w "$real")" >/dev/null || return 1
+    wu_mklink "$top/git-secret-guard" "$real" || return 1
     printf 'gsg-git-upgrade-handoff 1\nroute=installer\nscope=machine\nversion=2.56.0.4\ninstaller=%s\n' "$(cygpath -w "$top/git-secret-guard/git-upgrade")\Git-2.56.0.4-64-bit.exe" >"$real/git-upgrade/handoff.txt" || return 1
     wu_runner "$top/git-secret-guard/git-upgrade/handoff.txt"
-    "$TEST_SYSTEM32/cmd.exe" //c rmdir "$(cygpath -w "$top/git-secret-guard")" >/dev/null
+    wu_rmlink "$top/git-secret-guard"
     assert_rc 10 "refused"
     assert_contains "$ERR" "junction or symbolic link" "says why"
     assert_eq "$(wu_installer_log)" "" "nothing ran"
@@ -989,6 +993,32 @@ test_an_installed_version_that_cannot_be_read_as_a_version_stops_the_upgrade_bef
         assert_eq "$(wu_installer_log)" "" "nothing ran [$have]"
         assert_no_file "$WU_STATE_HANDOFF" "the hand-off is used up [$have]"
     done
+}
+
+test_the_path_helpers_refuse_an_empty_or_outside_path_and_create_nothing() {
+    local before after
+    before="$(wu_names /)"
+    WU_DIR=""
+    if wu_sandbox_path "$WU_DIR/top" 2>/dev/null; then fail "an empty WU_DIR gave an accepted path"; fi
+    if wu_sandbox_path "/tmp/outside" 2>/dev/null; then fail "a path outside the sandbox was accepted"; fi
+    if wu_sandbox_path "$SANDBOX/a/../../outside" 2>/dev/null; then fail "a .. path was accepted"; fi
+    wu_sandbox_path "$SANDBOX/inside/x" || fail "a path in the sandbox was refused"
+    if wu_mklink "$WU_DIR/greal" "$WU_DIR/top" 2>/dev/null; then fail "wu_mklink accepted empty paths"; fi
+    after="$(wu_names /)"
+    assert_eq "$after" "$before" "nothing was created at the root"
+}
+
+test_the_stray_file_check_sees_a_new_entry_in_a_directory() {
+    local d="$SANDBOX/names" before
+    wu_sandbox_path "$d" || return 1
+    mkdir -p -- "$d" && : >"$d/a" || return 1
+    before="$(wu_names "$d")"
+    : >"$d/stray" || return 1
+    [ "$(wu_names "$d")" != "$before" ] || fail "a new entry went unseen"
+}
+
+test_zz_nothing_was_created_at_the_root_of_the_file_system() {
+    assert_eq "$(wu_names /)" "$WU_ROOT_NAMES" "no test of this file created an entry at the root (on Git Bash the Git for Windows install)"
 }
 
 run_file_tests

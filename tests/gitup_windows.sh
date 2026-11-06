@@ -38,6 +38,33 @@ wu() {
     ERR="$(<"$SANDBOX/.err")"
 }
 
+# ^ security every path a test creates, links or removes lies below the sandbox; an empty variable would otherwise become a path at the root of the file system
+# ^ invariant refuses (rc 1, message on stderr) an empty path, a relative one, one with a .. component, or one not below $SANDBOX/; a caller returns 1 on it
+wu_sandbox_path() {
+    local p
+    if [ -z "${SANDBOX:-}" ]; then
+        printf 'wu_sandbox_path: SANDBOX is empty\n' >&2
+        return 1
+    fi
+    for p in "$@"; do
+        if [ -z "$p" ] || [ "${p#"$SANDBOX"/}" = "$p" ] || [[ /$p/ == */../* ]] || [[ $p == *[[:cntrl:]]* ]]; then
+            printf 'wu_sandbox_path: refusing [%s], it is empty or not below the sandbox\n' "$p" >&2
+            return 1
+        fi
+    done
+}
+
+# ^ invariant a junction made and removed with cmd; both paths must pass wu_sandbox_path, and removing a junction (rmdir) never reaches its target
+wu_mklink() {
+    wu_sandbox_path "$1" "$2" || return 1
+    "$TEST_SYSTEM32/cmd.exe" //c mklink //J "$(cygpath -w "$1")" "$(cygpath -w "$2")" >/dev/null
+}
+
+wu_rmlink() {
+    wu_sandbox_path "$1" || return 1
+    "$TEST_SYSTEM32/cmd.exe" //c rmdir "$(cygpath -w "$1")" >/dev/null
+}
+
 # ^ invariant prints the Windows spelling of a path; the real cygpath on Windows, the stand-in elsewhere
 wu_w() { cygpath -w "$1"; }
 
@@ -58,6 +85,7 @@ WU_DIR="" WU_GIT="" WU_HANDOFF_DIR="" WU_STATE_HANDOFF="" WU_FRONT_DIR="" WU_SHA
 wu_begin() {
     local scope="$1" ver="$2" app hive sys
     WU_DIR="$SANDBOX/wu"
+    wu_sandbox_path "$WU_DIR" || return 1
     rm -rf -- "$WU_DIR" || return 1
     sys="$WU_DIR/root/windows/System32"
     mkdir -p -- "$WU_DIR/home" "$WU_DIR/xdg/state" "$sys" "$WU_DIR/pathbin" || return 1
@@ -117,7 +145,9 @@ wu_curl_recorder() {
 # ^ invariant wu_fixture good|tampered writes the installer the pinned download serves and a lock for it; tampered serves bytes the lock does not describe
 # ^ invariant the installer is a script recording a run => a test sees whether bash ran it
 wu_fixture() {
-    local fix="$WU_DIR/fix" sha url
+    local fix sha url
+    wu_sandbox_path "$WU_DIR" || return 1
+    fix="$WU_DIR/fix"
     mkdir -p -- "$fix" || return 1
     printf '#!/bin/sh\ntouch %q\n' "$WU_DIR/installer.ran" >"$fix/Git-2.56.0.4-64-bit.exe" || return 1
     sha="$(sha256sum -- "$fix/Git-2.56.0.4-64-bit.exe" | cut -d' ' -f1)" || return 1
@@ -217,7 +247,9 @@ wu_write_lock() {
 # ^ invariant is wu_fixture good with the signed stand-in as the pinned download and a sandbox copy of the runner with its own tools.lock beside bin
 # ^ why a copy with one changed line, not an environment variable; the product runner reads no environment, a test cannot reach its checks from outside
 wu_fixture_exe() {
-    local fix="$WU_DIR/fix" sha url
+    local fix sha url
+    wu_sandbox_path "$WU_DIR" || return 1
+    fix="$WU_DIR/fix"
     wu_build_standin || return 1
     WU_RT="$WU_DIR/rt" WU_LOCK="$WU_DIR/rt/tools.lock"
     mkdir -p -- "$fix" "$WU_DIR/standin" "$WU_RT/bin" || return 1
@@ -359,4 +391,12 @@ wu_prepare_handoff() {
     wu_elevated no
     wu 'gitup_select; GSG_GIT="$1"; gitup_windows_plan upgrade >/dev/null; gitup_windows_apply; echo "rc=$?"' "$WU_GIT"
     assert_contains "$OUT" "rc=2" "the module handed off"
+}
+
+# ^ invariant the sorted names in a directory on one line; the stray-file check compares two of these
+wu_names() {
+    local f
+    for f in "$1"/* "$1"/.[!.]* "$1"/..?*; do
+        if [ -e "$f" ] || [ -L "$f" ]; then printf '%s\n' "${f##*/}"; fi
+    done | LC_ALL=C sort | tr '\n' ' '
 }

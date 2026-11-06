@@ -3,7 +3,7 @@
 set -u
 # ^ external runs inside a WSL distribution on a disposable GitHub Windows runner (.github/workflows/wsl.yml) and refuses to run anywhere else
 # ^ security the fake credential is built at runtime from fragments and never printed; every output is checked for its absence before any of it is shown
-# ^ coupled phases are facts probe upgrade mount-for-user mntc installed-cli tests, one per workflow step; WS, MAIN and LOGS come from the workflow
+# ^ coupled phases are prepare facts probe upgrade mount-for-user mntc installed-cli tests, one per step; WS, MAIN, LOGS and CONSENT come from the workflow
 
 PHASE="${1:-}"
 WS="${WS:-}"
@@ -34,11 +34,11 @@ check() { if "${@:2}"; then ok "$1"; else bad "$1"; fi; }
 show() { printf '        | %s\n' "$@"; }
 has() { [[ $OUT == *"$1"* ]]; }
 rc_is() { [ "$RC" -eq "$1" ]; }
-# ^ invariant run LABEL CMD... keeps stdout and stderr in LOGS/LABEL.log and in OUT; output holding the fake key is never kept
+# ^ invariant run LABEL CMD... keeps stdout and stderr in LOGS/LABEL.log and in OUT, stdin is RUN_STDIN or /dev/null; output holding the fake key is never kept
 run() {
     local label="$1"
     shift
-    "$@" >"$LOGS/$label.raw" 2>&1 </dev/null
+    "$@" >"$LOGS/$label.raw" 2>&1 <"${RUN_STDIN:-/dev/null}"
     RC=$?
     OUT="$(<"$LOGS/$label.raw")"
     if [[ $OUT == *"$(fake_key)"* ]]; then
@@ -86,6 +86,22 @@ blocked_and_clean() {
     check "$label: a clean commit passes" rc_is 0
 }
 
+# ^ external the vendor WSL images of Rocky and Fedora hold no git, jq, ps or user to test with; this root phase adds them from the repositories
+# ^ invariant prepare runs as root once, after the distribution exists; it adds git as the repository ships it and a user with sudo, as a developer has
+phase_prepare() {
+    if [ "$(id -u)" -ne 0 ]; then bad "prepare must run as root"; return 0; fi
+    if command -v dnf >/dev/null 2>&1; then
+        run prepare-dnf dnf install -y git jq procps-ng shadow-utils sudo curl tar util-linux findutils
+        check "dnf installed the tools (rc $RC)" rc_is 0
+    fi
+    info "stock git: $(git --version); $(grep -E '^(ID|VERSION_ID)=' /etc/os-release | tr '\n' ' ')"
+    id gsg >/dev/null 2>&1 || useradd -m -s /bin/bash gsg
+    printf 'gsg ALL=(ALL) NOPASSWD:ALL\n' >/etc/sudoers.d/gsg && chmod 440 /etc/sudoers.d/gsg
+    check "the test user exists with sudo" bash -c 'id gsg >/dev/null && sudo -n -u gsg true'
+    chmod 777 "$LOGS"
+    chmod -R a+rX "$WS" "$MAIN" || true
+}
+
 phase_facts() {
     {
         printf 'kernel: %s\n' "$(uname -r)"
@@ -120,17 +136,59 @@ phase_probe() {
     rm -rf -- "${base:?}"
 }
 
+# ^ invariant typed_install ANSWER LABEL CMD... runs CMD on a pty (script), typing ANSWER and Enter at the prompt; RC is the command rc, the log LOGS/LABEL.log
+# ^ why a fifo held open by a writer, not a pipe from printf; EOF on the stdin of script ends the session before a long install is done
+typed_install() {
+    local answer="$1" label="$2" dir writer
+    shift 2
+    dir="$(mktemp -d "$HOME/typed.XXXXXX")" || return 1
+    case "$dir" in /?*/?*) ;; *) return 1 ;; esac
+    mkfifo "$dir/in" || return 1
+    { printf '%s\n' "$answer"; exec sleep 3000; } >"$dir/in" &
+    writer=$!
+    RUN_STDIN="$dir/in" run "$label" timeout 3000 script -qefc "$*" /dev/null
+    kill "$writer" 2>/dev/null
+    wait "$writer" 2>/dev/null
+    rm -rf -- "${dir:?}"
+}
+
+# ^ invariant true when nothing of an upgrade is on the machine, meaning no git under /usr/local, no git-core PPA file and no install state
+no_upgrade_artifacts() {
+    [ ! -e /usr/local/bin/git ] && ! compgen -G '/etc/apt/sources.list.d/git-core*' >/dev/null && [ ! -e "$HOME/.local/share/git-secret-guard" ]
+}
+
 phase_upgrade() {
+    local stock_old=1 before
     need_ws
     rm -rf -- "$LINUX_CK" && cp -a -- "$WS" "$LINUX_CK" || exit 2
-    check "the machine starts with a git older than 2.54" bash -c '! git --version | grep -Eq "git version (2\.(5[4-9]|[6-9][0-9])|[3-9])"'
-    run upgrade-refuse "$LINUX_CK/bin/git-secret-guard" install
-    check "install without --upgrade-git refuses on the old git" test "$RC" -ne 0
-    run upgrade "$LINUX_CK/bin/git-secret-guard" install --upgrade-git
+    if ver_ge_254; then stock_old=0; info "stock git is already $(git --version): there is nothing to upgrade, the flow below checks that nothing is offered"; fi
+    if [ "$stock_old" -eq 1 ]; then
+        before="$(git --version)"
+        typed_install n typed-no "$LINUX_CK/bin/git-secret-guard" install
+        check "typed No: the prompt is shown" has "Upgrade git now with the plan above? [y/N]"
+        check "typed No: install refuses (rc $RC)" test "$RC" -ne 0
+        check "typed No: git is unchanged ($before)" test "$(git --version)" = "$before"
+        check "typed No: nothing of an upgrade or an install is on the machine" no_upgrade_artifacts
+        run upgrade-refuse "$LINUX_CK/bin/git-secret-guard" install
+        check "install without a terminal and without --upgrade-git refuses on the old git" test "$RC" -ne 0
+        if [ "${CONSENT:-flag}" = typed ]; then
+            typed_install y upgrade "$LINUX_CK/bin/git-secret-guard" install
+            check "typed yes: the prompt is shown" has "Upgrade git now with the plan above? [y/N]"
+            check "typed yes: install exits 0 (rc $RC)" rc_is 0
+        else
+            run upgrade "$LINUX_CK/bin/git-secret-guard" install --upgrade-git
+            check "install --upgrade-git exits 0 (rc $RC)" rc_is 0
+        fi
+    else
+        run upgrade "$LINUX_CK/bin/git-secret-guard" install --upgrade-git
+        check "stock git is new enough: install exits 0 (rc $RC)" rc_is 0
+        check "and offers no upgrade" bash -c '! grep -q "upgrade plan" "$1"' _ "$LOGS/upgrade.log"
+    fi
     show "$(printf '%s' "$OUT" | grep -E 'upgrade plan|note:|route:|as root:' | cut -c1-200 | head -n 14)"
-    check "install --upgrade-git exits 0 (rc $RC)" rc_is 0
-    check "the plan says it is a WSL plan" has "git upgrade plan for this wsl system"
-    check "the plan says it applies to this distribution only" has "this upgrades git inside this WSL distribution only"
+    if [ "$stock_old" -eq 1 ]; then
+        check "the plan says it is a WSL plan" has "git upgrade plan for this wsl system"
+        check "the plan says it applies to this distribution only" has "this upgrades git inside this WSL distribution only"
+    fi
     check "git is 2.54 or newer afterwards ($(git --version))" ver_ge_254
     run status "$HOME/.local/bin/git-secret-guard" status
     check "status exits 0" rc_is 0
@@ -163,6 +221,7 @@ phase_upgrade() {
 # ^ external the runner mounts the drive for root (WSL 1 drvfs uid=0, WSL 2 9p uid=0); a developer mount carries their uid (uid=1000 measured on a distribution)
 # ^ invariant mount-for-user runs as root before mntc and remounts /mnt/c for the test user; mntc runs as the user and fails if the mount is not theirs
 phase_mount_for_user() {
+    local extra="${1:-}"
     local user=gsg u g
     if [ "$(id -u)" -ne 0 ]; then bad "mount-for-user must run as root"; return 0; fi
     if ! id "$user" >/dev/null 2>&1; then bad "the user $user does not exist"; return 0; fi
@@ -175,31 +234,37 @@ phase_mount_for_user() {
         info "umount /mnt/c failed (rc $RC), trying a lazy umount"
         run mount-umount-lazy umount -l /mnt/c
     fi
-    run mount-mount mount -t drvfs 'C:' /mnt/c -o "uid=$u,gid=$g,noatime"
+    run mount-mount mount -t drvfs 'C:' /mnt/c -o "uid=$u,gid=$g,noatime${extra:+,$extra}"
     if [ "$RC" -ne 0 ]; then
         info "mount -t drvfs failed (rc $RC): $(printf '%s' "$OUT" | head -n 2 | tr '\n' ' ' | cut -c1-200)"
-        run mount-remount mount -o "remount,uid=$u,gid=$g" /mnt/c
+        run mount-remount mount -o "remount,uid=$u,gid=$g${extra:+,$extra}" /mnt/c
     fi
     info "mount of /mnt/c after: $(grep ' /mnt/c ' /proc/mounts | cut -c1-200)"
     check "/mnt/c is mounted for $user (uid $u)" bash -c 'grep -Eq " /mnt/c .*uid=$1[,;]" /proc/mounts' _ "$u"
+    if [ -n "$extra" ]; then check "the mount carries $extra" bash -c 'grep " /mnt/c " /proc/mounts | grep -q "$1"' _ "$extra"; fi
 }
 
 # ^ invariant a repository and an install checkout under /mnt/c; WSL 1 mounts the drive without metadata and files show mode 777
 phase_mntc() {
+    local sfx="${1:-}" dir="$MNTC${1:+-$1}" lab="mntc${1:+-$1}" f
     need_ws
     if [ ! -d /mnt/c ]; then bad "/mnt/c is not mounted"; return 0; fi
-    mkdir -p -- "$MNTC" || { bad "cannot create $MNTC"; return 0; }
+    case "$dir" in /mnt/c/?*) ;; *) bad "$dir is not a directory below /mnt/c"; return 0 ;; esac
+    mkdir -p -- "$dir" || { bad "cannot create $dir"; return 0; }
     info "mount of /mnt/c: $(grep ' /mnt/c ' /proc/mounts | cut -c1-200)"
     check "the drive is mounted for this user (uid $(id -u)), as on a developer's machine" bash -c 'grep -Eq " /mnt/c .*uid=$1[,;]" /proc/mounts' _ "$(id -u)"
-    blocked_and_clean "$MNTC/repo" mntc-repo
-    case "$MNTC" in /mnt/c/?*) ;; *) bad "MNTC is not a directory below /mnt/c"; return 0 ;; esac
-    run mntc-copy bash -c 'rm -rf -- "$1/checkout" && cp -a -- "$2" "$1/checkout"' _ "$MNTC" "$WS"
-    if [ "$RC" -ne 0 ]; then bad "cannot copy the checkout to $MNTC (rc $RC, see mntc-copy.log)"; return 0; fi
-    info "a file in the /mnt/c checkout shows mode $(stat -c %a "$MNTC/checkout/bin/git-secret-guard")"
-    run mntc-install "$MNTC/checkout/bin/git-secret-guard" install
+    blocked_and_clean "$dir/repo" "$lab-repo"
+    run "$lab-copy" bash -c 'rm -rf -- "$1/checkout" && cp -a -- "$2" "$1/checkout"' _ "$dir" "$WS"
+    if [ "$RC" -ne 0 ]; then bad "cannot copy the checkout to $dir (rc $RC, see $lab-copy.log)"; return 0; fi
+    for f in bin/git-secret-guard README.md lib/common.sh; do info "$lab: a file in the /mnt/c checkout, $f, shows mode $(stat -c %a "$dir/checkout/$f")"; done
+    if [ "$sfx" = metadata ]; then
+        chmod 640 "$dir/checkout/README.md" && info "$lab: README.md after chmod 640 shows mode $(stat -c %a "$dir/checkout/README.md")"
+        chmod 755 "$dir/checkout/README.md"
+    fi
+    run "$lab-install" "$dir/checkout/bin/git-secret-guard" install
     check "install from a checkout under /mnt/c exits 0 (rc $RC)" rc_is 0
     check "nothing the hook runs is group or other writable after it" bash -c '[ -z "$(find "$HOME/.local/share/git-secret-guard" -perm /022 ! -type l | head -n 1)" ]'
-    blocked_and_clean "$HOME/repo-after-mntc" mntc-install
+    blocked_and_clean "$HOME/repo-after-$lab" "$lab-install"
 }
 
 # ^ external main has no WSL pin and its installed CLI is the unfixed code; its install fails on WSL 1 with mv Permission denied and passes on WSL 2
@@ -224,13 +289,14 @@ phase_installed_cli() {
 }
 
 phase_tests() {
-    local f rc
+    local f rc files="test_wsl test_gitup test_gitup_contract test_gitup_apt test_gitup_apt_ppa test_gitup_apt_state test_prerequisites test_install test_timer"
     need_ws
     export GSG_TEST_JOBS=1
     GSG_TEST_GIT="$(command -v git)"
     export GSG_TEST_GIT
     cd -- "$LINUX_CK" || exit 2
-    for f in test_wsl test_gitup test_gitup_contract test_gitup_apt test_gitup_apt_ppa test_gitup_apt_state test_prerequisites test_install test_timer; do
+    if grep -Eq "^ID(_LIKE)?=.*(rhel|fedora|rocky)" /etc/os-release; then files="test_wsl test_gitup test_gitup_contract test_gitup_rpm test_prerequisites test_install test_timer"; fi
+    for f in $files; do
         tests/run.sh "tests/$f.sh" >"$LOGS/suite-$f.log" 2>&1 </dev/null
         rc=$?
         info "tests/$f.sh: rc $rc; $(grep '^SUMMARY' "$LOGS/suite-$f.log" | tail -n 1)"
@@ -245,12 +311,13 @@ case "$PHASE" in
     facts) phase_facts ;;
     probe) phase_probe ;;
     upgrade) phase_upgrade ;;
-    mount-for-user) phase_mount_for_user ;;
-    mntc) phase_mntc ;;
+    prepare) phase_prepare ;;
+    mount-for-user) phase_mount_for_user "${2:-}" ;;
+    mntc) phase_mntc "${2:-}" ;;
     installed-cli) phase_installed_cli ;;
     tests) phase_tests ;;
     *)
-        printf 'usage: tests/platform/wsl-ci.sh facts|probe|upgrade|mount-for-user|mntc|installed-cli|tests\n' >&2
+        printf 'usage: tests/platform/wsl-ci.sh prepare|facts|probe|upgrade|mount-for-user [metadata]|mntc [metadata]|installed-cli|tests\n' >&2
         exit 2
         ;;
 esac

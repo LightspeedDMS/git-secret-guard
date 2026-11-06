@@ -2,42 +2,53 @@ name: wsl
 
 # Real WSL checks on a disposable GitHub-hosted Windows runner (story #31). It never runs on a pull request and never blocks one.
 # tests/platform/wsl-ci.sh holds the scenarios and refuses to run unless GITHUB_ACTIONS is set, so it cannot run on a developer machine.
-# It runs only when started by hand: Actions, wsl, Run workflow.
+# It runs only when started by hand: Actions, wsl, Run workflow (or gh workflow run wsl.yml --ref BRANCH -f distribution=NAME).
 on:
   workflow_dispatch:
     inputs:
       distribution:
-        description: Distribution setup-wsl installs
+        description: Ubuntu comes from setup-wsl; Rocky-9 and Fedora-44 are the vendor WSL images, imported with wsl --import and checked against a pinned SHA-256
         type: choice
         default: Ubuntu-22.04
         options:
           - Ubuntu-22.04
           - Ubuntu-24.04
+          - Rocky-9
+          - Fedora-44
+      consent:
+        description: flag passes --upgrade-git; typed types y at the real prompt on a pty
+        type: choice
+        default: flag
+        options:
+          - flag
+          - typed
 
 permissions:
   contents: read
 
 concurrency:
-  group: wsl-${{ github.ref }}
+  group: wsl-${{ github.ref }}-${{ inputs.distribution }}-${{ inputs.consent }}
   cancel-in-progress: true
 
 jobs:
   wsl:
-    # windows-2022 has WSL 1 enabled in the image (actions/runner-images Windows2022-Readme); whether WSL 2 starts on it is what the second leg finds out
+    # windows-2022 has WSL 1 enabled in the image (actions/runner-images Windows2022-Readme); both versions start there with setup-wsl (runs 42237326449 and later)
     runs-on: windows-2022
-    timeout-minutes: 120
-    continue-on-error: ${{ matrix.wsl-version == '2' }}
+    timeout-minutes: 150
     strategy:
       fail-fast: false
       matrix:
         wsl-version: ['1', '2']
     env:
       # WSLENV carries these into the distribution; /p turns a Windows path into the /mnt path; GITHUB_ACTIONS is the guard of wsl-ci.sh
-      WSLENV: GITHUB_ACTIONS:WS/p:MAIN/p:LOGS/p
+      WSLENV: GITHUB_ACTIONS:CONSENT:WS/p:MAIN/p:LOGS/p
       WS: ${{ github.workspace }}
       MAIN: ${{ github.workspace }}\main-src
       LOGS: ${{ github.workspace }}\wsl-logs
       DISTRIBUTION: ${{ inputs.distribution || 'Ubuntu-22.04' }}
+      CONSENT: ${{ inputs.consent || 'flag' }}
+      # the distribution every phase runs in: the Ubuntu setup-wsl installs, or the imported RPM image
+      WSL_TARGET: ${{ startsWith(inputs.distribution, 'Ubuntu') && inputs.distribution || (inputs.distribution && 'RPM' || 'Ubuntu-22.04') }}
     steps:
       # actions/checkout v4, pinned by commit
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -51,42 +62,79 @@ jobs:
           path: main-src
           persist-credentials: false
 
-      # Vampire/setup-wsl v7.2.0, pinned by commit; git is the stock package of the distribution on purpose (2.34 on 22.04, 2.43 on 24.04)
+      # Vampire/setup-wsl v7.2.0, pinned by commit; git is the stock package of the distribution on purpose (2.34 on 22.04, 2.43 on 24.04).
+      # For Rocky and Fedora it only enables the WSL platform (it offers no RPM distribution); an Ubuntu is installed and not used.
       - uses: Vampire/setup-wsl@4c48163d9f981914dd8caa0fc335fe19cca5bff4
         with:
-          distribution: ${{ inputs.distribution || 'Ubuntu-22.04' }}
+          distribution: ${{ startsWith(inputs.distribution, 'Ubuntu') && inputs.distribution || 'Ubuntu-22.04' }}
           wsl-version: ${{ matrix.wsl-version }}
           additional-packages: sudo jq curl ca-certificates git
 
-      - name: A normal user with sudo, as a developer has
-        shell: wsl-bash -u root {0}
+      # The vendor WSL tar of each RPM distribution, from the vendor's mirror; the SHA-256 is the one in the vendor's own CHECKSUM file and a mismatch stops the job
+      - name: Import the RPM distribution
+        if: ${{ !startsWith(inputs.distribution, 'Ubuntu') && inputs.distribution }}
+        shell: pwsh
+        env:
+          WSLV: ${{ matrix.wsl-version }}
         run: |
-          useradd -m -s /bin/bash gsg
-          printf 'gsg ALL=(ALL) NOPASSWD:ALL\n' >/etc/sudoers.d/gsg
-          chmod 440 /etc/sudoers.d/gsg
-          mkdir -p "$LOGS" && chmod 777 "$LOGS"
-          chmod -R a+rX "$WS" "$MAIN" || true
+          $ErrorActionPreference = 'Stop'
+          switch ($env:DISTRIBUTION) {
+            'Rocky-9' {
+              $url = 'https://dl.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-WSL-Base-9.8-20260525.0.x86_64.wsl'
+              $sha = '58de2455cd475abbaa3cef0f9d240f405c379b5a54d3826f9b55cc41e3829221'
+            }
+            'Fedora-44' {
+              $url = 'https://dl.fedoraproject.org/pub/fedora/linux/releases/44/Container/x86_64/images/Fedora-WSL-Base-44-1.7.x86_64.wsl'
+              $sha = '2e5b153ba4b639952bf546be577fc19b832fe8944caa7de342b32f10da7d319a'
+            }
+            default { throw "no image is pinned for $env:DISTRIBUTION" }
+          }
+          $file = Join-Path $env:RUNNER_TEMP 'rootfs.wsl'
+          curl.exe -fsSL --retry 3 -o $file $url
+          if ($LASTEXITCODE -ne 0) { throw "download failed ($LASTEXITCODE)" }
+          $got = (Get-FileHash -Algorithm SHA256 -LiteralPath $file).Hash.ToLower()
+          if ($got -ne $sha) { throw "SHA-256 mismatch for $url : got $got, pinned $sha" }
+          "SHA-256 of $url is $got (pinned)"
+          $dir = Join-Path $env:RUNNER_TEMP 'wsl-rpm'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          wsl.exe --import $env:WSL_TARGET $dir $file --version $env:WSLV
+          if ($LASTEXITCODE -ne 0) { throw "wsl --import failed ($LASTEXITCODE)" }
+          wsl.exe --list --verbose
+
+      - name: A normal user with sudo, as a developer has
+        shell: pwsh
+        run: ./tests/platform/wsl-phase.ps1 -Phase prepare -User root
 
       - name: Facts of this machine
         if: ${{ !cancelled() }}
-        shell: wsl-bash -u gsg {0}
-        run: bash "$WS/tests/platform/wsl-ci.sh" facts
+        shell: pwsh
+        run: ./tests/platform/wsl-phase.ps1 -Phase facts
 
-      - name: Install with --upgrade-git, blocked commit, rerun, timer refusal
+      - name: Typed No, then install with the chosen consent, blocked commit, rerun, timer refusal
         if: ${{ !cancelled() }}
-        shell: wsl-bash -u gsg {0}
-        run: bash "$WS/tests/platform/wsl-ci.sh" upgrade
+        shell: pwsh
+        run: ./tests/platform/wsl-phase.ps1 -Phase upgrade
 
       # The runner mounts the drive for root; a developer's mount carries their own uid. Root remounts it for the test user here, and the next step runs as that user.
       - name: Mount /mnt/c for the test user
         if: ${{ !cancelled() }}
-        shell: wsl-bash -u root {0}
-        run: bash "$WS/tests/platform/wsl-ci.sh" mount-for-user
+        shell: pwsh
+        run: ./tests/platform/wsl-phase.ps1 -Phase mount-for-user -User root
 
       - name: Repository and checkout under /mnt/c
         if: ${{ !cancelled() }}
-        shell: wsl-bash -u gsg {0}
-        run: bash "$WS/tests/platform/wsl-ci.sh" mntc
+        shell: pwsh
+        run: ./tests/platform/wsl-phase.ps1 -Phase mntc
+
+      - name: Mount /mnt/c with metadata
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        run: ./tests/platform/wsl-phase.ps1 -Phase mount-for-user -User root -PhaseArg metadata
+
+      - name: Repository and checkout under /mnt/c with metadata
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        run: ./tests/platform/wsl-phase.ps1 -Phase mntc -PhaseArg metadata
 
       # The logs so far are written down before the test files, the rename probe and the installed-CLI install run: the probe renames a directory holding a running script, which is
       # the operation that coincided with the first blue screen of the maintainer's WSL 1 host, so it goes last and nothing earlier depends on it surviving.
@@ -95,7 +143,7 @@ jobs:
         shell: pwsh
         run: |
           $f = Join-Path $env:LOGS 'results.txt'
-          "### WSL ${{ matrix.wsl-version }}, $env:DISTRIBUTION, before the test files and the rename probe" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+          "### WSL ${{ matrix.wsl-version }}, $env:DISTRIBUTION, consent $env:CONSENT, before the test files and the rename probe" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
           if (Test-Path $f) {
             '```' | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
             Get-Content $f | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
@@ -107,7 +155,7 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: wsl-${{ matrix.wsl-version }}-logs-before-tests
+          name: wsl-${{ inputs.distribution || 'Ubuntu-22.04' }}-${{ inputs.consent || 'flag' }}-${{ matrix.wsl-version }}-logs-before-tests
           path: ${{ github.workspace }}\wsl-logs
           if-no-files-found: warn
 
@@ -115,26 +163,26 @@ jobs:
       # and its WSL 1 twin runs the pinned path. A failure of the suite on WSL 1 is recorded, not hidden.
       - name: Test files that apply (GSG_TEST_JOBS=1)
         if: ${{ !cancelled() }}
-        timeout-minutes: 60
-        shell: wsl-bash -u gsg {0}
-        run: bash "$WS/tests/platform/wsl-ci.sh" tests
+        timeout-minutes: 75
+        shell: pwsh
+        run: ./tests/platform/wsl-phase.ps1 -Phase tests
 
       - name: Rename probe (the installed-CLI mv error)
         if: ${{ !cancelled() }}
-        shell: wsl-bash -u gsg {0}
-        run: bash "$WS/tests/platform/wsl-ci.sh" probe
+        shell: pwsh
+        run: ./tests/platform/wsl-phase.ps1 -Phase probe
 
       - name: Install from the installed CLI (main, then this branch)
         if: ${{ !cancelled() }}
-        shell: wsl-bash -u gsg {0}
-        run: bash "$WS/tests/platform/wsl-ci.sh" installed-cli
+        shell: pwsh
+        run: ./tests/platform/wsl-phase.ps1 -Phase installed-cli
 
       - name: Results in the job summary
         if: ${{ !cancelled() }}
         shell: pwsh
         run: |
           $f = Join-Path $env:LOGS 'results.txt'
-          "### WSL ${{ matrix.wsl-version }}, $env:DISTRIBUTION, all phases" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+          "### WSL ${{ matrix.wsl-version }}, $env:DISTRIBUTION, consent $env:CONSENT, all phases" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
           if (Test-Path $f) {
             '```' | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
             Get-Content $f | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
@@ -145,6 +193,6 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: wsl-${{ matrix.wsl-version }}-logs
+          name: wsl-${{ inputs.distribution || 'Ubuntu-22.04' }}-${{ inputs.consent || 'flag' }}-${{ matrix.wsl-version }}-logs
           path: ${{ github.workspace }}\wsl-logs
           if-no-files-found: warn

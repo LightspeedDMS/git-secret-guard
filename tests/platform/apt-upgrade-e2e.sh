@@ -73,7 +73,7 @@ blocked_commit() {
     [ "$rc" -ne 0 ] && [ "$found" -eq 1 ] && [ "$leaked" -eq 0 ] && [ "$clean_rc" -eq 0 ]
 }
 
-lists_empty() { test -z "$(find /var/lib/apt/lists -type f ! -name lock | head -n 1)"; }
+lists_empty() { test -z "$(find /var/lib/apt/lists -path /var/lib/apt/lists/partial -prune -o -type f ! -name lock -print | head -n 1)"; }
 git_pkg_version() { dpkg-query -W -f='${Version}' git; }
 pkg_changed() { [ "$(git_pkg_version)" != "$git_pkg_version_before" ]; }
 all_plan_lines_absolute() { test -z "$(printf '%s\n' "$OUT" | grep -E '^  as root: [^/]')"; }

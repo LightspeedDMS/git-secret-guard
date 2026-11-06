@@ -693,7 +693,10 @@ gitup_apt_ppa_disable() {
     fi
     gitup_apt_unjudged_keys
     if [ "${#GITUP_APT_UNJUDGED[@]}" -gt 0 ]; then
-        GITUP_APT_STUCK="cannot tell whether ${GITUP_APT_UNJUDGED[*]} (new key file(s) that appeared while add-apt-repository ran) belong to the PPA; apt trusts them for every repository, they were left in place, remove them by hand if they do"
+        local done_text=""
+        if [ -n "$GITUP_APT_REMOVED" ]; then done_text="removed ${GITUP_APT_REMOVED}"; fi
+        if [ "$GITUP_APT_TOUCHED" -eq 1 ]; then done_text+="${done_text:+ and }refreshed apt"; fi
+        GITUP_APT_STUCK="${done_text:+$done_text; }cannot tell whether ${GITUP_APT_UNJUDGED[*]} (new key file(s) that appeared while add-apt-repository ran) belong to the PPA; apt trusts them for every repository, they were left in place, remove them by hand if they do"
         return 1
     fi
 }

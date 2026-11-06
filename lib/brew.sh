@@ -25,13 +25,13 @@ brew_unchanged_text() {
         printf 'the only change made was the Homebrew install of %s in this run' "$BREW_INSTALLED"
     elif [ -z "$BREW_INSTALLED" ]; then
         if [ "$GITUP_APPLY_FAILED" = 1 ]; then
-            printf 'the only change made was left behind by the failed git upgrade of this run (%s)' "$gitup"
+            printf 'the only changes are what the failed git upgrade of this run left behind (%s)' "$gitup"
         else
             printf 'the only change made was the git upgrade of this run (%s)' "$gitup"
         fi
     else
         if [ "$GITUP_APPLY_FAILED" = 1 ]; then
-            printf 'the changes made in this run were the Homebrew install of %s and what the failed git upgrade left behind (%s)' "$BREW_INSTALLED" "$gitup"
+            printf 'the changes made in this run were the Homebrew install of %s and what the failed git upgrade of this run left behind (%s)' "$BREW_INSTALLED" "$gitup"
         else
             printf 'the changes made in this run were the Homebrew install of %s and the git upgrade (%s)' "$BREW_INSTALLED" "$gitup"
         fi

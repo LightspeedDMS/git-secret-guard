@@ -347,7 +347,7 @@ function Scenario-Prompt {
     $cli = Join-Path $Root 'bin\git-secret-guard.cmd'
     $transcript = ''
     $rc = [GsgPty]::Run("$env:SystemRoot\System32\cmd.exe /c $cli install", $Root, '[y/N]', "y`r", 1500, [ref]$transcript)
-    $clean = [regex]::Replace($transcript, '\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(\x07|\x1b\)', '')
+    $clean = [regex]::Replace($transcript, '\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*\x07', '')
     Show ($clean -split "`r?`n" | Select-Object -Last 12 | Out-String)
     Write-Host "RESULT prompt: exit $rc"
     Check "a real prompt appeared on a pseudo console" ($clean -like '*[[]y/N]*')
@@ -368,7 +368,7 @@ function Scenario-Prompt {
         $t = ''
         try { $prc = [GsgPty]::Run($v.Cmd, $Root, 'probe-end', "`r", 60, [ref]$t) } catch { $prc = -2; $t = $_.Exception.Message }
         foreach ($k in $v.Env.Keys) { Remove-Item -Path "Env:$k" }
-        $vis = ([regex]::Replace($t, '\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(\x07|\x1b\)', '') -replace '\s+', ' ')
+        $vis = ([regex]::Replace($t, '\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*\x07', '') -replace '\s+', ' ')
         Show ("probe [" + $v.Label + "]: exit $prc; " + $vis)
     }
     Check "a commit with a fake key is blocked" (Commit-Blocked)

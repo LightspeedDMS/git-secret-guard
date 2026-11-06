@@ -149,6 +149,18 @@ phase_probe() {
     rm -rf -- "${base:?}"
 }
 
+# ^ external prints what the install bash and its script wait on (ps, syscall, wchan, open files, stat); it exists only to find a hang
+hang_snapshot() {
+    local p
+    date -u +%T
+    ps -eo pid,ppid,stat,etime,wchan:20,args --forest | cut -c1-200
+    for p in $(pgrep -f "git-secret-guard install|script -qefc"); do
+        printf -- '-- pid %s: syscall [%s] wchan [%s]\n' "$p" "$(cat "/proc/$p/syscall" 2>&1)" "$(cat "/proc/$p/wchan" 2>&1)"
+        ls -l "/proc/$p/fd" 2>&1 | cut -c1-160
+        cut -d' ' -f1-8 "/proc/$p/stat" 2>&1
+    done
+}
+
 # ^ invariant typed_install ANSWERS LABEL CMD... runs CMD on a pty (script) and types ANSWERS; backslash n splits answers; RC is the command rc
 # ^ why a fifo held open by a writer, not a pipe from printf; EOF on the stdin of script ends the session before a long install is done
 typed_install() {
@@ -159,8 +171,8 @@ typed_install() {
     mkfifo "$dir/in" || return 1
     { printf '%b\n' "$answers"; exec sleep 3000; } >"$dir/in" &
     writer=$!
-    # ^ why a process snapshot every 60 s; a typed run once sat for 10 minutes and its log said nothing about where (run 42292067132)
-    { for _ in $(seq 1 50); do sleep 60; { date -u +%T; ps -eo pid,ppid,stat,etime,wchan:20,args --forest | cut -c1-200; } >>"$LOGS/$label-ps.log"; done; } &
+    # ^ external a typed run once sat 10 minutes and its log was silent on where; a process snapshot is taken every 60 s (run 42292067132)
+    { for _ in $(seq 1 50); do sleep 60; hang_snapshot >>"$LOGS/$label-ps.log" 2>&1; done; } &
     watcher=$!
     RUN_STDIN="$dir/in" run "$label" timeout 3000 script -qefc "$*" /dev/null
     kill "$watcher" 2>/dev/null

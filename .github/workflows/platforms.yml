@@ -129,26 +129,6 @@ jobs:
           name: rpm-${{ matrix.name }}
           path: ${{ runner.temp }}/logs
 
-  diag:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - name: mounts and devices of a default podman container
-        run: |
-          set +e
-          ph="$(mktemp -d)"; mkdir -p "$ph/.config/containers" "$ph/hooks.d"; : >"$ph/.config/containers/mounts.conf"
-          printf '[engine]\nhooks_dir = ["%s"]\n' "$ph/hooks.d" >"$ph/containers.conf"
-          P=(env -i HOME="$ph" PATH="$PATH" XDG_RUNTIME_DIR=/run/user/$(id -u) XDG_DATA_HOME="$HOME/.local/share" XDG_CONFIG_HOME="$ph/.config" CONTAINERS_CONF="$ph/containers.conf" LANG=C.UTF-8)
-          img=docker.io/library/ubuntu:24.04@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852
-          "${P[@]}" podman pull -q $img
-          "${P[@]}" podman run --name diag --init --pull=never --http-proxy=false $img bash -c '
-            echo "--- mountinfo (mountpoint fstype)"; while read -r _ _ _ _ mp _ rest; do echo "$mp ${rest#* - }" | cut -d" " -f1,2; done </proc/self/mountinfo
-            echo "--- dev"; find /dev -mindepth 1 -maxdepth 4 -printf "%P\n" | sort'
-          echo "--- spec"
-          cfg="$HOME/.local/share/containers/storage/overlay-containers/$("${P[@]}" podman inspect -f '{{.Id}}' diag)/userdata/config.json"
-          jq -c '{masked:.linux.maskedPaths, ro:.linux.readonlyPaths, mounts:[.mounts[]|{d:.destination,t:.type}]}' "$cfg"
-
-  # the launcher and container-script unit tests (tests/test_platform.sh skips off Linux); a failure here is evidence for the baselines
   platform-unit:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -261,36 +241,3 @@ jobs:
           name: rocky-vm
           path: ${{ runner.temp }}/logs
 
-  # temporary: why sudo fails in PAM for a non-root user in the Rocky container on rootless podman
-  pamdiag:
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[pamdiag]')
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-      - name: sudo in a Rocky container
-        run: |
-          set +e
-          img=docker.io/rockylinux/rockylinux:9.7@sha256:53f4c6dcb34e1403bd93207351f0af9a593610faeb7165cb8a037346765199b0
-          podman run --rm --init "$img" bash -c '
-            dnf install -y -q --setopt=install_weak_deps=False sudo strace libcap >/dev/null 2>&1
-            useradd -m gsguser
-            echo "gsguser ALL=(ALL) NOPASSWD:ALL" >/etc/sudoers.d/gsguser; chmod 440 /etc/sudoers.d/gsguser
-            echo "--- files"; ls -l /etc/shadow /etc/passwd /usr/sbin/unix_chkpwd /usr/bin/sudo; getcap /usr/sbin/unix_chkpwd
-            echo "--- caps of this shell"; grep -E "^Cap(Eff|Bnd)" /proc/self/status
-            echo "--- sudo -n true (before any change)"; runuser -u gsguser -- sudo -n true; echo "rc=$?"
-            echo "--- pam sudo"; cat /etc/pam.d/sudo; grep -E "^account" /etc/pam.d/system-auth
-            echo "--- chkpwd as the user"; runuser -u gsguser -- /usr/sbin/unix_chkpwd gsguser nullok </dev/null; echo "rc=$?"
-            echo "--- strace of sudo, denied calls"; runuser -u gsguser -- strace -f -e trace=openat,execve,open -o /tmp/st sudo -n true >/dev/null 2>&1; grep -E "EACCES|EPERM" /tmp/st | head -20
-            echo "--- can root read shadow"; head -c 4 /etc/shadow >/dev/null; echo "rc=$?"
-            echo "--- chkpwd chkexpiry as the user"; runuser -u gsguser -- /usr/sbin/unix_chkpwd gsguser chkexpiry </dev/null; echo "rc=$?"
-            echo "--- chkpwd chkexpiry as root"; /usr/sbin/unix_chkpwd gsguser chkexpiry </dev/null; echo "rc=$?"
-            echo "--- strace of chkpwd as root"; strace -f -s 100 -o /tmp/st4 /usr/sbin/unix_chkpwd gsguser chkexpiry </dev/null >/dev/null 2>&1; grep -vE "ENOENT.*(ld.so|lib)" /tmp/st4 | tail -25 | cut -c1-200
-            echo "--- shadow line as root"; grep -c gsguser /etc/shadow; getent shadow gsguser | cut -c1-12; sed -n "/^shadow/p" /etc/nsswitch.conf
-            echo "--- strace as root, following the setuid sudo"; strace -f -Z -s 120 -o /tmp/st3 runuser -u gsguser -- sudo -n true >/dev/null 2>&1; grep -vE "ENOENT|ENOTTY" /tmp/st3 | grep -E "EACCES|EPERM|shadow|chkpwd|EAGAIN" | head -30
-            echo "--- after chmod u+s unix_chkpwd"; chmod 4755 /usr/sbin/unix_chkpwd; runuser -u gsguser -- sudo -n true; echo "rc=$?"
-            echo "--- shadow 0400 owner-readable"; chmod 0400 /etc/shadow; runuser -u gsguser -- sudo -n true; echo "rc=$?"
-            echo "--- chkpwd again"; /usr/sbin/unix_chkpwd gsguser chkexpiry </dev/null; echo "rc=$?"
-            echo "--- who am i in the shell"; id; grep -E "^(NoNewPrivs|Seccomp|CapPrm|CapAmb)" /proc/self/status
-            echo "--- nosuid mounts"; grep -E " / | /usr" /proc/self/mountinfo | head -3
-            echo "--- aging"; chage -l gsguser; grep gsguser /etc/shadow | cut -d: -f1,3-9
-          '

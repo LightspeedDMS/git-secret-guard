@@ -4,7 +4,7 @@
 
 RPM_DISTRO=""
 RPM_E2E_TIMEOUT=3300
-RPM_PREP_PKGS=(jq util-linux sudo ca-certificates diffutils findutils procps-ng rpm-build createrepo_c policycoreutils libcap)
+RPM_PREP_PKGS=(jq util-linux sudo ca-certificates diffutils findutils procps-ng rpm-build createrepo_c policycoreutils)
 # ^ invariant nopasswd = the test user may run sudo without a password (default), password = it needs one, none = no sudo package at all (a root run)
 RPM_SUDO=nopasswd
 # ^ external the Fedora 41 release repository still serves this package; the digest is of the file as downloaded over HTTPS on 2026-11-06
@@ -20,7 +20,7 @@ rpm_prepare_machine() {
     if [ "$RPM_DISTRO" = rocky ]; then
         step "dnf install the stock RPM git" 900 dnf install -y git || return 1
     fi
-    rpm_fix_unix_chkpwd || return 1
+    rpm_fix_shadow || return 1
     if ! id -u "$TEST_USER" >/dev/null 2>&1; then
         step "create the non-root test user" 60 useradd -m -s /bin/bash "$TEST_USER" || return 1
     fi
@@ -31,15 +31,11 @@ rpm_prepare_machine() {
     esac
 }
 
-# ^ external RHEL's unix_chkpwd carries a file capability; rootless podman on the hosted runner drops it, and PAM then fails for every sudo call
-# ^ why the setuid bit RHEL 8 used, not rpm --setcaps; the latter ran and left no capability behind (run 42255752347)
-rpm_fix_unix_chkpwd() {
-    local f=/usr/sbin/unix_chkpwd caps
-    caps="$(getcap "$f" 2>&1)"
-    printf '        | file capabilities of unix_chkpwd: [%s]\n' "${caps#"$f"}"
-    if [ -n "$caps" ]; then return 0; fi
-    step "give unix_chkpwd the setuid bit its capability would replace" 60 chmod 4755 "$f" || return 1
-    printf '        | unix_chkpwd is now %s\n' "$(stat -c '%A' "$f")"
+# ^ external the shadow file of the RHEL images is mode 000; under rootless podman on the hosted runner PAM cannot open it as root, and sudo fails
+# ^ why mode 0400 for the root owner, not the setuid bit on unix_chkpwd or file capabilities; only this made sudo work in the probe (run 42260761407)
+rpm_fix_shadow() {
+    step "let root, the owner of /etc/shadow, read it without a capability" 60 chmod 0400 /etc/shadow || return 1
+    printf '        | /etc/shadow is now %s\n' "$(stat -c %A /etc/shadow)"
 }
 
 

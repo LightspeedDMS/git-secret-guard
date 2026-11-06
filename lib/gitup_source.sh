@@ -126,8 +126,9 @@ gitup_source_build() {
     if [[ ! $jobs =~ ^[0-9]+$ ]] || [ "$jobs" -lt 1 ]; then jobs=2; fi
     if [ "$jobs" -gt 8 ]; then jobs=8; fi
     printf '%s: building git %s (about %s MB of disk, several minutes; the make output is kept only if the build fails)\n' "$GSG_NAME" "$GITUP_PIN_VER" "$GITUP_BUILD_NEED_MB"
-    if gitup_source_make "$GITUP_SRC_DIR" "-j$jobs" "prefix=$GITUP_PREFIX" "${GITUP_SRC_FLAGS[@]}" all &&
-        gitup_source_make "$GITUP_SRC_DIR" "prefix=$GITUP_PREFIX" "${GITUP_SRC_FLAGS[@]}" "DESTDIR=$GITUP_STAGE" install; then
+    # ^ why INSTALL_SYMLINKS=1, not git's hard links; one inode under bin and libexec gets one SELinux label from two policy rules, and restorecon flips it
+    if gitup_source_make "$GITUP_SRC_DIR" "-j$jobs" "prefix=$GITUP_PREFIX" "${GITUP_SRC_FLAGS[@]}" INSTALL_SYMLINKS=1 all &&
+        gitup_source_make "$GITUP_SRC_DIR" "prefix=$GITUP_PREFIX" "${GITUP_SRC_FLAGS[@]}" INSTALL_SYMLINKS=1 "DESTDIR=$GITUP_STAGE" install; then
         return 0
     fi
     tail -n 25 "$GITUP_BUILD_DIR/make.log" | sed 's/^/        | /' >&2

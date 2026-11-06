@@ -234,9 +234,16 @@ gitup_tk_status() {
     fi
 }
 
-# ^ invariant rc 0 = the file is a regular file owned by the trusted user and not writable by group or others; rc 1 sets GITUP_REASON
+# ^ invariant rc 0 = the file, or the target of a symlink below the prefix, has the trusted owner and no group or other write bit; rc 1 sets GITUP_REASON
+# ^ why the target of a link is judged, not the link; a symlink shows mode 777, and git installs its siblings as symlinks (INSTALL_SYMLINKS=1)
 gitup_tk_check_owner() {
-    local path="$1" uid mode stat_out
+    local path="$1" uid mode stat_out real prefix_real
+    if [ -L "$path" ]; then
+        real="$(realpath -- "$path")" || gitup_tk_fail "cannot resolve the link $path" || return 1
+        prefix_real="$(realpath -- "$GITUP_PREFIX")" || gitup_tk_fail "cannot resolve $GITUP_PREFIX" || return 1
+        if [[ $real != "$prefix_real"/* ]]; then gitup_tk_fail "$path is a link out of $GITUP_PREFIX" || return 1; fi
+        path="$real"
+    fi
     stat_out="$(stat -c '%u %a' -- "$path")" || gitup_tk_fail "cannot read the owner of $path" || return 1
     read -r uid mode <<<"$stat_out"
     if [ "$uid" != "$(gitup_trusted_uid)" ]; then gitup_tk_fail "$path is owned by user $uid, not by the trusted user" || return 1; fi

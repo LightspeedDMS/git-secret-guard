@@ -13,9 +13,20 @@ need_network() {
 # shellcheck disable=SC2016
 tl() { run_cap env -i "${GSG_ENV[@]}" "${EXTRA_ENV[@]}" bash -c 'set -u; source "$1/lib/common.sh" && source "$1/lib/tools.sh" && shift && "$@"' _ "$GSG_PROJECT" "$@"; }
 
+# ^ invariant drops the git upgrade overrides lc_begin puts into LC_ENV (os-release, system paths, build PATH, query timeout); a real run has none
+without_gitup_overrides() {
+    local e
+    local -a keep=()
+    for e in "${LC_ENV[@]}"; do
+        case "$e" in GSG_OS_RELEASE=* | GSG_GITUP_*) ;; *) keep+=("$e") ;; esac
+    done
+    LC_ENV=("${keep[@]}")
+}
+
 test_real_install_downloads_and_verifies_the_pinned_tarballs_from_github() {
     need_network
     lc_begin || return 1
+    without_gitup_overrides
     if [ "$TEST_OS" = Darwin ]; then lc_real_uname || return 1; fi
     gsg install
     assert_rc 0 "install from the vendor URLs, verified against the shipped tools.lock"

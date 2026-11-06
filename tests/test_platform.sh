@@ -867,9 +867,9 @@ test_the_prepare_phase_asks_for_software_properties_common_on_ubuntu_only() {
 # ^ invariant the PPA is an Ubuntu thing; a Debian machine in the default auto mode builds the pinned source and never tries a Launchpad PPA
 # shellcheck disable=SC2016
 test_a_debian_machine_in_auto_mode_goes_straight_to_the_source_build() {
-    local script='source "$1"; LOGDIR="$2"; OS_RELEASE="$3"; GIT_SOURCE=auto
-        install_git_source() { : >"$2/source-build-ran"; return 0; }; git_is_new_enough() { return 0; }
-        install_git_ppa() { : >"$2/ppa-ran"; return 0; }
+    local script='source "$1"; LOGDIR="$2"; D="$2"; OS_RELEASE="$3"; GIT_SOURCE=auto
+        install_git_source() { : >"$D/source-build-ran"; return 0; }; git_is_new_enough() { return 0; }
+        install_git_ppa() { : >"$D/ppa-ran"; return 0; }
         obtain_git; printf "rc=%s failures=%s\n" "$?" "$FAILURES"'
     local id
     for id in debian ubuntu; do

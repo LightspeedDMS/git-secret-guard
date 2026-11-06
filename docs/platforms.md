@@ -673,8 +673,8 @@ and not part of `tests.yml`. Its `push:` trigger on the branch `ci/real-platform
 | Ubuntu 24.04 `--phase upgrade` (PPA, `.sources`) | PASS | 42252266035, 42273585581 | `E2E SUMMARY: 27 passed, 0 failed` |
 | Ubuntu 22.04 `--phase upgrade` (PPA, `.list`; first container run) | PASS | same | `E2E SUMMARY: 28 passed, 0 failed` |
 | Debian 13 `--phase upgrade` (source build) | PASS | same | `E2E SUMMARY: 21 passed, 0 failed` |
-| Ubuntu 24.04 and 22.04, default phases (prepare, install E2E, whole suite) | install E2E 31/0; suite 1061 passed, 0 failed, 31 skipped | 42252845651 | `SUMMARY: 1061 passed, 0 failed, 31 skipped (total 1092)` |
-| Debian 13, default phases | install E2E 31/0; suite fails tests that assume an Ubuntu host, see below | 42273585581 | `SUMMARY: 1098 passed, 10 failed` (four were this branch's own docs link and comment length) |
+| Ubuntu 24.04 and 22.04, default phases (prepare, install E2E, whole suite) | PASS | 42282142479 | install `E2E SUMMARY: 31 passed, 0 failed`; `SUMMARY: 1108 passed, 0 failed, 67 skipped (total 1175)` on both |
+| Debian 13, default phases | PASS | 42284768674 | install `E2E SUMMARY: 31 passed, 0 failed`; `SUMMARY: 1108 passed, 0 failed, 67 skipped (total 1175)` |
 | Rocky 9.7 `rpm.sh rocky` (source route, takeover, dnf update control, restore, interrupts) | PASS | 42261480647, 42273585581 | `E2E SUMMARY: 92 passed, 0 failed` |
 | Fedora 44 `rpm.sh fedora` (package route) | PASS | same | `E2E SUMMARY: 13 passed, 0 failed` |
 | Fedora 44 with git-core 2.47.0 installed (#40, old git) | PASS after a product fix | 42259957123, 42273585581 | `E2E SUMMARY: 16 passed, 0 failed`; before the fix `Package "git-core-2.47.0-1.fc41.x86_64" is already installed. Nothing to do.` |
@@ -686,8 +686,9 @@ and not part of `tests.yml`. Its `push:` trigger on the branch `ci/real-platform
 | GitHub Desktop's bundled git | measured | 42259957123, 42273585581 | `old git: exit 0; output: []` for 2.45.3 built from the tarball and for the git in the Desktop 3.4.13 `.deb` |
 | Windows scenarios | see "Windows" | | |
 
-**Debian 13 default suite.** After the fixes above the suite still fails tests that assume the host is Ubuntu with its git in `/usr/bin`: `test_prerequisites` (four) and `test_doctor` (the `/usr/bin/git` warning).
-They pass on Ubuntu and do not describe product behaviour; the stock `git` package now installed by the Debian prepare step addresses the doctor one, the rest is open.
+**Suite failures this work found and fixed.** Debian 13 failed the prepare step (above); once it ran, `test_prerequisites` (four tests) saw the real `/usr/local/bin/git` of the machine and now moves the system paths into the sandbox
+like the other gitup tests, and the doctor test needs the stock `/usr/bin/git`, which the Debian prepare step now installs. Six `test_exemptions_real` tests failed on two of eight runs because a random 32-character draw sometimes holds a dictionary stopword that the
+built-in `generic-api-key` rule skips; the draw is now vowel-free.
 
 ### Rocky VM (SELinux enforcing)
 

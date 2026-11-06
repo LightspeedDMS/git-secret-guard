@@ -13,7 +13,7 @@ git-secret-guard uninstall          # put back what was there before
 ```
 
 **Requirements.** Linux on x86_64 or arm64, macOS arm64 with Homebrew (macOS x86_64 is mapped, not tested), or Windows x86_64 with Git for Windows (details in [platforms.md](platforms.md#windows-git-for-windows): there `install` downloads a missing `jq`, and `taskkill` replaces `setsid`). bash 4.4 or newer,
-**git >= 2.54 first on `PATH`**, `jq`, `setsid`, `timeout`, and `curl` plus `tar` when a scanner has to be downloaded. On
+**git >= 2.54 first on `PATH`**, `jq`, `setsid`, `timeout`, `awk` (Linux and WSL; the hook runs it, and a Fedora WSL image without it blocked every commit), and `curl` plus `tar` when a scanner has to be downloaded. On
 macOS, `install` lists whichever of bash 4.4 or newer, `coreutils` (`timeout`), `util-linux` (`setsid`) and `jq` is missing, installs them
 with `brew install` only after its other checks have passed, the `tools.lock` lookup included (with a GNU `timeout` already present, the scanner
 downloads are verified first too; under the system bash 3.2 it first installs `bash` alone), and refuses, changing
@@ -272,7 +272,7 @@ of [`doctor`](doctor.md).
 - **Backup bounds** (`install_check_backup_bounds`): test `/` only at the resolver level
   (`test_the_resolver_refuses_root_before_anything_could_back_it_up`), never by running install.
 - **Download override**: `GSG_TOOLS_BASE_URL` + `GSG_TOOLS_LOCK` cannot skip verification
-  (`test_the_base_url_override_cannot_skip_verification`); curl runs with `-q` first and `--proto =https --proto-redir =https`.
+  (`test_the_base_url_override_cannot_skip_verification`); curl runs with `-q` first, `--proto =https --proto-redir =https`, `--max-time 600` and `--max-filesize`; install prints `downloading TOOL VERSION` before each scanner download (not before the git source or the other downloads of the upgrade), see `test_install_names_each_scanner_before_it_downloads_it`.
 - **`/etc/os-release` is data, never sourced** (`install_os_release_field`; `GSG_OS_RELEASE` in tests;
   `test_the_container_script_reads_os_release_as_data`). Hints: `install_os_family`, `install_fix_hint`, `install_git_hint`
   (`tests/test_prerequisites.sh`).

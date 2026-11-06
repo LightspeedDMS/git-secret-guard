@@ -312,8 +312,8 @@ probe_secret() { (source "$GSG_PROJECT/lib/common.sh" && source "$GSG_PROJECT/li
 
 fail() { printf '%s\n' "$*" >>"$SANDBOX/.fails"; return 1; }
 assert_eq() { [ "$1" = "$2" ] || fail "${3:-assert_eq}: expected [$2] got [$1]"; }
-assert_rc() { [ "$RC" -eq "$1" ] || fail "${2:-rc}: expected exit $1 got $RC (stderr: ${ERR:0:300})"; }
-assert_contains() { case "$1" in *"$2"*) return 0 ;; esac; fail "${3:-assert_contains}: missing [$2] in [${1:0:400}]"; }
+assert_rc() { [ "$RC" -eq "$1" ] || fail "${2:-rc}: expected exit $1 got $RC (stderr: ${ERR:0:${GSG_TEST_DETAIL:-300}})"; }
+assert_contains() { case "$1" in *"$2"*) return 0 ;; esac; fail "${3:-assert_contains}: missing [$2] in [${1:0:${GSG_TEST_DETAIL:-400}}]"; }
 assert_not_contains() { case "$1" in *"$2"*) fail "${3:-assert_not_contains}: unexpected [$2]"; return 1 ;; esac; }
 # ^ why here too, not only in run_cap; many assertions read git or the state directly
 if [ "$TEST_IS_WINDOWS" -eq 1 ]; then
@@ -324,9 +324,9 @@ if [ "$TEST_IS_WINDOWS" -eq 1 ]; then
     assert_contains() { posix_assert_contains "$(windows_plain_text "$1")" "$(windows_plain_text "$2")" "${3:-assert_contains}"; }
     assert_not_contains() { posix_assert_not_contains "$(windows_plain_text "$1")" "$(windows_plain_text "$2")" "${3:-assert_not_contains}"; }
 fi
-assert_empty() { [ -z "$1" ] || fail "${2:-assert_empty}: got [${1:0:300}]"; }
+assert_empty() { [ -z "$1" ] || fail "${2:-assert_empty}: got [${1:0:${GSG_TEST_DETAIL:-300}}]"; }
 PASS_LINE_RE='^git-secret-guard: scanned ([0-9]+) files?, ([0-9]+) added lines? \(([^)]*)\): no findings(, [0-9]+ files? exempted)?, [0-9]+s$'
-assert_pass_line_only() { [[ $1 =~ $PASS_LINE_RE ]] || fail "${2:-assert_pass_line_only}: expected exactly the pass line, got [${1:0:300}]"; }
+assert_pass_line_only() { [[ $1 =~ $PASS_LINE_RE ]] || fail "${2:-assert_pass_line_only}: expected exactly the pass line, got [${1:0:${GSG_TEST_DETAIL:-300}}]"; }
 assert_file() { [ -e "$1" ] || fail "${2:-assert_file}: missing $1"; }
 assert_no_file() { [ ! -e "$1" ] || fail "${2:-assert_no_file}: unexpected $1"; }
 

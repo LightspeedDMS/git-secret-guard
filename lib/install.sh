@@ -206,8 +206,8 @@ install_report_other_gits() {
 # ^ security absolute paths found now are written to settings => the hook never resolves jq, setsid or timeout through PATH
 install_resolve_bins() {
     local name path bad=0
-    local -A package=([jq]=jq [setsid]=util-linux [taskkill]=taskkill [timeout]=coreutils)
-    local -a names=(jq setsid timeout)
+    local -A package=([jq]=jq [setsid]=util-linux [taskkill]=taskkill [timeout]=coreutils [awk]=gawk)
+    local -a names=(jq setsid timeout awk)
     INSTALL_SETSID_BIN="" INSTALL_TASKKILL_BIN="" INSTALL_JQ_WRAPPER="" INSTALL_JQ_BIN=""
     if tools_is_windows; then names=(jq taskkill timeout); fi
     for name in "${names[@]}"; do
@@ -228,6 +228,8 @@ install_resolve_bins() {
             setsid) INSTALL_SETSID_BIN="$path" ;;
             taskkill) INSTALL_TASKKILL_BIN="$path" ;;
             timeout) INSTALL_TIMEOUT_BIN="$path" ;;
+            # ^ why awk is checked, not recorded; the hook runs it from PATH like sed => a missing one blocked every commit on the Fedora WSL image
+            awk) ;;
         esac
     done
     if tools_is_windows && [ -n "${INSTALL_JQ_BIN:-}" ]; then INSTALL_JQ_WRAPPER="$GSG_SHARE/jq"; fi

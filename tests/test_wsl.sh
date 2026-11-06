@@ -437,4 +437,40 @@ test_the_systemd_analyze_probe_names_a_machine_that_cannot_verify_and_never_a_un
     assert_empty "$(analyze_blocked_reason "$stub")" "a working systemd-analyze is no reason either"
 }
 
+
+# ^ external the Fedora 44 WSL image has no awk and install finished => every commit was blocked for the missing awk (run 42275538317)
+# ^ invariant awk is a prerequisite of install on Linux and WSL, named with its package like jq, setsid and timeout
+test_a_missing_awk_is_refused_by_install_with_its_package_not_found_out_at_the_first_commit() {
+    local bin="$SANDBOX/noawk" tool
+    mkdir -p "$bin" || return 1
+    for tool in jq setsid timeout; do printf '#!/bin/sh\nexit 0\n' >"$bin/$tool" && chmod 755 "$bin/$tool" || return 1; done
+    printf 'ID=fedora\n' >"$SANDBOX/os-release" || return 1
+    set_env GSG_OS_RELEASE="$SANDBOX/os-release"
+    wsl 'PATH="$1"; install_resolve_bins; echo "bad=$?"' "$bin"
+    assert_contains "$OUT" "bad=1" "one prerequisite is missing"
+    assert_contains "$ERR" "awk is required but was not found on PATH" "awk is named"
+    assert_contains "$ERR" "dnf install gawk" "with the package that provides it"
+    printf '#!/bin/sh\nexit 0\n' >"$bin/awk" && chmod 755 "$bin/awk" || return 1
+    wsl 'PATH="$1"; install_resolve_bins; echo "bad=$?"' "$bin"
+    assert_contains "$OUT" "bad=0" "with awk on PATH nothing is missing"
+}
+
+
+# ^ external install prints nothing during the scanner downloads => a quiet install gave no sign of the step it was in
+# ^ invariant install names the tool before its download starts => a quiet install and its log show the step
+test_install_names_each_scanner_before_it_downloads_it() {
+    wsl 'GSG_STAGE=""; GSG_TOOL_NEED=(1 1 0); GSG_TOOL_NAMES=(trufflehog betterleaks jq); GSG_TOOL_VER=(3.99.2 1.9.0 1.6); GSG_TOOL_PLAT=(p p p); GSG_TOOL_SHA=(a b c)
+install_require_curl() { :; }
+tools_fetch_verified() { echo "FETCH $1" >&2; return 1; }
+install_stage_refused() { return 1; }
+install_stage_tools; echo "rc=$?"'
+    assert_contains "$ERR" "downloading trufflehog 3.99.2" "the first tool is named"
+    case "$ERR" in
+        *"downloading trufflehog 3.99.2"*"FETCH trufflehog"*) ;;
+        *) fail "the line must come before the download: $ERR" ;;
+    esac
+    assert_not_contains "$ERR" "downloading jq" "a tool that is already there is not announced"
+}
+
+
 run_file_tests

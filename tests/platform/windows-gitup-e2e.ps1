@@ -333,6 +333,7 @@ public static class GsgPty
             }
         }
         if (rc == -1) TerminateProcess(pi.hProcess, 124);
+        Thread.Sleep(2500);
         ClosePseudoConsole(hpc);
         t.Join(5000);
         lock (sb) { transcript = sb.ToString() + (sent ? "\n[typed: " + send.Trim() + "]" : "\n[nothing typed: the prompt never appeared]"); }

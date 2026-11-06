@@ -580,6 +580,16 @@ test_the_runner_reads_no_environment_variable() {
     assert_eq "$(grep -c 'gsg-signer git-for-windows' "$GSG_PROJECT/tools.lock")" 1 "the signer is data in tools.lock next to the digest row"
 }
 
+# ^ external PowerShell 5.1 started from PowerShell 7 inherits its PSModulePath and cannot load the Security module (run 42264892011)
+test_the_runner_resets_the_module_path_before_the_first_cmdlet_that_loads_a_module() {
+    local r="$GSG_PROJECT/bin/gsg-gitup.ps1" reset first
+    reset="$(grep -n "SetEnvironmentVariable('PSModulePath'" "$r" | head -n 1 | cut -d: -f1)"
+    first="$(grep -n 'Get-AuthenticodeSignature\|Get-FileHash\|Get-Command\|Join-Path' "$r" | grep -v '^[0-9]*:#' | head -n 1 | cut -d: -f1)"
+    if [ -z "$reset" ]; then fail "the runner never resets PSModulePath"; return 1; fi
+    if [ "$reset" -gt "$first" ]; then fail "PSModulePath is reset on line $reset, after the first module cmdlet on line $first"; fi
+    assert_contains "$(sed -n "${reset}p" "$r")" "'Process'" "only for its own process"
+}
+
 test_an_installer_that_is_unsigned_or_signed_by_another_signer_is_refused_though_its_digest_is_pinned() {
     local re
     wu_need_windows_runner

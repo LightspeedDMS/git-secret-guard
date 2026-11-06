@@ -9,6 +9,9 @@
 param([Parameter(Mandatory = $true)][string]$Handoff)
 Set-StrictMode -Version 2
 $ErrorActionPreference = 'Stop'
+# ^ external a PowerShell 7 parent leaves its module path to this 5.1 process, which then cannot load Microsoft.PowerShell.Security (Get-AuthenticodeSignature)
+# ^ invariant the process gets the module path 5.1 starts with: the user and machine values and its own built-in directory; nothing is read from the caller
+[System.Environment]::SetEnvironmentVariable('PSModulePath', ((@([System.Environment]::GetEnvironmentVariable('PSModulePath', 'User'), [System.Environment]::GetEnvironmentVariable('PSModulePath', 'Machine'), "$PSHOME\Modules") | Where-Object { $_ }) -join ';'), 'Process')
 # ^ invariant one definition of the silent flags; lib/gitup_windows.sh holds the same list and a test compares the two
 $InstallerFlags = '/VERYSILENT', '/NORESTART', '/NOCANCEL', '/SP-'
 $WingetBase = 'upgrade', '--id', 'Git.Git', '--exact', '--silent', '--accept-source-agreements', '--accept-package-agreements'

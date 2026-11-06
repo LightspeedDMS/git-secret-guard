@@ -153,7 +153,7 @@ function Scenario-InUse([bool]$WithWinget) {
     $holderAlive = -not $holder.HasExited
     Show ("holder still running: $holderAlive; installer processes left: " + (@(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -like "Git-*" } | ForEach-Object { $_.ProcessName }) -join ","))
     Show ("git: " + (Git-Version) + "; Git_is1: " + (Registry-Version))
-    Show ("pending renames naming Git: " + (Pending-Git-Renames).Count)
+    Show ("pending renames naming Git: " + @(Pending-Git-Renames).Count)
     if ($holderAlive) { Stop-Process -Id $holder.Id -Force }
     Check "the run finished by itself (the installer neither hung nor was killed by the timeout)" (-not $r.TimedOut)
     if ($r.Rc -ne 0) {
@@ -189,7 +189,7 @@ function Scenario-Killed {
     Check "the installer was found running and killed" $script:killed
     Check "the product did not report success" ($r.Rc -ne 0)
     Show ("after the kill: git: " + (Git-Version) + "; Git_is1: " + (Registry-Version) + "; unins000.exe: " + (Test-Path (Join-Path $GitDir 'unins000.exe')))
-    Show ("files under Git: " + (@(Get-ChildItem -Recurse -File -ErrorAction SilentlyContinue $GitDir)).Count + "; pending renames naming Git: " + (Pending-Git-Renames).Count)
+    Show ("files under Git: " + (@(Get-ChildItem -Recurse -File -ErrorAction SilentlyContinue $GitDir)).Count + "; pending renames naming Git: " + @(Pending-Git-Renames).Count)
     $r2 = Invoke-Gsg @('install', '--upgrade-git') 1200
     Show ($r2.Out -split "`n" | Select-Object -Last 15 | Out-String)
     Write-Host ("RESULT killed rerun: exit {0}" -f $r2.Rc)
@@ -233,7 +233,7 @@ function Scenario-Rerun {
     Show ((Read-Shared $o1) -split "`n" | Select-Object -Last 4 | Out-String)
     Check "leg 1 stops with exit 3 and leaves a hand-off" (($p1.ExitCode -eq 3) -and (Test-Path -LiteralPath $handoff))
     $o2 = Join-Path $Work 'runner.txt'
-    $p2 = Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File $(Join-Path $Root 'bin\gsg-gitup.ps1') $handoff" -Wait -PassThru -WindowStyle Hidden -RedirectStandardOutput $o2
+    $p2 = Start-Process -FilePath "$env:SystemRootSystem32d.exe" -ArgumentList "/c $env:SystemRootSystem32WindowsPowerShell1.0powershell.exe -NoProfile -ExecutionPolicy Bypass -File $(Join-Path $Root 'bingsg-gitup.ps1') $handoff > $o2 2>&1" -Wait -PassThru -WindowStyle Hidden
     Show ((Read-Shared $o2) -split "`n" | Select-Object -Last 4 | Out-String)
     Check "the runner upgrades git (exit 0)" ($p2.ExitCode -eq 0)
     Check "git is the pinned version now" ((Git-Version) -like ("*" + (Expected-Git) + "*"))

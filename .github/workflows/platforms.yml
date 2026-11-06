@@ -142,9 +142,93 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/logs"
           set -o pipefail
-          bash tests/run.sh tests/test_platform.sh tests/test_mac_runner.sh tests/test_platform_rpm.sh 2>&1 | tee "$RUNNER_TEMP/logs/platform-unit.log"
+          bash tests/run.sh tests/test_platform.sh tests/test_mac_runner.sh tests/test_platform_rpm.sh tests/test_platform_vm.sh 2>&1 | tee "$RUNNER_TEMP/logs/platform-unit.log"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: platform-unit
+          path: ${{ runner.temp }}/logs
+
+  # #40: does a commit made by a git below 2.54 skip the scan? A real old git (built from the pinned tarball) and the git inside GitHub Desktop's .deb.
+  old-git:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[heavy]')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build git 2.45.3 from the pinned tarball
+        env:
+          OLD_VERSION: 2.45.3
+          OLD_SHA256: 38f20f95a1427c42b4990f2ac677e558fe4384301b9964e161dd4b448315aebd
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential libcurl4-openssl-dev libssl-dev libexpat1-dev zlib1g-dev
+          mkdir -p "$RUNNER_TEMP/build" "$RUNNER_TEMP/logs"
+          cd "$RUNNER_TEMP/build"
+          curl -fsSL -o git.tar.xz "https://www.kernel.org/pub/software/scm/git/git-$OLD_VERSION.tar.xz"
+          printf '%s  git.tar.xz\n' "$OLD_SHA256" | sha256sum -c -
+          tar -xf git.tar.xz
+          make -C "git-$OLD_VERSION" -j "$(nproc)" prefix="$RUNNER_TEMP/oldgit" NO_GETTEXT=1 NO_TCLTK=1 NO_RUST=1 all
+          make -C "git-$OLD_VERSION" prefix="$RUNNER_TEMP/oldgit" NO_GETTEXT=1 NO_TCLTK=1 NO_RUST=1 install
+          "$RUNNER_TEMP/oldgit/bin/git" --version
+      - name: A commit made by git 2.45.3
+        run: |
+          set -o pipefail
+          bash tests/platform/old-git-e2e.sh "$RUNNER_TEMP/oldgit/bin/git" "git 2.45.3 built from source" 2>&1 | tee "$RUNNER_TEMP/logs/old-git-built.log"
+      - name: Fetch the GitHub Desktop .deb
+        env:
+          DESKTOP_URL: https://github.com/shiftkey/desktop/releases/download/release-3.4.13-linux1/GitHubDesktop-linux-amd64-3.4.13-linux1.deb
+          DESKTOP_SHA256: ""
+        run: |
+          mkdir -p "$RUNNER_TEMP/desktop"
+          curl -fsSL -o "$RUNNER_TEMP/desktop.deb" "$DESKTOP_URL"
+          sum="$(sha256sum "$RUNNER_TEMP/desktop.deb" | cut -d' ' -f1)"
+          echo "sha256 of the .deb: $sum" | tee "$RUNNER_TEMP/logs/desktop-deb.txt"
+          if [ -n "$DESKTOP_SHA256" ] && [ "$sum" != "$DESKTOP_SHA256" ]; then echo "::error::the .deb does not match its pinned digest"; exit 1; fi
+          dpkg-deb -x "$RUNNER_TEMP/desktop.deb" "$RUNNER_TEMP/desktop"
+          find "$RUNNER_TEMP/desktop" -path '*app/git/bin/git' -o -path '*app/git/libexec/git-core/git' | tee -a "$RUNNER_TEMP/logs/desktop-deb.txt"
+      - name: A commit made by the git GitHub Desktop bundles
+        run: |
+          set -o pipefail
+          g="$(find "$RUNNER_TEMP/desktop" -path '*app/git/bin/git' | head -n 1)"
+          "$g" --version
+          bash tests/platform/old-git-e2e.sh "$g" "the git bundled in GitHub Desktop 3.4.13" 2>&1 | tee "$RUNNER_TEMP/logs/old-git-desktop.log"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: old-git
+          path: ${{ runner.temp }}/logs
+
+  # #40: Rocky 9 with SELinux enforcing, as a real VM. Hosted x64 runners expose /dev/kvm; without it rocky-vm.sh stops and says what TCG would cost.
+  rocky-vm:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[heavy]')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: KVM and qemu
+        run: |
+          ls -l /dev/kvm || true
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm || true
+          ls -l /dev/kvm || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qemu-system-x86 qemu-utils cloud-image-utils openssh-client
+          qemu-system-x86_64 --version | head -n 1
+      - name: Boot the Rocky 9 image and run the E2E
+        env:
+          GSG_VM_LOGDIR: ${{ runner.temp }}/logs
+        run: |
+          mkdir -p "$GSG_VM_LOGDIR"
+          set -o pipefail
+          bash tests/platform/rocky-vm.sh 2>&1 | tee "$GSG_VM_LOGDIR/launcher.log"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: rocky-vm
           path: ${{ runner.temp }}/logs

@@ -31,7 +31,7 @@ the upgrade changed.
 | Situation | Route |
 |---|---|
 | `/usr/local/bin/git` is already 2.54 or newer but not first on `PATH` | `path-fix`: install prints the exact `export PATH="/usr/local/bin:$PATH"` line and refuses; no profile is edited. |
-| An enabled repository offers `git-core` 2.54 or newer (Fedora) | `package`: `dnf install -y git-core`. |
+| An enabled repository offers `git-core` 2.54 or newer (Fedora) | `package`: `dnf install -y git-core`, or `dnf upgrade -y git-core` when an older git-core is installed (dnf 5 leaves an installed package alone on `install`). |
 | Otherwise (RHEL 9, Rocky 9: the repositories carry 2.52) | `source`: the pinned source build below. |
 | `dnf` is missing | no route; the usual refusal follows. |
 

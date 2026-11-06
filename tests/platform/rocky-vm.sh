@@ -61,7 +61,7 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-qemu_args=(-name gsg-rocky-vm -smp "$VM_CPUS" -m "$VM_MEMORY" -nographic -no-reboot)
+qemu_args=(-name gsg-rocky-vm -smp "$VM_CPUS" -m "$VM_MEMORY" -display none -no-reboot)
 if [ "$accel" = kvm ]; then
     qemu_args=(-enable-kvm -cpu host "${qemu_args[@]}")
 else

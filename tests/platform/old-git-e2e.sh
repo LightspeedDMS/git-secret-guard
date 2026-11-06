@@ -62,6 +62,7 @@ main() {
     trap 'rm -rf -- "$scratch"' EXIT
     home="$scratch/home"
     mkdir -p "$home" || exit 2
+    export HOME="$home"
     newgit="$(type -P git)"
     printf '== a commit made by %s: %s, with the hook installed for a git of %s\n' "$LABEL" "$("$OLD_GIT" --version)" "$("$newgit" --version)"
     check "the git under test is older than 2.54" git_below_254 "$OLD_GIT"

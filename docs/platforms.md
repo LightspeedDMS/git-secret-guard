@@ -515,7 +515,7 @@ WSL runs a real Linux distribution, so `install` takes the Linux path and the di
 Rocky 9.8 (`Rocky-9-WSL-Base-9.8-20260525.0.x86_64.wsl`, SHA-256 `58de2455cd47...3829221`) and Fedora 44 (`Fedora-WSL-Base-44-1.7.x86_64.wsl`, SHA-256 `2e5b153ba4b6...d319a`) are the vendors' own WSL tars, imported
 with `wsl --import`; the digests are the ones in the vendors' CHECKSUM files, checked in the job (a mismatch stops it), and the same files were hashed once by hand. To bump an image, read the new file name and digest from the vendor's
 CHECKSUM file and change both in the `Import the RPM distribution` step. `consent=typed` types the answer at the real prompt on a pty instead of passing `--upgrade-git`. Every phase runs through `tests/platform/wsl-phase.ps1`
-in the distribution named by `WSL_TARGET`; a typed No is always run first, and on a stock git that is already new enough the flow checks that nothing is offered.
+in the distribution named by `WSL_TARGET`. Rocky and Fedora run the WSL 2 leg only (the matrix has no WSL 1 entry for them), because `wsl --import` of their vendor tars fails on WSL 1 (see the later runs above); a typed No is always run first, and on a stock git that is already new enough the flow checks that nothing is offered.
 
 **Tested where.** `tests/test_wsl.sh` drives all of this through fixture kernel files (`GSG_WSL_OSRELEASE`, `GSG_WSL_INTEROP`, `GSG_WSL_SYSTEMD_DIR`, announced on stderr like the other test seams, except that seams which look like plain Linux are silent) and a faked
 `uname`, so it runs on Linux, macOS and Git for Windows alike. The real runs are `tests/platform/wsl-ci.sh`, started by `.github/workflows/wsl.yml`.

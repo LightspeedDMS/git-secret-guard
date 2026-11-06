@@ -177,6 +177,8 @@ ISOLATION_MOUNT_RULES+=" /proc/scsi=tmpfs /proc/sys=proc /proc/sysrq-trigger=pro
 ISOLATION_MOUNT_RULES+=" /proc/latency_stats=devtmpfs /proc/sched_debug=devtmpfs /proc/timer_stats=devtmpfs"
 # ^ external podman 5.6.0 masks the directory /sys/devices/virtual/powercap with a tmpfs where intel_rapl exists (name in its binary)
 ISOLATION_MOUNT_RULES+=" /sys/devices/virtual/powercap=tmpfs"
+# ^ external podman 4.9.3 (ubuntu-24.04 hosted runner) masks the directory /sys/dev/block with a tmpfs; in its config.json maskedPaths
+ISOLATION_MOUNT_RULES+=" /sys/dev/block=tmpfs"
 ISOLATION_MOUNT_RULES+=" /src=* /sys=sysfs /sys/firmware=tmpfs /sys/fs/cgroup=cgroup2 /sys/fs/selinux=tmpfs "
 
 ISOLATION_MAX_MOUNT_LINES=500

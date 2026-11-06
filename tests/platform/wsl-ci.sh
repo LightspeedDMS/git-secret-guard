@@ -210,7 +210,7 @@ phase_upgrade() {
         check "install without a terminal and without --upgrade-git refuses on the old git" test "$RC" -ne 0
         if [ "${CONSENT:-flag}" = typed ]; then
             # ^ see the second answer; an RPM distribution asks again about the takeover of /usr/bin/git
-            typed_install 'y\nn' upgrade bash -x "$LINUX_CK/bin/git-secret-guard" install
+            typed_install 'y\nn' upgrade "$LINUX_CK/bin/git-secret-guard" install
             check "typed yes: the prompt is shown" has "Upgrade git now with the plan above? [y/N]"
             check "typed yes: install exits 0 (rc $RC)" rc_is 0
         else

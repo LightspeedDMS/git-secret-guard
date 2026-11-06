@@ -39,7 +39,7 @@ tools_binary_name() {
 tools_has_version() {
     local bin="$1" pinned="$2" timeout_bin="$3" out
     if [ ! -f "$bin" ] || [ ! -x "$bin" ]; then return 1; fi
-    out="$("$timeout_bin" "$GSG_VERSION_PROBE_SECONDS" "$bin" --version 2>&1)" || return 1
+    out="$("$timeout_bin" "$GSG_VERSION_PROBE_SECONDS" "$bin" --version 2>&1 </dev/null)" || return 1
     tools_version_matches "$out" "$pinned"
 }
 
@@ -47,7 +47,7 @@ tools_has_version() {
 tools_probe_version() {
     local bin="$1" pinned="$2" timeout_bin="$3" out
     TOOL_FOUND=unknown
-    out="$("$timeout_bin" "$GSG_VERSION_PROBE_SECONDS" "$bin" --version 2>&1)" || out=""
+    out="$("$timeout_bin" "$GSG_VERSION_PROBE_SECONDS" "$bin" --version 2>&1 </dev/null)" || out=""
     if [[ $out =~ ([0-9]+\.[0-9]+[0-9A-Za-z.+-]*) ]]; then TOOL_FOUND="${BASH_REMATCH[1]}"; fi
     if tools_version_matches "$out" "$pinned"; then
         TOOL_FOUND="$pinned"

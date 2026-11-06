@@ -872,7 +872,7 @@ test_a_debian_machine_in_auto_mode_goes_straight_to_the_source_build() {
     local script='source "$1"; LOGDIR="$2"; D="$2"; OS_RELEASE="$3"; GIT_SOURCE=auto
         install_git_source() { : >"$D/source-build-ran"; return 0; }; git_is_new_enough() { return 0; }
         install_git_ppa() { : >"$D/ppa-ran"; return 0; }
-        obtain_git; printf "rc=%s failures=%s\n" "$?" "$FAILURES"'
+        obtain_git; printf "rc=%s failures=%s prefix=%s\n" "$?" "$FAILURES" "$GIT_BUILD_PREFIX"'
     local id
     for id in debian ubuntu; do
         printf 'ID=%s\n' "$id" >"$SANDBOX/osr-$id"
@@ -882,8 +882,10 @@ test_a_debian_machine_in_auto_mode_goes_straight_to_the_source_build() {
         if [ "$id" = debian ]; then
             assert_no_file "$SANDBOX/ppa-ran" "Debian never tries the PPA"
             assert_file "$SANDBOX/source-build-ran" "Debian builds the source"
+            assert_contains "$OUT" "prefix=/opt/gsg-git" "into its own prefix, so no /usr/local/bin/git disturbs the tests that hide git"
         else
             assert_file "$SANDBOX/ppa-ran" "control: Ubuntu still tries the PPA first"
+            assert_contains "$OUT" "prefix=/usr/local" "and keeps /usr/local"
         fi
     done
 }

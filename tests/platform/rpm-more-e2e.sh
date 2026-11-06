@@ -149,6 +149,7 @@ mode_old() {
     check "git-core is the same package" test "$(rpm -q git-core)" = "$PKG_BEFORE"
     run "$GSG" install --upgrade-git </dev/null
     show "$(printf '%s' "$OUT" | grep -E 'route:|now; continuing|installed git-secret-guard|neither' | head -n 6 | cut -c1-160)"
+    show "exit $RC; the last lines of the output:" "$(printf '%s' "$OUT" | tail -n 14 | cut -c1-200)"
     check "install --upgrade-git ends with exit 0" rc_is 0
     check "the plan named the package route" has "route: package"
     check "no source build ran" not has "building git"

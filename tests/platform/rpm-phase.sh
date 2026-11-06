@@ -20,10 +20,7 @@ rpm_prepare_machine() {
     if [ "$RPM_DISTRO" = rocky ]; then
         step "dnf install the stock RPM git" 900 dnf install -y git || return 1
     fi
-    rpm_show_caps "before"
-    # ^ external rootless podman on the hosted runner drops file capabilities of the image; RHEL's pam_unix helper needs one, and sudo then fails in PAM
-    step "restore the file capabilities of the pam package" 120 rpm --setcaps pam || return 1
-    rpm_show_caps "after"
+    rpm_fix_unix_chkpwd || return 1
     if ! id -u "$TEST_USER" >/dev/null 2>&1; then
         step "create the non-root test user" 60 useradd -m -s /bin/bash "$TEST_USER" || return 1
     fi
@@ -34,9 +31,17 @@ rpm_prepare_machine() {
     esac
 }
 
-rpm_show_caps() {
-    printf '        | file capabilities of unix_chkpwd %s: %s\n' "$1" "$(getcap /usr/sbin/unix_chkpwd 2>&1 | sed 's/^[^ ]* //')"
+# ^ external RHEL's unix_chkpwd carries a file capability; rootless podman on the hosted runner drops it, and PAM then fails for every sudo call
+# ^ why the setuid bit RHEL 8 used, not rpm --setcaps; the latter ran and left no capability behind (run 42255752347)
+rpm_fix_unix_chkpwd() {
+    local f=/usr/sbin/unix_chkpwd caps
+    caps="$(getcap "$f" 2>&1)"
+    printf '        | file capabilities of unix_chkpwd: [%s]\n' "${caps#"$f"}"
+    if [ -n "$caps" ]; then return 0; fi
+    step "give unix_chkpwd the setuid bit its capability would replace" 60 chmod 4755 "$f" || return 1
+    printf '        | unix_chkpwd is now %s\n' "$(stat -c '%A' "$f")"
 }
+
 
 rpm_write_sudoers() {
     mkdir -p /etc/sudoers.d || return 1

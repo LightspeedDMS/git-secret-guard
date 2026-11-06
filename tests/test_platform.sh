@@ -877,13 +877,13 @@ test_a_debian_machine_in_auto_mode_goes_straight_to_the_source_build() {
         rm -f -- "$SANDBOX/source-build-ran" "$SANDBOX/ppa-ran"
         run_cap env -i PATH="/usr/local/bin:/usr/bin:/bin" bash -c "$script" _ "$GSG_PROJECT/tests/platform/ubuntu-container.sh" "$SANDBOX" "$SANDBOX/osr-$id"
         assert_contains "$OUT" "rc=0 failures=0" "[$id] the run ends well"
+        if [ "$id" = debian ]; then
+            assert_no_file "$SANDBOX/ppa-ran" "Debian never tries the PPA"
+            assert_file "$SANDBOX/source-build-ran" "Debian builds the source"
+        else
+            assert_file "$SANDBOX/ppa-ran" "control: Ubuntu still tries the PPA first"
+        fi
     done
-    run_cap env -i PATH="/usr/local/bin:/usr/bin:/bin" bash -c "$script" _ "$GSG_PROJECT/tests/platform/ubuntu-container.sh" "$SANDBOX" "$SANDBOX/osr-debian"
-    assert_no_file "$SANDBOX/ppa-ran" "Debian never tries the PPA"
-    assert_file "$SANDBOX/source-build-ran" "Debian builds the source"
-    rm -f -- "$SANDBOX/source-build-ran" "$SANDBOX/ppa-ran"
-    run_cap env -i PATH="/usr/local/bin:/usr/bin:/bin" bash -c "$script" _ "$GSG_PROJECT/tests/platform/ubuntu-container.sh" "$SANDBOX" "$SANDBOX/osr-ubuntu"
-    assert_file "$SANDBOX/ppa-ran" "control: Ubuntu still tries the PPA first"
 }
 
 run_file_tests

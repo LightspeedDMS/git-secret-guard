@@ -142,7 +142,7 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/logs"
           set -o pipefail
-          bash tests/run.sh tests/test_platform.sh tests/test_mac_runner.sh tests/test_platform_rpm.sh tests/test_platform_vm.sh 2>&1 | tee "$RUNNER_TEMP/logs/platform-unit.log"
+          bash tests/run.sh tests/test_platform.sh tests/test_mac_runner.sh tests/test_platform_rpm.sh tests/test_platform_vm.sh tests/test_gitup_rpm.sh tests/test_gitup_followups.sh tests/test_gitup_contract.sh 2>&1 | tee "$RUNNER_TEMP/logs/platform-unit.log"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
@@ -232,3 +232,28 @@ jobs:
         with:
           name: rocky-vm
           path: ${{ runner.temp }}/logs
+
+  # temporary: why sudo fails in PAM for a non-root user in the Rocky container on rootless podman
+  pamdiag:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[pamdiag]')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: sudo in a Rocky container
+        run: |
+          set +e
+          img=docker.io/rockylinux/rockylinux:9.7@sha256:53f4c6dcb34e1403bd93207351f0af9a593610faeb7165cb8a037346765199b0
+          podman run --rm --init "$img" bash -c '
+            dnf install -y -q --setopt=install_weak_deps=False sudo strace libcap >/dev/null 2>&1
+            useradd -m gsguser
+            echo "gsguser ALL=(ALL) NOPASSWD:ALL" >/etc/sudoers.d/gsguser; chmod 440 /etc/sudoers.d/gsguser
+            echo "--- files"; ls -l /etc/shadow /etc/passwd /usr/sbin/unix_chkpwd /usr/bin/sudo; getcap /usr/sbin/unix_chkpwd
+            echo "--- caps of this shell"; grep -E "^Cap(Eff|Bnd)" /proc/self/status
+            echo "--- sudo -n true (before any change)"; runuser -u gsguser -- sudo -n true; echo "rc=$?"
+            echo "--- pam sudo"; cat /etc/pam.d/sudo; grep -E "^account" /etc/pam.d/system-auth
+            echo "--- chkpwd as the user"; runuser -u gsguser -- /usr/sbin/unix_chkpwd gsguser nullok </dev/null; echo "rc=$?"
+            echo "--- strace of sudo, denied calls"; runuser -u gsguser -- strace -f -e trace=openat,execve,open -o /tmp/st sudo -n true >/dev/null 2>&1; grep -E "EACCES|EPERM" /tmp/st | head -20
+            echo "--- after chmod u+s unix_chkpwd"; chmod 4755 /usr/sbin/unix_chkpwd; runuser -u gsguser -- sudo -n true; echo "rc=$?"
+            echo "--- nosuid mounts"; grep -E " / | /usr" /proc/self/mountinfo | head -3
+            echo "--- aging"; chage -l gsguser; grep gsguser /etc/shadow | cut -d: -f1,3-9
+          '

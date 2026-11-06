@@ -27,7 +27,8 @@ test_the_guest_is_reachable_from_the_host_only_and_has_no_graphics() {
     assert_contains "$OUT" "hostfwd=tcp:127.0.0.1:" "the ssh forward is bound to the loopback"
     assert_not_contains "$OUT" "tcp::" "no forward on every address"
     assert_not_contains "$OUT" "0.0.0.0" "nothing listens on all interfaces"
-    assert_contains "$OUT" "qemu-arg: -nographic" "no display"
+    assert_contains "$OUT" "qemu-arg: -display" "a display option"
+    assert_contains "$OUT" "qemu-arg: none" "that shows nothing (-nographic cannot be combined with -daemonize)"
 }
 
 test_with_kvm_the_guest_runs_hardware_accelerated_and_says_so() {

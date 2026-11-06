@@ -29,7 +29,7 @@ jobs:
             uname -r
           } >"$RUNNER_TEMP/logs/facts.txt" 2>&1
           cat "$RUNNER_TEMP/logs/facts.txt"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: facts
@@ -42,19 +42,50 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-24.04, ubuntu-22.04, debian-13]
+        run: [upgrade, default]
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: apt upgrade E2E in a podman container
+      # upgrade = the real install --upgrade-git E2E; default = the launcher's own phases (prepare, install E2E, tests/run.sh)
+      - name: ubuntu.sh in a podman container
+        env:
+          OS: ${{ matrix.os }}
+          RUN: ${{ matrix.run }}
         run: |
           mkdir -p "$RUNNER_TEMP/logs"
           set -o pipefail
-          bash tests/platform/ubuntu.sh --os "${{ matrix.os }}" --phase upgrade 2>&1 | tee "$RUNNER_TEMP/logs/${{ matrix.os }}-upgrade.log"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+          args=()
+          if [ "$RUN" = upgrade ]; then args=(--phase upgrade); fi
+          bash tests/platform/ubuntu.sh --os "$OS" "${args[@]}" 2>&1 | tee "$RUNNER_TEMP/logs/$OS-$RUN.log"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
-          name: containers-${{ matrix.os }}
+          name: containers-${{ matrix.os }}-${{ matrix.run }}
+          path: ${{ runner.temp }}/logs
+
+  rpm:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 100
+    strategy:
+      fail-fast: false
+      matrix:
+        distro: [rocky, fedora]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: rpm.sh in a podman container
+        env:
+          DISTRO: ${{ matrix.distro }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/logs"
+          set -o pipefail
+          bash tests/platform/rpm.sh "$DISTRO" 2>&1 | tee "$RUNNER_TEMP/logs/$DISTRO.log"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: rpm-${{ matrix.distro }}
           path: ${{ runner.temp }}/logs
 
   diag:
@@ -81,7 +112,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Prerequisites of docs/platforms.md
@@ -99,7 +130,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/logs"
           set -o pipefail
           bash tests/run.sh tests/test_platform.sh tests/test_mac_runner.sh 2>&1 | tee "$RUNNER_TEMP/logs/platform-unit.log"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: platform-unit

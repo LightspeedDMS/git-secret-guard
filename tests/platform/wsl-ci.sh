@@ -276,6 +276,7 @@ phase_mntc() {
     blocked_and_clean "$dir/repo" "$lab-repo"
     run "$lab-copy" bash -c 'rm -rf -- "$1/checkout" && cp -a -- "$2" "$1/checkout"' _ "$dir" "$WS"
     if [ "$RC" -ne 0 ]; then bad "cannot copy the checkout to $dir (rc $RC, see $lab-copy.log)"; return 0; fi
+    : >"$dir/new-file" && chmod 644 "$dir/new-file" && info "$lab: a new file made here shows mode $(stat -c %a "$dir/new-file") after chmod 644, and a new directory $(mkdir -p "$dir/new-dir" && stat -c %a "$dir/new-dir")"
     for f in bin/git-secret-guard README.md lib/common.sh; do info "$lab: a file in the /mnt/c checkout, $f, shows mode $(stat -c %a "$dir/checkout/$f")"; done
     if [ "$sfx" = metadata ]; then
         chmod 640 "$dir/checkout/README.md" && info "$lab: README.md after chmod 640 shows mode $(stat -c %a "$dir/checkout/README.md")"

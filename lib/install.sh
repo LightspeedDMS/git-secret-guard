@@ -144,13 +144,13 @@ install_require_git() {
 # ^ external GitHub Desktop for Linux ships its own git here (2.45.3 on the reference host); GITUP_ROOT moves it into a test sandbox
 install_bundled_git_path() { printf '%s/usr/lib/github-desktop/resources/app/git/bin/git' "${GITUP_ROOT:-}"; }
 
-# ^ invariant true for the git GitHub Desktop bundles; whether its commits reach the hook is untested => no text claims they are skipped
+# ^ invariant true for the git GitHub Desktop bundles; the warning names it, and the commit test in docs/platforms.md used it
 install_git_is_bundled() { [ "$1" = "$(install_bundled_git_path)" ]; }
 
-# ^ invariant prints why a git older than 2.54 matters; the bundled git gets only the missing test said, any other git the certain claim
+# ^ invariant prints why a git older than 2.54 matters; the bundled git is named and measured, any other git gets the plain claim
 install_old_git_effect() {
     if install_git_is_bundled "$1"; then
-        printf 'it is the git GitHub Desktop bundles, config-based hooks need git >= 2.54, and whether commits made with it are scanned has not been tested'
+        printf 'it is the git GitHub Desktop bundles; it ignores config-based hooks without any message, so commits made from GitHub Desktop are not scanned (measured with 2.45.3)'
     else
         printf 'it ignores config-based hooks without any message, so commits made with it are not scanned'
     fi

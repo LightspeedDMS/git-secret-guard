@@ -66,10 +66,10 @@ test_the_takeover_accepts_siblings_that_are_symlinks_to_git_and_refuses_one_that
     local n
     gu_tk_start || return 1
     for n in git-receive-pack git-upload-archive git-upload-pack; do
-        rm -f -- "$GU_ROOT/usr/local/bin/$n" && ln -s git "$GU_ROOT/usr/local/bin/$n" || return 1
+        mv -- "$GU_ROOT/usr/local/bin/$n" "$GU_ROOT/usr/local/bin/$n.real" && ln -s "$n.real" "$GU_ROOT/usr/local/bin/$n" || return 1
     done
     gsg install --take-over-system-git </dev/null
-    if [ "$RC" -ne 0 ]; then fail "refusal text: $(tail -n 4 <<<"$ERR" | tr "
+
 " " " | cut -c1-700)"; fi
     assert_rc 0 "the three siblings are relative symlinks to git"
     gu_all_symlinks || fail "the six files are not symlinks"

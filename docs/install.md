@@ -104,6 +104,7 @@ with no git at all they run right after it.
 - **Windows has no `sudo`:** the plan says whether the upgrade is machine-wide (a UAC prompt unless the prompt is already elevated) or per-user, and never switches one into the
   other. A declined UAC prompt should stop the upgrade before the installer starts (the runner handles that case; a person has not yet declined the real dialog). The IDE and GUI client warning above still applies: the upgrade changes the Git for Windows your `PATH` finds, not the git
   an IDE bundles.
+- **macOS** has an upgrade module too (`brew install git` or `brew upgrade git` as your user, no takeover since `/usr/bin/git` is protected), so the lists above that say macOS keeps the refusal are out of date: [the macOS section of platforms.md](platforms.md#macos-homebrew).
 - **Takeover.** `git-secret-guard restore-system-git` undoes it from the saved originals without a network. `uninstall` stops while a takeover is active
   (it would take the restore command with it) and names `restore-system-git` and `uninstall --keep-system-git`. `status` and `doctor` report the takeover, and one that
   something else undid, which leaves commits through `/usr/bin/git` unscanned.

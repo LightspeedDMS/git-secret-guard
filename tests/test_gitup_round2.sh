@@ -104,7 +104,7 @@ test_branches_that_each_take_one_reserved_registry_line_merge_without_conflicts(
     gitx -C "$repo" init -q -b main && gitx -C "$repo" add lib/gitup.sh && gitx -C "$repo" commit -q -m base || return 1
     for a in "${classes[@]}"; do
         gitx -C "$repo" checkout -q -b "mod-$a" main || return 1
-        sed -i "s/^\\( *\\)$a) REPLY=\"\" ;;\$/\\1$a) REPLY=${a}mod ;;/" "$repo/lib/gitup.sh" || return 1
+        sed -i "s/^\\( *\\)$a) REPLY=[^ ;]* ;;\$/\\1$a) REPLY=${a}mod ;;/" "$repo/lib/gitup.sh" || return 1
         grep -q "^ *$a) REPLY=${a}mod ;;\$" "$repo/lib/gitup.sh" || { fail "no reserved line for $a"; return 1; }
         gitx -C "$repo" commit -q -am "module for $a" || return 1
     done
@@ -190,6 +190,7 @@ test_a_broken_record_prints_the_commands_to_undo_by_hand() {
 
 test_the_default_betterleaks_is_the_one_fetch_test_tools_downloads() {
     local home="$SANDBOX/bl-home" cache="$SANDBOX/bl-cache/git-secret-guard-test-tools" got
+    [ "$TEST_OS" != Darwin ] || skip_test "the ~/.local/bin fallback is the Linux branch of tests/lib.sh; macOS always uses the cache path"
     lc_begin || return 1
     rm -rf -- "$home" "$SANDBOX/bl-cache" && mkdir -p -- "$home/.local/bin" "$cache" || return 1
     printf '#!/bin/sh\n' >"$cache/betterleaks" && cp -- "$cache/betterleaks" "$home/.local/bin/betterleaks" && chmod 755 "$cache/betterleaks" "$home/.local/bin/betterleaks" || return 1

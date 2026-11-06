@@ -537,7 +537,7 @@ claim_line_is_allowed() {
 # ^ external awk joins backslash-continued lines first; comment lines skipped
 claim_sweep() {
     local root="$1" f hit text
-    for f in install install_tools tools state hookspath brew; do
+    for f in install install_tools tools state hookspath brew gitup gitup_macos; do
         if [ ! -f "$root/lib/$f.sh" ]; then
             printf '%s.sh: missing\n' "$f"
             continue
@@ -564,7 +564,7 @@ test_every_install_refusal_wording_is_honest_after_a_brew_install() {
 test_the_claim_sweep_catches_each_planted_false_claim() {
     local root="$SANDBOX/planted" out
     rm -rf -- "$root" && mkdir -p -- "$root/lib" || return 1
-    cp -- "$GSG_PROJECT"/lib/{install,install_tools,tools,state,hookspath,brew}.sh "$root/lib/" || return 1
+    cp -- "$GSG_PROJECT"/lib/{install,install_tools,tools,state,hookspath,brew,gitup,gitup_macos}.sh "$root/lib/" || return 1
     assert_eq "$(claim_sweep "$root")" "" "the unmodified copy is clean"
     cat >>"$root/lib/tools.sh" <<'EOF' || return 1
 printf 'planted one: nothing installed\n' >&2

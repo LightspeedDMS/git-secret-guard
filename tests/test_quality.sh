@@ -21,7 +21,7 @@ shellcheck_gate_skip_reason() {
 # ^ why project_scripts omits tests/fixtures/husky/h, not shellcheck it; verbatim third-party sh script
 project_scripts() {
     cd -- "$GSG_PROJECT" || return 1
-    printf '%s\n' hooks/secret-scan bin/git-secret-guard lib/*.sh lib/scanners/*.sh tests/*.sh tests/platform/*.sh tests/stubs/*
+    printf '%s\n' hooks/secret-scan bin/git-secret-guard lib/*.sh lib/scanners/*.sh tests/*.sh tests/platform/*.sh tests/stubs/* .github/scripts/check-dco.sh
 }
 
 test_shellcheck_reports_nothing_on_every_script() {
@@ -294,7 +294,7 @@ test_the_docs_do_not_claim_the_hook_has_no_PATH_lookup() {
     done
 }
 
-GSG_README_MAX_LINES=120
+GSG_README_MAX_LINES=135
 
 test_the_readme_stays_a_short_overview() {
     cd -- "$GSG_PROJECT" || return 1
@@ -439,6 +439,51 @@ test_launchctl_is_looked_up_only_in_lib_install_sh() {
     local found
     found="$(grep -rnE '(^|[;&|(`]|\$\()[[:space:]]*(command -v|which |type -a?P)[[:space:]]+launchctl' bin hooks lib | cut -d: -f1)"
     assert_eq "$found" "lib/install.sh" "exactly one lookup of launchctl in the shipped code, at install time"
+}
+
+# ^ why the version column of tools.lock, not a copy of it; a pin bump without updating THIRD_PARTY_LICENSES fails here
+test_third_party_licenses_list_every_component_at_its_tools_lock_version() {
+    cd -- "$GSG_PROJECT" || return 1
+    local tool version rest needle
+    assert_file THIRD_PARTY_LICENSES "THIRD_PARTY_LICENSES"
+    while read -r tool version rest; do
+        case "$tool" in '' | '#'*) continue ;; esac
+        grep -F -- "$tool" THIRD_PARTY_LICENSES | grep -qF -- "$version" || fail "THIRD_PARTY_LICENSES has no row with $tool and $version from tools.lock"
+    done <tools.lock
+    for needle in 'AGPL-3.0' 'MIT' 'GPL-2.0' 'not redistributed' 'husky' 'typicode' 'Zachary Rice' 'Stephen Dolan' \
+        'Heimdal' 'Kungliga Tekniska' 'NetBSD' 'Lucent' 'decNumber' \
+        'https://github.com/trufflesecurity/trufflehog' 'https://github.com/betterleaks/betterleaks' 'https://github.com/jqlang/jq'; do
+        grep -qF -- "$needle" THIRD_PARTY_LICENSES || fail "THIRD_PARTY_LICENSES does not mention [$needle]"
+    done
+}
+
+# ^ why the maintainer link built from fragments, not a literal; test_no_tracked_file_names_an_internal_host_service_or_account searches this file
+# shellcheck disable=SC2016
+test_the_security_policy_and_the_maintainer_are_published() {
+    cd -- "$GSG_PROJECT" || return 1
+    local needle
+    assert_file SECURITY.md "SECURITY.md"
+    for needle in 'Report a vulnerability' 'security/advisories/new' 'do not open a public issue' '5 business days' 'current `main` branch' 'merged to `main`'; do
+        grep -qiF -- "$needle" SECURITY.md || fail "SECURITY.md does not mention [$needle]"
+    done
+    if grep -qi 'latest release' SECURITY.md; then fail "SECURITY.md speaks of releases, and the repository has none"; fi
+    grep -qF 'GSG_TEST_SERVICE_UNIT' CONTRIBUTING.md || fail "CONTRIBUTING.md does not document GSG_TEST_SERVICE_UNIT"
+    grep -qF -- "[js""battig](https://github.com/js""battig)" README.md || fail "README.md does not name the maintainer as a link"
+    for needle in 'DCO.txt' 'SECURITY.md' 'THIRD_PARTY_LICENSES'; do
+        grep -qF -- "($needle)" README.md || fail "the README documentation table does not link $needle"
+    done
+}
+
+# ^ why names built from fragments, not literals; this file is one of the tracked files being searched
+test_no_tracked_file_names_an_internal_host_service_or_account() {
+    cd -- "$GSG_PROJECT" || return 1
+    local account="js""battig" service="cidx""-server" domain="lightspeedd""ms\\.com" hits
+    hits="$(gitx ls-files -z -co --exclude-standard | xargs -0 grep -nIiE -- "$service|$domain" 2>/dev/null || true)"
+    assert_empty "$hits" "no internal service unit or company domain"
+    hits="$(gitx ls-files -z -co --exclude-standard | xargs -0 grep -nIi -- "$account" 2>/dev/null | grep -v '^README.md:' || true)"
+    assert_empty "$hits" "the maintainer account appears only in README.md"
+    hits="$(grep -ci -- "$account" README.md || true)"
+    assert_eq "$hits" 1 "one mention of the account in README.md, the maintainer link"
 }
 
 test_the_project_tree_holds_no_credential_looking_literals() {

@@ -90,14 +90,28 @@ gu_module_env() {
 }
 
 # ^ invariant gu_pty INPUT CMD... runs CMD with stdin, stdout and stderr on a pseudo-terminal and feeds INPUT to it; OUT holds the terminal text, ERR is empty
-# ^ external util-linux script; the BSD script of macOS takes other arguments and the prompt tests skip there
+# ^ external util-linux script takes -qec on Linux; macOS has only the BSD /usr/bin/script (script -q FILE CMD...), Homebrew's util-linux ships no script
+GU_PTY_LEAD_SECONDS=1 GU_PTY_HOLD_SECONDS=3
+# ^ invariant a Mac test file sets GU_PTY_BSD=1 to run its prompt tests; the RPM and core prompt tests stay skipped on a Mac
+: "${GU_PTY_BSD:=0}"
+# ^ external BSD script sends EOF first when its stdin ends at once; input follows a lead and stdin stays open for a hold
+gu_pty_bsd() {
+    local input="$1"
+    shift
+    { sleep "$GU_PTY_LEAD_SECONDS"; printf '%s' "$input"; sleep "$GU_PTY_HOLD_SECONDS"; } | /usr/bin/script -q /dev/null "$@"
+}
+
 gu_pty() {
     local input="$1" cmd
     shift
-    command -v script >/dev/null 2>&1 || skip_test "script (util-linux) is not available for a pseudo-terminal"
-    if [ "$TEST_OS" = Darwin ]; then skip_test "the prompt tests use the util-linux script"; fi
-    printf -v cmd '%q ' "$@"
-    run_cap script -qec "$cmd" /dev/null <<<"$input"
+    if [ "$TEST_OS" = Darwin ] && [ "$GU_PTY_BSD" != 1 ]; then skip_test "the prompt tests use the util-linux script"; fi
+    if [ "$TEST_OS" = Darwin ]; then
+        run_cap gu_pty_bsd "$input" "$@"
+    else
+        command -v script >/dev/null 2>&1 || skip_test "script (util-linux) is not available for a pseudo-terminal"
+        printf -v cmd '%q ' "$@"
+        run_cap script -qec "$cmd" /dev/null <<<"$input"
+    fi
     OUT="${OUT//$'\r'/}"
 }
 
@@ -127,6 +141,8 @@ lc_make_git_fixtures() {
 # ^ security GSG_GITUP_ROOT moves /usr, /var and /etc into the sandbox and the build PATH finds the make stand-in => nothing outside the sandbox is reachable
 GU_ROOT=""
 gu_rpm_setup() {
+    # ^ why a skip, not a fix; the RPM module runs only on Rocky, RHEL and Fedora, and its source route lists files with GNU find -printf and -perm /111
+    if ! env PATH="$TEST_BASE_PATH" find / -maxdepth 0 -printf x >/dev/null 2>&1; then skip_test "the RPM source route needs GNU find; this PATH has only BSD find"; fi
     lc_begin && gu_os_release 'ID="rocky"' 'ID_LIKE="rhel centos fedora"' && gu_old_git "${1:-2.52.0}" || return 1
     lc_make_fixtures && lc_make_git_fixtures "${2:-2.56.0}" && lc_use_fixtures || return 1
     GU_ROOT="$SANDBOX/root"

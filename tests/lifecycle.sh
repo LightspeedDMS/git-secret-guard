@@ -15,7 +15,7 @@ lc_systemctl_standin() {
     cat >"$SANDBOX/pathbin/systemctl" <<'EOF' || return 1
 #!/bin/sh
 d="${0%/*}/.."
-echo "$*" >>"$d/systemctl.log"
+printf '%s\n' "$*" >>"$d/systemctl.log"
 if [ -f "$d/systemctl.fail" ]; then
     want="$(cat "$d/systemctl.fail")"
     case " $* " in *"$want"*) echo "Failed: injected systemctl failure" >&2; exit 1 ;; esac
@@ -31,7 +31,7 @@ lc_launchctl_standin() {
     cat >"$SANDBOX/pathbin/launchctl" <<'EOF' || return 1
 #!/bin/sh
 d="${0%/*}/.."
-echo "$*" >>"$d/launchctl.log"
+printf '%s\n' "$*" >>"$d/launchctl.log"
 for kind in fail failonce; do
     if [ -f "$d/launchctl.$kind" ]; then
         want="$(cat "$d/launchctl.$kind")"
@@ -60,7 +60,7 @@ lc_gitup_standins() {
     cat >"$SANDBOX/pathbin/sudo" <<'EOF' || return 1
 #!/bin/sh
 d="$(cd "${0%/*}/.." && pwd -P)" || exit 1
-echo "sudo $*" >>"$d/gitup.log"
+printf '%s\n' "sudo $*" >>"$d/gitup.log"
 if [ -f "$d/sudo.stall" ]; then
     case " $* " in
         *"$(cat "$d/sudo.stall")"*)
@@ -101,7 +101,7 @@ EOF
     cat >"$SANDBOX/pathbin/rpm" <<'EOF' || return 1
 #!/bin/sh
 d="$(cd "${0%/*}/.." && pwd -P)" || exit 1
-echo "rpm $*" >>"$d/gitup.log"
+printf '%s\n' "rpm $*" >>"$d/gitup.log"
 answer() { if [ -f "$d/$1" ]; then cat "$d/$1"; exit 0; fi; echo "error: the rpm stand-in has no $1" >&2; exit 1; }
 case "$*" in
     "-qf --qf %{NAME}\n -- "*) if [ -f "$d/rpm.owner" ]; then cat "$d/rpm.owner"; exit 0; fi; echo "file $5 is not owned by any package" >&2; exit 1 ;;
@@ -111,13 +111,13 @@ case "$*" in
     "-qa --qf %{NAME} %{SOURCERPM}\n") answer rpm.all ;;
     "-V git-core") if [ -f "$d/rpm.verify" ]; then cat "$d/rpm.verify"; fi; exit 0 ;;
 esac
-echo "Error: the rpm stand-in does not know the call [$*]" >&2
+printf '%s\n' "Error: the rpm stand-in does not know the call [$*]" >&2
 exit 1
 EOF
     cat >"$SANDBOX/pathbin/dnf" <<'EOF' || return 1
 #!/bin/sh
 d="$(cd "${0%/*}/.." && pwd -P)" || exit 1
-echo "dnf $*" >>"$d/gitup.log"
+printf '%s\n' "dnf $*" >>"$d/gitup.log"
 case " $* " in *" repoquery "* | *" repolist "*) if [ -t 0 ]; then echo "query-stdin-is-a-terminal" >>"$d/gitup.log"; fi ;; esac
 if [ -f "$d/dnf.fail" ]; then
     case " $* " in *"$(cat "$d/dnf.fail")"*) echo "Error: injected dnf failure" >&2; exit 1 ;; esac
@@ -150,19 +150,19 @@ case " $* " in
         exit 0
         ;;
 esac
-echo "Error: the dnf stand-in does not know the call [$*]" >&2
+printf '%s\n' "Error: the dnf stand-in does not know the call [$*]" >&2
 exit 1
 EOF
     cat >"$SANDBOX/pathbin/restorecon" <<'EOF' || return 1
 #!/bin/sh
 d="$(cd "${0%/*}/.." && pwd -P)" || exit 1
-echo "restorecon $*" >>"$d/gitup.log"
+printf '%s\n' "restorecon $*" >>"$d/gitup.log"
 exit 0
 EOF
     cat >"$SANDBOX/pathbin/make" <<'EOF' || return 1
 #!/bin/sh
 d="$(cd "${0%/*}/.." && pwd -P)" || exit 1
-echo "make $*" >>"$d/gitup.log"
+printf '%s\n' "make $*" >>"$d/gitup.log"
 { echo "PATH=$PATH"; env | cut -d= -f1 | LC_ALL=C sort | tr '\n' ' '; echo; echo "cwd=$(pwd)"; } >>"$d/make.env"
 if [ -f "$d/make.hang" ]; then : >"$d/make.started"; exec sleep 60; fi
 if [ -f "$d/make.fail" ]; then echo "make: *** injected failure" >&2; exit 2; fi
@@ -210,7 +210,7 @@ EOF
     cat >"$SANDBOX/pathbin/ldd" <<'EOF' || return 1
 #!/bin/sh
 d="$(cd "${0%/*}/.." && pwd -P)" || exit 1
-echo "ldd $*" >>"$d/gitup.log"
+printf '%s\n' "ldd $*" >>"$d/gitup.log"
 if [ -f "$d/ldd.out" ]; then
     if [ ! -f "$d/ldd.only" ]; then cat "$d/ldd.out"; exit 0; fi
     case "$1" in *"$(cat "$d/ldd.only")"*) cat "$d/ldd.out"; exit 0 ;; esac
@@ -219,20 +219,24 @@ echo "	not a dynamic executable" >&2
 exit 1
 EOF
     chmod 755 "$SANDBOX/pathbin/sudo" "$SANDBOX/pathbin/dnf" "$SANDBOX/pathbin/restorecon" "$SANDBOX/pathbin/make" "$SANDBOX/pathbin/df" "$SANDBOX/pathbin/ldd" "$SANDBOX/pathbin/rpm" || return 1
-    # ^ why copies, not symlinks; gitup_system_bin checks the owner of the target, and /usr/bin files belong to root, not to the test user
+    # ^ why exec wrappers, not symlinks or copies; gitup_system_bin wants a regular file owned by the test user, and macOS kills a copied system binary
+    # ^ why TEST_BASE_PATH, not /usr/bin; on macOS the GNU directory comes first, and the install needs GNU mv -T
+    local -a base_dirs
+    IFS=: read -r -a base_dirs <<<"$TEST_BASE_PATH"
     for tool in cp rm mv mkdir install ln rmdir touch; do
         src=""
-        for dir in /usr/bin /bin; do
+        for dir in "${base_dirs[@]}"; do
             if [ -x "$dir/$tool" ]; then
                 src="$dir/$tool"
                 break
             fi
         done
         if [ -z "$src" ]; then
-            printf 'lc_gitup_standins: no %s in /usr/bin or /bin\n' "$tool" >&2
+            printf 'lc_gitup_standins: no %s on TEST_BASE_PATH (%s)\n' "$tool" "$TEST_BASE_PATH" >&2
             return 1
         fi
-        cp -- "$src" "$SANDBOX/pathbin/$tool" || return 1
+        printf '#!/bin/sh\nexec %s "$@"\n' "$src" >"$SANDBOX/pathbin/$tool" || return 1
+        chmod 755 "$SANDBOX/pathbin/$tool" || return 1
     done
     printf '%s' "$GIT" >"$SANDBOX/real-git"
 }
@@ -249,7 +253,7 @@ lc_brew_standin() {
     cat >"$SANDBOX/pathbin/brew" <<'EOF' || return 1
 #!/bin/sh
 d="$(cd "${0%/*}/.." && pwd -P)" || exit 1
-echo "$*" >>"$d/brew.log"
+printf '%s\n' "$*" >>"$d/brew.log"
 case "$1" in
     --prefix)
         echo "$d/brewprefix"
@@ -289,6 +293,19 @@ case "$1" in
         done
         exit 0
         ;;
+    upgrade)
+        fail_upgrade=0
+        if [ -f "$d/brew.fail" ]; then fail_upgrade=1; fi
+        if [ -f "$d/brew.failon" ]; then
+            case " $* " in *"$(cat "$d/brew.failon")"*) fail_upgrade=1 ;; esac
+        fi
+        if [ "$fail_upgrade" -eq 1 ]; then
+            echo "Error: injected brew failure" >&2
+            exit 1
+        fi
+        if [ -f "$d/brew.upgrade_src" ]; then ln -sfn "$(cat "$d/brew.upgrade_src")" "$d/brewprefix/bin/git" || exit 1; fi
+        exit 0
+        ;;
 esac
 echo "Error: the brew stand-in does not know the subcommand [$1]" >&2
 exit 1
@@ -309,7 +326,7 @@ lc_brew_map() {
     } >"$SANDBOX/brew.map"
 }
 
-lc_brew_reset() { rm -rf -- "$SANDBOX/brewprefix" "$SANDBOX/brew.log" "$SANDBOX/brew.fail" "$SANDBOX/brew.failon" "$SANDBOX/brew.nopopulate" && mkdir -p -- "$SANDBOX/brewprefix"; }
+lc_brew_reset() { rm -rf -- "$SANDBOX/brewprefix" "$SANDBOX/brew.log" "$SANDBOX/brew.fail" "$SANDBOX/brew.failon" "$SANDBOX/brew.nopopulate" "$SANDBOX/brew.upgrade_src" && mkdir -p -- "$SANDBOX/brewprefix"; }
 
 # ^ invariant populates the fake prefix with the given formulae and leaves brew.log absent; a test sees only the calls install makes
 lc_brew_have() {
@@ -489,5 +506,7 @@ lc_git_wrapper() {
     chmod 755 "$SANDBOX/pathbin/git"
 }
 
-lc_fixture_url() { if [ "$TEST_IS_WINDOWS" -eq 1 ]; then printf 'file:///%s' "$(cygpath -m "$LC_FIX")"; else printf 'file://%s' "$LC_FIX"; fi; }
+# ^ invariant lc_file_url DIR prints a file URL native curl can open; on Windows DIR goes through cygpath -m, an MSYS path such as /c/dir is not readable there
+lc_file_url() { if [ "$TEST_IS_WINDOWS" -eq 1 ]; then printf 'file:///%s' "$(cygpath -m "$1")"; else printf 'file://%s' "$1"; fi; }
+lc_fixture_url() { lc_file_url "$LC_FIX"; }
 lc_use_fixtures() { set_env GSG_TOOLS_BASE_URL="$(lc_fixture_url)" GSG_TOOLS_LOCK="$LC_FIX/fixture.lock"; }

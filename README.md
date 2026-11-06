@@ -117,4 +117,13 @@ The scan's limits are in [docs/scan.md](docs/scan.md#limits); install, exemption
 | [docs/exemptions.md](docs/exemptions.md) | `.secret-scan-ignore`, inline markers, betterleaks config, local switches |
 | [docs/doctor.md](docs/doctor.md) | the coverage report, its checks and exit status, the weekly timer |
 | [docs/platforms.md](docs/platforms.md) | supported platforms, setup on Windows, macOS and Ubuntu, the container tests |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | development setup on every platform, running the tests, rules for changes |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | development setup on every platform, running the tests, rules for changes, signing off commits |
+| [DCO.txt](DCO.txt) | the Developer Certificate of Origin 1.1 that every commit's `Signed-off-by:` line refers to |
+| [SECURITY.md](SECURITY.md) | how to report a vulnerability privately, and what to expect |
+| [THIRD_PARTY_LICENSES](THIRD_PARTY_LICENSES) | the third-party components `install` downloads, with version, license and copyright |
+
+## Maintainer
+
+[jsbattig](https://github.com/jsbattig) (Lightspeed DMS) maintains git-secret-guard and is responsible for its issues,
+reviews and releases. To contribute, read [CONTRIBUTING.md](CONTRIBUTING.md); to report a vulnerability, follow
+[SECURITY.md](SECURITY.md) and do not open a public issue.

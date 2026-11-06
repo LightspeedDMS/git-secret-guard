@@ -36,6 +36,7 @@ jobs:
           path: ${{ runner.temp }}/logs
 
   containers:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[heavy]')
     runs-on: ubuntu-24.04
     timeout-minutes: 100
     strategy:
@@ -65,12 +66,21 @@ jobs:
           path: ${{ runner.temp }}/logs
 
   rpm:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[heavy]')
     runs-on: ubuntu-24.04
     timeout-minutes: 100
     strategy:
       fail-fast: false
       matrix:
-        distro: [rocky, fedora]
+        include:
+          - { name: rocky, distro: rocky, args: "" }
+          - { name: fedora, distro: fedora, args: "" }
+          # the "needs a real machine" items of #40 that a container can show (docs/platforms.md#ci-on-real-platforms)
+          - { name: rocky-root, distro: rocky, args: "--phase upgrade-root" }
+          - { name: rocky-password, distro: rocky, args: "--phase upgrade-password" }
+          - { name: rocky-bump, distro: rocky, args: "--phase upgrade-bump" }
+          - { name: rocky-offline, distro: rocky, args: "--offline-restore" }
+          - { name: fedora-old, distro: fedora, args: "--phase upgrade-old" }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -78,14 +88,17 @@ jobs:
       - name: rpm.sh in a podman container
         env:
           DISTRO: ${{ matrix.distro }}
+          NAME: ${{ matrix.name }}
+          ARGS: ${{ matrix.args }}
         run: |
           mkdir -p "$RUNNER_TEMP/logs"
           set -o pipefail
-          bash tests/platform/rpm.sh "$DISTRO" 2>&1 | tee "$RUNNER_TEMP/logs/$DISTRO.log"
+          # shellcheck disable=SC2086
+          bash tests/platform/rpm.sh "$DISTRO" $ARGS 2>&1 | tee "$RUNNER_TEMP/logs/$NAME.log"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
-          name: rpm-${{ matrix.distro }}
+          name: rpm-${{ matrix.name }}
           path: ${{ runner.temp }}/logs
 
   diag:
@@ -125,11 +138,11 @@ jobs:
           echo "$HOME/.local/bin" >>"$GITHUB_PATH"
           echo "GSG_TEST_GIT=$(command -v git)" >>"$GITHUB_ENV"
           echo "GSG_TEST_SHELLCHECK=$HOME/.local/bin/shellcheck" >>"$GITHUB_ENV"
-      - name: tests/test_platform.sh and tests/test_mac_runner.sh
+      - name: the platform launcher tests
         run: |
           mkdir -p "$RUNNER_TEMP/logs"
           set -o pipefail
-          bash tests/run.sh tests/test_platform.sh tests/test_mac_runner.sh 2>&1 | tee "$RUNNER_TEMP/logs/platform-unit.log"
+          bash tests/run.sh tests/test_platform.sh tests/test_mac_runner.sh tests/test_platform_rpm.sh 2>&1 | tee "$RUNNER_TEMP/logs/platform-unit.log"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:

@@ -200,14 +200,30 @@ install_global_config_files() {
     printf '%s\n' "${HOME:-/nonexistent}/.gitconfig" "${XDG_CONFIG_HOME:-${HOME:-/nonexistent}/.config}/git/config"
 }
 
+# ^ invariant prints PATH when missing, or the missing target of a dangling symlink at PATH; the probe may create exactly what this prints
+install_config_probe_site() {
+    local f="$1" t
+    if [ ! -e "$f" ] && [ ! -L "$f" ]; then
+        printf '%s\n' "$f"
+        return 0
+    fi
+    if [ -L "$f" ] && [ ! -e "$f" ]; then
+        t="$(readlink -- "$f")" || return 0
+        if [[ $t != /* ]]; then t="${f%/*}/$t"; fi
+        if [ ! -e "$t" ] && [ ! -L "$t" ]; then printf '%s\n' "$t"; fi
+    fi
+    return 0
+}
+
 # ^ why a write probe, not git config --list; --list exits 128 for a missing file too = a normal fresh machine
 # ^ order before the first download or copy => an unwritable global config leaves nothing half installed
 # ^ invariant a config file the probe created is removed again when it is empty => a refusal after the probe still leaves the machine as it was
 install_check_config_writable() {
-    local f ok=1
+    local f t ok=1
     local -a absent=()
     while IFS= read -r f; do
-        if [ ! -e "$f" ] && [ ! -L "$f" ]; then absent+=("$f"); fi
+        t="$(install_config_probe_site "$f")"
+        if [ -n "$t" ]; then absent+=("$t"); fi
     done < <(install_global_config_files)
     if "$GSG_GIT" config --global gsg-install-probe.ok 1 2>/dev/null; then
         if "$GSG_GIT" config --global --remove-section gsg-install-probe 2>/dev/null; then ok=0; fi

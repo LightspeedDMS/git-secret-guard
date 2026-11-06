@@ -378,6 +378,8 @@ doctor_check_git() {
         ver="$(install_git_version "$cand")" || ver=""
         if [ -n "$ver" ] && install_git_is_new_enough "$cand"; then
             doctor_machine_line ok "git: $cand $ver"
+        elif install_git_is_bundled "$cand"; then
+            doctor_machine_line WARNING "git: $cand is git ${ver:-of unknown version}; $(install_old_git_effect "$cand")"
         else
             doctor_machine_line WARNING "git: $cand is git ${ver:-of unknown version}; it ignores config-based hooks without any message, so commits made with it are NOT scanned"
         fi

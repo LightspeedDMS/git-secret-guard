@@ -57,12 +57,13 @@ vm_prepare() {
 vm_labels_after_install() {
     printf '== Rocky VM: labels after the source install into /usr/local\n'
     show "$(stat -c "%C %n" /usr/local/bin/git /usr/local/libexec/git-core/git-upload-pack /usr/local/share/doc/git-*-local/MANIFEST 2>&1)"
-    check "git in /usr/local/bin is labelled bin_t" test "$(type_of /usr/local/bin/git)" = bin_t
-    check "the helpers in libexec are labelled bin_t" test "$(type_of /usr/local/libexec/git-core/git-upload-pack)" = bin_t
-    show "$(stat -c "%i %C %h %n" /usr/local/bin/git /usr/local/libexec/git-core/git-merge /usr/local/libexec/git-core/git-add 2>&1)"
+    show "$(stat -c "%i %C %h %F %n" /usr/local/bin/git /usr/local/libexec/git-core/git-merge /usr/local/libexec/git-core/git-add 2>&1)"
     show "$(matchpathcon /usr/local/bin/git /usr/local/libexec/git-core/git-merge /usr/local/libexec/git-core/git-add 2>&1)"
-    # ^ why a recorded finding, not a failed check; the labels differ from the policy by design of the copy, see docs/platforms.md#rocky-vm-selinux-enforcing
-    if nothing_to_relabel -R /usr/local; then ok "restorecon would relabel nothing under /usr/local"; else printf 'FINDING restorecon -R /usr/local would relabel the shared git inode (listed above)\n'; fi
+    check "git in /usr/local/bin is labelled bin_t" test "$(type_of /usr/local/bin/git)" = bin_t
+    check "git has one name: no hard link ties it to the libexec entries" test "$(stat -c %h /usr/local/bin/git)" = 1
+    check "the libexec entry git-merge is a symlink" test -L /usr/local/libexec/git-core/git-merge
+    check "restorecon would relabel nothing under /usr/local/bin" nothing_to_relabel -R /usr/local/bin
+    show "libexec entries restorecon would relabel (symlinks and separate programs, by the policy): $(sudo restorecon -n -R /usr/local/libexec 2>&1 | wc -l)"
 }
 
 # ^ invariant clone_over_ssh PATH sets CLONE_OUT (the server's agent line) and RC; the server runs PATH as its upload-pack, the client is the git on PATH
@@ -119,20 +120,29 @@ vm_restored() {
     show "$(printf '%s' "$OUT" | head -n 6 | cut -c1-200)"
 }
 
-# ^ invariant informational; git and its hard links are one inode, bin_t under /usr/local/bin by policy and usr_t under /usr/local/libexec
-# ^ invariant a relabel of /usr/local ends with the label of the last path it visits; the output shows what the does to a clone sshd serves
+# ^ invariant a confined domain is tried when runcon can enter it; the control (/usr/bin/true) tells a refused transition from a refused git
+vm_confined_run() {
+    sudo runcon -t httpd_t -- "$@" 2>&1 | head -n 2 | tr '\n' ' '
+    printf '(rc %s)' "${PIPESTATUS[0]}"
+}
+
 vm_restorecon_effect() {
     local mark
-    printf '== Rocky VM: what restorecon -R /usr/local does to the shared inode (measured, not judged)\n'
+    printf '== Rocky VM: what a real restorecon -R /usr/local does to git\n'
     mark="$(date '+%x %T')"
-    show "before: $(stat -c '%C %i %n' /usr/local/bin/git /usr/local/libexec/git-core/git-upload-pack 2>&1)"
+    show "before: $(stat -c '%C %n' /usr/local/bin/git /usr/local/libexec/git-core/git-upload-pack /usr/local/libexec/git-core/git-remote-https 2>&1)"
     sudo restorecon -R /usr/local
-    show "after: $(stat -c '%C %i %n' /usr/local/bin/git /usr/local/libexec/git-core/git-upload-pack 2>&1)"
+    show "after: $(stat -c '%C %n' /usr/local/bin/git /usr/local/libexec/git-core/git-upload-pack /usr/local/libexec/git-core/git-remote-https 2>&1)"
+    check "/usr/local/bin/git is still bin_t after restorecon -R /usr/local" test "$(type_of /usr/local/bin/git)" = bin_t
+    check "restorecon -n -R /usr/local/bin now reports nothing" nothing_to_relabel -R /usr/local/bin
     clone_over_ssh /usr/local/bin/git-upload-pack
     show "clone served through /usr/local/bin/git-upload-pack after the relabel: exit $RC; $CLONE_OUT"
+    check "the clone still works" test "$RC" -eq 0
+    show "httpd_t runs /usr/bin/true (control): $(vm_confined_run /usr/bin/true)"
+    show "httpd_t runs /usr/local/bin/git --version: $(vm_confined_run /usr/local/bin/git --version)"
+    show "httpd_t runs git-remote-https (usr_t after the relabel): $(vm_confined_run /usr/local/libexec/git-core/git-remote-https)"
     # shellcheck disable=SC2086
     show "AVC records since: $(sudo ausearch -m AVC,USER_AVC -ts $mark 2>&1 | head -n 6 | cut -c1-240)"
-    check "the experiment ran to the end" true
 }
 
 main_vm() {

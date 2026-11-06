@@ -101,7 +101,7 @@ break it. Read it before changing the hook, extraction, exemptions or install. I
    change different lines: replace `windows) REPLY="" ;;` by `windows) REPLY=windows ;;`. **Keep the comment line between the entries:** git treats two changed lines
    that touch as one conflict (real merges showed it), and with a comment line between them any two class branches merge cleanly
    (`test_branches_that_each_take_one_reserved_registry_line_merge_without_conflicts` runs those merges). The registry is a plain `case`; there is no globbing and no
-   generated name outside `gitup_call`. `gitup_os_class` already detects every class; only the WSL signal (#31) will touch detection. Shared files a module branch does
+   generated name outside `gitup_call`. `gitup_os_class` already detects every class, WSL (class `wsl`, the wrapper module `lib/gitup_wsl.sh`) included. Shared files a module branch does
    not edit: `tests/coverage.sh` globs `lib/gitup*.sh`, the registry test reads the class list from the library, the merge test (`test_branches_that_each_take_one_reserved_registry_line_merge_without_conflicts`) takes the classes still reserved from the library, the CLI loads only the shared `gitup` and
    `gitup_source`, a module sources its own helper libraries (`gitup_rpm.sh` does it for `gitup_takeover.sh`), and the contract tests use synthetic classes
    (`gu_tree_add_class` in `tests/gitup.sh`), so they need no edit. **What a class branch does edit:** the tests that pin today's refusal for that class, because the

@@ -401,7 +401,7 @@ test_the_hook_never_loads_the_install_time_libraries() {
     local rc
     mapfile -t files < <(hook_load_path)
     [ "${#files[@]}" -ge 8 ] || fail "only ${#files[@]} hook files found"
-    grep -nE '(install|uninstall|status|state|tools|hookspath|brew|gitup[a-z_]*)\.sh|usage\.md' "${files[@]}"
+    grep -nE '(install|uninstall|status|state|tools|hookspath|brew|wsl|gitup[a-z_]*)\.sh|usage\.md' "${files[@]}"
     rc=$?
     assert_eq "$rc" 1 "the hook's load path never reaches a lifecycle library (grep exit 1 = no match)"
 }

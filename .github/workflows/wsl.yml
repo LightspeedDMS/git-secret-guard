@@ -1,0 +1,147 @@
+name: wsl
+
+# Real WSL checks on a disposable GitHub-hosted Windows runner (story #31). It never runs on a pull request and never blocks one.
+# tests/platform/wsl-ci.sh holds the scenarios and refuses to run unless GITHUB_ACTIONS is set, so it cannot run on a developer machine.
+# workflow_dispatch works only for a workflow file that is on the default branch, so until this file is merged the branch push below starts it.
+on:
+  workflow_dispatch:
+    inputs:
+      distribution:
+        description: Distribution setup-wsl installs
+        type: choice
+        default: Ubuntu-22.04
+        options:
+          - Ubuntu-22.04
+          - Ubuntu-24.04
+  # TEMPORARY: remove this push trigger before the branch is merged; it exists only to start the workflow from the feature branch
+  push:
+    branches: [feat/gitup-wsl]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wsl-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  wsl:
+    # windows-2022 has WSL 1 enabled in the image (actions/runner-images Windows2022-Readme); whether WSL 2 starts on it is what the second leg finds out
+    runs-on: windows-2022
+    timeout-minutes: 120
+    continue-on-error: ${{ matrix.wsl-version == '2' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        wsl-version: ['1', '2']
+    env:
+      # WSLENV carries these into the distribution; /p turns a Windows path into the /mnt path; GITHUB_ACTIONS is the guard of wsl-ci.sh
+      WSLENV: GITHUB_ACTIONS:WS/p:MAIN/p:LOGS/p
+      WS: ${{ github.workspace }}
+      MAIN: ${{ github.workspace }}\main-src
+      LOGS: ${{ github.workspace }}\wsl-logs
+      DISTRIBUTION: ${{ inputs.distribution || 'Ubuntu-22.04' }}
+    steps:
+      # actions/checkout v4, pinned by commit
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      # main is checked out beside the branch: its installed CLI is the unfixed code the installed-cli phase runs
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: main
+          path: main-src
+          persist-credentials: false
+
+      # Vampire/setup-wsl v7.2.0, pinned by commit; git is the stock package of the distribution on purpose (2.34 on 22.04, 2.43 on 24.04)
+      - uses: Vampire/setup-wsl@4c48163d9f981914dd8caa0fc335fe19cca5bff4
+        with:
+          distribution: ${{ inputs.distribution || 'Ubuntu-22.04' }}
+          wsl-version: ${{ matrix.wsl-version }}
+          additional-packages: sudo jq curl ca-certificates git
+
+      - name: A normal user with sudo, as a developer has
+        shell: wsl-bash -u root {0}
+        run: |
+          useradd -m -s /bin/bash gsg
+          printf 'gsg ALL=(ALL) NOPASSWD:ALL\n' >/etc/sudoers.d/gsg
+          chmod 440 /etc/sudoers.d/gsg
+          mkdir -p "$LOGS" && chmod 777 "$LOGS"
+          chmod -R a+rX "$WS" "$MAIN" || true
+
+      - name: Facts of this machine
+        if: ${{ !cancelled() }}
+        shell: wsl-bash -u gsg {0}
+        run: bash "$WS/tests/platform/wsl-ci.sh" facts
+
+      - name: Install with --upgrade-git, blocked commit, rerun, timer refusal
+        if: ${{ !cancelled() }}
+        shell: wsl-bash -u gsg {0}
+        run: bash "$WS/tests/platform/wsl-ci.sh" upgrade
+
+      - name: Repository and checkout under /mnt/c
+        if: ${{ !cancelled() }}
+        shell: wsl-bash -u gsg {0}
+        run: bash "$WS/tests/platform/wsl-ci.sh" mntc
+
+      # The logs so far are written down before the test files, the rename probe and the installed-CLI install run: the probe renames a directory holding a running script, which is
+      # the operation that coincided with the first blue screen of the maintainer's WSL 1 host, so it goes last and nothing earlier depends on it surviving.
+      - name: Results so far in the job summary
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        run: |
+          $f = Join-Path $env:LOGS 'results.txt'
+          "### WSL ${{ matrix.wsl-version }}, $env:DISTRIBUTION, before the test files and the rename probe" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+          if (Test-Path $f) {
+            '```' | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+            Get-Content $f | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+            '```' | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+          } else { 'no results file was written' | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY }
+
+      # actions/upload-artifact v4, pinned by commit
+      - name: Logs so far
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: wsl-${{ matrix.wsl-version }}-logs-before-tests
+          path: ${{ github.workspace }}\wsl-logs
+          if-no-files-found: warn
+
+      # After the first upload on purpose: test_install has an installed-copy test that runs under the plain-kernel pin, so on WSL 1 it renames the directory of a running
+      # script, the operation that coincided with the first blue screen. A failure of it on WSL 1 is evidence for the hypothesis and is recorded, not hidden.
+      - name: Test files that apply (GSG_TEST_JOBS=1)
+        if: ${{ !cancelled() }}
+        timeout-minutes: 60
+        shell: wsl-bash -u gsg {0}
+        run: bash "$WS/tests/platform/wsl-ci.sh" tests
+
+      - name: Rename probe (hypothesis for the installed-CLI mv error)
+        if: ${{ !cancelled() }}
+        shell: wsl-bash -u gsg {0}
+        run: bash "$WS/tests/platform/wsl-ci.sh" probe
+
+      - name: Install from the installed CLI (main, then this branch)
+        if: ${{ !cancelled() }}
+        shell: wsl-bash -u gsg {0}
+        run: bash "$WS/tests/platform/wsl-ci.sh" installed-cli
+
+      - name: Results in the job summary
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        run: |
+          $f = Join-Path $env:LOGS 'results.txt'
+          "### WSL ${{ matrix.wsl-version }}, $env:DISTRIBUTION, all phases" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+          if (Test-Path $f) {
+            '```' | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+            Get-Content $f | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+            '```' | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+          } else { 'no results file was written' | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY }
+
+      - name: Logs
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: wsl-${{ matrix.wsl-version }}-logs
+          path: ${{ github.workspace }}\wsl-logs
+          if-no-files-found: warn

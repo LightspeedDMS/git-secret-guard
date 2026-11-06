@@ -107,6 +107,8 @@ sandbox_create() {
     # shellcheck disable=SC2034
     if [ "$TEST_IS_WINDOWS" -eq 1 ]; then TEST_WORK_BASE="$SANDBOX/home/.tmp"; fi
     mkdir -p -- "$SANDBOX/home" "$SANDBOX/tmp" "$SHARE" "$SANDBOX/repos" || exit 2
+    # ^ invariant every test sees a plain Linux kernel through the WSL seams => no result depends on the machine running the suite (a test of WSL sets its own)
+    printf '%s\n' "6.8.0-45-generic" >"$SANDBOX/wsl-kernel" || exit 2
     cp -r -- "$GSG_PROJECT/hooks" "$GSG_PROJECT/lib" "$SHARE/" || exit 2
     # ^ invariant jq on the sandbox PATH like a system jq elsewhere => install keeps it; a test wanting the download path removes it with lc_path_without
     if [ "$TEST_IS_WINDOWS" -eq 1 ]; then
@@ -122,6 +124,9 @@ sandbox_create() {
         LC_ALL=C
         GIT_TERMINAL_PROMPT=0
         PYTHONUSERBASE="$REAL_HOME/.local"
+        GSG_WSL_OSRELEASE="$SANDBOX/wsl-kernel"
+        GSG_WSL_INTEROP="$SANDBOX/wsl-no-interop"
+        GSG_WSL_SYSTEMD_DIR="$SANDBOX/wsl-no-systemd"
     )
     if [ "$TEST_IS_WINDOWS" -eq 1 ]; then
         TEST_SANDBOX_MIXED="$(cygpath -m "$SANDBOX")" || exit 2

@@ -491,7 +491,7 @@ install_copy_share() {
     local old item
     GSG_SHARE_NEW=""
     # ^ external Windows refuses to rename a directory with a running script in it (probed) => from the installed copy only generated files change
-    if tools_is_windows && [ "$GSG_ROOT" -ef "$GSG_SHARE" ]; then
+    if install_pins_running_script && [ "$GSG_ROOT" -ef "$GSG_SHARE" ]; then
         install_write_settings "$GSG_SHARE/settings.new" && mv -T -f -- "$GSG_SHARE/settings.new" "$GSG_SHARE/settings" || return 1
         if [ -n "${INSTALL_JQ_WRAPPER:-}" ]; then install_write_jq_wrapper "$GSG_SHARE/jq" "$INSTALL_JQ_BIN" || return 1; fi
         return 0
@@ -929,6 +929,7 @@ INSTALL_HP_MIN_GIT=2.26
 install_precheck_timer() {
     local dir="/usr/local/bin"
     if [ "$1" -ne 1 ]; then return 0; fi
+    wsl_check_timer "$1" || return 1
     if [ -n "$GSG_GIT" ]; then dir="${GSG_GIT%/*}"; fi
     if brew_is_macos; then launchd_check_target "$dir"; else timer_check_target "$dir"; fi
 }
@@ -979,5 +980,6 @@ install_run() {
     install_unset_hooks_path || return 1
     install_retire_legacy_tools || return 1
     install_summary
+    install_wsl_notice
     install_enable_timer
 }

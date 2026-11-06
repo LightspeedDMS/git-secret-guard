@@ -8,7 +8,7 @@ GSG_ROOT="$1"
 GSG_NAME=git-secret-guard
 GSG_UNINSTALL_ACTIONS=0
 uname() { if [ "${1:-}" = -m ]; then echo x86_64; else echo MINGW64_NT-10.0-26200; fi; }
-for lib in brew common state tools hookspath exempt timer launchd install install_tools uninstall status doctor doctor_repos doctor_findings proc; do
+for lib in brew common state tools hookspath exempt timer launchd wsl install install_tools uninstall status doctor doctor_repos doctor_findings proc; do
     source "$1/lib/$lib.sh" || exit 9
 done
 shift

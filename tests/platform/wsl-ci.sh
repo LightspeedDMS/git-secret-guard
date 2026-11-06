@@ -91,6 +91,8 @@ blocked_and_clean() {
 phase_prepare() {
     if [ "$(id -u)" -ne 0 ]; then bad "prepare must run as root"; return 0; fi
     if command -v dnf >/dev/null 2>&1; then
+        run prepare-update dnf upgrade -y --refresh
+        check "dnf upgrade, as a developer distribution has had (rc $RC)" rc_is 0
         run prepare-dnf dnf install -y git jq procps-ng shadow-utils sudo curl tar xz util-linux findutils
         check "dnf installed the tools (rc $RC)" rc_is 0
     fi
@@ -116,6 +118,15 @@ phase_facts() {
         printf 'tools: sudo=%s jq=%s setsid=%s timeout=%s add-apt-repository=%s\n' "$(command -v sudo)" "$(command -v jq)" "$(command -v setsid)" "$(command -v timeout)" "$(command -v add-apt-repository)"
         printf 'windows git on PATH: %s\n' "$(type -P git.exe || echo none)"
     } 2>&1 | tee "$LOGS/facts.log"
+    # ^ external script -c printed "-c: COMMAND: No such file or directory" on WSL 1 (run 42278536933); these probes show which pty route works there
+    {
+        printf 'script version: %s\n' "$(script --version 2>&1 | head -n 1)"
+        printf 'SHELL=[%s] /bin/sh -> %s\n' "${SHELL:-}" "$(readlink -f /bin/sh)"
+        printf 'script -qefc: [%s]\n' "$(timeout 20 script -qefc 'echo via-script' /dev/null 2>&1 </dev/null | tr '\r\n' '  ')"
+        printf 'SHELL=/bin/bash script -qefc: [%s]\n' "$(SHELL=/bin/bash timeout 20 script -qefc 'echo via-script-bash' /dev/null 2>&1 </dev/null | tr '\r\n' '  ')"
+        printf 'script -qefc with an absolute path: [%s]\n' "$(timeout 20 script -qefc '/bin/echo via-script-abs' /dev/null 2>&1 </dev/null | tr '\r\n' '  ')"
+        printf 'python3 pty: [%s]\n' "$(timeout 20 python3 -c 'import pty,sys; sys.exit(pty.spawn(["/bin/echo","via-python-pty"]))' 2>&1 </dev/null | tr '\r\n' '  ')"
+    } 2>&1 | tee "$LOGS/pty-probe.log"
     # ^ invariant what the product's own detection says on this machine; a wrong answer fails the job
     check "wsl_is says WSL" bash -c 'source "$1/lib/wsl.sh" && wsl_is' _ "$WS"
     info "wsl_version says $(bash -c 'source "$1/lib/wsl.sh" && wsl_version && echo "$REPLY"' _ "$WS")"

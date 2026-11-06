@@ -14,7 +14,10 @@ os_release() {
     printf '%s\n' "$@" >"$SANDBOX/os-release" && set_env GSG_OS_RELEASE="$SANDBOX/os-release"
 }
 
-ubuntu_release() { os_release 'NAME="Ubuntu"' 'ID=ubuntu' 'ID_LIKE=debian' 'VERSION_ID="24.04"'; }
+# ^ why a sandbox root, not the real /usr/local; WSL Rocky with its own build in place got the path-fix refusal (run 42278541531)
+apt_root() { set_env GSG_GITUP_ROOT="$SANDBOX/gitup-root"; }
+
+ubuntu_release() { os_release 'NAME="Ubuntu"' 'ID=ubuntu' 'ID_LIKE=debian' 'VERSION_ID="24.04"' && apt_root; }
 
 nothing_changed() {
     assert_no_file "$LC_STATE" "$1: no state"
@@ -45,14 +48,14 @@ test_a_missing_git_on_ubuntu_names_the_same_command() {
 }
 
 test_ubuntu_derivatives_are_recognised_through_ID_LIKE() {
-    lc_begin && lc_fake_git 2.43.0 && os_release 'NAME="Linux Mint"' 'ID=linuxmint' 'ID_LIKE="ubuntu debian"' || return 1
+    lc_begin && lc_fake_git 2.43.0 && os_release 'NAME="Linux Mint"' 'ID=linuxmint' 'ID_LIKE="ubuntu debian"' && apt_root || return 1
     gsg install
     assert_rc 1 "old git on a derivative"
     assert_contains "$ERR" "$UBUNTU_FIX" "the PPA works on Ubuntu derivatives"
 }
 
 test_debian_gets_a_source_build_pointer_and_no_ppa_command() {
-    lc_begin && lc_fake_git 2.39.5 && os_release 'NAME="Debian GNU/Linux"' 'ID=debian' 'VERSION_ID="12"' || return 1
+    lc_begin && lc_fake_git 2.39.5 && os_release 'NAME="Debian GNU/Linux"' 'ID=debian' 'VERSION_ID="12"' && apt_root || return 1
     gsg install
     assert_rc 1 "old git on Debian"
     assert_contains "$ERR" "Debian" "names the distribution"

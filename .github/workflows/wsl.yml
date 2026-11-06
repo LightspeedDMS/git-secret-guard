@@ -95,13 +95,14 @@ jobs:
           $got = (Get-FileHash -Algorithm SHA256 -LiteralPath $file).Hash.ToLower()
           if ($got -ne $sha) { throw "SHA-256 mismatch for $url : got $got, pinned $sha" }
           "SHA-256 of $url is $got (pinned)"
-          $dir = Join-Path $env:RUNNER_TEMP 'wsl-rpm'
-          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          # WSL 1 needs an NTFS directory: C: is tried first, then the runner temp directory on D:; the file system types are logged
+          $dirs = @('C:\wsl-rpm', (Join-Path $env:RUNNER_TEMP 'wsl-rpm'))
+          foreach ($l in 'C', 'D') { $v = Get-Volume -DriveLetter $l -ErrorAction SilentlyContinue; if ($v) { "volume ${l}: $($v.FileSystemType)" } }
           # wsl.exe prints UTF-16; read it as such for the management calls only
           [Console]::OutputEncoding = [System.Text.Encoding]::Unicode
           "wsl.exe on this runner:"
           wsl.exe --status
-          # Each attempt is logged. The tar is tried as shipped, as .tar.gz, and unpacked to a plain .tar; the version is given with --version and then through the default version.
+          # Each attempt is logged: the tar as shipped, as .tar.gz and unpacked to a plain .tar, into each directory, with --version and through the default version.
           $tarGz = Join-Path $env:RUNNER_TEMP 'rootfs.tar.gz'
           $tar = Join-Path $env:RUNNER_TEMP 'rootfs.tar'
           Copy-Item -LiteralPath $file -Destination $tarGz
@@ -112,11 +113,14 @@ jobs:
           "unpacked tar: $((Get-Item $tar).Length) bytes"
           $done = $false
           foreach ($src in @($file, $tarGz, $tar)) {
-            foreach ($withVersion in @($true, $false)) {
-              if ($done) { break }
-              if ($withVersion) { wsl.exe --import $env:WSL_TARGET $dir $src --version $env:WSLV } else { wsl.exe --set-default-version $env:WSLV; wsl.exe --import $env:WSL_TARGET $dir $src }
-              "import of $src (--version: $withVersion) exit $LASTEXITCODE"
-              if ($LASTEXITCODE -eq 0) { $done = $true }
+            foreach ($dir in $dirs) {
+              foreach ($withVersion in @($true, $false)) {
+                if ($done) { break }
+                New-Item -ItemType Directory -Force -Path $dir | Out-Null
+                if ($withVersion) { wsl.exe --import $env:WSL_TARGET $dir $src --version $env:WSLV } else { wsl.exe --set-default-version $env:WSLV; wsl.exe --import $env:WSL_TARGET $dir $src }
+                "import of $src into $dir (--version: $withVersion) exit $LASTEXITCODE"
+                if ($LASTEXITCODE -eq 0) { $done = $true }
+              }
             }
           }
           if (-not $done) { throw "wsl --import failed in every form" }

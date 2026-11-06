@@ -344,6 +344,11 @@ public static class GsgPty
 function Scenario-Prompt {
     Install-OldGit
     Add-Type -TypeDefinition $ConptySource -Language CSharp
+    # Is the pseudo console itself working? A plain cmd echo must come back through it.
+    $t0 = ''
+    try { $rc0 = [GsgPty]::Run("$env:SystemRoot\System32\cmd.exe /c echo PTYHELLO", $Root, 'PTYHELLO', "`r", 30, [ref]$t0) } catch { $rc0 = -2; $t0 = "EXCEPTION: $($_.Exception.Message)" }
+    Show ("echo through the pseudo console: exit $rc0; " + $t0.Length + " characters; " + ($t0 -replace "`e", '<ESC>' -replace '\s+', ' '))
+    Check "a pseudo console returns the output of a child process" ($t0 -like '*PTYHELLO*')
     $cli = Join-Path $Root 'bin\git-secret-guard.cmd'
     $transcript = ''
     $rc = [GsgPty]::Run("$env:SystemRoot\System32\cmd.exe /c $cli install", $Root, '[y/N]', "y`r", 1500, [ref]$transcript)

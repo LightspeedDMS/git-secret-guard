@@ -35,15 +35,15 @@ jobs:
           name: facts
           path: ${{ runner.temp }}/logs
 
-  containers:
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[heavy]')
+  containers-upgrade:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[heavy]') || contains(github.event.head_commit.message, '[apt]')
     runs-on: ubuntu-24.04
     timeout-minutes: 100
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-24.04, ubuntu-22.04, debian-13]
-        run: [upgrade, default]
+        run: [upgrade]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -64,9 +64,37 @@ jobs:
         with:
           name: containers-${{ matrix.os }}-${{ matrix.run }}
           path: ${{ runner.temp }}/logs
-
+  containers-suite:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[heavy]') || contains(github.event.head_commit.message, '[suite]')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 100
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-22.04, debian-13]
+        run: [default]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # upgrade = the real install --upgrade-git E2E; default = the launcher's own phases (prepare, install E2E, tests/run.sh)
+      - name: ubuntu.sh in a podman container
+        env:
+          OS: ${{ matrix.os }}
+          RUN: ${{ matrix.run }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/logs"
+          set -o pipefail
+          args=()
+          if [ "$RUN" = upgrade ]; then args=(--phase upgrade); fi
+          bash tests/platform/ubuntu.sh --os "$OS" "${args[@]}" 2>&1 | tee "$RUNNER_TEMP/logs/$OS-$RUN.log"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: containers-${{ matrix.os }}-${{ matrix.run }}
+          path: ${{ runner.temp }}/logs
   rpm:
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[heavy]')
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[heavy]') || contains(github.event.head_commit.message, '[rpm]')
     runs-on: ubuntu-24.04
     timeout-minutes: 100
     strategy:
@@ -151,7 +179,7 @@ jobs:
 
   # #40: does a commit made by a git below 2.54 skip the scan? A real old git (built from the pinned tarball) and the git inside GitHub Desktop's .deb.
   old-git:
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[heavy]')
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[heavy]') || contains(github.event.head_commit.message, '[oldgit]')
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
@@ -203,7 +231,7 @@ jobs:
 
   # #40: Rocky 9 with SELinux enforcing, as a real VM. Hosted x64 runners expose /dev/kvm; without it rocky-vm.sh stops and says what TCG would cost.
   rocky-vm:
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[heavy]')
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[heavy]') || contains(github.event.head_commit.message, '[vm]')
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     steps:

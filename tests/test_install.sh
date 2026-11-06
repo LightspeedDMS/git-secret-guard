@@ -674,11 +674,11 @@ test_an_install_run_from_the_installed_copy_on_wsl1_rewrites_only_the_settings_a
     fresh_install
     assert_rc 0 "first install"
     set_env GSG_WSL_OSRELEASE="$SANDBOX/wsl1-kernel"
-    printf 'kept\n' >"$LC_DATA/lib/sentinel" || return 1
+    printf 'kept\n' >"$LC_DATA/sentinel" || return 1
     printf 'stale\n' >"$LC_DATA/settings" || return 1
     gsg_installed install
     assert_rc 0 "install run through the symlink on WSL 1"
-    assert_eq "$(<"$LC_DATA/lib/sentinel")" kept "the tree it runs from was not replaced"
+    assert_eq "$(<"$LC_DATA/sentinel")" kept "the tree it runs from was not replaced"
     assert_not_contains "$(<"$LC_DATA/settings")" stale "the settings were written again"
     assert_contains "$(<"$LC_DATA/settings")" "JQ_BIN=" "with their keys"
     gsg_installed version

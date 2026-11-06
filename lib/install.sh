@@ -937,7 +937,7 @@ install_precheck_timer() {
 # ^ order the git offers run after every refusable check a git can run; a missing git, or one too old for --show-scope, runs them after the offers
 # ^ invariant install_run returns 3 when a git upgrade module hands off to finish outside this process
 install_run() {
-    local replace="$1" timer="$2" upgrade="${3:-0}" takeover="${4:-0}" rc early=0 ver
+    local replace="$1" timer="$2" upgrade="${3:-0}" takeover="${4:-0}" early=0 ver
     # ^ security umask only tightens (022 or stricter) => settings, share tree, CLI link and state are never group or other writable; WSL 1 starts at 0000
     umask "$(printf '%03o' "$((8#$(umask) | 8#022))")"
     paths_init || return 1
@@ -956,9 +956,7 @@ install_run() {
         install_refuse_hooks_path "$replace" || return 1
         install_run_state_checks || return 1
     fi
-    gitup_offers "$upgrade" "$takeover"
-    rc=$?
-    if [ "$rc" -ne 0 ]; then return "$rc"; fi
+    gitup_offers "$upgrade" "$takeover" || return $?
     if [ "$early" -eq 0 ]; then
         install_check_hooks_path || return 1
         install_refuse_hooks_path "$replace" || return 1

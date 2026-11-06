@@ -223,16 +223,31 @@ test_the_running_script_pin_covers_windows_and_wsl1_only() {
 }
 
 test_an_install_from_the_installed_copy_on_wsl1_never_renames_the_directory_it_runs_from() {
-    local share="$SANDBOX/share-copy"
+    local share="$SANDBOX/share-copy" item
     wsl_kernel "$WSL1_KERNEL" || return 1
-    mkdir -p "$share/lib" || return 1
-    printf 'old\n' >"$share/settings" && printf 'kept\n' >"$share/lib/sentinel" || return 1
+    mkdir -p "$share" || return 1
+    for item in hooks lib bin tools.lock VERSION; do cp -a -- "$GSG_PROJECT/$item" "$share/" || return 1; done
+    printf 'old\n' >"$share/settings" && printf 'kept\n' >"$share/sentinel" || return 1
     wsl 'GSG_ROOT="$1" GSG_SHARE="$1" GSG_BIN_DIR=/b GSG_TOOL_VER=(1 2) INSTALL_JQ_BIN=/b/jq INSTALL_JQ_WRAPPER=""
 INSTALL_TIMEOUT_BIN=/t INSTALL_BASH_BIN="" INSTALL_GNUBIN_DIR="" INSTALL_TIMER_BIN=""; install_copy_share; echo "rc=$?"' "$share"
     assert_contains "$OUT" "rc=0" "no rename is attempted"
     assert_contains "$(<"$share/settings")" "JQ_BIN=" "the settings are rewritten in place"
-    assert_eq "$(<"$share/lib/sentinel")" kept "the rest of the tree is not replaced"
+    assert_eq "$(<"$share/sentinel")" kept "the rest of the tree is not replaced (the sentinel is not one of the copied items, so a replaced tree would lose it)"
     assert_eq "$(find "$SANDBOX" -maxdepth 1 -name 'share-copy.*' | wc -l | tr -d ' ')" 0 "nothing is left beside it"
+}
+
+# ^ invariant the same install on a plain kernel replaces the whole tree and the sentinel of the test above is gone => the test above can fail
+test_the_same_install_on_a_plain_kernel_replaces_the_tree_and_loses_the_sentinel() {
+    local share="$SANDBOX/share-plain" item
+    wsl_kernel "6.8.0-45-generic" || return 1
+    mkdir -p "$share" || return 1
+    for item in hooks lib bin tools.lock VERSION; do cp -a -- "$GSG_PROJECT/$item" "$share/" || return 1; done
+    printf 'old\n' >"$share/settings" && printf 'kept\n' >"$share/sentinel" || return 1
+    wsl 'GSG_ROOT="$1" GSG_SHARE="$1" GSG_BIN_DIR=/b GSG_TOOL_VER=(1 2) INSTALL_JQ_BIN=/b/jq INSTALL_JQ_WRAPPER=""
+INSTALL_TIMEOUT_BIN=/t INSTALL_BASH_BIN="" INSTALL_GNUBIN_DIR="" INSTALL_TIMER_BIN=""; install_copy_share; echo "rc=$?"' "$share"
+    assert_contains "$OUT" "rc=0" "the copy ran"
+    assert_no_file "$share/sentinel" "the tree was replaced, not updated in place"
+    assert_contains "$(<"$share/settings")" "JQ_BIN=" "and the new tree has its settings"
 }
 
 
@@ -411,10 +426,10 @@ test_the_ci_script_refuses_to_run_outside_github_actions() {
 }
 
 
-# ^ external measured on WSL 1 (build 20348); without systemd, systemd-analyze --user verify fails for any unit with a device monitor and a system bus error
+# ^ external measured on WSL 1 (build 20348); without systemd, systemd-analyze --user verify complains of a device monitor and a system bus, and exits 0
 test_the_systemd_analyze_probe_names_a_machine_that_cannot_verify_and_never_a_unit_problem() {
     local stub="$SANDBOX/analyze-stub"
-    printf '#!/bin/sh\necho "Failed to start device monitor: Invalid argument"\necho "Failed to connect to system bus: No such file or directory"\nexit 1\n' >"$stub" && chmod 755 "$stub" || return 1
+    printf '#!/bin/sh\necho "Failed to start device monitor: Invalid argument"\necho "Failed to connect to system bus: No such file or directory"\nexit 0\n' >"$stub" && chmod 755 "$stub" || return 1
     assert_contains "$(analyze_blocked_reason "$stub")" "Failed to start device monitor" "no systemd: a reason, so the test skips"
     printf '#!/bin/sh\necho "x.service: Unknown key name Foo in section Service"\nexit 1\n' >"$stub" || return 1
     assert_empty "$(analyze_blocked_reason "$stub")" "a real unit problem is no reason to skip"

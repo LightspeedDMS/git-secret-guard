@@ -332,7 +332,7 @@ assert_no_file() { [ ! -e "$1" ] || fail "${2:-assert_no_file}: unexpected $1"; 
 
 skip_test() { printf '%s\n' "$1" >"$SANDBOX/.skip"; exit 0; }
 
-# ^ external measured on WSL 1 (build 20348); without systemd, systemd-analyze --user verify fails for any unit with a device monitor and a system bus error
+# ^ external measured on WSL 1 (build 20348); without systemd, systemd-analyze --user verify complains of a device monitor and a system bus, and exits 0
 # ^ invariant analyze_blocked_reason [BIN] prints why BIN cannot verify anything here, nothing when it can; it verifies a good unit => a bad unit is no reason
 analyze_blocked_reason() {
     local bin="${1:-systemd-analyze}" out

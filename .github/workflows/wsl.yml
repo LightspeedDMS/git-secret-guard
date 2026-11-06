@@ -114,8 +114,8 @@ jobs:
           path: ${{ github.workspace }}\wsl-logs
           if-no-files-found: warn
 
-      # After the first upload on purpose: test_install has an installed-copy test that runs under the plain-kernel pin, so on WSL 1 it renames the directory of a running
-      # script, the operation that coincided with the first blue screen. A failure of it on WSL 1 is the measured rename limit and is recorded, not hidden.
+      # After the first upload on purpose: the suite includes test_install, whose in-place test renames the directory of a running script under the plain-kernel pin. It skips itself on real WSL 1
+      # and its WSL 1 twin runs the pinned path. A failure of the suite on WSL 1 is recorded, not hidden.
       - name: Test files that apply (GSG_TEST_JOBS=1)
         if: ${{ !cancelled() }}
         timeout-minutes: 60

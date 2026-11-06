@@ -259,7 +259,7 @@ test_a_hand_off_that_is_not_ours_or_names_another_installer_is_refused_before_an
     printf 'hello\n' >"$h" || return 1
     wu_runner "$h"
     assert_rc 13 "not a hand-off"
-    sed "s|^installer=.*|installer=$(cygpath -w "$SANDBOX/standin/standin.exe")|" "$WU_STATE_HANDOFF" >"$h" || return 1
+    wu_rewrite_installer "$WU_STATE_HANDOFF" "$h" "$(cygpath -w "$SANDBOX/standin/standin.exe")" || return 1
     wu_runner "$h"
     assert_rc 13 "an installer elsewhere"
     assert_contains "$ERR" "beside the hand-off" "says why"
@@ -906,6 +906,17 @@ test_an_installed_version_that_cannot_be_read_as_a_version_stops_the_upgrade_bef
 
 test_zz_nothing_was_created_at_the_root_of_the_file_system() {
     assert_eq "$(wu_names /)" "$WU_ROOT_NAMES" "no test of this file created an entry at the root (on Git Bash the Git for Windows install)"
+}
+
+test_a_hand_off_rewritten_for_a_windows_path_keeps_every_backslash_whatever_the_user_name() {
+    local src="$SANDBOX/ho.src" out="$SANDBOX/ho.out" p
+    printf 'gsg-git-upgrade-handoff 1\nroute=installer\nscope=machine\nversion=2.56.0.4\ninstaller=C:\old\Git.exe\n' >"$src" || return 1
+    for p in 'C:\Users\runneradmin\.tmp\a' 'C:\Users\Uzer\New\bell\a.exe' 'C:\Users\Administrator\x'; do
+        wu_rewrite_installer "$src" "$out" "$p" || return 1
+        assert_eq "$(grep '^installer=' "$out")" "installer=$p" "the path survives [$p]"
+        assert_eq "$(grep -c '' "$out")" 5 "and the file has the same five lines [$p]"
+        assert_eq "$(tr -cd '\r' <"$out" | wc -c | tr -d ' ')" 0 "with no carriage return [$p]"
+    done
 }
 
 run_file_tests

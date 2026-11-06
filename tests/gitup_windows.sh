@@ -400,3 +400,15 @@ wu_names() {
         if [ -e "$f" ] || [ -L "$f" ]; then printf '%s\n' "${f##*/}"; fi
     done | LC_ALL=C sort | tr '\n' ' '
 }
+
+# ^ why a read loop, not sed; a Windows path in a sed replacement turns \r, \U or \a (from \runneradmin, \Users) into control characters and breaks the hand-off
+# ^ invariant wu_rewrite_installer SRC OUT WINPATH copies a hand-off with its installer line replaced by WINPATH, byte for byte otherwise
+wu_rewrite_installer() {
+    local line
+    while IFS= read -r line || [ -n "$line" ]; do
+        case "$line" in
+            installer=*) printf 'installer=%s\n' "$3" ;;
+            *) printf '%s\n' "$line" ;;
+        esac
+    done <"$1" >"$2"
+}

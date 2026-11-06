@@ -71,7 +71,7 @@ gitup_rpm_prepare() {
     gitup_rpm_find_dnf || return 1
     GITUP_SRC_DEPS=("$GITUP_DNF" install -y "${GITUP_RPM_DEPS[@]}")
     GITUP_SRC_FLAGS=("${GITUP_RPM_FLAGS[@]}")
-    # ^ external dnf 5 answers "already installed, nothing to do" to install of an older installed git-core; upgrade works on dnf 4 and 5 (Fedora 44, #40)
+    # ^ external dnf 5 answers "already installed, nothing to do" to install of an older git-core (Fedora 44); upgrade ran there, on dnf 4 it is untested
     GITUP_RPM_VERB=install
     if gitup_system_bin rpm && "$REPLY" -q --qf '%{NAME}\n' git-core >/dev/null 2>&1; then GITUP_RPM_VERB=upgrade; fi
 }

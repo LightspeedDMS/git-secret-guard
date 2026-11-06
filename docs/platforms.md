@@ -66,7 +66,7 @@ group and others cannot write, and the plan prints its full path (`as root: /usr
    (`/usr/local/share/doc/git-*-local/MANIFEST`) refuses and is named; nothing is overwritten. A build made by hand with a
    `MANIFEST` at that path (the reference host's `git-2.56.0-local`) counts as ours.
 7. As root, under `umask 022` (the stage is built under it too, so a hardened `umask 027` cannot make root-owned directories unreadable to you or rewrite
-   the mode of a shared one such as `share/man`): save the `MANIFEST` as `MANIFEST.partial`, run `cp -dR --preserve=timestamps,links
+   the mode of a shared one such as `share/man`): save the `MANIFEST` as `MANIFEST.partial`, run `cp -dR --remove-destination --preserve=timestamps,links
    <stage>/usr/local/. /usr/local/` (no `mode`: an existing directory keeps its mode), then rename `MANIFEST.partial` to `MANIFEST`. A copy that stops leaves the
    partial file; it counts as ours for the foreign-file check and as unfinished for the plan, so `install --upgrade-git` again finishes the copy (it is offered as a
    rebuild even when `git` itself already landed). Files an earlier MANIFEST listed and the new one does not are removed. A relative `TMPDIR` is refused.

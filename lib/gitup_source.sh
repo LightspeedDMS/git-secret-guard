@@ -267,9 +267,9 @@ gitup_source_compile() {
 }
 
 # ^ order MANIFEST.partial is saved before the copy and renamed to MANIFEST after it
-# ^ invariant a copy stopped half way leaves the partial file, and the next run counts it as ours and as unfinished
-# ^ why no mode in --preserve, not --preserve=mode; mode would rewrite the mode of a shared directory such as share/man with the stage directory's mode
-GITUP_SRC_CP=(cp -dR "--preserve=timestamps,links" --)
+# ^ invariant a copy stopped half way, also between a removed file and its copy, leaves the partial file; the next run counts it as ours and unfinished
+# ^ why --remove-destination, not a plain cp; cp onto an existing symlink writes through it. No mode in --preserve, it rewrote share/man
+GITUP_SRC_CP=(cp -dR --remove-destination "--preserve=timestamps,links" --)
 gitup_source_docdir() { printf '%s/share/doc/git-%s-local' "$GITUP_PREFIX" "$GITUP_PIN_VER"; }
 
 # ^ invariant prints the clause GITUP_CHANGED holds during the copy; the next step comes first and the clause has no bracket, since brew_unchanged_text wraps it

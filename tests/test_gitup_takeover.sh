@@ -80,6 +80,29 @@ test_the_takeover_accepts_siblings_that_are_symlinks_to_git_and_refuses_one_that
 }
 
 
+# ^ invariant every libexec entry, a symlink included, is judged by its own target: inside the prefix, trusted owner, no group or other write bit
+test_the_takeover_judges_the_targets_of_libexec_symlinks_like_any_other_file() {
+    local d case_name
+    for case_name in good writable outside; do
+        gu_tk_start || return 1
+        d="$GU_ROOT/usr/local/libexec/git-core"
+        mkdir -p -- "$d" || return 1
+        case "$case_name" in
+            good) ln -s ../../bin/git "$d/git-merge" || return 1 ;;
+            writable) cp -- "$GU_ROOT/usr/local/bin/git-shell" "$GU_ROOT/usr/local/bin/loose" && chmod 775 "$GU_ROOT/usr/local/bin/loose" && ln -s ../../bin/loose "$d/git-merge" || return 1 ;;
+            outside) ln -s /bin/sh "$d/git-merge" || return 1 ;;
+        esac
+        gsg install --take-over-system-git </dev/null
+        if [ "$case_name" = good ]; then
+            assert_rc 0 "a libexec symlink to git [$case_name]"
+        else
+            assert_rc 1 "a libexec symlink to a bad target [$case_name]"
+            assert_contains "$ERR" "the system git takeover was refused" "refused [$case_name]"
+            gu_untouched "libexec link [$case_name]"
+        fi
+    done
+}
+
 test_the_takeover_states_its_cost_before_asking() {
     gu_tk_start || return 1
     gsg install </dev/null

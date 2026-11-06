@@ -393,7 +393,7 @@ bin\git-secret-guard.cmd install --upgrade-git
 
 - **Route.** winget when it is on `PATH`, otherwise the pinned installer. The Windows Server 2019 test host has no winget, so it took the installer route. The installer is `Git-2.56.0.4-64-bit.exe` of the
   release `v2.56.0.windows.4` of git-for-windows/git, pinned in `tools.lock` (row `git-for-windows`, not a scanner) with its SHA-256. `install` downloads it over HTTPS, checks the
-  digest and removes a file that differs. **winget is untested here** (this host has none): its `--scope` handling, its own hash check and its elevation are not proven. The runner passes
+  digest and removes a file that differs. The winget route was run for real on a windows-2025 runner (see [CI on real platforms](#ci-on-real-platforms)): its `--scope`, its own hash check and the kept scope worked there; the Windows Server 2019 host has none. The runner passes
   `--scope machine` or `--scope user` as planned and the plan says the rest is not tested.
 - **Why the hand-off.** The upgrade replaces the `bash.exe` that `install` runs in, so bash only decides, plans, downloads and verifies. `lib/gitup_windows.sh` writes a hand-off file
   (`route`, `scope`, `version`, installer path; no digest) into a directory below the profile (NTFS ignores chmod, so the profile ACL is what keeps it private; a state directory outside the profile has no such protection) and returns the module status "finish outside this process": `install` stops with exit 3.
@@ -432,8 +432,7 @@ bin\git-secret-guard.cmd install --upgrade-git
   `Inno Setup CodeFile:` option, setup type and icon group were kept), `etc/gitconfig` was byte-identical, the file set was identical except `unins000.dat`, and `usr\bin\bash.exe` was replaced
   cleanly (no pending file renames naming Git, although 72 unrelated ones existed before the run; no `.tmp`/`.old` leftovers). The runner's `-Wait` followed the installer and its helper processes; the rerun of install started after the installer tree was gone.
   Commits were scanned afterwards (a clean one passed, a fake key was blocked). Nothing was passed for the directory or the options.
-- **Still unproven:** `/VERYSILENT` with Git for Windows files in use (a Git Bash window or another git open during the upgrade), an installer killed halfway, a signature refusal on a file that matches its digest, a refusal in the rerun after the hand-off, the winget route, a real UAC decline by a person,
-  a typed yes at a real prompt (the real run used the flag), a Windows client, and the Linux runs.
+- **Still unproven:** a real UAC decline by a person, a typed yes at a real prompt (the real runs used the flag; a pseudo console on the hosted runner returned no text), and a Windows client. Files in use, a killed installer, a signature refusal, a refusal in the rerun and the winget route were run on a hosted runner.
 - **A downgrade is never allowed.** In that run the 2.53 installer, started under `/VERYSILENT` without `/ALLOWDOWNGRADE=1`, stopped on a Yes/No "really downgrade?" message box and waited until it was
   killed. So a stale hand-off run after git has moved past the pin could hang under the runner's unbounded `-Wait` (a hypothesis: the stale case itself was not run). The runner therefore reads the installed
   version (`Git_is1` `DisplayVersion`, `HKLM` for machine-wide and `HKCU` for per-user) after its checks and, when it is not older than the pin, deletes the stale hand-off and installer and exits 17 with
@@ -444,7 +443,7 @@ bin\git-secret-guard.cmd install --upgrade-git
 - **After the upgrade** open a new terminal when `PATH` changed. The IDE and GUI client warning stays: this changes the Git for Windows that `PATH` finds, not a git an IDE bundles.
 - **Exit codes of the runner:** 0 done; 10 installer refused (digest, signature, signer, junction or missing) and nothing ran; 11 elevation declined, nothing changed; 12 installer or winget
   returned non-zero (check `git --version`, run again); 13 invalid, unknown or already used hand-off, or a missing or unusable `tools.lock`; 14 per-user install from an elevated prompt (nothing ran); 15 the installer could not be
-  started for another reason; 16 unexpected error; 17 the installed Git for Windows is not older than the pin (stale hand-off, nothing ran); 18 its version string is not a plain a.b.c[.d] version (for example `garbage`, `2.57.0-rc1`), so it cannot be compared, nothing ran and the user is pointed to a manual install (an empty or missing record goes on); 1 PowerShell itself refused to run the script (for example a group policy that blocks `-ExecutionPolicy Bypass`).
+  started for another reason; 16 unexpected error; 17 the installed Git for Windows is not older than the pin (stale hand-off, nothing ran); 19 programs of the install directory (a Git Bash, an editor terminal) are running: nothing ran, the hand-off is kept and the message names them (the silent installer waits for ever with them open); 18 its version string is not a plain a.b.c[.d] version (for example `garbage`, `2.57.0-rc1`), so it cannot be compared, nothing ran and the user is pointed to a manual install (an empty or missing record goes on); 1 PowerShell itself refused to run the script (for example a group policy that blocks `-ExecutionPolicy Bypass`).
 - **What the tests run on the Windows host:** `tests/test_gitup_windows.sh` (its safety nets, the path guards, the never-start guards and the certificate hygiene, are in `tests/test_gitup_windows_safety.sh`) drives the module with registry, `whoami` and `winget` stand-ins (the sandbox stands for System32 through
   `GSG_GITUP_ROOT`), the runner with Windows PowerShell and a compiled stand-in installer carrying a throw-away signature, `git-secret-guard.cmd` (checkout and installed copy) with real
   `cmd.exe`, and the real `bin/git-secret-guard install --upgrade-git` with a fake old git. The module logic also runs on Linux through a faked `uname`; the runner and `.cmd` tests skip there.
@@ -645,6 +644,91 @@ Both run the whole suite and the install E2E as a non-root user, in a podman-mac
   `podman images --digests`). Its repositories already serve 9.8, so the run mixes 9.7 base packages with current 9.x updates.
 - **Not covered:** x86_64 (the `linux_x64` and `linux_amd64` rows of `tools.lock` are not exercised on an arm64 VM), and macOS itself, which
   `tests/run.sh` covers natively.
+
+## CI on real platforms
+
+`.github/workflows/platforms.yml` runs what no unit test can: real containers, a real VM and real Windows installs, on disposable GitHub-hosted runners. It is not a pull request check
+and not part of `tests.yml`. Its `push:` trigger on the branch `ci/real-platform-runs` is temporary and goes before the merge; `workflow_dispatch` stays.
+
+- **Starting it.** The heavy jobs run for a manual dispatch or when the head commit message holds one of `[apt]` (Ubuntu and Debian `--phase upgrade`), `[suite]` (their default phases, the
+  whole suite), `[rpm]`, `[oldgit]`, `[vm]`, `[win]` or `[heavy]` (all). A push without a key runs only the launcher unit tests and the runner facts. Third-party actions are pinned by full SHA.
+  The concurrency group names the commit. Job logs are readable through the API only when the whole run has ended; every job uploads its log as an artifact (`gh run download RUN -n NAME`).
+- **The runner.** `ubuntu-24.04`, 4 vCPUs, 16 GB, rootless podman 4.9.3 with crun 1.14.1 and cgroups v2, `/dev/kvm` present (`crw-rw---- root kvm`; a udev rule makes it usable), qemu from apt.
+  `windows-2025` is elevated and has winget 1.11 with `Git.Git`.
+
+### What had to change for the runner (and what did not)
+
+- **Isolation checks: one mount rule added, nothing skipped.** Podman 4.9.3 masks `/sys/dev/block` as well (the `maskedPaths` of its `config.json`, read in a probe job). `ISOLATION_MOUNT_RULES`
+  gained `/sys/dev/block=tmpfs`; the fstype is checked like every other entry, and the variable, `/dev`, namespace, `/run/secrets` and read-only `/src` checks are unchanged. `ubuntu.sh` still has no way to skip a check.
+- **Debian 13 prepare.** `software-properties-common` does not exist on Debian; the package list is now per distribution (`apt_prerequisites`), the Debian default is the source build (no Launchpad PPA is tried), and the
+  stock `git` is installed as on Rocky. This was a real failure of the default phases on Debian (run 42252845651).
+- **Rocky containers need `/etc/shadow` at mode 0400** (`rpm_fix_shadow`). At the image's 000 every `sudo` of a non-root user failed with "PAM account management error" under this runner's rootless podman.
+  A setuid `unix_chkpwd` and `rpm --setcaps` did not help; only the mode did (probe job, run 42260761407). A fixture, not a product change.
+- **The Rocky VM guest runs with `/usr/local/bin` first on `PATH`**, as the product tells a user to do; a Rocky 9 login shell lists `/usr/bin` first.
+
+### Results
+
+| Item | Result | Run | Real output |
+|---|---|---|---|
+| Ubuntu 24.04 `--phase upgrade` (PPA, `.sources`) | PASS | 42252266035, 42273585581 | `E2E SUMMARY: 27 passed, 0 failed` |
+| Ubuntu 22.04 `--phase upgrade` (PPA, `.list`; first container run) | PASS | same | `E2E SUMMARY: 28 passed, 0 failed` |
+| Debian 13 `--phase upgrade` (source build) | PASS | same | `E2E SUMMARY: 21 passed, 0 failed` |
+| Ubuntu 24.04 and 22.04, default phases (prepare, install E2E, whole suite) | install E2E 31/0; suite 1061 passed, 0 failed, 31 skipped | 42252845651 | `SUMMARY: 1061 passed, 0 failed, 31 skipped (total 1092)` |
+| Debian 13, default phases | install E2E 31/0; suite fails tests that assume an Ubuntu host, see below | 42273585581 | `SUMMARY: 1098 passed, 10 failed` (four were this branch's own docs link and comment length) |
+| Rocky 9.7 `rpm.sh rocky` (source route, takeover, dnf update control, restore, interrupts) | PASS | 42261480647, 42273585581 | `E2E SUMMARY: 92 passed, 0 failed` |
+| Fedora 44 `rpm.sh fedora` (package route) | PASS | same | `E2E SUMMARY: 13 passed, 0 failed` |
+| Fedora 44 with git-core 2.47.0 installed (#40, old git) | PASS after a product fix | 42259957123, 42273585581 | `E2E SUMMARY: 16 passed, 0 failed`; before the fix `Package "git-core-2.47.0-1.fc41.x86_64" is already installed. Nothing to do.` |
+| `sudo` with a real password prompt (pty through `script`, random password in a 0600 file) | PASS | 42261480647, 42273585581 | three `[sudo] password for gsguser:` for a wrong password, then `sudo: 3 incorrect password attempts` and nothing built; right password: `E2E SUMMARY: 16 passed, 0 failed` |
+| Takeover restore with the network off (`--network none` after `podman commit`) | PASS | same | stage 1 `41 passed, 0 failed`; stage 2 (only `lo`, `curl` and name lookup fail) `12 passed, 0 failed` |
+| Direct root run of the full flow, no `sudo` installed | PASS | same | `E2E SUMMARY: 65 passed, 0 failed` |
+| Real pin bump (git 2.55.0 built, then the current pin 2.56.0) | PASS | 42273585581 | `E2E SUMMARY: 17 passed, 0 failed` |
+| Rocky 9.8 VM, SELinux enforcing, KVM | see "Rocky VM" | | |
+| GitHub Desktop's bundled git | measured | 42259957123, 42273585581 | `old git: exit 0; output: []` for 2.45.3 built from the tarball and for the git in the Desktop 3.4.13 `.deb` |
+| Windows scenarios | see "Windows" | | |
+
+**Debian 13 default suite.** After the fixes above the suite still fails tests that assume the host is Ubuntu with its git in `/usr/bin`: `test_prerequisites` (four) and `test_doctor` (the `/usr/bin/git` warning).
+They pass on Ubuntu and do not describe product behaviour; the stock `git` package now installed by the Debian prepare step addresses the doctor one, the rest is open.
+
+### Rocky VM (SELinux enforcing)
+
+`tests/platform/rocky-vm.sh` boots the dated image `Rocky-9-GenericCloud-Base-9.8-20260525.0.x86_64.qcow2` (SHA-256 in the script, taken from the file's CHECKSUM) under qemu with KVM, cloud-init and an
+ed25519 key; the ssh forward is bound to 127.0.0.1 and the guest has no display. `tests/platform/rocky-vm-e2e.sh` runs inside it: `getenforce` must say `Enforcing`, then the Rocky E2E (source install, takeover,
+dnf update control, restore), plus labels (`stat -c %C`, `matchpathcon`, `restorecon -n -v`), `ausearch -m AVC,USER_AVC` from the start of the run, and `sshd` serving a real push and clone over ssh through
+`/usr/bin/git-receive-pack` and `/usr/bin/git-upload-pack` while the takeover is active (the server's `agent=git/2.56.0` shows it is the taken-over git; after the restore it is `agent=git/2.52.0`).
+Without a writable `/dev/kvm` the launcher exits 3 and says that TCG software emulation is roughly 10 to 50 times slower, unless `GSG_VM_ACCEL=tcg` is set. This runner has KVM, so TCG was not run.
+
+- **Boot**: the guest accepted ssh after about 10 seconds.
+- **SELinux**: enforcing, auditd active; no AVC record from the start of the run to its end, across the install, the takeover, a push and a clone served by sshd through the taken-over links, and the restore.
+- **Labels**: git and its helpers copied by `install` get `bin_t`, `/usr/bin/git` and its five links `bin_t`, `dnf.conf` keeps `etc_t`, `/var/lib/git-secret-guard` is `var_lib_t`; `restorecon -n -v` on the six links, `dnf.conf` and
+  the backup directory reports nothing.
+- **Finding, no product change yet.** git and its 150 hard links are one inode. The policy labels `/usr/local/bin/git` `bin_t` but `/usr/local/libexec/git-core/*` `usr_t`, so `restorecon -n -R /usr/local` lists
+  the helpers as "would relabel", and a real `restorecon -R /usr/local` ends with the label of the last path it visits. `vm_restorecon_effect` measures what that does to a clone served by sshd; its output is in the run record.
+
+### GitHub Desktop's bundled git
+
+A git older than 2.54 ignores `hook.<name>.*` configuration without a word. `tests/platform/old-git-e2e.sh` installs the hook with a current git into a scratch home, then commits a fake key with (1) the current
+git and (2) the old git under the same home. Measured with git 2.45.3 built from the pinned tarball (SHA-256 `38f20f95...`) and with the git inside `GitHubDesktop-linux-amd64-3.4.13-linux1.deb` (SHA-256 `8b557776...`;
+its `usr/lib/github-desktop/resources/app/git/bin/git` is 2.45.3): the current git blocks (`1 potential secret(s) in lines this commit adds`), both old gits finish the commit with exit 0 and **no output at all**, and
+the key is in the history. **Commits made by GitHub Desktop's bundled git are not scanned.** The warning of `install` and `doctor` says so now; it used to say "has not been tested".
+
+### Windows
+
+The `windows` job runs on `windows-2025` (Windows Server 2025, build 26100, elevated). `tests/platform/windows-gitup-e2e.ps1 -Scenario NAME` first installs Git for Windows 2.53.0.3 over the image's git
+(`/ALLOWDOWNGRADE=1` is for this fixture only; the digest `bc88381e...` equals the release's own table), then drives `bin\git-secret-guard.cmd install --upgrade-git`. The installer route needs winget off `PATH`, so those scenarios remove it for the product only.
+
+| Scenario | Result |
+|---|---|
+| `winget` | winget 1.11 is on the runner and lists `Git.Git 2.56.0.4`. The plan named the route `winget`, `--scope machine` and "this prompt is already elevated"; winget downloaded, verified the installer hash and upgraded; `git --version` 2.56.0.windows.4; a fake key was blocked. `E2E SUMMARY: 8 passed, 0 failed` (run 42263939621). |
+| `inuse-winget` | A running Git Bash (`bash.exe`) during the upgrade: winget's installer failed at once with `Installer failed with exit code: 1`, the runner exited 12, git stayed 2.53.0.3, `Git_is1` unchanged, no pending file rename; after the holder ended, the same command upgraded. `7 passed, 0 failed` (run 42270097343). |
+| `inuse` (installer route) | The silent installer **hung**: 15 minutes with no output until the harness killed it; git unchanged, no pending rename; after the holder ended, the same command upgraded (run 42270993343). Fixed here: the runner now stops first with exit 19 and names the programs. |
+| `killed` | The installer was killed 12 seconds after it appeared: product exit 12, `git --version` already 2.56.0.windows.4 but the `Git_is1` record gone, `unins000.exe` present, `usr\bin\bash.exe` missing, no pending renames. A plain rerun could not start (Git Bash was gone). Fixed here: `gsg-bash.cmd` says "looks half installed ... run its installer again" and exits 127. Running the installer file the first run kept (`%LocalAppData%\git-secret-guard\git-upgrade\Git-2.56.0.4-64-bit.exe`) by hand repaired it; `install --upgrade-git` then ended in a blocked fake-key commit. `8 passed, 0 failed` (run 42269584889). |
+| `signature` | A sandbox copy of the repository whose `tools.lock` pins another signer: the runner exited 10, named both subjects, kept the file (it matched its digest), git unchanged; the unmodified lock then upgraded. `11 passed, 0 failed` (run 42267563578). |
+| `rerun` | The two legs of the `.cmd` run by hand, the second with a dead proxy and `GSG_GIT_UPGRADED=1`: `install refused; the only change made was the git upgrade of this run (Git for Windows was upgraded just before this run)`; without the proxy the same command completed. `10 passed, 0 failed` (run 42269584889). |
+| `prompt` | **Not possible on this runner.** A ConPTY is created and sends its set-up sequences, but returns no text of any child (not even `cmd /c echo`), so a typed answer cannot be given to a real prompt. A person at a console must do this one. |
+
+- **Found by these runs, fixed with a test first:** the runner failed with `Get-AuthenticodeSignature ... the module could not be loaded` whenever the parent was PowerShell 7 (its module path leaks into Windows
+  PowerShell 5.1) and now resets `PSModulePath` for its own process (`bin/gsg-gitup.ps1`); `bin/gsg-bash.cmd` names a half-installed Git for Windows; the runner stops with the new exit 19 when programs of the install directory run, before the hand-off is used up.
+- **Not done:** a real UAC decline (needs a person) and the typed yes above.
 
 ## Maintainer notes
 

@@ -694,10 +694,11 @@ test_the_isolation_check_accepts_exactly_the_container_defaults() {
 
 # shellcheck disable=SC2016
 test_obtain_git_does_not_build_from_source_when_the_ppa_could_not_be_disabled() {
-    local script='source "$1"; LOGDIR="$2"; MARK="$2/source-build-ran"; GIT_SOURCE="$3"; PPA_RC="$4"
+    local script='source "$1"; LOGDIR="$2"; MARK="$2/source-build-ran"; OS_RELEASE="$2/osr"; GIT_SOURCE="$3"; PPA_RC="$4"
         install_git_source() { : >"$MARK"; return 0; }; git_is_new_enough() { return 0; }; install_git_ppa() { return "$PPA_RC"; }
         obtain_git; rc=$?; printf "rc=%s failures=%s\n" "$rc" "$FAILURES"'
     local mode
+    printf 'ID=ubuntu\n' >"$SANDBOX/osr"
     for mode in auto ppa; do
         rm -f -- "$SANDBOX/source-build-ran"
         run_cap env -i PATH="/usr/local/bin:/usr/bin:/bin" bash -c "$script" _ "$GSG_PROJECT/tests/platform/ubuntu-container.sh" "$SANDBOX" "$mode" 2
@@ -862,6 +863,7 @@ test_the_prepare_phase_asks_for_software_properties_common_on_ubuntu_only() {
     assert_contains "$OUT" "software-properties-common" "Ubuntu gets it"
     run_cap env -i PATH="/usr/local/bin:/usr/bin:/bin" bash -c 'source "$1"; OS_RELEASE="$2"; apt_prerequisites' _ "$GSG_PROJECT/tests/platform/ubuntu-container.sh" "$SANDBOX/osr-debian"
     assert_not_contains "$OUT" "software-properties-common" "Debian does not"
+    assert_contains "$OUT" $'\ngit' "Debian gets the stock git, as Rocky does"
 }
 
 # ^ invariant the PPA is an Ubuntu thing; a Debian machine in the default auto mode builds the pinned source and never tries a Launchpad PPA

@@ -484,6 +484,8 @@ install_shellcheck() {
 apt_prerequisites() {
     local -a pkgs=(ca-certificates curl gnupg jq tar xz-utils gzip util-linux coreutils procps pre-commit systemd dbus gawk mawk perl)
     if [ "$(os_field ID)" = ubuntu ]; then pkgs+=(software-properties-common); fi
+    # ^ why the stock git on Debian too, not only the build; as on Rocky, a doctor test calls /usr/bin/git and the source build leaves it alone
+    if [ "$(os_field ID)" = debian ]; then pkgs+=(git); fi
     printf '%s\n' "${pkgs[@]}"
 }
 

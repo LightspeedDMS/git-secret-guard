@@ -56,7 +56,7 @@ test_a_machine_whose_repositories_offer_a_new_enough_git_is_upgraded_through_dnf
 
 pathbin_git_version() { "$SANDBOX/pathbin/git" --version; }
 
-# ^ external dnf 5 answers "already installed, nothing to do" to dnf install of an installed older package; dnf 4 upgrades it (found on Fedora 44, run 42257678269)
+# ^ external dnf 5 answers already installed to dnf install of an older installed package; dnf 4 upgrades it (Fedora 44, run 42257678269)
 test_an_old_package_git_is_upgraded_with_dnf_upgrade_because_dnf_install_leaves_it_alone() {
     gu_rpm_setup || return 1
     printf '2.55.0\n' >"$SANDBOX/dnf.candidate"

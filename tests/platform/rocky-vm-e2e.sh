@@ -49,7 +49,7 @@ vm_prepare() {
     show "AVC records are searched from $AVC_MARK"
     mkdir -p "$HOME/.ssh" "$HOME/srv" || return 1
     ssh-keygen -q -t ed25519 -N '' -f "$SSH_KEY" && cat "$SSH_KEY.pub" >>"$HOME/.ssh/authorized_keys" && chmod 600 "$HOME/.ssh/authorized_keys"
-    git init -q --bare "$SRV"
+    /usr/bin/git init -q --bare "$SRV"
 }
 
 vm_labels_after_install() {
@@ -114,6 +114,22 @@ vm_restored() {
     show "$(printf '%s' "$OUT" | head -n 6 | cut -c1-200)"
 }
 
+# ^ invariant informational; git and its hard links are one inode, bin_t under /usr/local/bin by policy and usr_t under /usr/local/libexec
+# ^ invariant a relabel of /usr/local ends with the label of the last path it visits; the output shows what the does to a clone sshd serves
+vm_restorecon_effect() {
+    local mark
+    printf '== Rocky VM: what restorecon -R /usr/local does to the shared inode (measured, not judged)\n'
+    mark="$(date '+%x %T')"
+    show "before: $(stat -c '%C %i %n' /usr/local/bin/git /usr/local/libexec/git-core/git-upload-pack 2>&1)"
+    sudo restorecon -R /usr/local
+    show "after: $(stat -c '%C %i %n' /usr/local/bin/git /usr/local/libexec/git-core/git-upload-pack 2>&1)"
+    clone_over_ssh /usr/local/bin/git-upload-pack
+    show "clone served through /usr/local/bin/git-upload-pack after the relabel: exit $RC; $CLONE_OUT"
+    # shellcheck disable=SC2086
+    show "AVC records since: $(sudo ausearch -m AVC,USER_AVC -ts $mark 2>&1 | head -n 6 | cut -c1-240)"
+    check "the experiment ran to the end" true
+}
+
 main_vm() {
     vm_prepare
     rocky_upgrade
@@ -123,6 +139,7 @@ main_vm() {
     rocky_takeover_dnf
     rocky_restore
     vm_restored
+    vm_restorecon_effect
     e2e_summary
 }
 

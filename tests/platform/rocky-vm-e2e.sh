@@ -70,7 +70,7 @@ clone_over_ssh() {
     GIT_SSH_COMMAND="ssh -i $SSH_KEY -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes -o LogLevel=ERROR" \
         GIT_TRACE_PACKET=1 git clone --upload-pack "$1" "ssh://$ME@127.0.0.1$SRV" "$dest" >"$OUTF" 2>&1
     RC=$?
-    CLONE_OUT="$(grep -o 'clone< agent=git/[0-9.]*' "$OUTF" | sed 's/^clone< //' | sort -u | head -n 2 | tr '\n' ' ')"
+    CLONE_OUT="$(grep -o '< agent=git/[0-9.]*' "$OUTF" | sed 's/^< //' | sort -u | head -n 2 | tr '\n' ' ')"
 }
 
 push_over_ssh() {

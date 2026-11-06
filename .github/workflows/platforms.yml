@@ -5,6 +5,12 @@ name: platforms
 # a full run takes about 45 minutes of hosted runners and its results change only when the product or a pinned image does.
 on:
   workflow_dispatch:
+    inputs:
+      only:
+        description: all runs every job; unit runs only the launcher and module unit tests (a quick check while iterating)
+        type: choice
+        default: all
+        options: [all, unit]
 
 permissions:
   contents: read
@@ -34,6 +40,7 @@ jobs:
           path: ${{ runner.temp }}/logs
 
   containers-upgrade:
+    if: inputs.only != 'unit'
     runs-on: ubuntu-24.04
     timeout-minutes: 100
     strategy:
@@ -62,6 +69,7 @@ jobs:
           name: containers-${{ matrix.os }}-${{ matrix.run }}
           path: ${{ runner.temp }}/logs
   containers-suite:
+    if: inputs.only != 'unit'
     runs-on: ubuntu-24.04
     timeout-minutes: 100
     strategy:
@@ -90,6 +98,7 @@ jobs:
           name: containers-${{ matrix.os }}-${{ matrix.run }}
           path: ${{ runner.temp }}/logs
   rpm:
+    if: inputs.only != 'unit'
     runs-on: ubuntu-24.04
     timeout-minutes: 100
     strategy:
@@ -154,6 +163,7 @@ jobs:
 
   # #40: does a commit made by a git below 2.54 skip the scan? A real old git (built from the pinned tarball) and the git inside GitHub Desktop's .deb.
   old-git:
+    if: inputs.only != 'unit'
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
@@ -205,6 +215,7 @@ jobs:
 
   # #40: Rocky 9 with SELinux enforcing, as a real VM. Hosted x64 runners expose /dev/kvm; without it rocky-vm.sh stops and says what TCG would cost.
   rocky-vm:
+    if: inputs.only != 'unit'
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     steps:
@@ -237,6 +248,7 @@ jobs:
 
   # #30: the Git for Windows upgrade on a disposable windows-2025 runner (docs/platforms.md#ci-on-real-platforms). The script replaces Git for Windows with an old release first.
   windows:
+    if: inputs.only != 'unit'
     runs-on: windows-2025
     timeout-minutes: 60
     strategy:

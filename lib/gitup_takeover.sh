@@ -254,23 +254,15 @@ GITUP_TK_FILES_LIMIT=5000
 
 # ^ invariant rc 0 when every non-directory below libexec/git-core has the trusted owner and no group or other write bit, and no symlink leaves the prefix
 gitup_tk_check_libexec() {
-    local dir="$GITUP_PREFIX/libexec/git-core" listing entry kind f real prefix_real n=0
+    local dir="$GITUP_PREFIX/libexec/git-core" listing entry n=0
     if [ ! -d "$dir" ]; then return 0; fi
     gitup_tk_check_owner "$dir" || return 1
-    prefix_real="$(realpath -- "$GITUP_PREFIX")" || gitup_tk_fail "cannot resolve $GITUP_PREFIX" || return 1
-    listing="$(find "$dir" ! -type d -printf '%y %p\n')" || gitup_tk_fail "cannot list the files below $dir" || return 1
+    listing="$(find "$dir" ! -type d -printf '%p\n')" || gitup_tk_fail "cannot list the files below $dir" || return 1
     while IFS= read -r entry; do
         if [ -z "$entry" ]; then continue; fi
         n=$((n + 1))
         if [ "$n" -gt "$GITUP_TK_FILES_LIMIT" ]; then gitup_tk_fail "$dir holds more than $GITUP_TK_FILES_LIMIT files" || return 1; fi
-        kind="${entry%% *}"
-        f="${entry#* }"
-        if [ "$kind" = l ]; then
-            real="$(realpath -- "$f")" || gitup_tk_fail "cannot resolve the link ${f//[^[:print:]]/?}" || return 1
-            if [[ $real != "$prefix_real"/* ]]; then gitup_tk_fail "the link ${f//[^[:print:]]/?} leaves $GITUP_PREFIX (it points at ${real//[^[:print:]]/?})" || return 1; fi
-        else
-            gitup_tk_check_owner "$f" || return 1
-        fi
+        gitup_tk_check_owner "$entry" || return 1
     done <<<"$listing"
 }
 

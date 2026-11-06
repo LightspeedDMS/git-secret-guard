@@ -80,7 +80,7 @@ test_the_takeover_accepts_siblings_that_are_symlinks_to_git_and_refuses_one_that
 }
 
 
-# ^ invariant every libexec entry, a symlink included, is judged by its own target: inside the prefix, trusted owner, no group or other write bit
+# ^ invariant every libexec entry, a symlink included, is judged by its target; inside the prefix, trusted owner, no group or other write bit
 test_the_takeover_judges_the_targets_of_libexec_symlinks_like_any_other_file() {
     local d case_name
     for case_name in good writable outside; do

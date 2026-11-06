@@ -152,14 +152,19 @@ phase_probe() {
 # ^ invariant typed_install ANSWERS LABEL CMD... runs CMD on a pty (script) and types ANSWERS; backslash n splits answers; RC is the command rc
 # ^ why a fifo held open by a writer, not a pipe from printf; EOF on the stdin of script ends the session before a long install is done
 typed_install() {
-    local answers="$1" label="$2" dir writer
+    local answers="$1" label="$2" dir writer watcher
     shift 2
     dir="$(mktemp -d "$HOME/typed.XXXXXX")" || return 1
     case "$dir" in /?*/?*) ;; *) return 1 ;; esac
     mkfifo "$dir/in" || return 1
     { printf '%b\n' "$answers"; exec sleep 3000; } >"$dir/in" &
     writer=$!
+    # ^ why a process snapshot every 60 s; a typed run once sat for 10 minutes and its log said nothing about where (run 42292067132)
+    { for _ in $(seq 1 50); do sleep 60; { date -u +%T; ps -eo pid,ppid,stat,etime,wchan:20,args --forest | cut -c1-200; } >>"$LOGS/$label-ps.log"; done; } &
+    watcher=$!
     RUN_STDIN="$dir/in" run "$label" timeout 3000 script -qefc "$*" /dev/null
+    kill "$watcher" 2>/dev/null
+    wait "$watcher" 2>/dev/null
     kill "$writer" 2>/dev/null
     wait "$writer" 2>/dev/null
     rm -rf -- "${dir:?}"

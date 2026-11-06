@@ -15,6 +15,7 @@ SRV="$HOME/srv/repo.git"
 SSH_KEY="$HOME/.ssh/id_gsg"
 AVC_MARK=""
 CLONE_OUT=""
+RPM_GIT_VERSION=""
 ME="$(id -un)"
 
 # ^ invariant true when ausearch finds no AVC or USER_AVC record since AVC_MARK; the records themselves go to OUT for the log
@@ -46,6 +47,7 @@ vm_prepare() {
     check "auditd is running, so denials are recorded" sudo systemctl is-active auditd
     check "sshd is running" sudo systemctl is-active sshd
     AVC_MARK="$(date '+%x %T')"
+    RPM_GIT_VERSION="$(/usr/bin/git --version | sed "s/^git version //")"
     show "AVC records are searched from $AVC_MARK"
     mkdir -p "$HOME/.ssh" "$HOME/srv" || return 1
     ssh-keygen -q -t ed25519 -N '' -f "$SSH_KEY" && cat "$SSH_KEY.pub" >>"$HOME/.ssh/authorized_keys" && chmod 600 "$HOME/.ssh/authorized_keys"
@@ -70,7 +72,7 @@ clone_over_ssh() {
     GIT_SSH_COMMAND="ssh -i $SSH_KEY -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes -o LogLevel=ERROR" \
         GIT_TRACE_PACKET=1 git clone --upload-pack "$1" "ssh://$ME@127.0.0.1$SRV" "$dest" >"$OUTF" 2>&1
     RC=$?
-    CLONE_OUT="$(grep -o '< agent=git/[0-9.]*' "$OUTF" | sed 's/^< //' | sort -u | head -n 2 | tr '\n' ' ')"
+    CLONE_OUT="$(grep -o 'agent=git/[0-9.]*' "$OUTF" | sort -u | tr '\n' ' ')"
 }
 
 push_over_ssh() {
@@ -96,7 +98,8 @@ vm_taken_over() {
     show "the server answered with: $CLONE_OUT (exit $RC)"
     check "git-upload-pack through /usr/bin serves a real clone over ssh" test "$RC" -eq 0
     check "the cloned working tree holds the pushed file" test "$(cat "$HOME/clone/a.txt" 2>/dev/null)" = "clean content"
-    check "the server that answered is the taken-over git" test "$CLONE_OUT" = "agent=git/$(git_ver /usr/local/bin/git) "
+    # shellcheck disable=SC2016
+    check "the server that answered is the taken-over git (its agent is the new version, not the RPM's)" bash -c '[[ $1 == *"agent=git/$2 "* && $1 != *"agent=git/$3 "* ]]' _ "$CLONE_OUT" "$(git_ver /usr/local/bin/git)" "$RPM_GIT_VERSION"
     check "no AVC denial has been logged since the start" no_new_avc
     show "$(printf '%s' "$OUT" | head -n 6 | cut -c1-200)"
 }
@@ -110,7 +113,8 @@ vm_restored() {
     clone_over_ssh /usr/bin/git-upload-pack
     show "the server answered with: $CLONE_OUT (exit $RC)"
     check "git-upload-pack through /usr/bin serves a clone again" test "$RC" -eq 0
-    check "and the server is the RPM git again" test "$CLONE_OUT" = "agent=git/$(/usr/bin/git --version | sed 's/^git version //') "
+    # shellcheck disable=SC2016
+    check "and the server is the RPM git again (its agent is the RPM's version)" bash -c '[[ $1 == *"agent=git/$2 "* ]]' _ "$CLONE_OUT" "$RPM_GIT_VERSION"
     check "no AVC denial has been logged over the whole run" no_new_avc
     show "$(printf '%s' "$OUT" | head -n 6 | cut -c1-200)"
 }

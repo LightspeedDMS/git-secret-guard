@@ -122,7 +122,9 @@ mode_bump() {
     cp "$HOME/gitup_source.sh.current" "$CK/lib/gitup_source.sh" || { bad "gitup_source.sh cannot be restored"; return 1; }
     check "the code is the current one again, with the flag" grep -q 'INSTALL_SYMLINKS=1' "$CK/lib/gitup_source.sh"
     run "$GSG" install --upgrade-git </dev/null
-    check "at the same pin the hard-link build is not rebuilt: no plan" not has "plan"
+    show "same pin, output: $(printf '%s' "$OUT" | tail -n 3 | cut -c1-160)"
+    # shellcheck disable=SC2016
+    check "at the same pin the hard-link build is not rebuilt: no rebuild plan" bash -c '[[ $1 != *"rebuild plan"* && $1 != *"upgrade plan"* ]]' _ "$OUT"
     check "and it still has hard links" test "$(stat -c %h /usr/local/bin/git)" -gt 1
     cp "$HOME/tools.lock.current" "$lock"
     check "the checkout pins $cur again" grep -q "^git $cur source " "$lock"

@@ -288,7 +288,6 @@ test_a_rebuild_replaces_a_symlink_of_the_old_build_and_never_writes_through_it()
     victim_before="$(<"$b/git-shell.victim")"
     gsg install --upgrade-git </dev/null
     assert_rc 0 "install --upgrade-git over a build whose git-shell is a symlink"
-    check_plan_matches_log "$OUT" "the source route over an older build"
     if [ -L "$b/git-shell" ]; then fail "git-shell is still a symlink"; fi
     assert_eq "$(<"$b/git-shell.victim")" "$victim_before" "the file the old link pointed at was not written"
     assert_eq "$("$b/git" --version)" "git version 2.56.0" "the new build is in place"

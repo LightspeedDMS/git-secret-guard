@@ -437,4 +437,22 @@ test_the_systemd_analyze_probe_names_a_machine_that_cannot_verify_and_never_a_un
     assert_empty "$(analyze_blocked_reason "$stub")" "a working systemd-analyze is no reason either"
 }
 
+
+# ^ external the Fedora 44 WSL image has no awk and install finished => every commit was blocked for the missing awk (run 42275538317)
+# ^ invariant awk is a prerequisite of install on Linux and macOS, named with its package like jq, setsid and timeout
+test_a_missing_awk_is_refused_by_install_with_its_package_not_found_out_at_the_first_commit() {
+    local bin="$SANDBOX/noawk" tool
+    mkdir -p "$bin" || return 1
+    for tool in jq setsid timeout; do printf '#!/bin/sh\nexit 0\n' >"$bin/$tool" && chmod 755 "$bin/$tool" || return 1; done
+    printf 'ID=fedora\n' >"$SANDBOX/os-release" || return 1
+    set_env GSG_OS_RELEASE="$SANDBOX/os-release"
+    wsl 'PATH="$1"; install_resolve_bins; echo "bad=$?"' "$bin"
+    assert_contains "$OUT" "bad=1" "one prerequisite is missing"
+    assert_contains "$ERR" "awk is required but was not found on PATH" "awk is named"
+    assert_contains "$ERR" "dnf install gawk" "with the package that provides it"
+    printf '#!/bin/sh\nexit 0\n' >"$bin/awk" && chmod 755 "$bin/awk" || return 1
+    wsl 'PATH="$1"; install_resolve_bins; echo "bad=$?"' "$bin"
+    assert_contains "$OUT" "bad=0" "with awk on PATH nothing is missing"
+}
+
 run_file_tests

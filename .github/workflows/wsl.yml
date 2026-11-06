@@ -97,9 +97,19 @@ jobs:
           "SHA-256 of $url is $got (pinned)"
           $dir = Join-Path $env:RUNNER_TEMP 'wsl-rpm'
           New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          # wsl.exe prints UTF-16; read it as such for the management calls only
+          [Console]::OutputEncoding = [System.Text.Encoding]::Unicode
+          "wsl.exe on this runner:"
+          wsl.exe --status
           wsl.exe --import $env:WSL_TARGET $dir $file --version $env:WSLV
-          if ($LASTEXITCODE -ne 0) { throw "wsl --import failed ($LASTEXITCODE)" }
+          if ($LASTEXITCODE -ne 0) {
+            "wsl --import --version $env:WSLV failed ($LASTEXITCODE); trying the older form with the default version set first"
+            wsl.exe --set-default-version $env:WSLV
+            wsl.exe --import $env:WSL_TARGET $dir $file
+            if ($LASTEXITCODE -ne 0) { throw "wsl --import failed ($LASTEXITCODE)" }
+          }
           wsl.exe --list --verbose
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
       - name: A normal user with sudo, as a developer has
         shell: pwsh

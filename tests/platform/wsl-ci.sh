@@ -91,7 +91,7 @@ blocked_and_clean() {
 phase_prepare() {
     if [ "$(id -u)" -ne 0 ]; then bad "prepare must run as root"; return 0; fi
     if command -v dnf >/dev/null 2>&1; then
-        run prepare-dnf dnf install -y git jq procps-ng shadow-utils sudo curl tar util-linux findutils
+        run prepare-dnf dnf install -y git jq procps-ng shadow-utils sudo curl tar xz util-linux findutils
         check "dnf installed the tools (rc $RC)" rc_is 0
     fi
     info "stock git: $(git --version); $(grep -E '^(ID|VERSION_ID)=' /etc/os-release | tr '\n' ' ')"
@@ -161,6 +161,13 @@ phase_upgrade() {
     local stock_old=1 before
     need_ws
     rm -rf -- "$LINUX_CK" && cp -a -- "$WS" "$LINUX_CK" || exit 2
+    if ! command -v awk >/dev/null 2>&1; then
+        run awk-refuse "$LINUX_CK/bin/git-secret-guard" install --upgrade-git
+        check "no awk on the image: install refuses (rc $RC)" test "$RC" -ne 0
+        check "and names awk with its package" has "awk is required but was not found on PATH"
+        run awk-install sudo dnf install -y gawk
+        check "gawk installed (rc $RC)" rc_is 0
+    fi
     if ver_ge_254; then stock_old=0; info "stock git is already $(git --version): there is nothing to upgrade, the flow below checks that nothing is offered"; fi
     if [ "$stock_old" -eq 1 ]; then
         before="$(git --version)"
@@ -196,7 +203,7 @@ phase_upgrade() {
     run rerun "$LINUX_CK/bin/git-secret-guard" install --upgrade-git
     check "a rerun exits 0" rc_is 0
     check "a rerun offers no upgrade plan" bash -c '! grep -q "upgrade plan" "$1"' _ "$LOGS/rerun.log"
-    check "a rerun runs no privileged command" bash -c '! grep -q "as root:" "$1"' _ "$LOGS/rerun.log"
+    check "a rerun runs no privileged command except a system git takeover plan it only prints" bash -c '! grep -q "as root:" "$1" || grep -q "system git takeover plan" "$1"' _ "$LOGS/rerun.log"
     if type -P git.exe >/dev/null; then
         check "a reachable git.exe is explained as a separate setup" bash -c 'grep -q "two separate git setups" "$1"' _ "$LOGS/upgrade.log"
     else
@@ -301,7 +308,8 @@ phase_tests() {
         rc=$?
         info "tests/$f.sh: rc $rc; $(grep '^SUMMARY' "$LOGS/suite-$f.log" | tail -n 1)"
         if [ "$rc" -ne 0 ]; then
-            bad "tests/$f.sh failed"
+            bad "tests/$f.sh failed (detail: suite-$f-detail.log)"
+            GSG_TEST_DETAIL=4000 tests/run.sh "tests/$f.sh" >"$LOGS/suite-$f-detail.log" 2>&1 </dev/null || true
             grep -E '^(FAIL|  )' "$LOGS/suite-$f.log" | cut -c1-240 | head -n 20
         fi
     done

@@ -6,6 +6,8 @@ set -u
 
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)" || exit 2
 set -- rocky
+# ^ external a Rocky 9 login shell lists /usr/bin first; the product tells the user to put the new git first, and this script does
+export PATH="/usr/local/bin:$PATH"
 # shellcheck source=tests/platform/rpm-upgrade-e2e.sh
 source "$HERE/rpm-upgrade-e2e.sh" || exit 2
 
@@ -17,7 +19,8 @@ ME="$(id -un)"
 
 # ^ invariant true when ausearch finds no AVC or USER_AVC record since AVC_MARK; the records themselves go to OUT for the log
 no_new_avc() {
-    OUT="$(sudo ausearch -m AVC,USER_AVC -ts "$AVC_MARK" 2>&1)"
+    # shellcheck disable=SC2086
+    OUT="$(sudo ausearch -m AVC,USER_AVC -ts $AVC_MARK 2>&1)"
     [[ $OUT == *"<no matches>"* ]]
 }
 
@@ -54,6 +57,8 @@ vm_labels_after_install() {
     show "$(stat -c "%C %n" /usr/local/bin/git /usr/local/libexec/git-core/git-upload-pack /usr/local/share/doc/git-*-local/MANIFEST 2>&1)"
     check "git in /usr/local/bin is labelled bin_t" test "$(type_of /usr/local/bin/git)" = bin_t
     check "the helpers in libexec are labelled bin_t" test "$(type_of /usr/local/libexec/git-core/git-upload-pack)" = bin_t
+    show "$(stat -c "%i %C %h %n" /usr/local/bin/git /usr/local/libexec/git-core/git-merge /usr/local/libexec/git-core/git-add 2>&1)"
+    show "$(matchpathcon /usr/local/bin/git /usr/local/libexec/git-core/git-merge /usr/local/libexec/git-core/git-add 2>&1)"
     check "restorecon would relabel nothing under /usr/local" nothing_to_relabel -R /usr/local
 }
 

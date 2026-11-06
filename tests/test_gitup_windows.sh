@@ -235,6 +235,27 @@ test_a_tampered_installer_never_runs_when_it_is_swapped_after_the_download_was_v
     assert_eq "$(wu_installer_log)" "" "the installer never ran"
 }
 
+# ^ external a Git Bash process holding Git files made the silent installer wait 15 minutes with no output (run 42270993343); winget failed at once
+test_a_program_running_from_the_git_directory_stops_the_runner_before_anything_starts() {
+    local gd="$SANDBOX/heldgit" pid
+    wu_need_windows_runner
+    wu_prepare_handoff machine || return 1
+    mkdir -p -- "$gd/usr/bin" || return 1
+    cp -- "$TEST_SYSTEM32/cmd.exe" "$gd/usr/bin/holdsgit.exe" || return 1
+    "$gd/usr/bin/holdsgit.exe" //c "ping -n 60 127.0.0.1 >nul" >/dev/null 2>&1 &
+    pid=$!
+    sleep 2
+    GD_W="$(cygpath -w "$gd")" awk '/^function Get-InstalledDir/ { print "function Get-InstalledDir([string]$Scope) { return \x27" ENVIRON["GD_W"] "\x27 }"; next } { print }' "$WU_RT/bin/gsg-gitup.ps1" >"$WU_DIR/rt.ps1" && cp -- "$WU_DIR/rt.ps1" "$WU_RT/bin/gsg-gitup.ps1" || { kill "$pid" 2>/dev/null; return 1; }
+    wu_runner "$WU_STATE_HANDOFF"
+    kill "$pid" 2>/dev/null
+    assert_rc 19 "a program of the Git directory is running"
+    assert_contains "$ERR" "holdsgit" "names it"
+    assert_contains "$ERR" "nothing was changed" "and that nothing ran"
+    assert_eq "$(wu_installer_log)" "" "the installer never started"
+    assert_file "$WU_STATE_HANDOFF" "the hand-off is kept, so closing the program and running the runner again works"
+    wait "$pid" 2>/dev/null || true
+}
+
 test_a_missing_installer_or_a_failing_one_is_reported_with_how_to_retry() {
     wu_need_windows_runner
     wu_prepare_handoff machine || return 1

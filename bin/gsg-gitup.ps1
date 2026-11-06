@@ -5,12 +5,12 @@
 # ^ invariant exit 0 done; 10 installer refused (digest, signature, link, missing) and nothing ran; 11 elevation declined; 12 installer or winget failed
 
 # ^ invariant exit 13 bad or used hand-off or bad tools.lock; 14 per-user from an elevated prompt; 15 not startable; 16 unexpected; 17 git at the pin
-# ^ invariant exit 18 installed version unreadable, nothing ran; exit 1 means powershell itself refused the script
+# ^ invariant exit 18 installed version unreadable, nothing ran; exit 19 programs of the install directory run, nothing ran; exit 1 = powershell refused
 param([Parameter(Mandatory = $true)][string]$Handoff)
 Set-StrictMode -Version 2
 $ErrorActionPreference = 'Stop'
-# ^ external a PowerShell 7 parent leaves its module path to this 5.1 process, which then cannot load Microsoft.PowerShell.Security (Get-AuthenticodeSignature)
-# ^ invariant the process gets the module path 5.1 starts with: the user and machine values and its own built-in directory; nothing is read from the caller
+# ^ external a PowerShell 7 parent leaves its module path to this 5.1 process, and the Security module (Get-AuthenticodeSignature) fails to load
+# ^ invariant the process gets the module path 5.1 starts with (user and machine values, its built-in directory); nothing is read from the caller
 [System.Environment]::SetEnvironmentVariable('PSModulePath', ((@([System.Environment]::GetEnvironmentVariable('PSModulePath', 'User'), [System.Environment]::GetEnvironmentVariable('PSModulePath', 'Machine'), "$PSHOME\Modules") | Where-Object { $_ }) -join ';'), 'Process')
 # ^ invariant one definition of the silent flags; lib/gitup_windows.sh holds the same list and a test compares the two
 $InstallerFlags = '/VERYSILENT', '/NORESTART', '/NOCANCEL', '/SP-'
@@ -27,6 +27,19 @@ function Stop-Run([int]$Code, [string]$Text) {
 
 # ^ invariant the installed Git for Windows version from its setup record (HKLM machine, HKCU user), empty when none; tests replace this one line
 function Get-InstalledVersion([string]$Scope) { $k = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Git_is1'; if ($Scope -eq 'user') { $k = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Git_is1' }; if (Test-Path -LiteralPath $k) { return [string](Get-ItemProperty -LiteralPath $k).DisplayVersion }; return '' }
+
+# ^ invariant the install directory from the setup record (HKLM machine, HKCU user), empty when none; tests replace this one line
+function Get-InstalledDir([string]$Scope) { $k = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Git_is1'; if ($Scope -eq 'user') { $k = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Git_is1' }; if (Test-Path -LiteralPath $k) { return [string](Get-ItemProperty -LiteralPath $k).InstallLocation }; return '' }
+
+# ^ external the silent installer waits with no output when a program of the install directory runs (15 minutes measured); winget fails at once
+# ^ invariant returns the sentence naming up to eight such programs, or '' when none runs; a program whose path cannot be read is not counted
+function Get-Holders([string]$Scope) {
+    $dir = (Get-InstalledDir $Scope).TrimEnd('\')
+    if (-not $dir) { return '' }
+    $held = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith($dir + '\', [System.StringComparison]::OrdinalIgnoreCase) })
+    if ($held.Count -eq 0) { return '' }
+    return "programs of $dir are running ($((($held | Select-Object -First 8 | ForEach-Object { "$($_.ProcessName) pid $($_.Id)" }) -join ', ')))"
+}
 
 function Test-Elevated { return (New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) }
 
@@ -104,6 +117,8 @@ function Invoke-Winget([hashtable]$H) {
     $w = Get-Command winget.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $w) { Stop-Run 10 "winget was planned but is not on PATH any more; nothing was changed. Run: $Retry" }
     $wingetArgs = $WingetBase + @('--scope', $H['scope'])
+    $held = Get-Holders $H['scope']
+    if ($held) { Stop-Run 19 "$held; nothing was changed and the hand-off is kept. Close them, then run this runner again, or run: $Retry" }
     Remove-Quietly $Handoff
     Write-Host "git-secret-guard: running winget $($wingetArgs -join ' ')"
     try {
@@ -147,6 +162,10 @@ function Invoke-Installer([hashtable]$H) {
             elseif ($have -and $haveV -ge [version]$H['version']) { $kind = 'current'; $failure = "Git for Windows $have is already installed, which is not older than the pinned $($H['version'])" }
         }
         if (-not $failure) {
+            $held = Get-Holders $H['scope']
+            if ($held) { $kind = 'held'; $failure = $held }
+        }
+        if (-not $failure) {
             Remove-Quietly $Handoff
             Write-Host "git-secret-guard: starting $(Split-Path -Leaf $path) with $($InstallerFlags -join ' ')"
             $params = @{ FilePath = $path; ArgumentList = $InstallerFlags; Wait = $true; PassThru = $true }
@@ -165,6 +184,7 @@ function Invoke-Installer([hashtable]$H) {
     } finally {
         $stream.Dispose()
     }
+    if ($kind -eq 'held') { Stop-Run 19 "$failure; nothing was changed and the hand-off is kept. Close them, then run this runner again, or run: $Retry" }
     if ($kind -eq 'declined') { Stop-Run 11 "the elevation prompt was declined, so the installer did not start and nothing was changed. Run: $Retry" }
     if ($kind -eq 'start') { Stop-Run 15 "the installer could not be started ($failure); nothing was changed. Run: $Retry" }
     if ($kind -eq 'unreadable') {

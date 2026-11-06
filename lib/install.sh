@@ -141,13 +141,29 @@ install_require_git() {
     fi
 }
 
-# ^ invariant sets GSG_GIT_CANDIDATES = every executable git on PATH plus /usr/bin/git, one path per real file, as found; GSG_GIT_REAL is parallel
+# ^ external GitHub Desktop for Linux ships its own git here (2.45.3 on the reference host); GITUP_ROOT moves it into a test sandbox
+install_bundled_git_path() { printf '%s/usr/lib/github-desktop/resources/app/git/bin/git' "${GITUP_ROOT:-}"; }
+
+# ^ invariant true for the git GitHub Desktop bundles; whether its commits reach the hook is untested => no text claims they are skipped
+install_git_is_bundled() { [ "$1" = "$(install_bundled_git_path)" ]; }
+
+# ^ invariant prints why a git older than 2.54 matters; the bundled git gets only the missing test said, any other git the certain claim
+install_old_git_effect() {
+    if install_git_is_bundled "$1"; then
+        printf 'it is the git GitHub Desktop bundles, config-based hooks need git >= 2.54, and whether commits made with it are scanned has not been tested'
+    else
+        printf 'it ignores config-based hooks without any message, so commits made with it are not scanned'
+    fi
+}
+
+# ^ invariant sets GSG_GIT_CANDIDATES = every executable git on PATH plus /usr/bin/git and GitHub Desktop's, one path per real file; GSG_GIT_REAL is parallel
 install_collect_gits() {
     local cand real seen=" "
     local -a cands=()
     GSG_GIT_CANDIDATES=() GSG_GIT_REAL=()
     mapfile -t cands < <(type -aP git)
     cands+=("${GITUP_USRBIN:-/usr/bin}/git")
+    cands+=("$(install_bundled_git_path)")
     for cand in "${cands[@]}"; do
         if [ ! -x "$cand" ]; then continue; fi
         real="$(realpath -- "$cand")" || continue
@@ -176,8 +192,8 @@ install_report_other_gits() {
         if [ "${GSG_GIT_REAL[$i]}" = "$GSG_GIT_USED" ]; then continue; fi
         if install_git_is_new_enough "$cand"; then continue; fi
         ver="$(install_git_version "$cand")" || ver="of unknown version"
-        printf '%s: warning: %s is git %s; it ignores config-based hooks without any message, so commits made with it are not scanned (the git in use is %s, git %s)%s\n' \
-            "$GSG_NAME" "$cand" "$ver" "$GSG_GIT" "$(install_git_version "$GSG_GIT")" "$(gitup_takeover_note "$cand")" >&2
+        printf '%s: warning: %s is git %s; %s (the git in use is %s, git %s)%s\n' \
+            "$GSG_NAME" "$cand" "$ver" "$(install_old_git_effect "$cand")" "$GSG_GIT" "$(install_git_version "$GSG_GIT")" "$(gitup_takeover_note "$cand")" >&2
         brew_old_git_note "$cand"
     done
 }

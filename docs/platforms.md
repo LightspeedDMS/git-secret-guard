@@ -109,7 +109,7 @@ No, offered on every install that finds the old package git next to a qualifying
 - **Undo:** `git-secret-guard restore-system-git` acts on what is on disk (the record, the `dnf.conf` marker, the links). It puts back every recorded file that is
   our link or missing (hash checked), accepts a file that is neither ours nor the saved original only when `rpm -qf` names `git-core` as its owner and
   `rpm -V git-core` does not list it (otherwise it says so and the backup stays), removes the `dnf.conf` entry from the marker alone (a package you added
-  to the line stays, and an unrelated line below the marker is kept), and removes the backup directory last, then the empty `/var/lib/git-secret-guard`. A Ctrl-C or SIGTERM during the restore ends it with
+  to the line stays, and an unrelated line below the marker is kept), and removes the backup directory last, then the empty `/var/lib/git-secret-guard` (a second run removes one a by-hand restore left behind). A Ctrl-C or SIGTERM during the restore ends it with
   the state of the machine and the command to run next (`restore-system-git` again; the backup is removed last, so a repeat is safe), and no temporary directory is left
   behind. The upgrade plan and the takeover plan list every privileged command by its full path, `mkdir` included, and those are the files that run. It needs no
   network and no dnf, and says `nothing to restore` on a second run. `uninstall` stops in every takeover state except none (active, partial, undone, broken) and names
@@ -117,8 +117,8 @@ No, offered on every install that finds the old package git next to a qualifying
   `install --take-over-system-git` refuse and print those commands, built from the saved originals in `orig/` (or `dnf reinstall` when the originals are gone). `active`
   needs the `excludepkgs` line itself below the marker, not only the marker comment; a rerun of `install --take-over-system-git` puts a deleted line back.
   `status` and `doctor` report an active takeover and a
-  leftover one as a problem, with the fix: `PARTIAL` (`/usr/bin/git` is still our link, so commits are scanned; finish with `install --take-over-system-git`
-  or undo with `restore-system-git`) and `UNDONE` (`/usr/bin/git` is not our link, so commits through it are no longer scanned).
+  leftover one as a problem, with the fix: "the takeover is half done" (`/usr/bin/git` is still our link, so commits are scanned; finish with `install --take-over-system-git`
+  or undo with `restore-system-git`) and "the takeover is partly undone" (`/usr/bin/git` is not our link, so commits through it are no longer scanned).
 - **A rebuild under an active takeover is refused**, before any privileged command: `cp` would replace the files the links point at in place, and an
   interruption there would break `/usr/bin/git`. The way out is `restore-system-git`, `install --upgrade-git`, then the takeover again.
 - A takeover is recorded on the machine only by its backup directory and its symlinks; no key was added to the install state.
@@ -141,6 +141,10 @@ does (private copy of the tracked files, `env -i`, `CONTAINERS_CONF` with an emp
   `install --upgrade-git` takes the package route (dnf 5), a blocked fake key, a rerun, and the takeover has nothing to do.
   To bump the digest: `curl -I -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json'
   https://registry.fedoraproject.org/v2/fedora/manifests/44` and read `docker-content-digest` (it equals the DIGEST column of `podman images --digests`).
+- **`sudo` and Ctrl-C.** With `use_pty` (on by default since sudo 1.9.14) `sudo` runs the command on its own pseudo-terminal. A Ctrl-C
+  typed during a `sudo` call can then be absorbed there and never reach bash, so the interrupt traps of `install` and `restore-system-git` do not fire; the
+  privileged command finishes or fails by itself and the run goes on. Every step can be repeated (backup last, partial states are
+  reported by `status` and `doctor`). The test suite sends its signals to the process group of the CLI and not through a terminal.
 - **Not proved:** SELinux. The containers run without an enforcing policy, so `restorecon` is called and logged but its effect, and `sshd` serving
   `git-upload-pack` through the taken-over path, need the manual run on an enforcing Rocky VM. The takeover and the Rocky E2E were not run against the reference host.
 

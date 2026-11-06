@@ -64,7 +64,6 @@ test_the_takeover_plan_has_a_heading_and_lists_its_commands_with_full_paths() {
     done
 }
 
-
 test_what_the_plan_prints_is_what_sudo_runs() {
     gu_tk_start || return 1
     gsg install --take-over-system-git </dev/null
@@ -95,6 +94,51 @@ test_a_rolled_back_takeover_runs_only_commands_the_plan_lists() {
         fi
         fail "rollback: sudo ran a command the plan does not list: $line"
     done < <(sudo_cmds)
+}
+
+# ^ invariant a takeover over a newer RPM finds an earlier backup => the annotated mv orig orig.old runs, and it must be a line of the plan
+test_the_conditional_plan_line_that_sets_an_earlier_backup_aside_is_listed_and_runs() {
+    local n plan
+    gu_tk_start || return 1
+    gsg install --take-over-system-git </dev/null
+    assert_rc 0 "first takeover"
+    for n in "${GU_TK_NAMES[@]}"; do
+        # shellcheck disable=SC2016
+        printf '#!/bin/sh\nif [ "$1" = --version ]; then echo "git version 2.53.0"; exit 0; fi\necho "rpm 2.53 %s"\n' "$n" >"$SANDBOX/new-$n" || return 1
+        chmod 755 "$SANDBOX/new-$n" || return 1
+        cp -a --remove-destination -- "$SANDBOX/new-$n" "$GU_ROOT/usr/bin/$n" || return 1
+    done
+    printf '%s\n' "$GU_CONF_BEFORE" >"$GU_ROOT/etc/dnf/dnf.conf" || return 1
+    rm -f -- "$SANDBOX/gitup.log" || return 1
+    gsg install --take-over-system-git </dev/null
+    assert_rc 0 "second takeover over a newer RPM"
+    plan="$OUT"
+    assert_contains "$(sudo_cmds)" "mv -T -- $GU_TK_DIR/orig $GU_TK_DIR/orig.old" "the earlier backup was set aside"
+    assert_contains "$(plan_lines "$plan")" "mv -T -- $GU_TK_DIR/orig $GU_TK_DIR/orig.old  [only when an earlier backup exists]" "and the plan lists that command with its condition"
+    check_plan_matches_log "$plan" "takeover over an earlier backup"
+}
+
+# ^ invariant a leftover link of a file the failed swap never reaches is removed by the rollback rm -f => the annotated plan line must exist
+test_the_conditional_plan_line_that_removes_leftover_files_is_listed_and_runs() {
+    local line word known plan ran=0
+    gu_tk_start || return 1
+    ln -s -- "$GU_ROOT/usr/local/bin/scalar" "$GU_ROOT/usr/bin/.scalar.gsg-new" || return 1
+    printf 'ln -s' >"$SANDBOX/sudo.failon" && printf '1' >"$SANDBOX/sudo.skip" || return 1
+    gsg install --take-over-system-git </dev/null
+    assert_rc 1 "the second link fails and the takeover is rolled back"
+    plan="$OUT"
+    assert_contains "$(plan_lines "$plan")" "rm -f -- $GU_ROOT/usr/bin/.<file>.gsg-new" "the plan lists the rm -f line"
+    while IFS= read -r line; do
+        if [[ $line != *"rm -f -- "* ]]; then continue; fi
+        ran=$((ran + 1))
+        for word in ${line#*" -- "}; do
+            known=0
+            if grep -F 'rm -f -- ' <(plan_all_cmds "$plan") | grep -qF -- "$word"; then known=1; fi
+            assert_eq "$known" "1" "the leftover $word is named by an rm -f line of the plan"
+        done
+    done < <(sudo_cmds)
+    if [ "$ran" -lt 1 ]; then fail "the rollback ran no rm -f although a leftover link was there"; fi
+    assert_no_file "$GU_ROOT/usr/bin/.scalar.gsg-new" "the leftover link is gone"
 }
 
 # shellcheck disable=SC2016

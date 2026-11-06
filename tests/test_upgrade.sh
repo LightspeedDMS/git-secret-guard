@@ -79,7 +79,7 @@ seed_user_tools() {
 # ^ security the stub fails only the staging copy of betterleaks and execs the real install otherwise
 fail_install_of_betterleaks() {
     # shellcheck disable=SC2016
-    printf '#!/bin/sh\nfor a; do last=$a; done\ncase "$last" in *.betterleaks.gsg-new) echo "install: injected failure" >&2; exit 1 ;; esac\nexec /usr/bin/install "$@"\n' \
+    printf '#!/bin/sh\nfor a; do last=$a; done\ncase "$last" in *.betterleaks.gsg-new) echo "/usr/bin/install: injected failure" >&2; exit 1 ;; esac\nexec /usr/bin/install "$@"\n' \
         >"$SANDBOX/pathbin/install" || return 1
     chmod 755 "$SANDBOX/pathbin/install"
 }
@@ -135,6 +135,7 @@ test_a_rerun_after_a_failure_placing_the_second_tool_ends_with_both_originals_re
     lc_begin && lc_make_fixtures && lc_use_fixtures && seed_user_tools && fail_install_of_betterleaks || return 1
     gsg install
     assert_rc 1 "betterleaks cannot be placed after trufflehog was"
+    assert_contains "$ERR" "(cannot write $LC_BIN/.betterleaks.gsg-new: injected failure)" "the reason is stripped of the program name, path included"
     rm -f -- "$SANDBOX/pathbin/install"
     gsg install
     assert_rc 0 "rerun once the cause is fixed"
@@ -267,8 +268,9 @@ test_a_placement_blocked_by_a_directory_prints_one_clear_message_and_no_raw_inst
     gsg install
     assert_rc 1 "a directory is in the way of the staging file"
     assert_eq "$(grep -c 'could not place' <<<"$ERR")" 1 "one could-not-place line"
-    assert_eq "$(grep -c '^install:' <<<"$ERR" || true)" 0 "no raw line from coreutils install"
-    assert_contains "$ERR" "git-secret-guard: could not place $LC_BIN/betterleaks$LC_EXE (cannot write $LC_BIN/.betterleaks.gsg-new: cannot overwrite directory" "the reason is folded into the one message"
+    assert_eq "$(grep -c '^\(/[^ ]*/\)\{0,1\}install:' <<<"$ERR" || true)" 0 "no raw line from coreutils install, whatever name it prints for itself"
+    # ^ why our own wording for a directory, not install's; one wording on every platform
+    assert_contains "$ERR" "git-secret-guard: could not place $LC_BIN/betterleaks$LC_EXE (cannot write $LC_BIN/.betterleaks.gsg-new: a directory is in the way)" "the reason is folded into the one message, in words the code controls"
 }
 
 # ^ external a sha256sum first on PATH prints nothing for files below an out/ dir (the staged binaries) and runs the real one otherwise

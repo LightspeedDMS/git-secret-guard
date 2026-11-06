@@ -19,7 +19,7 @@ with `brew install` only after its other checks have passed, the `tools.lock` lo
 downloads are verified first too; under the system bash 3.2 it first installs `bash` alone), and refuses, changing
 nothing, when Homebrew is not on `PATH`: details in
 [platforms.md](platforms.md#macos-homebrew). Older git ignores config hooks without any message, so when the git on `PATH` is older
-than 2.54 or missing, `install` offers to upgrade it on RHEL, Rocky, AlmaLinux and Fedora (see
+than 2.54 or missing, `install` offers to upgrade it on RHEL, Rocky, AlmaLinux, Fedora, Ubuntu, Debian and macOS (see
 [platforms.md](platforms.md#rhel-rocky-and-fedora-rpm)). If you decline, and on every other platform, it refuses and prints how to get a newer git.
 
 > **Warning, old git.** On Windows, check the git your IDE or GUI client bundles: it is often not the one on `PATH`. The
@@ -76,7 +76,7 @@ the one the old install placed), so you can uninstall without upgrading. Your re
 ## Upgrading an old git: `--upgrade-git` and `--take-over-system-git`
 
 On a system whose class has an upgrade module (RHEL, Rocky, AlmaLinux, CentOS and Fedora: [the RPM section of platforms.md](platforms.md#rhel-rocky-and-fedora-rpm);
-Ubuntu, Debian and their derivatives: [the apt section](platforms.md#ubuntu-and-debian-apt); macOS and Windows keep the refusal and hint they always had until their modules land), `install` no longer stops at an old or missing git. It
+Ubuntu, Debian and their derivatives: [the apt section](platforms.md#ubuntu-and-debian-apt); macOS: `brew install git` or `brew upgrade git` as your user, no takeover since `/usr/bin/git` is protected, [the macOS section](platforms.md#macos-homebrew); Windows keeps the refusal and hint it always had until its module lands), `install` no longer stops at an old or missing git. It
 finishes every other check first (`jq`, `setsid`, `timeout`, `core.hooksPath`, the CLI link, the platform), reports their problems together, and only then offers
 the upgrade, so a run that would be refused anyway changes nothing. An old git can still read the config, so the `core.hooksPath` checks run before the upgrade;
 with no git at all they run right after it.
@@ -100,7 +100,6 @@ with no git at all they run right after it.
 - **A rerun does nothing to git:** a git that qualifies, at the pin or not a build of ours, with no old package git behind it, means no prompt, no download of git and no
   `sudo`, `dnf` or `make` call.
 - **Exit status 3** is reserved for a module that must finish the upgrade outside the install process; install stops, prints the next step and changes nothing else.
-- **macOS** has an upgrade module too (`brew install git` or `brew upgrade git` as your user, no takeover since `/usr/bin/git` is protected), so the lists above that say macOS keeps the refusal are out of date: [the macOS section of platforms.md](platforms.md#macos-homebrew).
 - **Takeover.** `git-secret-guard restore-system-git` undoes it from the saved originals without a network. `uninstall` stops while a takeover is active
   (it would take the restore command with it) and names `restore-system-git` and `uninstall --keep-system-git`. `status` and `doctor` report the takeover, and one that
   something else undid, which leaves commits through `/usr/bin/git` unscanned.

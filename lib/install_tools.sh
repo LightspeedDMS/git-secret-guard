@@ -127,6 +127,7 @@ install_stage_tools() {
     for i in "${!GSG_TOOL_NAMES[@]}"; do
         if [ "${GSG_TOOL_NEED[$i]}" -ne 1 ]; then continue; fi
         tool="${GSG_TOOL_NAMES[$i]}"
+        printf '%s: downloading %s %s (a download that stalls for 60 s is cut)\n' "$GSG_NAME" "$tool" "${GSG_TOOL_VER[$i]}" >&2
         tarball="$(tools_fetch_verified "$tool" "${GSG_TOOL_VER[$i]}" "${GSG_TOOL_PLAT[$i]}" "${GSG_TOOL_SHA[$i]}" "$GSG_STAGE")" || install_stage_refused || return 1
         tools_extract_binary "$tarball" "$tool" "$GSG_STAGE/out" || install_stage_refused || return 1
         bin="$GSG_STAGE/out/$(tools_binary_name "$tool")"

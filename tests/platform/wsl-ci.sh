@@ -149,16 +149,15 @@ phase_probe() {
     rm -rf -- "${base:?}"
 }
 
-# ^ invariant typed_install ANSWER AGAIN LABEL CMD... runs CMD on a pty (script), types ANSWER, repeats AGAIN every 15 s; RC is the command rc
-# ^ why AGAIN is repeated, not queued; sudo or dnf drop queued pty input, and a later prompt (the takeover offer on RPM) would wait for ever
+# ^ invariant typed_install ANSWERS LABEL CMD... runs CMD on a pty (script) and types ANSWERS; backslash n splits answers; RC is the command rc
 # ^ why a fifo held open by a writer, not a pipe from printf; EOF on the stdin of script ends the session before a long install is done
 typed_install() {
-    local answer="$1" again="$2" label="$3" dir writer
-    shift 3
+    local answers="$1" label="$2" dir writer
+    shift 2
     dir="$(mktemp -d "$HOME/typed.XXXXXX")" || return 1
     case "$dir" in /?*/?*) ;; *) return 1 ;; esac
     mkfifo "$dir/in" || return 1
-    { printf '%s\n' "$answer"; if [ -n "$again" ]; then for _ in $(seq 1 120); do sleep 15; printf '%s\n' "$again"; done; fi; exec sleep 3000; } >"$dir/in" &
+    { printf '%b\n' "$answers"; exec sleep 3000; } >"$dir/in" &
     writer=$!
     RUN_STDIN="$dir/in" run "$label" timeout 3000 script -qefc "$*" /dev/null
     kill "$writer" 2>/dev/null
@@ -185,7 +184,7 @@ phase_upgrade() {
     if ver_ge_254; then stock_old=0; info "stock git is already $(git --version): there is nothing to upgrade, the flow below checks that nothing is offered"; fi
     if [ "$stock_old" -eq 1 ]; then
         before="$(git --version)"
-        typed_install n '' typed-no "$LINUX_CK/bin/git-secret-guard" install
+        typed_install n typed-no "$LINUX_CK/bin/git-secret-guard" install
         check "typed No: the prompt is shown" has "Upgrade git now with the plan above? [y/N]"
         check "typed No: install refuses (rc $RC)" test "$RC" -ne 0
         check "typed No: git is unchanged ($before)" test "$(git --version)" = "$before"
@@ -193,8 +192,8 @@ phase_upgrade() {
         run upgrade-refuse "$LINUX_CK/bin/git-secret-guard" install
         check "install without a terminal and without --upgrade-git refuses on the old git" test "$RC" -ne 0
         if [ "${CONSENT:-flag}" = typed ]; then
-            # ^ see the second answer n; an RPM distribution asks again about the takeover of /usr/bin/git
-            typed_install y n upgrade "$LINUX_CK/bin/git-secret-guard" install
+            # ^ see the second answer; an RPM distribution asks again about the takeover of /usr/bin/git
+            typed_install 'y\nn' upgrade "$LINUX_CK/bin/git-secret-guard" install
             check "typed yes: the prompt is shown" has "Upgrade git now with the plan above? [y/N]"
             check "typed yes: install exits 0 (rc $RC)" rc_is 0
         else

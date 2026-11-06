@@ -13,7 +13,7 @@ git-secret-guard uninstall          # put back what was there before
 ```
 
 **Requirements.** Linux on x86_64 or arm64, macOS arm64 with Homebrew (macOS x86_64 is mapped, not tested), or Windows x86_64 with Git for Windows (details in [platforms.md](platforms.md#windows-git-for-windows): there `install` downloads a missing `jq`, and `taskkill` replaces `setsid`). bash 4.4 or newer,
-**git >= 2.54 first on `PATH`**, `jq`, `setsid`, `timeout`, `awk` (Linux and macOS; the hook runs it, and a Fedora WSL image without it blocked every commit), and `curl` plus `tar` when a scanner has to be downloaded. On
+**git >= 2.54 first on `PATH`**, `jq`, `setsid`, `timeout`, `awk` (Linux and WSL; the hook runs it, and a Fedora WSL image without it blocked every commit), and `curl` plus `tar` when a scanner has to be downloaded. On
 macOS, `install` lists whichever of bash 4.4 or newer, `coreutils` (`timeout`), `util-linux` (`setsid`) and `jq` is missing, installs them
 with `brew install` only after its other checks have passed, the `tools.lock` lookup included (with a GNU `timeout` already present, the scanner
 downloads are verified first too; under the system bash 3.2 it first installs `bash` alone), and refuses, changing

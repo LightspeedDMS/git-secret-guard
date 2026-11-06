@@ -38,7 +38,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        wsl-version: ['1', '2']
+        # Rocky and Fedora run on WSL 2 only: wsl --import of their vendor tars fails on the WSL 1 leg in every form (docs/platforms.md, WSL section)
+        wsl-version: ${{ fromJSON((inputs.distribution == 'Rocky-9' || inputs.distribution == 'Fedora-44') && '["2"]' || '["1","2"]') }}
     env:
       # WSLENV carries these into the distribution; /p turns a Windows path into the /mnt path; GITHUB_ACTIONS is the guard of wsl-ci.sh
       WSLENV: GITHUB_ACTIONS:CONSENT:WS/p:MAIN/p:LOGS/p

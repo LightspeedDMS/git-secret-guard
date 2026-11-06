@@ -206,7 +206,7 @@ exit 2' || return 1
 # shellcheck disable=SC2016
 test_a_declined_offer_after_the_bash_bootstrap_names_the_brew_install_of_bash() {
     gm_setup 2.40.0 || return 1
-    run_cap env -i "${LC_ENV[@]}" "${EXTRA_ENV[@]}" "$TEST_BASH" -c 'export GSG_BREW_BOOTSTRAPPED="$$:bash"; exec "$0" "$@"' \
+    run_cap env -i "${LC_ENV[@]}" "${EXTRA_ENV[@]}" "${TEST_BASH:-$BASH}" -c 'export GSG_BREW_BOOTSTRAPPED="$$:bash"; exec "$0" "$@"' \
         "$GSG_PROJECT/bin/git-secret-guard" install </dev/null
     assert_rc 1 "no terminal, no flag, after the bootstrap installed bash"
     assert_contains "$ERR" "the only change made was the Homebrew install of bash" "the refusal names the bash install"

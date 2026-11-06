@@ -7,6 +7,7 @@
 | Ubuntu 22.04 LTS and Debian 13 | Offer tested against stand-ins (2.34.1 on 22.04 takes the PPA in its older `.list` form, Debian takes the source build) and, with real apt, in debootstrap chroots (22.04, 24.04, Debian 13, 20.04). Debian 13 also ran the `--phase upgrade` container E2E (source route, 21/0). **Not run:** an Ubuntu 22.04 container and an x86_64 container ([details](#ubuntu-and-debian-apt)). |
 | macOS arm64 (tested on macOS 26.7.1) | Supported, with Homebrew: see [macOS (Homebrew)](#macos-homebrew). The whole suite and an install E2E in a scratch home run on a real Mac. |
 | Windows x86_64 (tested on Windows Server 2019) | Supported with Git for Windows: see [Windows (Git for Windows)](#windows-git-for-windows). No weekly timer; the lifecycle test suites do not run there. |
+| WSL (Ubuntu, Debian, RPM distributions) | Implemented, fixture-tested, and run for real on hosted WSL 1 and WSL 2 (runs 42237326449 and 42240922868, both legs pass); Ubuntu 24.04, an RPM distribution, a `metadata` mount and a typed yes are not run, see [WSL](#wsl-windows-subsystem-for-linux). WSL 1 on Windows Server 2019 blue-screened the maintainer's host twice in its own driver; the cause is not established. |
 | macOS x86_64 (Intel) | Mapped (`darwin_amd64` / `darwin_x64` rows of `tools.lock`) but **not tested**. |
 | Other Linux | Not tested. `install` names what is missing and falls back to generic advice when `/etc/os-release` is not Ubuntu or Debian. |
 
@@ -174,7 +175,7 @@ Without the flag and without a terminal `install` refuses, names `--upgrade-git`
 
 What the PPA carried on 2026-11-04 (`dists/<release>/main/binary-amd64/Packages.gz`) and the route that gives today: 20.04 focal 2.50.1 (source: a real focal run is refused at the floor, because the PPA's git stays below 2.54; its add-apt-repository 0.99.9.12 writes the key as `git-core_ubuntu_ppa.gpg` with underscores, which the key check reads as well), 22.04 jammy 2.56.0 (stock 2.34.1, measured; security updates stay on it), 24.04 noble 2.56.0 (stock 2.43), 25.10 questing 2.54.0 (at the floor),
 26.04 resolute, 26.10 stonking and 27.04 tenacious 2.56.0 (package or PPA). Supported: **22.04 and later**; earlier releases follow the same rule but are not tested. After a
-package route git updates arrive through the normal `apt upgrade`, and nothing is scheduled by `install`. WSL takes this same rule (it runs real Ubuntu packages) once story #31 lands.
+package route git updates arrive through the normal `apt upgrade`, and nothing is scheduled by `install`. WSL takes this same rule (it runs real Ubuntu packages): see [WSL](#wsl-windows-subsystem-for-linux).
 
 **The query cannot hang or change anything.** The candidate is read with `apt-cache policy git` (no `apt-get update`, no lock, nothing written), stdin from `/dev/null`, `LC_ALL=C`
 (the label is translated otherwise), bounded by the same timeout as the RPM query (60 seconds, `GSG_GITUP_QUERY_TIMEOUT` in tests). A version such as `1:2.34.1-1ubuntu1.11` or
@@ -472,6 +473,87 @@ list to see exactly what is not covered on Windows. Add to it only what truly ca
 that could be a bug gets fixed.
 
 `tests/test_windows.sh` tests the Windows branches through a faked `uname`, so a change that breaks them also fails on Linux.
+
+## WSL (Windows Subsystem for Linux)
+
+> **WSL 1 warning.** On the maintainer's Windows Server 2019 machine (build 17763, `lxcore.sys` 10.0.17763.2268) WSL 1 blue-screened the host twice, both
+> times in its own driver (bugcheck `0x3B`, `LXCORE.SYS+0xa223c`, stack through `Wof.sys` and `FLTMGR.SYS`). The first came under heavy load, the second about two
+> minutes after a plain `wsl.exe -d Ubuntu -- git --version` with no tests running. The first crash came in the same minute that a script renaming the directory of a running script was written (it may or may not have run); the rename probe of the workflow is that same kind of operation, so it runs last. **The cause is not established.** It is not known that git-secret-guard caused
+> it, and not known that it did not. Do not run installs or the test suite in WSL 1 on a machine that must not crash; the real WSL checks run on a disposable
+> GitHub runner (below), never on that machine.
+
+**Status: implemented, fixture-tested and run for real on hosted WSL 1 and WSL 2 (runs 42237326449 and 42240922868, both legs pass).** Still unproven: Ubuntu 24.04 in WSL, an RPM distribution in WSL, a `metadata` mount of the drive, a typed yes at the prompt, and the Windows Server 2019 build 17763 host (a crash there is neither explained nor cleared). What a WSL 1 chroot E2E of the apt route on Windows Server 2019 showed is recorded in issue #29
+(its comments). The `wsl` workflow (`.github/workflows/wsl.yml`, started by hand from the Actions tab) runs the scenarios below on a hosted runner; until its first results are written into
+this section, treat what the status line lists as unproven as unproven. The measured answers are in the table below.
+
+WSL runs a real Linux distribution, so `install` takes the Linux path and the distribution's own git route: Ubuntu and Debian follow
+[the apt rule](#ubuntu-and-debian-apt) and RPM distributions the [RPM route](#rhel-rocky-and-fedora-rpm), with the same checks and the same plan. WSL adds only this:
+
+- **Detection** (`lib/wsl.sh`, `wsl_is`): `uname -s` is `Linux` and either the kernel release (`/proc/sys/kernel/osrelease`) contains `microsoft` in any case, or
+  `/proc/sys/fs/binfmt_misc/WSLInterop` exists. WSL 1 reports `4.4.0-17763-Microsoft` (capital M, read on a real machine); `WSL_DISTRO_NAME` is not set there, so it is
+  not the signal. A Linux container on a WSL 2 host shows the same kernel text and is taken for WSL too, which only adds the notes and the timer check below.
+- **Class `wsl`** (`gitup_os_class`): a WSL distribution of the `rpm`, `ubuntu` or `debian` family. The `wsl` module (`lib/gitup_wsl.sh`) runs that family's module unchanged and adds two plan notes: the upgrade applies to this distribution only,
+  and Windows-side git is a separate setup. Any other WSL distribution stays class `other` with today's refusal.
+- **Two git setups.** WSL git reads the WSL `~/.gitconfig`, `git.exe` the Windows one. When a `git.exe` is reachable, `install` ends with a note naming it: commits made
+  with it are not covered; run `install` in Git for Windows bash for that. `git.exe` is never an install candidate and never an "other git" warning (`type -aP git` does not match it).
+- **`--with-timer`** needs systemd running (`/run/systemd/system` exists, what `sd_booted` tests). `systemctl` being on `PATH` proves nothing: on WSL 1 it is installed and pid 1 is `init`.
+  Without systemd `install` refuses before any change. On WSL 2 it prints the fix: `[boot]` `systemd=true` in `/etc/wsl.conf`, then `wsl --shutdown` in Windows (the `[boot]` section needs Windows 11 or Windows Server 2022).
+  On WSL 1 it says the timer is not available and prints no `wsl.conf` fix, because that section does not exist there. Run `git-secret-guard doctor` by hand instead.
+- **`--take-over-system-git`** behaves as on the same distribution outside WSL: on Ubuntu or Debian (the apt classes have no takeover) it is refused with exit 1, naming class `wsl`; on an RPM distribution it works as on RPM. The wrapper module defines the takeover functions only when the inner module has them.
+- **Checkout and repository on `/mnt/c` (measured, run 42240922868).** DrvFs without `metadata` shows every file as mode 777. `install` copies the checkout with `cp -a` and then removes group and other write bits from the share tree. With the drive mounted for the user (`uid=1000`, measured on drvfs and 9p), a repository on `/mnt/c` blocks the fake key and passes a clean commit (2 s on WSL 1, 4 s on WSL 2), `install` from a checkout there exits 0, and nothing in the installed tree is group or other writable. The mount must belong to the user: in the first run, with the runner default mount for root (`uid=0`), the repository could not be prepared and the checkout could not be copied by the normal user. A `metadata` mount was not tried.
+- **`install` from the installed CLI on WSL 1** failed with `mv: cannot move '.../git-secret-guard' to '.../git-secret-guard.old.XXXXXX/previous': Permission denied` (issue #29, jammy and noble).
+  **Measured (run 42237326449, GitHub-hosted `windows-2022`, Ubuntu 22.04):** renaming the directory that holds a running script fails on WSL 1 (`4.4.0-20348-Microsoft`, rc 1, `Permission denied`) and works on WSL 2
+  (`6.18.54.1-microsoft-standard-WSL2`, rc 0). `main`'s installed CLI gives the same `mv` error on WSL 1 and passes on WSL 2, so the pin applies to WSL 1 only (`install_pins_running_script`): from the installed copy only the
+  generated files (`settings`) change, as on Windows. This branch's installed-CLI install passes on both. WSL 1 on that runner (build 20348) ran the rename without a crash; that says nothing about the 17763 host, which is not cleared.
+
+**Order of the real run.** The workflow runs `facts`, `upgrade`, `mount-for-user` and `mntc`, writes their results to the job summary and uploads the logs, and only then runs `tests`, the rename `probe` and the
+`installed-cli` phase, because the probe is the kind of operation that coincided with the first blue screen (no cause is claimed). `tests` comes after the first upload for the same reason:
+`test_install` has an installed-copy test that runs under the plain-kernel pin and so renames the directory of a running script; it failed on WSL 1 as the measured limit predicts, and now skips there with that reason while a second test runs the WSL 1 path through the fixture seams. A failure on WSL 1 stays recorded, not hidden. `tests/platform/wsl-ci.sh` refuses to run unless `GITHUB_ACTIONS` is `true`.
+
+**Tested where.** `tests/test_wsl.sh` drives all of this through fixture kernel files (`GSG_WSL_OSRELEASE`, `GSG_WSL_INTEROP`, `GSG_WSL_SYSTEMD_DIR`, announced on stderr like the other test seams, except that seams which look like plain Linux are silent) and a faked
+`uname`, so it runs on Linux, macOS and Git for Windows alike. The real runs are `tests/platform/wsl-ci.sh`, started by `.github/workflows/wsl.yml`.
+
+**What the hosted runner offers** (sources, not assumptions): the `windows-2022` image lists "Windows Subsystem for Linux (WSLv1): Enabled" and no distribution
+([actions/runner-images, Windows2022-Readme](https://github.com/actions/runner-images/blob/main/images/windows/Windows2022-Readme.md), image 20261101.353.1). `Vampire/setup-wsl` v7.2.0 installs a distribution
+(`Ubuntu-26.04` to `Ubuntu-16.04`, `Debian-13`, default `Debian-13`) and takes `wsl-version` 1 or 2 (default 2; "WSLv1 and WSLv2 are tested"); its README says WSL 2 "is also available" on later `windows-2022` images
+but does not discuss nested virtualization. Another setup action states that it "requires WSL2 with nested virtualization". Whether WSL 2 starts on a hosted runner is therefore **not documented
+by GitHub in the places read**; the first real run answered it: both versions start on `windows-2022` with `Vampire/setup-wsl`, WSL 2 included, with systemd running in the WSL 2 distribution.
+
+**Measured in run 42237326449** (GitHub-hosted `windows-2022`, Ubuntu 22.04, stock git 2.34.1, one run, both versions):
+
+| | WSL 2 | WSL 1 |
+|---|---|---|
+| Kernel | `6.18.54.1-microsoft-standard-WSL2` | `4.4.0-20348-Microsoft` |
+| `wsl_is` / `wsl_version` | WSL / 2 | WSL / 1 |
+| systemd | pid 1 is systemd, `/run/systemd/system` present | pid 1 is `init`, directory absent |
+| `install --upgrade-git` | rc 0, git 2.56.0, fake key blocked (4 to 5 s over two runs), clean commit passes, rerun offers nothing | the same (blocked commit 2 s) |
+| `git.exe` on the distribution's PATH | `/mnt/c/Program Files/Git/bin/git.exe`; the separate-setups note was printed | the same |
+| `install --with-timer` | rc 0, timer installed | rc 1, "not available on WSL 1", no `wsl.conf` fix, nothing changed |
+| Rename of the directory of a running script | rc 0 | rc 1, `Permission denied` |
+| `main`'s installed-CLI `install` | passes | `mv ... Permission denied`, rc 1 |
+| This branch's installed-CLI `install` | passes | passes |
+| Test files (`GSG_TEST_JOBS=1`) | 273 passed, 0 failed (run 42263902872) | 270 passed, 0 failed, 3 skipped: one `test_install` test that needs the real rename and two `test_timer` tests that need systemd-analyze |
+| `/mnt/c` mount | 9p, `uid=0;gid=0` | drvfs, `uid=0,gid=0,case=off` |
+
+The first run's `mntc` phase failed on both legs because the runner mounts the drive for root while the test user is `gsg`. The workflow now remounts `/mnt/c` for that user (phase `mount-for-user`, as root, before `mntc`); the second run passed on both legs with the mount shown as `uid=1000,gid=1000` (drvfs on WSL 1, 9p on WSL 2).
+
+### Real scenarios and where each one runs
+
+| Scenario (issue #31) | Fixture test (`tests/test_wsl.sh`, runs anywhere) | Real run (`wsl.yml`, phase of `tests/platform/wsl-ci.sh`) |
+|---|---|---|
+| Detection on WSL 1 and WSL 2 | `test_the_wsl1_kernel_text_*`, `test_the_wsl2_kernel_text_*`, interop file, plain Linux, macOS and Windows | `facts` |
+| Plan is the inner plan plus notes | `test_the_wsl_plan_is_the_inner_plan_plus_two_notes` | `upgrade` |
+| Old git, accept the offer, blocked commit | (module dispatch only) | `upgrade` |
+| Rerun does nothing to git | `test_a_wsl_refresh_with_nothing_stale_prints_nothing_at_all` | `upgrade` |
+| Windows git never mistaken for the WSL git | `test_a_windows_git_is_never_taken_for_a_git_of_the_distribution` | `facts` (`git.exe` on PATH) |
+| The two setups are explained | `test_a_reachable_windows_git_is_explained_as_a_separate_setup` | `upgrade`, checked when `git.exe` is on the PATH inside the distribution; otherwise recorded as not exercised |
+| Timer without systemd, WSL 1 and WSL 2 | `test_with_timer_is_refused_on_wsl1_*`, `..._wsl2_*` | `upgrade` |
+| Timer with systemd | `test_with_timer_goes_on_when_systemd_runs_*` | measured on WSL 2: systemd runs and `install --with-timer` exits 0 (run 42237326449) |
+| Repository and checkout under `/mnt/c` | none possible | `mount-for-user` and `mntc`: measured, both legs pass (blocked commit 2 s on WSL 1, 4 s on WSL 2; install from the checkout exits 0; files show mode 777) |
+| `install` from the installed CLI | `test_an_install_from_the_installed_copy_on_wsl1_never_renames_*` | `probe`, `installed-cli` |
+| Rocky or Fedora in WSL | `test_the_wsl_module_for_an_rpm_distribution_wraps_the_rpm_module` | not run (the workflow installs Ubuntu) |
+| Not WSL: nothing changes | `test_the_class_outside_wsl_is_unchanged`, `test_with_timer_is_unchanged_outside_wsl` | the Linux suite |
+| Test files that apply | | `tests`, `GSG_TEST_JOBS=1` |
 
 ## What differs on Ubuntu, and what was checked
 
@@ -841,3 +923,10 @@ The `windows` job runs on `windows-2025` (Windows Server 2025, build 26100, elev
   `.zip` (`lc_asset_name`); appending to a guessed `.tar.gz` tampers with nothing and the test then "fails" for the wrong
   reason. Inspect a failing fail-closed test before skipping it. `tests/test_windows.sh` fakes `uname` around the real libs so the
   Windows branches are also tested on Linux and macOS; `tests/windows-skips.list` names the tests that cannot apply, with reasons.
+- **WSL internals.** `lib/wsl.sh` (CLI-only, loaded before `gitup`): `wsl_is`, `wsl_version` (REPLY 1 when the raw kernel text holds `Microsoft` with a capital M, else 2: real WSL 2 kernels exist without a `WSL2`
+  suffix, such as `4.19.128-microsoft-standard`), `wsl_systemd_running`, `wsl_check_timer` (called by `install_precheck_timer`), `wsl_announce_overrides` (only when an override makes the run a WSL run, so a plain
+  fixture adds nothing to stderr), `install_pins_running_script` and `install_wsl_notice`. The last one finds `git.exe` with `install_find_bin` of `lib/install.sh`, the one place that may call `type -P`.
+  The test harness (`sandbox_create` in `tests/lib.sh`) points the three seams at a plain kernel for every test file, so no result depends on the kernel of the machine running the suite; `tests/test_wsl.sh` sets its own.
+  `gitup_os_class` returns `wsl` only for an rpm, ubuntu or debian family; the wrapper module `lib/gitup_wsl.sh` sets `GITUP_INNER_CLASS` and delegates with `gitup_delegate`; the apt module reads
+  `gitup_inner_class` where it used to read `GITUP_CLASS`. The wrapper defines all five takeover functions (the set is all or none) and answers "not supported" for an inner module without them.
+  Tests: `tests/test_wsl.sh` (fixture kernel files, faked `uname`, a synthetic inner module in a copy of the tree, so no apt stand-in and no `setsid` are needed and it runs on Git for Windows).

@@ -396,7 +396,7 @@ test_the_hook_never_looks_tools_up_on_PATH() {
 }
 
 # ^ invariant the pattern of the hook guard; the guard and the test of its coverage share this one definition
-GSG_LIFECYCLE_RE='(install[a-z_]*|uninstall|status|state|tools|hookspath|brew|gitup[a-z_]*)\.sh|usage\.md'
+GSG_LIFECYCLE_RE='(install[a-z_]*|uninstall|status|state|tools|hookspath|brew|wsl|gitup[a-z_]*)\.sh|usage\.md'
 
 test_the_hook_guard_pattern_names_every_install_time_library() {
     cd -- "$GSG_PROJECT" || return 1

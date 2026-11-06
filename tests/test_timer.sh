@@ -53,7 +53,10 @@ test_install_with_timer_writes_the_units_and_enables_the_timer_through_the_recor
 }
 
 test_the_generated_units_pass_systemd_analyze_verify() {
+    local reason
     command -v systemd-analyze >/dev/null 2>&1 || skip_test "systemd-analyze is not available"
+    reason="$(analyze_blocked_reason)"
+    if [ -n "$reason" ]; then skip_test "$reason"; fi
     timer_begin || return 1
     gsg install --with-timer
     assert_rc 0 "install --with-timer"
@@ -68,7 +71,7 @@ test_the_service_unit_bounds_a_run_with_timeout_start_sec() {
     gsg install --with-timer
     assert_rc 0 "install --with-timer"
     assert_contains "$(<"$(unit_dir)/$SERVICE")" $'\nTimeoutStartSec=1h\n' "a run is killed after an hour"
-    if command -v systemd-analyze >/dev/null 2>&1; then
+    if command -v systemd-analyze >/dev/null 2>&1 && [ -z "$(analyze_blocked_reason)" ]; then
         verify_units
         assert_rc 0 "the real parser accepts it"
         assert_empty "$OUT$ERR" "without a complaint"
@@ -182,7 +185,10 @@ test_uninstall_says_what_happened_when_the_timer_file_was_already_gone() {
 }
 
 test_a_share_path_with_spaces_is_quoted_in_the_units() {
+    local reason
     command -v systemd-analyze >/dev/null 2>&1 || skip_test "systemd-analyze is not available"
+    reason="$(analyze_blocked_reason)"
+    if [ -n "$reason" ]; then skip_test "$reason"; fi
     timer_begin || return 1
     mkdir -p -- "$SANDBOX/xdg/data with space" || return 1
     set_env XDG_DATA_HOME="$SANDBOX/xdg/data with space"

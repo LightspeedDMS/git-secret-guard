@@ -18,7 +18,7 @@ tools_announce_overrides() {
     fi
 }
 
-# ^ external Windows means Git for Windows bash (uname -s MINGW64_NT-*) running the native .exe scanners; no WSL, no MSYS2 shells
+# ^ external Windows means Git for Windows bash (uname -s MINGW64_NT-*) running the native .exe scanners; WSL is Linux and takes the Linux rows
 tools_is_windows() {
     case "$(uname -s)" in
         MINGW64_NT-*) return 0 ;;

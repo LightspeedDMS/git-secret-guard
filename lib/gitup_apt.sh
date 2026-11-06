@@ -573,7 +573,7 @@ gitup_apt_plan_ppa() {
 }
 
 gitup_apt_plan_upgrade() {
-    local new="$GITUP_PREFIX/bin/git" reason adopt=0 from_ppa=0
+    local new="$GITUP_PREFIX/bin/git" reason adopt=0 from_ppa=0 class
     if [ -x "$new" ] && install_git_is_new_enough "$new" && gitup_source_read_manifests && [ "${#GITUP_PARTIALS[@]}" -eq 0 ]; then
         GITUP_ROUTE=path-fix GITUP_FOUND_GIT="$new"
         printf "  route: path-fix; %s is already git %s, only PATH is wrong\n" "$new" "$(install_git_version "$new")"
@@ -602,15 +602,17 @@ gitup_apt_plan_upgrade() {
         reason="the candidate shown with the old PPA is not trusted"
         gitup_apt_plan_aside
     fi
-    if [ "$GITUP_CLASS" = ubuntu ] && ! gitup_apt_adder_ok; then
+    gitup_inner_class
+    class="$REPLY"
+    if [ "$class" = ubuntu ] && ! gitup_apt_adder_ok; then
         reason="$reason; the add-apt-repository here has no -n (--no-update) option, and without it apt would trust the key before it is checked"
-    elif [ "$GITUP_CLASS" = ubuntu ]; then
+    elif [ "$class" = ubuntu ]; then
         gitup_apt_plan_ppa "$reason" "$adopt"
         return
     fi
     gitup_source_pins || return 1
     gitup_apt_prepare || return 1
-    if [ "$GITUP_CLASS" = debian ]; then reason="$reason; Debian has no PPA"; fi
+    if [ "$class" = debian ]; then reason="$reason; Debian has no PPA"; fi
     gitup_source_print_plan "$reason"
 }
 

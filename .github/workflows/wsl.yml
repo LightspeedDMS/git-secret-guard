@@ -27,8 +27,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: wsl-${{ github.ref }}-${{ inputs.distribution }}-${{ inputs.consent }}
-  cancel-in-progress: true
+  # one group per run: manual runs of the same distribution may run side by side (repeated runs measure a hang), nothing is cancelled
+  group: wsl-${{ github.run_id }}
 
 jobs:
   wsl:

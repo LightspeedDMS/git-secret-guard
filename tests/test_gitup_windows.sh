@@ -929,4 +929,19 @@ test_a_hand_off_rewritten_for_a_windows_path_keeps_every_backslash_whatever_the_
     done
 }
 
+# ^ external a killed installer left binash.exe (the launcher) without usrinash.exe, and the launcher failed with its own text (run 42267563578)
+test_a_half_installed_git_for_windows_is_named_and_not_run_as_if_it_were_missing_or_fine() {
+    local g="$SANDBOX/halfgit" w32
+    if [ "$TEST_IS_WINDOWS" -ne 1 ]; then skip_test "gsg-bash.cmd is a Windows batch file"; fi
+    mkdir -p -- "$g/cmd" "$g/bin" "$SANDBOX/pf" "$SANDBOX/lad" || return 1
+    : >"$g/cmd/git.exe" && : >"$g/bin/bash.exe" || return 1
+    w32="$(cygpath -w "$TEST_SYSTEM32")"
+    run_cap env -i SystemRoot="$(cygpath -w "$(dirname "$TEST_SYSTEM32")")" PATH="$(cygpath -w "$g/cmd");$w32" ProgramFiles="$(cygpath -w "$SANDBOX/pf")" \
+        LocalAppData="$(cygpath -w "$SANDBOX/lad")" "$TEST_SYSTEM32/cmd.exe" //c "$(cygpath -w "$GSG_PROJECT/bin/gsg-bash.cmd")" -c "echo ran"
+    assert_rc 127 "bash cannot be started"
+    assert_not_contains "$OUT$ERR" "ran" "nothing ran"
+    assert_contains "$OUT$ERR" "half installed" "the message says Git for Windows looks half installed"
+    assert_contains "$OUT$ERR" "git-scm.com" "and where to get it again"
+}
+
 run_file_tests

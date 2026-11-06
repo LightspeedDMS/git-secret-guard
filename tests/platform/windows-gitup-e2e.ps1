@@ -154,7 +154,8 @@ function Scenario-InUse([bool]$WithWinget) {
     Show ("holder still running: $holderAlive; installer processes left: " + (@(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -like "Git-*" } | ForEach-Object { $_.ProcessName }) -join ","))
     Show ("git: " + (Git-Version) + "; Git_is1: " + (Registry-Version))
     Show ("pending renames naming Git: " + @(Pending-Git-Renames).Count)
-    if ($holderAlive) { Stop-Process -Id $holder.Id -Force }
+    foreach ($gp in @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path -like "$GitDir*" })) { Stop-Process -Id $gp.Id -Force -ErrorAction SilentlyContinue }
+    Start-Sleep -Seconds 3
     Check "the run finished by itself (the installer neither hung nor was killed by the timeout)" (-not $r.TimedOut)
     if ($r.Rc -ne 0) {
         Write-Host "OBSERVED: the upgrade failed with Git files in use; rerun without the holder to see recovery"
@@ -190,9 +191,20 @@ function Scenario-Killed {
     Check "the product did not report success" ($r.Rc -ne 0)
     Show ("after the kill: git: " + (Git-Version) + "; Git_is1: " + (Registry-Version) + "; unins000.exe: " + (Test-Path (Join-Path $GitDir 'unins000.exe')))
     Show ("files under Git: " + (@(Get-ChildItem -Recurse -File -ErrorAction SilentlyContinue $GitDir)).Count + "; pending renames naming Git: " + @(Pending-Git-Renames).Count)
-    $r2 = Invoke-Gsg @('install', '--upgrade-git') 1200
-    Show ($r2.Out -split "`n" | Select-Object -Last 15 | Out-String)
+    $r2 = Invoke-Gsg @('install', '--upgrade-git') 600
+    Show ($r2.Out -split "`n" | Select-Object -Last 8 | Out-String)
     Write-Host ("RESULT killed rerun: exit {0}" -f $r2.Rc)
+    if ($r2.Rc -ne 0) {
+        Write-Host "OBSERVED: the plain rerun does not recover; the installer file the first run kept is run by hand with the same flags"
+        $kept = @(Installer-Files)
+        Show ("kept installer: " + (($kept | ForEach-Object { $_.FullName }) -join ', '))
+        if ($kept.Count -ge 1) {
+            $hp = Start-Process -FilePath $kept[0].FullName -ArgumentList '/VERYSILENT', '/NORESTART', '/NOCANCEL', '/SP-' -Wait -PassThru
+            Show "manual installer exit code $($hp.ExitCode); git: $(Git-Version); Git_is1: $(Registry-Version)"
+        }
+        $r2 = Invoke-Gsg @('install', '--upgrade-git') 900
+        Show ($r2.Out -split "`n" | Select-Object -Last 8 | Out-String)
+    }
     Full-Upgrade-Checks $r2
 }
 
@@ -233,7 +245,9 @@ function Scenario-Rerun {
     Show ((Read-Shared $o1) -split "`n" | Select-Object -Last 4 | Out-String)
     Check "leg 1 stops with exit 3 and leaves a hand-off" (($p1.ExitCode -eq 3) -and (Test-Path -LiteralPath $handoff))
     $o2 = Join-Path $Work 'runner.txt'
-    $p2 = Start-Process -FilePath "$env:SystemRootSystem32d.exe" -ArgumentList "/c $env:SystemRootSystem32WindowsPowerShell1.0powershell.exe -NoProfile -ExecutionPolicy Bypass -File $(Join-Path $Root 'bingsg-gitup.ps1') $handoff > $o2 2>&1" -Wait -PassThru -WindowStyle Hidden
+    $ps51 = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
+    $runner = Join-Path $Root 'bin\gsg-gitup.ps1'
+    $p2 = Start-Process -FilePath "$env:SystemRoot\System32\cmd.exe" -ArgumentList "/c $ps51 -NoProfile -ExecutionPolicy Bypass -File $runner $handoff > $o2 2>&1" -Wait -PassThru -WindowStyle Hidden
     Show ((Read-Shared $o2) -split "`n" | Select-Object -Last 4 | Out-String)
     Check "the runner upgrades git (exit 0)" ($p2.ExitCode -eq 0)
     Check "git is the pinned version now" ((Git-Version) -like ("*" + (Expected-Git) + "*"))
@@ -330,23 +344,33 @@ public static class GsgPty
 function Scenario-Prompt {
     Install-OldGit
     Add-Type -TypeDefinition $ConptySource -Language CSharp
-    # Does MSYS bash see a terminal on the pseudo console? One probe per way of starting it, before the product is judged.
-    foreach ($probe in @("$GitDir\bin\bash.exe", "$GitDir\usr\bin\bash.exe")) {
-        $t = ''
-        $prc = [GsgPty]::Run("`"$probe`" -c `"[ -t 0 ] && echo stdin-is-a-tty; [ -t 2 ] && echo stderr-is-a-tty; echo done`"", $Root, 'done', "`r", 60, [ref]$t)
-        Show ("probe " + $probe + ": exit $prc; " + ([regex]::Replace($t, '\x1b\[[0-9;?]*[ -/]*[@-~]', '') -replace '\s+', ' '))
-    }
     $cli = Join-Path $Root 'bin\git-secret-guard.cmd'
     $transcript = ''
     $rc = [GsgPty]::Run("$env:SystemRoot\System32\cmd.exe /c $cli install", $Root, '[y/N]', "y`r", 1500, [ref]$transcript)
-    $clean = [regex]::Replace($transcript, '\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)', '')
-    Show ($clean -split "`r?`n" | Select-Object -Last 25 | Out-String)
+    $clean = [regex]::Replace($transcript, '\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(\x07|\x1b\)', '')
+    Show ($clean -split "`r?`n" | Select-Object -Last 12 | Out-String)
     Write-Host "RESULT prompt: exit $rc"
     Check "a real prompt appeared on a pseudo console" ($clean -like '*[[]y/N]*')
     Check "a typed y was taken as the consent" ($clean -like '*[[]typed: y]*' -and $clean -notlike '*refus*')
     Check "install ends with exit 0 after the hand-off and the rerun" ($rc -eq 0)
     Assert-No-Key "the transcript holds no fake key" $clean
     Check "git is the pinned version afterwards" ((Git-Version) -like ("*" + (Expected-Git) + "*"))
+    # Diagnosis: does MSYS bash see a terminal on a ConPTY, and does any way of starting it change that?
+    $probeScript = 'echo T0=$([ -t 0 ] && echo yes || echo no) T2=$([ -t 2 ] && echo yes || echo no) tty=$(tty 2>&1); echo probe-end'
+    $variants = @(
+        @{ Label = 'bin\bash.exe'; Cmd = "`"$GitDir\bin\bash.exe`" -c `"$probeScript`""; Env = @{} },
+        @{ Label = 'usr\bin\bash.exe'; Cmd = "`"$GitDir\usr\bin\bash.exe`" -c `"$probeScript`""; Env = @{} },
+        @{ Label = 'usr\bin\bash.exe with MSYS=enable_pcon'; Cmd = "`"$GitDir\usr\bin\bash.exe`" -c `"$probeScript`""; Env = @{ MSYS = 'enable_pcon' } },
+        @{ Label = 'winpty usr\bin\bash.exe'; Cmd = "`"$GitDir\usr\bin\winpty.exe`" `"$GitDir\usr\bin\bash.exe`" -c `"$probeScript`""; Env = @{} }
+    )
+    foreach ($v in $variants) {
+        foreach ($k in $v.Env.Keys) { Set-Item -Path "Env:$k" -Value $v.Env[$k] }
+        $t = ''
+        try { $prc = [GsgPty]::Run($v.Cmd, $Root, 'probe-end', "`r", 60, [ref]$t) } catch { $prc = -2; $t = $_.Exception.Message }
+        foreach ($k in $v.Env.Keys) { Remove-Item -Path "Env:$k" }
+        $vis = ([regex]::Replace($t, '\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(\x07|\x1b\)', '') -replace '\s+', ' ')
+        Show ("probe [" + $v.Label + "]: exit $prc; " + $vis)
+    }
     Check "a commit with a fake key is blocked" (Commit-Blocked)
 }
 

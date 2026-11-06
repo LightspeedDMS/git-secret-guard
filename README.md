@@ -20,6 +20,7 @@ When `install` finds an older or missing git, what happens depends on the platfo
   distribution's package when that is new enough, and otherwise builds the pinned source into `/usr/local`. If an old package git stays in `/usr/bin`, `install` also offers
   `--take-over-system-git`, which points it at the new build (undo: `restore-system-git`). See [docs/platforms.md](docs/platforms.md#rhel-rocky-and-fedora-rpm).
 - **Ubuntu and Debian (and derivatives such as Linux Mint):** `install` shows its plan and offers to upgrade git the same way. It uses the distribution's package when that is new enough; on Ubuntu otherwise the git-core PPA (`ppa:git-core/ppa`, signing key checked against a pinned fingerprint), and on Debian, when the PPA lags, or on Linux Mint (its `add-apt-repository` has no `-n`, read from source, not run), the pinned source build. Ubuntu 22.04 ships 2.34 and 24.04 ships 2.43. See [docs/platforms.md](docs/platforms.md#ubuntu-and-debian-apt).
+- **Windows:** `install` offers to upgrade Git for Windows (default No; no terminal: `--upgrade-git`) with winget or the pinned, checked installer: [docs/platforms.md](docs/platforms.md#upgrading-git-for-windows).
 - **Other platforms:** `install` refuses and prints how to get a newer git.
 
 ## Install

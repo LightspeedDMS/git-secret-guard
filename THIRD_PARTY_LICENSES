@@ -23,6 +23,7 @@ Downloaded at install time (not redistributed)
 | jq (Windows only, and only when none is on PATH) | 1.8.2 | https://github.com/jqlang/jq | MIT, with bundled notices (see below) | "jq is copyright (C) 2012 Stephen Dolan". License: https://github.com/jqlang/jq/blob/jq-1.8.2/COPYING |
 | git (built from source on RPM systems by `install --upgrade-git`) | 2.56.0 | https://github.com/git/git | GPL-2.0 (the COPYING file says version 2 only) | No single copyright line: git is the work of many contributors. License: https://github.com/git/git/blob/v2.56.0/COPYING |
 | git-manpages (the documentation tarball of the same release) | 2.56.0 | https://git-scm.com/ (tarballs from https://www.kernel.org/pub/software/scm/git/) | Part of the git release above, see its COPYING | See git |
+| git-for-windows (the Git for Windows installer, downloaded by `install --upgrade-git` on Windows only) | 2.56.0.4 | https://github.com/git-for-windows/git | GPL-2.0 for git itself; the installer bundles further components, each under its own license | No single copyright line: see the COPYING file and the release notes of https://github.com/git-for-windows/git/releases/tag/v2.56.0.windows.4 |
 
 About jq: GitHub's license detection reports NOASSERTION for jq because its COPYING file combines several notices. The
 COPYING file at tag jq-1.8.2 contains the notices below, and it is the authority for their exact terms:

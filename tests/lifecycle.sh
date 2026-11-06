@@ -388,8 +388,9 @@ lc_begin() {
     : >"$SANDBOX/gitconfig" || return 1
     EXTRA_ENV=()
     LC_ENV=("${GSG_ENV[@]}" PATH="$SANDBOX/pathbin:$TEST_BASE_PATH"
-        XDG_DATA_HOME="$SANDBOX/xdg/data" XDG_STATE_HOME="$SANDBOX/xdg/state" GSG_OS_RELEASE="$SANDBOX/os-release"
-        GSG_GITUP_BUILD_PATH="$SANDBOX/pathbin")
+        XDG_DATA_HOME="$SANDBOX/xdg/data" XDG_STATE_HOME="$SANDBOX/xdg/state")
+    # ^ why the two Linux overrides off Windows only, not everywhere; the windows module announces any override it finds and neither changes anything there
+    if [ "$TEST_IS_WINDOWS" -ne 1 ]; then LC_ENV+=(GSG_OS_RELEASE="$SANDBOX/os-release" GSG_GITUP_BUILD_PATH="$SANDBOX/pathbin"); fi
     gitx config --global user.name "Test User" || return 1
     gitx config --global user.email "test@example.invalid" || return 1
     gitx config --global commit.gpgsign false || return 1

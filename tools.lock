@@ -18,3 +18,9 @@ jq 1.8.2 windows_amd64 a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e42
 # sha256sums.asc over HTTPS, fetched 2026-11-04 from www.kernel.org and mirrors.edge.kernel.org (both agree). The GPG signature of that file was not verified.
 git 2.56.0 source 26c56c296b38c0695b26fa95f475f1d01704d2d38e73465ca30b0b2f5dc789d3
 git-manpages 2.56.0 source 1f62a7fabaa36a0469c4d51fe247d12e7e246b890d2b8b49aec91df610f417c7
+# Git for Windows is pinned as the installer for the Windows upgrade (install --upgrade-git); platform is windows_amd64 and the version is the asset's (2.56.0.4 = release v2.56.0.windows.4).
+# Digest taken 2026-11-05 from the release data of git-for-windows/git (GitHub API "digest" field of Git-2.56.0.4-64-bit.exe and the SHA-256 table of the release notes, both equal); the file was
+# then downloaded over HTTPS and sha256sum computed the same value. The Authenticode signature of that file was Valid (signer Johannes Schindelin). Not a scanner: it stays out of GSG_TOOL_NAMES.
+# The signer below is the subject of the Authenticode certificate of that file (Get-AuthenticodeSignature, 2026-11-05, status Valid); bin/gsg-gitup.ps1 requires it with the digest.
+# gsg-signer git-for-windows 2.56.0.4 CN=Johannes Schindelin, O=Johannes Schindelin, L=Bruehl, C=DE
+git-for-windows 2.56.0.4 windows_amd64 4961a4a8cc778d8b6e00a5819e5fe4d078b754555aff7aedc2d77a5d74c2de80

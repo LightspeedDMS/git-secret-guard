@@ -98,8 +98,13 @@ install_fix_hint() {
 
 # ^ external ppa:git-core/ppa carries git >= 2.54 for Ubuntu only; Ubuntu 24.04 ships 2.43; the build path is in docs/platforms.md
 install_git_hint() {
+    if tools_is_windows && [ "${GITUP_PLAN_REFUSED:-0}" -eq 1 ]; then
+        printf '%s: update Git for Windows to git >= 2.54 yourself (winget upgrade Git.Git, or the installer from https://git-scm.com/download/win), then open a new terminal\n' "$GSG_NAME" >&2
+        return 0
+    fi
     if tools_is_windows; then
-        printf '%s: update Git for Windows to git >= 2.54 with: winget upgrade Git.Git, then open a new terminal\n' "$GSG_NAME" >&2
+        printf '%s: update Git for Windows to git >= 2.54 with: %s install --upgrade-git (winget when present, otherwise the pinned installer), or winget upgrade Git.Git; then open a new terminal\n' \
+            "$GSG_NAME" "$GSG_NAME" >&2
         return 0
     fi
     install_os_family
@@ -550,29 +555,6 @@ install_cli_wrapper_text() {
     printf 'exec %q "$@"\n' "$GSG_SHARE/bin/git-secret-guard"
 }
 
-GSG_CLI_CMD_MARKER='rem git-secret-guard: written by install, every install rewrites this file'
-
-# ^ external cmd and PowerShell cannot start the bash wrapper => a .cmd beside it; Git's bin\bash.exe sets up PATH, usr\bin\bash.exe does not
-# ^ hazard uninstall removes the share under this running file => it deletes itself with the (goto) idiom; a plain rm ends in "batch file cannot be found"
-# ^ invariant prints CRLF lines; % is doubled => cmd reads a literal percent sign in a path
-install_cli_cmd_text() {
-    local root share_win share_mixed bash_win
-    root="$(cygpath -w /)" || return 1
-    share_win="$(cygpath -w "$GSG_SHARE")" || return 1
-    share_mixed="$(cygpath -m "$GSG_SHARE")" || return 1
-    bash_win="${root%\\}\\bin\\bash.exe"
-    printf '%s\r\n' '@echo off' "$GSG_CLI_CMD_MARKER" setlocal 'set "GSG_CMD_ENTRY=%~f0"' \
-        "\"${bash_win//%/%%}\" \"${share_mixed//%/%%}/bin/git-secret-guard\" %*" 'set "GSG_RC=%errorlevel%"' \
-        "if not exist \"${share_win//%/%%}\\bin\\git-secret-guard\" (goto) 2>nul & del \"%~f0\"" 'exit /b %GSG_RC%'
-}
-
-# ^ invariant true only for a file install_cli_cmd_text wrote; the second line is the marker, whatever paths it names
-install_cli_cmd_is_ours() {
-    local line
-    { read -r line && read -r line; } <"$1" || return 1
-    [ "${line%$'\r'}" = "$GSG_CLI_CMD_MARKER" ]
-}
-
 # ^ invariant on Windows only a file written by install_cli_wrapper_text counts as ours, whatever share path it names => any other file is refused
 install_check_cli_link() {
     local link="$GSG_BIN_DIR/git-secret-guard"
@@ -953,6 +935,11 @@ install_precheck_timer() {
 # ^ invariant install_run returns 3 when a git upgrade module hands off to finish outside this process
 install_run() {
     local replace="$1" timer="$2" upgrade="${3:-0}" takeover="${4:-0}" rc early=0 ver
+    # ^ invariant the flags of this run besides --upgrade-git, as text for the next step a module prints; the new git makes --upgrade-git unnecessary
+    GSG_INSTALL_FLAGS=""
+    if [ "$replace" -eq 1 ]; then GSG_INSTALL_FLAGS+=" --replace-hooks-path"; fi
+    if [ "$timer" -eq 1 ]; then GSG_INSTALL_FLAGS+=" --with-timer"; fi
+    if [ "$takeover" -eq 1 ]; then GSG_INSTALL_FLAGS+=" --take-over-system-git"; fi
     # ^ security umask only tightens (022 or stricter) => settings, share tree, CLI link and state are never group or other writable; WSL 1 starts at 0000
     umask "$(printf '%03o' "$((8#$(umask) | 8#022))")"
     paths_init || return 1

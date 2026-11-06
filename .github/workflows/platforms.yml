@@ -1,0 +1,28 @@
+name: platforms
+
+# TEMPORARY probe; replaced below.
+on:
+  push:
+    branches: [ci/real-platform-runs]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: platforms-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - run: |
+          set +e
+          podman --version; id; cat /etc/subuid /etc/subgid; ls -ld /run/user/* ; echo XDG=$XDG_RUNTIME_DIR
+          ls -l /dev/kvm; grep -c -E 'vmx|svm' /proc/cpuinfo; nproc; free -m; df -h / /mnt
+          stat -fc %T /sys/fs/cgroup; crun --version | head -1; runc --version | head -1
+          podman info --format '{{.Host.OCIRuntime.Name}} {{.Host.CgroupManager}} {{.Host.Security.Rootless}} {{.Store.GraphDriverName}}'
+          which qemu-system-x86_64 cloud-localds genisoimage xorriso; getenforce; cat /etc/os-release | head -3; uname -r
+          systemctl --user is-system-running; loginctl list-sessions

@@ -8,7 +8,7 @@ GSG_ROOT="$1"
 GSG_NAME=git-secret-guard
 GSG_UNINSTALL_ACTIONS=0
 uname() { if [ "${1:-}" = -m ]; then echo x86_64; else echo MINGW64_NT-10.0-26200; fi; }
-for lib in brew common state tools hookspath exempt timer launchd install install_tools uninstall status doctor doctor_repos doctor_findings proc; do
+for lib in brew common state tools hookspath exempt timer launchd install install_cmd install_tools uninstall status doctor doctor_repos doctor_findings proc; do
     source "$1/lib/$lib.sh" || exit 9
 done
 shift
@@ -140,6 +140,9 @@ test_the_cmd_wrapper_runs_gits_login_bash_and_deletes_itself_when_the_share_is_g
     assert_contains "$OUT" '"C:\Program Files\Git\bin\bash.exe" "C:/U/100%%/share/bin/git-secret-guard" %*' "bin\\bash.exe sets up PATH, and a percent sign is doubled"
     assert_contains "$OUT" 'if not exist "C:\U\100%%\share\bin\git-secret-guard" (goto) 2>nul & del "%~f0"' "self delete"
     assert_contains "$OUT" 'exit /b %GSG_RC%' "the exit code survives"
+    assert_contains "$OUT" 'if "%GSG_RC%"=="3" if defined GSG_HANDOFF if exist "%GSG_HANDOFF%" goto :handoff' "exit 3 plus a hand-off file runs the upgrade runner"
+    assert_contains "$OUT" '-File "C:\U\100%%\share\bin\gsg-gitup.ps1" "%GSG_HANDOFF%"' "the runner of the share dir, with a doubled percent sign"
+    assert_contains "$OUT" 'set "GSG_HANDOFF=%LocalAppData%\git-secret-guard\git-upgrade\handoff.txt"' "the place bash is told to use"
     assert_contains "$OUT" $'@echo off\r\n' "CRLF"
 }
 

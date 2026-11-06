@@ -87,6 +87,11 @@ tools_tarball_name() {
         printf 'jq-%s.exe\n' "${platform//_/-}"
         return 0
     fi
+    # ^ external the Git for Windows installer is Git-<a.b.c.n>-64-bit.exe; only the 64-bit one is pinned (platform windows_amd64)
+    if [ "$tool" = git-for-windows ]; then
+        printf 'Git-%s-64-bit.exe\n' "$version"
+        return 0
+    fi
     case "$platform" in
         windows_*) if [ "$tool" = betterleaks ]; then ext=zip; fi ;;
     esac
@@ -103,6 +108,15 @@ tools_release_url() {
         betterleaks) repo=betterleaks/betterleaks ;;
         jq) repo=jqlang/jq tag="jq-$version" ;;
         git | git-manpages) repo="" ;;
+        # ^ external version a.b.c.n is the release v<a.b.c>.windows.<n> of git-for-windows/git (2.56.0.4 = v2.56.0.windows.4)
+        git-for-windows)
+            repo=git-for-windows/git
+            if [[ ! $version =~ ^([0-9]+\.[0-9]+\.[0-9]+)\.([0-9]+)$ ]]; then
+                printf '%s: a Git for Windows version is a.b.c.n (2.56.0.4), got [%s]\n' "$GSG_NAME" "$version" >&2
+                return 1
+            fi
+            tag="v${BASH_REMATCH[1]}.windows.${BASH_REMATCH[2]}"
+            ;;
         *) printf '%s: unknown tool [%s]\n' "$GSG_NAME" "$tool" >&2; return 1 ;;
     esac
     if [ -n "${GSG_TOOLS_BASE_URL:-}" ]; then

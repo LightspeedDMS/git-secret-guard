@@ -23,7 +23,7 @@ case "$(uname -s)" in
         FILE_TIMEOUT_SECONDS="${GSG_TEST_FILE_TIMEOUT:-2400}"
         JOBS="${GSG_TEST_JOBS:-$(nproc)}"
         tools_cache="${XDG_CACHE_HOME:-$HOME/.cache}/git-secret-guard-test-tools"
-        if [ ! -x "$tools_cache/jq.exe" ] || [ ! -x "$tools_cache/trufflehog.exe" ] || [ ! -x "$tools_cache/betterleaks.exe" ]; then
+        if ! "$TESTS_DIR/fetch-test-tools.sh" --check "$tools_cache" >/dev/null; then
             "$TESTS_DIR/fetch-test-tools.sh" || printf 'WARNING the test tools could not be fetched\n'
         fi
         ;;

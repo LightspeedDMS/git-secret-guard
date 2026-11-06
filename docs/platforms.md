@@ -352,12 +352,12 @@ git-secret-guard status             # in a new terminal, once %USERPROFILE%\.loc
 Git Bash works the same way with `bin/git-secret-guard install`. Commits are scanned from any shell and from GUI clients,
 because the hook lives in the global git config.
 
-- **Prerequisites.** Git for Windows with git 2.54 or newer (`install` refuses an older one) on x86_64. `taskkill`,
+- **Prerequisites.** Git for Windows with git 2.54 or newer (an older one is upgraded with `install --upgrade-git`, see below) on x86_64. `taskkill`,
   `timeout`, `curl`, `sha256sum` and the System32 `tar.exe` come with Windows or Git for Windows. `~/.local/bin` should be
   on `PATH` for the `git-secret-guard` command.
 - **jq is handled by `install`.** With no `jq` on `PATH`, `install` downloads the pinned `jq.exe` from the jqlang release,
   checks its SHA-256 against `tools.lock`, and places it in `~/.local/bin` beside the scanners. No package manager is
-  needed (Windows Server has no winget). It follows the scanner rules: all downloads are verified before anything
+  needed (the Windows Server 2019 test host has no winget). It follows the scanner rules: all downloads are verified before anything
   changes, a rerun keeps it, a pin bump replaces it, and `uninstall --remove-tools` removes it. A `jq` you already have on
   `PATH` is used as it is and never recorded as ours.
 - **`git` in PowerShell.** The Git for Windows installer normally puts `git` on `PATH`. If `git` is not found there, re-run
@@ -380,6 +380,77 @@ because the hook lives in the global git config.
   from Git Bash and from PowerShell, a foreign scanner moved aside and restored, and a `jq` of the user's left alone. In
   commits: a clean one passes and a leak is blocked from Git Bash and PowerShell, findings from both scanners,
   `.secret-scan-ignore`, `--no-verify` and a broken probe repository blocking with `nothing was scanned` from Git Bash.
+
+### Upgrading Git for Windows
+
+When the git on `PATH` is older than 2.54, `install` offers to upgrade Git for Windows (story 30, the `windows` module in `lib/gitup_windows.sh`). The consent rules are those of
+[the other platforms](install.md#upgrading-an-old-git---upgrade-git-and---take-over-system-git): a prompt in a terminal (default No), or `--upgrade-git`; with no terminal and no flag
+`install` refuses, names `--upgrade-git` and changes nothing.
+
+```powershell
+bin\git-secret-guard.cmd install --upgrade-git
+```
+
+- **Route.** winget when it is on `PATH`, otherwise the pinned installer. The Windows Server 2019 test host has no winget, so it took the installer route. The installer is `Git-2.56.0.4-64-bit.exe` of the
+  release `v2.56.0.windows.4` of git-for-windows/git, pinned in `tools.lock` (row `git-for-windows`, not a scanner) with its SHA-256. `install` downloads it over HTTPS, checks the
+  digest and removes a file that differs. **winget is untested here** (this host has none): its `--scope` handling, its own hash check and its elevation are not proven. The runner passes
+  `--scope machine` or `--scope user` as planned and the plan says the rest is not tested.
+- **Why the hand-off.** The upgrade replaces the `bash.exe` that `install` runs in, so bash only decides, plans, downloads and verifies. `lib/gitup_windows.sh` writes a hand-off file
+  (`route`, `scope`, `version`, installer path; no digest) into a directory below the profile (NTFS ignores chmod, so the profile ACL is what keeps it private; a state directory outside the profile has no such protection) and returns the module status "finish outside this process": `install` stops with exit 3.
+  `bin/gsg-gitup.ps1` then runs the upgrade from Windows PowerShell, outside bash:
+  - from `git-secret-guard.cmd` (checkout or the one `install` wrote to `~/.local/bin`) it runs by itself, and then the same command runs once more with its own arguments, with
+    `GSG_GIT_UPGRADED=1` so a refusal there does not claim that nothing was changed. The `.cmd` names the hand-off place, `%LocalAppData%\git-secret-guard\git-upgrade\handoff.txt`,
+    through `GSG_HANDOFF` (accepted only below `LOCALAPPDATA`, without regard to case, and only as `git-upgrade\handoff.txt`); it deletes a stale hand-off first, and a failing runner
+    stops there with the runner's exit code;
+  - from Git Bash (no `.cmd` parent) `install` stops and prints the exact commands, with the flags of the run that stopped: close every Git Bash window, run
+    `powershell -NoProfile -ExecutionPolicy Bypass -File "...\gsg-gitup.ps1" "...\handoff.txt"` in PowerShell or cmd, then `git-secret-guard.cmd install ...` in a new terminal. The hand-off
+    is then in the state directory (the same name and link checks apply to that route).
+- **What the runner checks before it starts the installer.** The SHA-256 must equal the pin in `tools.lock` (read by the runner itself from the lock beside `bin`, never from the hand-off or the environment),
+  the Authenticode signature must be `Valid` and by the signer the lock names (a `# gsg-signer` line next to the digest row: `CN=Johannes Schindelin, O=Johannes Schindelin, L=Bruehl, C=DE`; a subject pin,
+  so a renewed certificate with another subject needs a new pin), and neither the installer file nor the two directories install made for it (`git-secret-guard` and `git-upgrade`) may be a junction or
+  symbolic link; bash checks the same two directories, and a link above them (a profile moved to another disk) is accepted by both. A file with another digest is deleted and never started;
+  a link or a signature refusal keeps the file, because it matched its pin, and says so. No environment variable steers its checks (the lock, the signer and the status are not taken from the environment; only winget, on the winget route, is found through `PATH`). A signer other than the pin, with a valid signature, gets its own refusal text (the pin does not describe the file), and every comparison of the pin is case-sensitive. The file is opened without write and delete sharing before these checks
+  and stays open until the installer has ended: a test holds the runner between the checks and the start and fails to write, delete or rename the file, its directory and the directory above it.
+- **What is not defended.** Code running as the same user. It can edit `bin/gsg-gitup.ps1`, `tools.lock` or the hand-off, and so is not stopped by any of the above. The checks defend against
+  a changed or substituted installer file and against a hand-off that vouches for itself, not against a compromised account.
+- **What the signature status means here.** `Valid` does not prove that the signing certificate is unrevoked: Windows checks revocation from its cache only in this call (probed with a CAPI2 trace:
+  cache-only retrieval, revocation result "offline", status still `Valid`). It also rests on the timestamp countersignature, because the signing certificate of 2.56.0.4 expired on 2026-10-27.
+  The chain ends in a Microsoft root of 2020; a stale host without it may report `UnknownError`, and the runner then refuses with Windows' own message and tells the user to install Git for Windows by hand
+  (a rerun cannot help). That case was not reproduced. A test checks the real asset against the production pins without starting it (`test_real_the_pinned_installer_...`; it skips with a reason when
+  the pinned file named by the lock row is not in the tools cache; `tests/run.sh` fetches it on Windows when it is missing, and a fetch that fails prints a warning and the test skips, except that with `CI` set the test fails instead of skipping). It can never start the installer: it checks before running that the runner has no start path besides the two `Start-Process` calls, and the wrapper fails closed for any mode but the listed ones.
+- **The hand-off is used once.** The runner deletes it before it starts anything, and deletes the installer after a successful run, so an old hand-off cannot downgrade git later.
+  `uninstall` removes both leftovers from both places.
+- **Scope is kept, never switched.** The plan reads the Inno Setup record `HKLM` or `HKCU` `SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Git_is1` whose `Inno Setup: App Path` contains
+  the git on `PATH`, and says `machine-wide` or `per-user`. Another install (portable, scoop, MinGit, a git elsewhere on `PATH`) is refused, not upgraded. Machine-wide needs
+  administrator rights: from a prompt that is not elevated the runner starts the installer with the `RunAs` verb (tested through a wrapper and with the exit code coming back, on an elevated
+  prompt where no dialog appears). The exit code 1223 that the cmdlet reports for a declined dialog is exit 11, "nothing was changed", with the command to run again; any other start failure is
+  exit 15 and is not called a decline. **The real dialog was never declined by a person.** A per-user install is never started from an elevated prompt (exit 14, nothing ran), because the
+  setup might then install machine-wide; that behaviour of the setup was not tested either.
+- **Flags.** `/VERYSILENT /NORESTART /NOCANCEL /SP-`. No `/DIR`, `/LOADINF` or component flag is passed.
+- **What a real run proved (Windows Server 2019, no winget, machine-wide install, elevated prompt, nothing else holding Git open).** From Git for Windows 2.53.0.3 to the pinned 2.56.0.4 with
+  `bin\git-secret-guard.cmd install --upgrade-git`: the setup record `Git_is1` differed afterwards only in `InstallDate` (install directory, selected and deselected components, every
+  `Inno Setup CodeFile:` option, setup type and icon group were kept), `etc/gitconfig` was byte-identical, the file set was identical except `unins000.dat`, and `usr\bin\bash.exe` was replaced
+  cleanly (no pending file renames naming Git, although 72 unrelated ones existed before the run; no `.tmp`/`.old` leftovers). The runner's `-Wait` followed the installer and its helper processes; the rerun of install started after the installer tree was gone.
+  Commits were scanned afterwards (a clean one passed, a fake key was blocked). Nothing was passed for the directory or the options.
+- **Still unproven:** `/VERYSILENT` with Git for Windows files in use (a Git Bash window or another git open during the upgrade), an installer killed halfway, a signature refusal on a file that matches its digest, a refusal in the rerun after the hand-off, the winget route, a real UAC decline by a person,
+  a typed yes at a real prompt (the real run used the flag), a Windows client, and the Linux runs.
+- **A downgrade is never allowed.** In that run the 2.53 installer, started under `/VERYSILENT` without `/ALLOWDOWNGRADE=1`, stopped on a Yes/No "really downgrade?" message box and waited until it was
+  killed. So a stale hand-off run after git has moved past the pin could hang under the runner's unbounded `-Wait` (a hypothesis: the stale case itself was not run). The runner therefore reads the installed
+  version (`Git_is1` `DisplayVersion`, `HKLM` for machine-wide and `HKCU` for per-user) after its checks and, when it is not older than the pin, deletes the stale hand-off and installer and exits 17 with
+  "nothing is needed". It never passes `/ALLOWDOWNGRADE`. The wait itself is not bounded: `Start-Process -Wait` also waits for helper processes, and a bound that is simple and safe was not found. A killed
+  runner or installer leaves whatever the installer had done by then; check `git --version` and run `git-secret-guard install --upgrade-git` again.
+- **Where the hand-off is.** From `git-secret-guard.cmd` it is in `%LocalAppData%\git-secret-guard\git-upgrade`; started from Git Bash it is in the state directory, `~/.local/state/git-secret-guard/git-upgrade`.
+  Files are removed after a run, the empty directories stay until `uninstall`.
+- **After the upgrade** open a new terminal when `PATH` changed. The IDE and GUI client warning stays: this changes the Git for Windows that `PATH` finds, not a git an IDE bundles.
+- **Exit codes of the runner:** 0 done; 10 installer refused (digest, signature, signer, junction or missing) and nothing ran; 11 elevation declined, nothing changed; 12 installer or winget
+  returned non-zero (check `git --version`, run again); 13 invalid, unknown or already used hand-off, or a missing or unusable `tools.lock`; 14 per-user install from an elevated prompt (nothing ran); 15 the installer could not be
+  started for another reason; 16 unexpected error; 17 the installed Git for Windows is not older than the pin (stale hand-off, nothing ran); 18 its version string is not a plain a.b.c[.d] version (for example `garbage`, `2.57.0-rc1`), so it cannot be compared, nothing ran and the user is pointed to a manual install (an empty or missing record goes on); 1 PowerShell itself refused to run the script (for example a group policy that blocks `-ExecutionPolicy Bypass`).
+- **What the tests run on the Windows host:** `tests/test_gitup_windows.sh` (its safety nets, the path guards, the never-start guards and the certificate hygiene, are in `tests/test_gitup_windows_safety.sh`) drives the module with registry, `whoami` and `winget` stand-ins (the sandbox stands for System32 through
+  `GSG_GITUP_ROOT`), the runner with Windows PowerShell and a compiled stand-in installer carrying a throw-away signature, `git-secret-guard.cmd` (checkout and installed copy) with real
+  `cmd.exe`, and the real `bin/git-secret-guard install --upgrade-git` with a fake old git. The module logic also runs on Linux through a faked `uname`; the runner and `.cmd` tests skip there.
+  The runner reads no variable for its checks: tests run a sandbox copy of it with its own `tools.lock` (and its signer line), changed in one line for the untrusted test signature and for the elevation check,
+  and wrap `Start-Process` to record, hold, fail or skip the start. The self-signed test signer is built once into the tools cache and its key and store copies are deleted. No test starts
+  a real Git for Windows installer or winget.
 
 ### The test suite on Windows
 

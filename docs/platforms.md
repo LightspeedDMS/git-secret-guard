@@ -58,7 +58,7 @@ group and others cannot write, and the plan prints its full path (`as root: /usr
    first; the downloads come first because a tampered tarball then changes nothing.)
 3. As root: `dnf install -y gcc make perl xz tar openssl-devel zlib-devel libcurl-devel expat-devel pcre2-devel perl-ExtUtils-MakeMaker`.
 4. As the invoking user, in a `mktemp` directory, under `env -i PATH=/usr/bin:/bin` with a scratch `HOME` and `TMPDIR`:
-   `make prefix=/usr/local NO_RUST=1 NO_TCLTK=1 NO_GETTEXT=1 USE_LIBPCRE2=1 all`, then the same with `DESTDIR=<stage> install`; the man pages
+   `make prefix=/usr/local NO_RUST=1 NO_TCLTK=1 NO_GETTEXT=1 USE_LIBPCRE2=1 INSTALL_SYMLINKS=1 all`, then the same with `DESTDIR=<stage> install` (INSTALL_SYMLINKS=1 makes git install its siblings as symlinks, see [CI on real platforms](#rocky-vm-selinux-enforcing)); the man pages
    are unpacked into `<stage>/usr/local/share/man`. Homebrew's tools and libraries on the caller's `PATH` cannot reach the build (a Homebrew
    `PATH` made the linker fail on the reference host). `NO_RUST=1` is needed: without it git 2.56 wants cargo.
 5. Every built binary is checked with `ldd`: a Homebrew path or a missing library refuses.
@@ -784,8 +784,11 @@ Without a writable `/dev/kvm` the launcher exits 3 and says that TCG software em
 - **SELinux**: enforcing, auditd active; no AVC record from the start of the run to its end, across the install, the takeover, a push and a clone served by sshd through the taken-over links, and the restore.
 - **Labels**: git and its helpers copied by `install` get `bin_t`, `/usr/bin/git` and its five links `bin_t`, `dnf.conf` keeps `etc_t`, `/var/lib/git-secret-guard` is `var_lib_t`; `restorecon -n -v` on the six links, `dnf.conf` and
   the backup directory reports nothing.
-- **Finding, no product change yet.** git and its 150 hard links are one inode. The policy labels `/usr/local/bin/git` `bin_t` but `/usr/local/libexec/git-core/*` `usr_t`, so `restorecon -n -R /usr/local` lists
-  the helpers as "would relabel". Measured (`vm_restorecon_effect`): a real `restorecon -R /usr/local` changed `/usr/local/bin/git` and the helpers from `bin_t` to `usr_t`; a clone served by sshd for the unconfined `rocky` session still worked afterwards (`agent=git/2.56.0`, no AVC record). A confined domain running git was not tried. `install` never runs `restorecon` on `/usr/local`; an administrator who does changes the label.
+- **Finding, fixed.** git installs its siblings as hard links, so git and 150 other names were one inode that the policy labels `bin_t` under `/usr/local/bin` but `usr_t` under `/usr/local/libexec/git-core`:
+  a real `restorecon -R /usr/local` relabelled `/usr/local/bin/git` to `usr_t` (run 42282871381). The source route now passes `INSTALL_SYMLINKS=1` to `make`, so the libexec entries and the `bin/git-*` siblings are symlinks to `git`, `git` has one name
+  and keeps `bin_t`. In the VM (run in the record above) the checks are real: `git` is `bin_t` with one link, `restorecon -n -R /usr/local/bin` reports nothing, and after a real `restorecon -R /usr/local` `git` is still `bin_t` and a clone served through it works.
+  The separate programs in `libexec/git-core` (`git-remote-https` and the like) are `usr_t`, as the policy says, from the day they are copied. The takeover judges the target of a symlinked sibling (`gitup_tk_check_owner`) instead of the 777 mode of the link.
+  Whether a confined domain may execute `usr_t` files was asked of the policy with `sesearch` (the VM prints the rule counts); `runcon` cannot enter a confined domain from `unconfined_t` here, so no confined process was run.
 
 ### GitHub Desktop's bundled git
 

@@ -764,7 +764,7 @@ The `windows` job runs on `windows-2025` (Windows Server 2025, build 26100, elev
   `gua_container_ppa` (`tests/test_gitup_apt_ppa.sh`). `ubuntu.sh` must never mention `--skip-isolation` (`tests/test_mac_runner.sh`). `install_git_ppa` is a
   wrapper over the product's `gitup_apt_ppa_apply`; a failed disable makes it return 2 and no source build runs (its root `apt-get install` would trust a PPA that may still be
   enabled). `--phase upgrade` (`tests/platform/apt-phase.sh`, then `apt-upgrade-e2e.sh` as `gsguser` with sudo) is the real `install --upgrade-git`; `ubuntu.sh --os`
-  chooses the pinned image and passes `--expect-os ID:VERSION` for the isolation check. Debian builds into /opt/gsg-git for the default phases (a /usr/local git disturbs tests that hide git). Rocky also installs the stock distro git, because a doctor test calls `/usr/bin/git` directly.
+  chooses the pinned image and passes `--expect-os ID:VERSION` for the isolation check. Rocky also installs the stock distro git, because a doctor test calls `/usr/bin/git` directly.
 - **Mac runner gotchas.** `stage_checkout` runs `git init` in the copy (`tests/test_quality.sh` uses `git ls-files`); BSD `mktemp -t`
   appends a suffix; macOS bash rejects a regex repetition over 255.
 - **Shell traps that bit.** `set -o pipefail` plus `sed ...q` inside `$( )` is a race (the writer gets SIGPIPE); it once turned a good

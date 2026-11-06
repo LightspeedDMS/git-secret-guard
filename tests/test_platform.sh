@@ -463,9 +463,10 @@ test_the_mount_check_names_a_replaced_mount_point_with_the_fstype_it_shows() {
 }
 
 # ^ external podman 5.6.0 masks these files and the powercap directory on hosts having them (names in its binary); the files devtmpfs by analogy, not probed
+# ^ external podman 4.9.3 on the ubuntu-24.04 hosted runner also masks /sys/dev/block (maskedPaths of its config.json, run 42251921468); fstype proven by the platforms workflow
 test_the_mount_check_accepts_the_optional_masked_paths_other_kernels_add() {
     local entry p fs
-    for entry in /proc/latency_stats=devtmpfs /proc/sched_debug=devtmpfs /proc/timer_stats=devtmpfs /sys/devices/virtual/powercap=tmpfs; do
+    for entry in /proc/latency_stats=devtmpfs /proc/sched_debug=devtmpfs /proc/timer_stats=devtmpfs /sys/devices/virtual/powercap=tmpfs /sys/dev/block=tmpfs; do
         p="${entry%%=*}"
         fs="${entry#*=}"
         mountinfo_fixture "$SANDBOX/mi" "${BASELINE_MOUNTS[@]}" "$p=$fs" || return 1

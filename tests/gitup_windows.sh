@@ -277,6 +277,7 @@ wu_runner_seam() {
 wu_runner_installed() {
     cp -- "$GSG_PROJECT/bin/gsg-gitup.ps1" "$WU_RT/bin/gsg-gitup.ps1" || return 1
     wu_runner_seam "^\$AcceptStatus = 'Valid'\$" "\$AcceptStatus = 'UnknownError'" || return 1
+    wu_runner_seam "^function Get-InstalledDir.*" "function Get-InstalledDir([string]\$Scope) { return '' }" || return 1
     wu_runner_seam "^function Get-InstalledVersion.*" "function Get-InstalledVersion([string]\$Scope) { return '$1' }"
 }
 

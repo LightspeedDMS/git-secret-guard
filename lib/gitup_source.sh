@@ -126,8 +126,9 @@ gitup_source_build() {
     if [[ ! $jobs =~ ^[0-9]+$ ]] || [ "$jobs" -lt 1 ]; then jobs=2; fi
     if [ "$jobs" -gt 8 ]; then jobs=8; fi
     printf '%s: building git %s (about %s MB of disk, several minutes; the make output is kept only if the build fails)\n' "$GSG_NAME" "$GITUP_PIN_VER" "$GITUP_BUILD_NEED_MB"
-    if gitup_source_make "$GITUP_SRC_DIR" "-j$jobs" "prefix=$GITUP_PREFIX" "${GITUP_SRC_FLAGS[@]}" all &&
-        gitup_source_make "$GITUP_SRC_DIR" "prefix=$GITUP_PREFIX" "${GITUP_SRC_FLAGS[@]}" "DESTDIR=$GITUP_STAGE" install; then
+    # ^ why INSTALL_SYMLINKS=1, not git's hard links; one inode under bin and libexec gets one SELinux label from two policy rules, and restorecon flips it
+    if gitup_source_make "$GITUP_SRC_DIR" "-j$jobs" "prefix=$GITUP_PREFIX" "${GITUP_SRC_FLAGS[@]}" INSTALL_SYMLINKS=1 all &&
+        gitup_source_make "$GITUP_SRC_DIR" "prefix=$GITUP_PREFIX" "${GITUP_SRC_FLAGS[@]}" INSTALL_SYMLINKS=1 "DESTDIR=$GITUP_STAGE" install; then
         return 0
     fi
     tail -n 25 "$GITUP_BUILD_DIR/make.log" | sed 's/^/        | /' >&2
@@ -266,9 +267,9 @@ gitup_source_compile() {
 }
 
 # ^ order MANIFEST.partial is saved before the copy and renamed to MANIFEST after it
-# ^ invariant a copy stopped half way leaves the partial file, and the next run counts it as ours and as unfinished
-# ^ why no mode in --preserve, not --preserve=mode; mode would rewrite the mode of a shared directory such as share/man with the stage directory's mode
-GITUP_SRC_CP=(cp -dR "--preserve=timestamps,links" --)
+# ^ invariant a copy stopped half way, also between a removed file and its copy, leaves the partial file; the next run counts it as ours and unfinished
+# ^ why --remove-destination, not a plain cp; cp onto an existing symlink writes through it. No mode in --preserve, it rewrote share/man
+GITUP_SRC_CP=(cp -dR --remove-destination "--preserve=timestamps,links" --)
 gitup_source_docdir() { printf '%s/share/doc/git-%s-local' "$GITUP_PREFIX" "$GITUP_PIN_VER"; }
 
 # ^ invariant prints the clause GITUP_CHANGED holds during the copy; the next step comes first and the clause has no bracket, since brew_unchanged_text wraps it

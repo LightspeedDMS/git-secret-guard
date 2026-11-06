@@ -118,4 +118,62 @@ test_a_dry_run_starts_no_podman_and_the_script_runs_by_its_path() {
     assert_contains "$OUT" "usage: tests/platform/rpm.sh" "and it prints its usage"
 }
 
+
+# ^ invariant OFFLINE_ARGS1 and OFFLINE_ARGS2 = the two podman command lines of rpm.sh DISTRO --offline-restore --dry-run (the "offline-stage-N-arg:" lines)
+offline_dry() {
+    rpm_dry "$@" --offline-restore || return 1
+    mapfile -t OFFLINE_ARGS1 < <(sed -n 's/^offline-stage-1-arg: //p' <<<"$OUT")
+    mapfile -t OFFLINE_ARGS2 < <(sed -n 's/^offline-stage-2-arg: //p' <<<"$OUT")
+}
+
+in_args() {
+    local want="$1" a
+    shift
+    for a in "$@"; do
+        if [ "$a" = "$want" ]; then return 0; fi
+    done
+    return 1
+}
+
+test_the_offline_restore_run_takes_over_in_a_networked_container_and_restores_in_one_with_no_network() {
+    local a prev
+    offline_dry rocky || return 1
+    assert_rc 0 "dry run of the offline restore"
+    assert_eq "${#RPM_ARGS[@]}" 0 "no plain arg: line: the two stages are listed under their own names"
+    in_args podman "${OFFLINE_ARGS1[@]}" || fail "stage 1 does not start podman"
+    in_args --rm "${OFFLINE_ARGS1[@]}" && fail "stage 1 is removed on exit, so nothing can be committed"
+    in_args upgrade-takeover "${OFFLINE_ARGS1[@]}" || fail "stage 1 does not run the takeover phase"
+    in_args --network "${OFFLINE_ARGS1[@]}" && fail "stage 1 has no network option, it needs the network"
+    in_args --rm "${OFFLINE_ARGS2[@]}" || fail "stage 2 is not removed on exit"
+    in_args upgrade-offline "${OFFLINE_ARGS2[@]}" || fail "stage 2 does not run the offline phase"
+    in_args --network "${OFFLINE_ARGS2[@]}" || fail "stage 2 has no network option"
+    in_args none "${OFFLINE_ARGS2[@]}" || fail "stage 2 does not switch the network off"
+    # ^ why the word before bash, not a fixed index; it is the image the container starts from
+    prev=""
+    for a in "${OFFLINE_ARGS2[@]}"; do
+        if [ "$a" = bash ]; then break; fi
+        prev="$a"
+    done
+    case "$prev" in
+        localhost/gsg-rpm-offline:*) ;;
+        *) fail "stage 2 starts [$prev], not the container stage 1 committed" ;;
+    esac
+    in_args --pull=never "${OFFLINE_ARGS2[@]}" || fail "stage 2 may pull"
+    in_args --http-proxy=false "${OFFLINE_ARGS2[@]}" || fail "stage 2 forwards the proxy variables"
+    in_args GSG_PLATFORM_SENTINEL=host-environment-must-not-arrive "${OFFLINE_ARGS2[@]}" || fail "stage 2 lacks the sentinel"
+    for a in "${OFFLINE_ARGS2[@]}"; do
+        case "$a" in
+            --env-host | -e | --env | --env-file) fail "[$a] passes the environment to stage 2" ;;
+        esac
+    done
+}
+
+test_the_offline_restore_option_is_for_rocky_only_and_refuses_a_second_phase() {
+    offline_dry fedora
+    assert_rc 2 "fedora has no system git takeover"
+    run_cap env -i HOME="$SANDBOX/home" PATH="/usr/local/bin:/usr/bin:/bin" bash "$RPM_SH" rocky --offline-restore --phase upgrade --dry-run
+    assert_rc 2 "--offline-restore chooses the phases itself"
+    assert_contains "$ERR" "--offline-restore" "and says which option"
+}
+
 run_file_tests

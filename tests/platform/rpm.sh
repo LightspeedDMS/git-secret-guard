@@ -13,9 +13,11 @@ HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)" || exit 2
 PROJECT="${HERE%/tests/platform}"
 
 usage() {
-    printf 'usage: tests/platform/rpm.sh rocky|fedora [--dry-run] [--timeout SECONDS] [container script options]\n'
+    printf 'usage: tests/platform/rpm.sh rocky|fedora [--dry-run] [--timeout SECONDS] [--offline-restore] [container script options]\n'
     printf 'Runs the real git upgrade E2E (install --upgrade-git, takeover, restore) in a podman Rocky 9.7 or Fedora 44 container started from this Linux host.\n'
-    printf 'Options it does not know go to rocky-container.sh or fedora-container.sh (--phase prepare|e2e|suite|upgrade on Rocky, --phase upgrade on Fedora).\n'
+    printf 'Options it does not know go to rocky-container.sh or fedora-container.sh (--phase prepare|e2e|suite|upgrade on Rocky, --phase upgrade on Fedora;\n'
+    printf 'also upgrade-root|password|bump|takeover|offline on Rocky and upgrade-old on Fedora, see docs/platforms.md#ci-on-real-platforms).\n'
+    printf -- '--offline-restore (Rocky): stage 1 upgrades and takes over git, the container is committed, stage 2 restores it in a container with --network none.\n'
 }
 
 distro="${1:-}"
@@ -34,10 +36,12 @@ esac
 shift
 
 dry=0
+offline=0
 passthru=()
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --dry-run) dry=1 ;;
+        --offline-restore) offline=1 ;;
         --timeout)
             shift
             if [[ ${1:-} != [1-9]* ]] || [[ $1 == *[!0-9]* ]]; then
@@ -58,14 +62,24 @@ has_phase=0
 for arg in "${passthru[@]}"; do
     if [ "$arg" = --phase ]; then has_phase=1; fi
 done
-if [ "$has_phase" -eq 0 ]; then passthru+=(--phase upgrade); fi
+if [ "$offline" -eq 1 ]; then
+    if [ "$distro" != rocky ] || [ "$has_phase" -eq 1 ]; then
+        printf 'rpm.sh: --offline-restore is for rocky only and chooses the phases itself (no --phase)\n' >&2
+        exit 2
+    fi
+elif [ "$has_phase" -eq 0 ]; then
+    passthru+=(--phase upgrade)
+fi
 
-copy="" podman_home="" name="gsg-$distro-$$"
+copy="" podman_home="" name="gsg-$distro-$$" offline_tag="localhost/gsg-rpm-offline:$$"
 PODMAN_ENV=()
 # ^ order trap before mktemp; the private copy, the scratch podman HOME and a half-started container never outlive an interrupted run
 # shellcheck disable=SC2329
 cleanup() {
-    if [ "$dry" -eq 0 ] && [ "${#PODMAN_ENV[@]}" -gt 0 ]; then timeout "$CLEANUP_TIMEOUT_SECONDS" "${PODMAN_ENV[@]}" podman rm -f "$name" >/dev/null 2>&1; fi
+    if [ "$dry" -eq 0 ] && [ "${#PODMAN_ENV[@]}" -gt 0 ]; then
+        timeout "$CLEANUP_TIMEOUT_SECONDS" "${PODMAN_ENV[@]}" podman rm -f "$name" "$name-offline" >/dev/null 2>&1
+        if [ "$offline" -eq 1 ]; then timeout "$CLEANUP_TIMEOUT_SECONDS" "${PODMAN_ENV[@]}" podman rmi -f "$offline_tag" >/dev/null 2>&1; fi
+    fi
     if [ -n "$copy" ] && [[ ${copy##*/} == gsg-rpm-src.* ]]; then rm -rf -- "$copy"; fi
     if [ -n "$podman_home" ] && [[ ${podman_home##*/} == gsg-rpm-podman-home.* ]]; then rm -rf -- "$podman_home"; fi
 }
@@ -115,10 +129,32 @@ done
 
 # ^ security no --env-host, no -e, no host HOME, ~/.gitconfig or ~/.ssh; --http-proxy=false stops podman forwarding proxy variables
 # ^ hazard dropping --init or timeout -k means the time limit never fires, as in ubuntu.sh
-cmd=(timeout --foreground -k 60 "$TOTAL_TIMEOUT_SECONDS" "${PODMAN_ENV[@]}" GSG_PLATFORM_SENTINEL="$SENTINEL"
-    podman run --rm --init --name "$name" --pull=never --http-proxy=false
-    -v "$copy:/src:ro,Z" "$image" bash "/src/tests/platform/$distro-container.sh" "${host_ns[@]}" --image "$image" "${passthru[@]}")
+# ^ invariant make_cmd NAME IMAGE REMOVE NETWORK PHASE... sets cmd; REMOVE is rm or keep (keep leaves the container for podman commit), NETWORK is empty or none
+make_cmd() {
+    local cname="$1" cimage="$2" remove="$3" network="$4"
+    shift 4
+    cmd=(timeout --foreground -k 60 "$TOTAL_TIMEOUT_SECONDS" "${PODMAN_ENV[@]}" GSG_PLATFORM_SENTINEL="$SENTINEL" podman run)
+    if [ "$remove" = rm ]; then cmd+=(--rm); fi
+    cmd+=(--init --name "$cname" --pull=never --http-proxy=false)
+    if [ -n "$network" ]; then cmd+=(--network "$network"); fi
+    cmd+=(-v "$copy:/src:ro,Z" "$cimage" bash "/src/tests/platform/$distro-container.sh" "${host_ns[@]}" --image "$image" "$@")
+}
+cmd=() stage2=()
+if [ "$offline" -eq 1 ]; then
+    make_cmd "$name" "$image" keep "" "${passthru[@]}" --phase upgrade-takeover
+    stage1=("${cmd[@]}")
+    make_cmd "$name-offline" "$offline_tag" rm none "${passthru[@]}" --phase upgrade-offline
+    stage2=("${cmd[@]}")
+    cmd=("${stage1[@]}")
+else
+    make_cmd "$name" "$image" rm "" "${passthru[@]}"
+fi
 
+if [ "$dry" -eq 1 ] && [ "$offline" -eq 1 ]; then
+    printf 'offline-stage-1-arg: %s\n' "${stage1[@]}"
+    printf 'offline-stage-2-arg: %s\n' "${stage2[@]}"
+    exit 0
+fi
 if [ "$dry" -eq 1 ]; then
     printf 'arg: %s\n' "${cmd[@]}"
     printf 'copy-files: %s\n' "$(find "$copy" -type f | wc -l)"
@@ -139,6 +175,18 @@ printf 'containers.conf layers ignored: CONTAINERS_CONF=%s (every system and use
     "$podman_home/containers.conf" "$podman_home/hooks.d"
 "${cmd[@]}"
 rc=$?
+# ^ order stage 2 starts only from the container stage 1 left behind; a failed stage 1 or a failed commit ends the run before it
+# ^ why podman commit of the stopped container, not a volume; the takeover changes /usr/bin, /etc and /var/lib, where a volume holds nothing
+if [ "$offline" -eq 1 ] && [ "$rc" -eq 0 ]; then
+    printf 'rpm.sh: stage 1 done; committing the container as %s and starting stage 2 with --network none\n' "$offline_tag"
+    if ! timeout "$CLEANUP_TIMEOUT_SECONDS" "${PODMAN_ENV[@]}" podman commit --quiet "$name" "$offline_tag" >/dev/null; then
+        printf 'rpm.sh: cannot commit the container of stage 1\n' >&2
+        exit 2
+    fi
+    timeout "$CLEANUP_TIMEOUT_SECONDS" "${PODMAN_ENV[@]}" podman rm -f "$name" >/dev/null
+    "${stage2[@]}"
+    rc=$?
+fi
 if [ "$rc" -eq 0 ]; then
     printf '%s PLATFORM TEST: PASS (image %s)\n' "${distro^^}" "$image"
 else

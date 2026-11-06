@@ -463,9 +463,10 @@ test_the_mount_check_names_a_replaced_mount_point_with_the_fstype_it_shows() {
 }
 
 # ^ external podman 5.6.0 masks these files and the powercap directory on hosts having them (names in its binary); the files devtmpfs by analogy, not probed
+# ^ external podman 4.9.3 on the ubuntu-24.04 hosted runner also masks /sys/dev/block (its config.json maskedPaths); fstype proven by CI
 test_the_mount_check_accepts_the_optional_masked_paths_other_kernels_add() {
     local entry p fs
-    for entry in /proc/latency_stats=devtmpfs /proc/sched_debug=devtmpfs /proc/timer_stats=devtmpfs /sys/devices/virtual/powercap=tmpfs; do
+    for entry in /proc/latency_stats=devtmpfs /proc/sched_debug=devtmpfs /proc/timer_stats=devtmpfs /sys/devices/virtual/powercap=tmpfs /sys/dev/block=tmpfs; do
         p="${entry%%=*}"
         fs="${entry#*=}"
         mountinfo_fixture "$SANDBOX/mi" "${BASELINE_MOUNTS[@]}" "$p=$fs" || return 1
@@ -693,10 +694,11 @@ test_the_isolation_check_accepts_exactly_the_container_defaults() {
 
 # shellcheck disable=SC2016
 test_obtain_git_does_not_build_from_source_when_the_ppa_could_not_be_disabled() {
-    local script='source "$1"; LOGDIR="$2"; MARK="$2/source-build-ran"; GIT_SOURCE="$3"; PPA_RC="$4"
+    local script='source "$1"; LOGDIR="$2"; MARK="$2/source-build-ran"; OS_RELEASE="$2/osr"; GIT_SOURCE="$3"; PPA_RC="$4"
         install_git_source() { : >"$MARK"; return 0; }; git_is_new_enough() { return 0; }; install_git_ppa() { return "$PPA_RC"; }
         obtain_git; rc=$?; printf "rc=%s failures=%s\n" "$rc" "$FAILURES"'
     local mode
+    printf 'ID=ubuntu\n' >"$SANDBOX/osr"
     for mode in auto ppa; do
         rm -f -- "$SANDBOX/source-build-ran"
         run_cap env -i PATH="/usr/local/bin:/usr/bin:/bin" bash -c "$script" _ "$GSG_PROJECT/tests/platform/ubuntu-container.sh" "$SANDBOX" "$mode" 2
@@ -828,6 +830,62 @@ test_the_entry_script_runs_by_the_path_the_readme_documents() {
     run_cap env -i HOME="$SANDBOX/home" PATH="/usr/local/bin:/usr/bin:/bin" "$UBUNTU_SH" --help
     assert_rc 0 "executing tests/platform/ubuntu.sh directly (a mode without x gives 126)"
     assert_contains "$OUT" "usage: tests/platform/ubuntu.sh" "and it prints its usage"
+}
+
+
+# ^ invariant the real-machine phases of story #40 are fixed names; any other word after upgrade- is refused, a typo starts nothing
+test_the_container_script_accepts_the_real_machine_phases_and_nothing_else() {
+    local ph
+    for ph in upgrade upgrade-root upgrade-password upgrade-bump upgrade-old upgrade-takeover upgrade-offline; do
+        parse_with --host-ns net=4026532008 --phase "$ph"
+        assert_rc 0 "[$ph] is a phase"
+        assert_eq "$OUT" "net=4026532008||$ph|1" "[$ph] is the one phase"
+    done
+    for ph in upgrade- upgrade-x upgrade-root-x Upgrade-root upgrade_root; do
+        parse_with --phase "$ph"
+        assert_rc 2 "[$ph] is refused"
+        assert_contains "$ERR" "usage" "[$ph] prints the usage"
+    done
+}
+
+# ^ external Debian 13 has no software-properties-common (add-apt-repository); the prepare phase of the default run failed on it (run 42252845651)
+# shellcheck disable=SC2016
+test_the_prepare_phase_asks_for_software_properties_common_on_ubuntu_only() {
+    local id
+    for id in ubuntu debian; do
+        printf 'ID=%s\nVERSION_ID="13"\n' "$id" >"$SANDBOX/osr-$id"
+        run_cap env -i PATH="/usr/local/bin:/usr/bin:/bin" bash -c 'source "$1"; OS_RELEASE="$2"; apt_prerequisites' _ \
+            "$GSG_PROJECT/tests/platform/ubuntu-container.sh" "$SANDBOX/osr-$id"
+        assert_rc 0 "[$id] the package list"
+        assert_contains "$OUT" $'\ngawk\n' "[$id] gawk is in the list"
+    done
+    run_cap env -i PATH="/usr/local/bin:/usr/bin:/bin" bash -c 'source "$1"; OS_RELEASE="$2"; apt_prerequisites' _ "$GSG_PROJECT/tests/platform/ubuntu-container.sh" "$SANDBOX/osr-ubuntu"
+    assert_contains "$OUT" "software-properties-common" "Ubuntu gets it"
+    run_cap env -i PATH="/usr/local/bin:/usr/bin:/bin" bash -c 'source "$1"; OS_RELEASE="$2"; apt_prerequisites' _ "$GSG_PROJECT/tests/platform/ubuntu-container.sh" "$SANDBOX/osr-debian"
+    assert_not_contains "$OUT" "software-properties-common" "Debian does not"
+    assert_contains "$OUT" $'\ngit' "Debian gets the stock git, as Rocky does"
+}
+
+# ^ invariant the PPA is an Ubuntu thing; a Debian machine in the default auto mode builds the pinned source and never tries a Launchpad PPA
+# shellcheck disable=SC2016
+test_a_debian_machine_in_auto_mode_goes_straight_to_the_source_build() {
+    local script='source "$1"; LOGDIR="$2"; D="$2"; OS_RELEASE="$3"; GIT_SOURCE=auto
+        install_git_source() { : >"$D/source-build-ran"; return 0; }; git_is_new_enough() { return 0; }
+        install_git_ppa() { : >"$D/ppa-ran"; return 0; }
+        obtain_git; printf "rc=%s failures=%s\n" "$?" "$FAILURES"'
+    local id
+    for id in debian ubuntu; do
+        printf 'ID=%s\n' "$id" >"$SANDBOX/osr-$id"
+        rm -f -- "$SANDBOX/source-build-ran" "$SANDBOX/ppa-ran"
+        run_cap env -i PATH="/usr/local/bin:/usr/bin:/bin" bash -c "$script" _ "$GSG_PROJECT/tests/platform/ubuntu-container.sh" "$SANDBOX" "$SANDBOX/osr-$id"
+        assert_contains "$OUT" "rc=0 failures=0" "[$id] the run ends well"
+        if [ "$id" = debian ]; then
+            assert_no_file "$SANDBOX/ppa-ran" "Debian never tries the PPA"
+            assert_file "$SANDBOX/source-build-ran" "Debian builds the source"
+        else
+            assert_file "$SANDBOX/ppa-ran" "control: Ubuntu still tries the PPA first"
+        fi
+    done
 }
 
 run_file_tests

@@ -235,6 +235,30 @@ test_a_tampered_installer_never_runs_when_it_is_swapped_after_the_download_was_v
     assert_eq "$(wu_installer_log)" "" "the installer never ran"
 }
 
+# ^ external a Git Bash process holding Git files made the silent installer wait 15 minutes with no output (run 42270993343); winget failed at once
+test_a_program_running_from_the_git_directory_stops_the_runner_before_anything_starts() {
+    local gd="$SANDBOX/heldgit" pid
+    wu_need_windows_runner
+    wu_prepare_handoff machine || return 1
+    mkdir -p -- "$gd/usr/bin" || return 1
+    cp -- "$TEST_SYSTEM32/cmd.exe" "$gd/usr/bin/holdsgit.exe" || return 1
+    "$gd/usr/bin/holdsgit.exe" //c "ping -n 60 127.0.0.1 >nul" >/dev/null 2>&1 &
+    pid=$!
+    sleep 2
+    if ! GD_W="$(cygpath -w "$gd")" awk '/^function Get-InstalledDir/ { print "function Get-InstalledDir([string]$Scope) { return \x27" ENVIRON["GD_W"] "\x27 }"; next } { print }' "$WU_RT/bin/gsg-gitup.ps1" >"$WU_DIR/rt.ps1" || ! cp -- "$WU_DIR/rt.ps1" "$WU_RT/bin/gsg-gitup.ps1"; then
+        kill "$pid" 2>/dev/null
+        return 1
+    fi
+    wu_runner "$WU_STATE_HANDOFF"
+    kill "$pid" 2>/dev/null
+    assert_rc 19 "a program of the Git directory is running"
+    assert_contains "$ERR" "holdsgit" "names it"
+    assert_contains "$ERR" "nothing was changed" "and that nothing ran"
+    assert_eq "$(wu_installer_log)" "" "the installer never started"
+    assert_file "$WU_STATE_HANDOFF" "the hand-off is kept, so closing the program and running the runner again works"
+    wait "$pid" 2>/dev/null || true
+}
+
 test_a_missing_installer_or_a_failing_one_is_reported_with_how_to_retry() {
     wu_need_windows_runner
     wu_prepare_handoff machine || return 1
@@ -244,6 +268,8 @@ test_a_missing_installer_or_a_failing_one_is_reported_with_how_to_retry() {
     assert_rc 12 "the installer's own failure"
     assert_contains "$ERR" "returned 3" "its exit code"
     assert_contains "$ERR" "git --version" "what to check"
+    assert_contains "$ERR" "by hand" "and what to do when git-secret-guard cannot start any more"
+    assert_contains "$ERR" "Git-2.56.0.4-64-bit.exe" "naming the installer file the run kept"
     cp -- "$WU_DIR/handoff.copy" "$WU_STATE_HANDOFF" || return 1
     rm -f -- "$WU_HANDOFF_DIR/Git-2.56.0.4-64-bit.exe" || return 1
     wu_runner "$WU_STATE_HANDOFF"
@@ -577,7 +603,18 @@ test_the_cmd_front_end_does_not_run_a_stale_hand_off_that_this_run_did_not_write
 
 test_the_runner_reads_no_environment_variable() {
     assert_eq "$(grep -c '\$env:' "$GSG_PROJECT/bin/gsg-gitup.ps1")" 0 "no environment variable is read, so none can weaken a check"
+    assert_eq "$(grep -c "GetEnvironmentVariable" "$GSG_PROJECT/bin/gsg-gitup.ps1")" 0 "and none through the .NET call either (the user value of PSModulePath came in that way)"
     assert_eq "$(grep -c 'gsg-signer git-for-windows' "$GSG_PROJECT/tools.lock")" 1 "the signer is data in tools.lock next to the digest row"
+}
+
+# ^ external PowerShell 5.1 started from PowerShell 7 inherits its PSModulePath and cannot load the Security module (run 42264892011)
+test_the_runner_resets_the_module_path_before_the_first_cmdlet_that_loads_a_module() {
+    local r="$GSG_PROJECT/bin/gsg-gitup.ps1" reset first
+    reset="$(grep -n "SetEnvironmentVariable('PSModulePath'" "$r" | head -n 1 | cut -d: -f1)"
+    first="$(grep -n 'Get-AuthenticodeSignature\|Get-FileHash\|Get-Command\|Join-Path' "$r" | grep -v '^[0-9]*:#' | head -n 1 | cut -d: -f1)"
+    if [ -z "$reset" ]; then fail "the runner never resets PSModulePath"; return 1; fi
+    if [ "$reset" -gt "$first" ]; then fail "PSModulePath is reset on line $reset, after the first module cmdlet on line $first"; fi
+    assert_contains "$(sed -n "${reset}p" "$r")" "'Process'" "only for its own process"
 }
 
 test_an_installer_that_is_unsigned_or_signed_by_another_signer_is_refused_though_its_digest_is_pinned() {
@@ -728,7 +765,7 @@ test_a_start_failure_other_than_a_declined_prompt_is_not_called_a_decline() {
 }
 
 test_real_the_pinned_installer_passes_every_production_check_and_is_never_started() {
-    local ver cached prod installed want_rc
+    local ver cached prod installed want_rc instdir me
     if [ "$TEST_IS_WINDOWS" -ne 1 ]; then skip_test "checks the real Windows installer with Windows PowerShell"; fi
     ver="$(awk '$1 == "git-for-windows" && $3 == "windows_amd64" { print $2 }' "$GSG_PROJECT/tools.lock")"
     cached="${TEST_TOOLS_CACHE:-}/Git-$ver-64-bit.exe"
@@ -741,6 +778,13 @@ test_real_the_pinned_installer_passes_every_production_check_and_is_never_starte
     installed="$(MSYS2_ARG_CONV_EXCL='*' "$TEST_SYSTEM32/reg.exe" query 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Git_is1' /v DisplayVersion 2>/dev/null | tr -d '\r' | awk '$1 == "DisplayVersion" { print $3 }')"
     want_rc=0
     if [ -n "$installed" ] && [ "$(printf '%s\n%s\n' "$ver" "$installed" | sort -V | tail -1)" = "$installed" ]; then want_rc=17; fi
+    # ^ hazard the harness runs from the install directory, and its own Git Bash counts as a holder on a host with git below the pin
+    if [ "$want_rc" -eq 0 ]; then
+        instdir="$(MSYS2_ARG_CONV_EXCL='*' "$TEST_SYSTEM32/reg.exe" query 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Git_is1' /v InstallLocation 2>/dev/null | tr -d '\r' | awk '$1 == "InstallLocation" { $1 = ""; $2 = ""; sub(/^ +/, ""); print }')"
+        me="$(cygpath -w "$(command -v bash)")"
+        instdir="${instdir%\\}"
+        if [ -n "$instdir" ] && [[ ${me,,} == "${instdir,,}\\"* ]]; then want_rc=19; fi
+    fi
     wu_begin machine 2.52.0.1 || return 1
     mkdir -p -- "$WU_DIR/prod/bin" "$WU_DIR/prod/hand" || return 1
     cp -- "$GSG_PROJECT/bin/gsg-gitup.ps1" "$WU_DIR/prod/bin/" && cp -- "$GSG_PROJECT/tools.lock" "$WU_DIR/prod/" || return 1
@@ -755,6 +799,9 @@ test_real_the_pinned_installer_passes_every_production_check_and_is_never_starte
     assert_contains "$OUT" "SHA-256 and signature of Git-$ver-64-bit.exe verified" "all checks passed, before the version check"
     if [ "$want_rc" -eq 0 ]; then
         assert_contains "$(<"$WU_DIR/verbs.log")" "args=/VERYSILENT /NORESTART /NOCANCEL /SP-" "the start line was reached with the story's flags, and replaced by a stand-in"
+    elif [ "$want_rc" -eq 19 ]; then
+        assert_contains "$ERR" "programs of" "this harness runs from the install directory, and the runner names its programs"
+        assert_no_file "$WU_DIR/verbs.log" "and never reached the start"
     else
         assert_contains "$ERR" "nothing is needed" "this host already has the pinned Git for Windows, so the runner refuses the stale start"
         assert_no_file "$WU_DIR/verbs.log" "and never reached the start"

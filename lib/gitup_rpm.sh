@@ -7,6 +7,7 @@ GITUP_RPM_FLAGS=(NO_RUST=1 NO_TCLTK=1 NO_GETTEXT=1 USE_LIBPCRE2=1)
 GITUP_RPM_FAILED=()
 GITUP_RPM_CANDIDATE=""
 GITUP_DNF=""
+GITUP_RPM_VERB=install
 
 # ^ coupled the takeover is part of this module; its library loads with it and lib/gitup.sh and the CLI do not list it
 # shellcheck source=lib/gitup_takeover.sh
@@ -70,6 +71,9 @@ gitup_rpm_prepare() {
     gitup_rpm_find_dnf || return 1
     GITUP_SRC_DEPS=("$GITUP_DNF" install -y "${GITUP_RPM_DEPS[@]}")
     GITUP_SRC_FLAGS=("${GITUP_RPM_FLAGS[@]}")
+    # ^ external dnf 5 answers "already installed, nothing to do" to install of an older git-core (Fedora 44); upgrade ran there, on dnf 4 it is untested
+    GITUP_RPM_VERB=install
+    if gitup_system_bin rpm && "$REPLY" -q --qf '%{NAME}\n' git-core >/dev/null 2>&1; then GITUP_RPM_VERB=upgrade; fi
 }
 
 gitup_rpm_plan_upgrade() {
@@ -86,7 +90,7 @@ gitup_rpm_plan_upgrade() {
     if gitup_rpm_candidate && [ -n "$GITUP_RPM_CANDIDATE" ] && gitup_version_at_least "$GITUP_RPM_CANDIDATE" "$GSG_MIN_GIT_MAJOR.$GSG_MIN_GIT_MINOR"; then
         GITUP_ROUTE=package
         printf '  route: package; %s offers git-core %s (the query that found it was read-only: it imported no key and answered no prompt)\n' "$GITUP_DNF" "$GITUP_RPM_CANDIDATE"
-        gitup_plan_priv "$GITUP_DNF install -y git-core"
+        gitup_plan_priv "$GITUP_DNF $GITUP_RPM_VERB -y git-core"
         gitup_plan_note "$GITUP_RPM_KEYNOTE"
         return 0
     fi
@@ -114,11 +118,11 @@ gitup_rpm_plan() {
 }
 
 gitup_rpm_apply_package() {
-    gitup_elevate "$GITUP_DNF" install -y git-core || {
-        gitup_changed_add "dnf install git-core was started and failed, so the package manager may have changed packages (see rpm -q git-core)"
+    gitup_elevate "$GITUP_DNF" "$GITUP_RPM_VERB" -y git-core || {
+        gitup_changed_add "dnf $GITUP_RPM_VERB git-core was started and failed, so the package manager may have changed packages (see rpm -q git-core)"
         return 1
     }
-    gitup_changed_add "dnf installed git-core from the repositories"
+    gitup_changed_add "dnf ran $GITUP_RPM_VERB -y git-core from the repositories"
     GITUP_NEW_GIT="$GITUP_USRBIN/git"
 }
 

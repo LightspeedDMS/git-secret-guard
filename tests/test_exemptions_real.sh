@@ -143,9 +143,10 @@ test_real_a_marker_on_another_line_does_not_mute_the_secret() {
 }
 
 internal_id() { printf '%s%s' "ACMEINT" "-482915730264"; }
-# ^ security generated once per run, never a literal => nothing in the tree looks like a credential; 32 random alphanumerics clear the entropy filter
+# ^ security built from fragments at run time, never a literal => nothing in the tree looks like a credential; every run judges the same key
+# ^ why a fixed key, not a random draw; the built-in rule skips a value holding a dictionary stopword (vpn is one), and a random draw can meet one
 # ^ external betterleaks 1.9.0 reports this shape as generic-api-key (a built-in rule); trufflehog and our aws-access-key-id rule do not match it
-GENERIC_KEY="$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32 || true)"
+GENERIC_KEY="$(printf '%s%s%s%s' "7Hk2QxM9" "vLp4ZtB8" "Rw3NcY6j" "Gd5SfX1q")"
 generic_key() { printf '%s' "$GENERIC_KEY"; }
 builtin_line() { printf 'api_key = "%s"' "$(generic_key)"; }
 commit_gitleaks_toml() {

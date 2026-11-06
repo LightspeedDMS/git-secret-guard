@@ -109,6 +109,7 @@ answer() { if [ -f "$d/$1" ]; then cat "$d/$1"; exit 0; fi; echo "error: the rpm
 case "$*" in
     "-qf --qf %{NAME}\n -- "*) if [ -f "$d/rpm.owner" ]; then cat "$d/rpm.owner"; exit 0; fi; echo "file $5 is not owned by any package" >&2; exit 1 ;;
     "-q --qf %{NAME}-%{VERSION}-%{RELEASE}.%{ARCH}\n git-core") answer rpm.nevra ;;
+    "-q --qf %{NAME}\n git-core") answer rpm.nevra ;;
     "-ql git-core") answer rpm.files ;;
     "-q --qf %{SOURCERPM}\n git-core") answer rpm.srpm ;;
     "-qa --qf %{NAME} %{SOURCERPM}\n") answer rpm.all ;;

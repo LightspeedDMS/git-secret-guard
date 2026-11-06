@@ -24,9 +24,10 @@ test_a_rocky_machine_with_an_old_git_builds_the_pinned_source_when_the_user_acce
     assert_contains "$OUT" "git-2.56.0.tar.xz" "and the tarball"
     assert_contains "$OUT" "env -i with PATH=" "and the clean build environment"
     assert_contains "$OUT" "as root: $SANDBOX/pathbin/dnf install -y gcc make" "and the dependency command with the full path of the dnf root will run"
-    assert_contains "$OUT" "/cp -dR --preserve=timestamps,links" "and the copy"
+    assert_contains "$OUT" "/cp -dR --remove-destination --preserve=timestamps,links" "and the copy, which replaces an existing file instead of writing through a link"
     assert_contains "$(gu_log)" "make -C" "make ran"
     assert_contains "$(gu_log)" "prefix=$GU_ROOT/usr/local NO_RUST=1 NO_TCLTK=1 NO_GETTEXT=1 USE_LIBPCRE2=1" "with the proven flags and the prefix"
+    assert_contains "$(gu_log)" "INSTALL_SYMLINKS=1" "git installs its siblings as symlinks, so no hard link ties bin/git to libexec"
     assert_contains "$(gu_log)" "DESTDIR=" "into a stage directory"
     assert_eq "$("$GU_ROOT/usr/local/bin/git" --version)" "git version 2.56.0" "git is built into /usr/local"
     assert_file "$LC_STATE/state" "install ran to the end"
@@ -55,6 +56,31 @@ test_a_machine_whose_repositories_offer_a_new_enough_git_is_upgraded_through_dnf
 }
 
 pathbin_git_version() { "$SANDBOX/pathbin/git" --version; }
+
+# ^ external dnf 5 answers already installed to dnf install of an older installed package; dnf 4 upgrades it (Fedora 44, run 42257678269)
+test_an_old_package_git_is_upgraded_with_dnf_upgrade_because_dnf_install_leaves_it_alone() {
+    gu_rpm_setup || return 1
+    printf '2.55.0\n' >"$SANDBOX/dnf.candidate"
+    printf '2.55.0' >"$SANDBOX/dnf.upgrade_to"
+    printf 'git-core-2.47.0-1.fc41.x86_64\n' >"$SANDBOX/rpm.nevra"
+    gsg install --upgrade-git </dev/null
+    assert_rc 0 "package route with an installed old git-core"
+    assert_contains "$OUT" "as root: $SANDBOX/pathbin/dnf upgrade -y git-core" "the plan says upgrade"
+    check_plan_matches_log "$OUT" "the package route over an installed git-core"
+    assert_contains "$(gu_log)" "dnf upgrade -y git-core" "and dnf upgraded git-core"
+    assert_not_contains "$(gu_log)" "dnf install -y git-core" "dnf install is not used on an installed package"
+    assert_eq "$(pathbin_git_version)" "git version 2.55.0" "git is the repository's"
+}
+
+test_a_missing_git_core_is_installed_with_dnf_install() {
+    gu_rpm_setup || return 1
+    printf '2.55.0\n' >"$SANDBOX/dnf.candidate"
+    printf '2.55.0' >"$SANDBOX/dnf.upgrade_to"
+    gsg install --upgrade-git </dev/null
+    assert_rc 0 "package route without git-core installed"
+    assert_contains "$OUT" "as root: $SANDBOX/pathbin/dnf install -y git-core" "the plan says install"
+    assert_not_contains "$(gu_log)" "dnf upgrade -y git-core" "and upgrade is not used"
+}
 
 test_the_repository_query_is_read_only_bounded_and_never_answers_a_prompt() {
     gu_rpm_setup || return 1
@@ -250,6 +276,21 @@ test_a_pin_bump_is_offered_and_replaces_the_old_build_and_its_obsolete_files() {
     assert_file "$GU_ROOT/usr/local/share/doc/git-2.56.0-local/MANIFEST" "a new MANIFEST was saved"
     assert_no_file "$GU_ROOT/usr/local/share/man/man1/obsolete.1" "a file the new version no longer ships is removed"
     assert_no_file "$GU_ROOT/usr/local/share/doc/git-2.55.0-local" "and so is the old MANIFEST directory"
+}
+
+# ^ hazard cp onto an existing symlink writes through it; a later pin shipping a builtin as a program would overwrite the link target
+test_a_rebuild_replaces_a_symlink_of_the_old_build_and_never_writes_through_it() {
+    local b victim_before
+    gu_rpm_setup || return 1
+    gu_old_build 2.55.0 || return 1
+    b="$GU_ROOT/usr/local/bin"
+    mv -- "$b/git-shell" "$b/git-shell.victim" && ln -s git-shell.victim "$b/git-shell" || return 1
+    victim_before="$(<"$b/git-shell.victim")"
+    gsg install --upgrade-git </dev/null
+    assert_rc 0 "install --upgrade-git over a build whose git-shell is a symlink"
+    if [ -L "$b/git-shell" ]; then fail "git-shell is still a symlink"; fi
+    assert_eq "$(<"$b/git-shell.victim")" "$victim_before" "the file the old link pointed at was not written"
+    assert_eq "$("$b/git" --version)" "git version 2.56.0" "the new build is in place"
 }
 
 test_declining_a_pin_bump_changes_nothing_and_install_continues() {

@@ -10,8 +10,9 @@ if [ "$TEST_IS_WINDOWS" -eq 1 ]; then FILE_SKIP_REASON="Linux package manager hi
 UBUNTU_FIX="sudo add-apt-repository ppa:git-core/ppa && sudo apt install git"
 
 # ^ external install reads the distribution from GSG_OS_RELEASE, default /etc/os-release; the tests point it at fixtures
+# ^ why the system paths move into the sandbox too, not only os-release; a git in the real /usr/local/bin would change the refusal under test
 os_release() {
-    printf '%s\n' "$@" >"$SANDBOX/os-release" && set_env GSG_OS_RELEASE="$SANDBOX/os-release"
+    mkdir -p -- "$SANDBOX/root/usr/bin" "$SANDBOX/root/usr/local/bin" && printf '%s\n' "$@" >"$SANDBOX/os-release" && set_env GSG_OS_RELEASE="$SANDBOX/os-release" GSG_GITUP_ROOT="$SANDBOX/root"
 }
 
 ubuntu_release() { os_release 'NAME="Ubuntu"' 'ID=ubuntu' 'ID_LIKE=debian' 'VERSION_ID="24.04"'; }

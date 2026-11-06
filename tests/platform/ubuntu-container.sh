@@ -71,7 +71,7 @@ parse_args() {
                 ;;
             --phase)
                 shift
-                case "${1:-}" in prepare | e2e | suite | upgrade) PHASES+=("$1") ;; *) usage >&2; exit 2 ;; esac
+                case "${1:-}" in prepare | e2e | suite | upgrade | upgrade-root | upgrade-password | upgrade-bump | upgrade-old | upgrade-takeover | upgrade-offline) PHASES+=("$1") ;; *) usage >&2; exit 2 ;; esac
                 ;;
             --suite-file)
                 shift
@@ -177,6 +177,8 @@ ISOLATION_MOUNT_RULES+=" /proc/scsi=tmpfs /proc/sys=proc /proc/sysrq-trigger=pro
 ISOLATION_MOUNT_RULES+=" /proc/latency_stats=devtmpfs /proc/sched_debug=devtmpfs /proc/timer_stats=devtmpfs"
 # ^ external podman 5.6.0 masks the directory /sys/devices/virtual/powercap with a tmpfs where intel_rapl exists (name in its binary)
 ISOLATION_MOUNT_RULES+=" /sys/devices/virtual/powercap=tmpfs"
+# ^ external podman 4.9.3 (ubuntu-24.04 hosted runner) masks the directory /sys/dev/block with a tmpfs; in its config.json maskedPaths
+ISOLATION_MOUNT_RULES+=" /sys/dev/block=tmpfs"
 ISOLATION_MOUNT_RULES+=" /src=* /sys=sysfs /sys/firmware=tmpfs /sys/fs/cgroup=cgroup2 /sys/fs/selinux=tmpfs "
 
 ISOLATION_MAX_MOUNT_LINES=500
@@ -430,6 +432,8 @@ build_git_from_tarball() {
 # ^ security install_git_ppa rc 2 = the PPA may still be enabled => one counted failure and no source build (its root apt install would trust the PPA)
 obtain_git() {
     local ok=0 ppa_rc
+    # ^ why source for Debian in auto mode, not a PPA try; Launchpad serves Ubuntu releases, and the product's Debian class takes the source route
+    if [ "$GIT_SOURCE" = auto ] && [ "$(os_field ID)" = debian ]; then GIT_SOURCE=source; fi
     if [ "$GIT_SOURCE" != source ]; then
         if [ "$GIT_SOURCE" = auto ]; then STEP_SOFT=1; fi
         install_git_ppa
@@ -476,12 +480,21 @@ install_shellcheck() {
     step "install shellcheck" 60 install -m 755 "$dir/shellcheck-v$v/shellcheck" /usr/local/bin/shellcheck || return 1
 }
 
+# ^ external software-properties-common (add-apt-repository) exists on Ubuntu only; Debian 13 has no such package
+apt_prerequisites() {
+    local -a pkgs=(ca-certificates curl gnupg jq tar xz-utils gzip util-linux coreutils procps pre-commit systemd dbus gawk mawk perl)
+    if [ "$(os_field ID)" = ubuntu ]; then pkgs+=(software-properties-common); fi
+    # ^ why the stock git on Debian too, not only the build; as on Rocky, a doctor test calls /usr/bin/git and the source build leaves it alone
+    if [ "$(os_field ID)" = debian ]; then pkgs+=(git); fi
+    printf '%s\n' "${pkgs[@]}"
+}
+
 phase_prepare() {
+    local -a pkgs
     export DEBIAN_FRONTEND=noninteractive
+    mapfile -t pkgs < <(apt_prerequisites)
     step "apt-get update" "$APT_TIMEOUT" apt-get update || return 1
-    step "apt-get install prerequisites" "$APT_TIMEOUT" apt-get install -y --no-install-recommends \
-        ca-certificates curl gnupg jq tar xz-utils gzip util-linux coreutils procps pre-commit systemd dbus \
-        gawk mawk software-properties-common perl || return 1
+    step "apt-get install prerequisites" "$APT_TIMEOUT" apt-get install -y --no-install-recommends "${pkgs[@]}" || return 1
     step "start the system bus (systemd-analyze connects to it)" 60 bash -c 'mkdir -p /run/dbus && dbus-daemon --system --fork' || return 1
     install_shellcheck || return 1
     step "make mawk the default awk" 60 update-alternatives --set awk /usr/bin/mawk || return 1
@@ -580,7 +593,7 @@ main() {
         }
     fi
     for phase in "${PHASES[@]}"; do
-        "phase_$phase" || record_fail "phase $phase did not finish"
+        "phase_${phase//-/_}" || record_fail "phase $phase did not finish"
     done
     print_summary
     [ "$FAILURES" -eq 0 ]

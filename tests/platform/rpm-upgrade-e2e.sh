@@ -373,19 +373,28 @@ fedora_package() {
     check "the takeover has nothing to do on the package route" has "nothing to take over"
 }
 
-case "$DISTRO" in
-    rocky)
-        rocky_upgrade
-        rocky_takeover
-        rocky_takeover_dnf
-        rocky_restore
-        rocky_interrupts
-        ;;
-    fedora) fedora_package ;;
-    *)
-        printf 'usage: rpm-upgrade-e2e.sh rocky|fedora\n' >&2
-        exit 2
-        ;;
-esac
-printf 'E2E SUMMARY: %s passed, %s failed\n' "$pass" "$fail"
-[ "$fail" -eq 0 ]
+# ^ coupled sourced by rpm-more-e2e.sh, a reuse of these functions; main runs only when this file is executed
+e2e_summary() {
+    printf 'E2E SUMMARY: %s passed, %s failed\n' "$pass" "$fail"
+    [ "$fail" -eq 0 ]
+}
+
+main() {
+    case "$DISTRO" in
+        rocky)
+            rocky_upgrade
+            rocky_takeover
+            rocky_takeover_dnf
+            rocky_restore
+            rocky_interrupts
+            ;;
+        fedora) fedora_package ;;
+        *)
+            printf 'usage: rpm-upgrade-e2e.sh rocky|fedora\n' >&2
+            exit 2
+            ;;
+    esac
+    e2e_summary
+}
+
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then main; fi

@@ -20,6 +20,7 @@ ME="$(id -un)"
 
 # ^ invariant true when ausearch finds no AVC or USER_AVC record since AVC_MARK; the records themselves go to OUT for the log
 no_new_avc() {
+    vm_policy_allows
     # shellcheck disable=SC2086
     OUT="$(sudo ausearch -m AVC,USER_AVC -ts $AVC_MARK 2>&1)"
     [[ $OUT == *"<no matches>"* ]]
@@ -43,7 +44,7 @@ vm_prepare() {
     show "$(uname -r); $(cat /etc/rocky-release)"
     check "SELinux is enforcing" test "$(getenforce)" = Enforcing
     show "$(sestatus | head -n 3 | tr '\n' ' ')"
-    check "the prerequisites install" bash -c 'sudo dnf install -y --setopt=install_weak_deps=False jq rpm-build createrepo_c policycoreutils audit libselinux-utils git >/dev/null 2>&1'
+    check "the prerequisites install" bash -c 'sudo dnf install -y --setopt=install_weak_deps=False jq rpm-build createrepo_c policycoreutils audit libselinux-utils setools-console git >/dev/null 2>&1'
     check "auditd is running, so denials are recorded" sudo systemctl is-active auditd
     check "sshd is running" sudo systemctl is-active sshd
     AVC_MARK="$(date '+%x %T')"
@@ -120,10 +121,15 @@ vm_restored() {
     show "$(printf '%s' "$OUT" | head -n 6 | cut -c1-200)"
 }
 
-# ^ invariant a confined domain is tried when runcon can enter it; the control (/usr/bin/true) tells a refused transition from a refused git
-vm_confined_run() {
-    sudo runcon -u system_u -r system_r -t httpd_t -- "$@" 2>&1 | head -n 2 | tr '\n' ' '
-    printf '(rc %s)' "${PIPESTATUS[0]}"
+# ^ why a policy query, not a run; unconfined_t cannot enter a confined domain on these files (runcon says Permission denied even for /usr/bin/true)
+vm_policy_allows() {
+    local dom type n
+    for dom in httpd_t git_script_t sshd_t; do
+        for type in bin_t usr_t; do
+            n="$(sudo sesearch -A -s "$dom" -t "$type" -c file -p execute 2>/dev/null | grep -c 'allow ')"
+            show "policy: $dom may execute $type files: $n rule(s)"
+        done
+    done
 }
 
 vm_restorecon_effect() {
@@ -138,9 +144,6 @@ vm_restorecon_effect() {
     clone_over_ssh /usr/local/bin/git-upload-pack
     show "clone served through /usr/local/bin/git-upload-pack after the relabel: exit $RC; $CLONE_OUT"
     check "the clone still works" test "$RC" -eq 0
-    show "httpd_t runs /usr/bin/true (control): $(vm_confined_run /usr/bin/true)"
-    show "httpd_t runs /usr/local/bin/git --version: $(vm_confined_run /usr/local/bin/git --version)"
-    show "httpd_t runs git-remote-https (usr_t after the relabel): $(vm_confined_run /usr/local/libexec/git-core/git-remote-https)"
     # shellcheck disable=SC2086
     show "AVC records since: $(sudo ausearch -m AVC,USER_AVC -ts $mark 2>&1 | head -n 6 | cut -c1-240)"
 }

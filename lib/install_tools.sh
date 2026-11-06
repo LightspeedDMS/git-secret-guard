@@ -189,8 +189,11 @@ install_commit_tools() {
         # ^ why capture install's stderr, not let it through; coreutils prints its own line before ours, and the reason belongs inside the one message
         err="$(install -m 755 -T -- "$GSG_STAGE/out/$(tools_binary_name "$tool")" "$new" 2>&1)" || {
             err="${err%%$'\n'*}"
-            err="${err#install: }"
+            # ^ why strip through the name, not only its start; an absolute-path exec wrapper, as the lifecycle stand-ins are, makes install print its full path
+            err="${err#*install: }"
             err="${err//[[:cntrl:]]/?}"
+            # ^ why our own text for a directory, not install's; one wording on every platform and no reliance on coreutils phrasing
+            if [ -d "$new" ]; then err="a directory is in the way"; fi
             printf '%s: could not place %s (cannot write %s%s)\n' "$GSG_NAME" "$target" "$new" "${err:+: ${err:0:200}}" >&2
             return 1
         }

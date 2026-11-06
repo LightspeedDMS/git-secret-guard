@@ -189,7 +189,9 @@ test_apt_get_update_comes_before_the_first_install_on_every_route() {
 test_a_failing_gpg_is_a_failure_even_when_the_pin_is_in_its_output() {
     gu_apt_setup 2.43.0 ubuntu "$NOBLE_STOCK" "$NOBLE_PPA" || return 1
     printf 'STUBGARBAGE\n' >>"$SANDBOX/apt.fixture/sources/sources.list.d/git-core-ubuntu-ppa-noble.sources" || return 1
-    sed -i 's/^ -----END PGP PUBLIC KEY BLOCK-----$/ STUBGARBAGE\n -----END PGP PUBLIC KEY BLOCK-----/' "$SANDBOX/apt.fixture/sources/sources.list.d/git-core-ubuntu-ppa-noble.sources" || return 1
+    awk '$0 == " -----END PGP PUBLIC KEY BLOCK-----" { print " STUBGARBAGE" } { print }' "$SANDBOX/apt.fixture/sources/sources.list.d/git-core-ubuntu-ppa-noble.sources" \
+        >"$SANDBOX/garbage.new" && mv "$SANDBOX/garbage.new" "$SANDBOX/apt.fixture/sources/sources.list.d/git-core-ubuntu-ppa-noble.sources" || return 1
+    assert_contains "$(<"$SANDBOX/apt.fixture/sources/sources.list.d/git-core-ubuntu-ppa-noble.sources")" $'\n STUBGARBAGE\n -----END' "the garbage is on its own line inside the key block"
     gsg install --upgrade-git </dev/null
     assert_rc 0 "the source route follows"
     assert_contains "$ERR" "gpg" "the output names gpg as the reason"
@@ -275,7 +277,7 @@ test_an_interrupt_prints_a_real_reason_and_removes_only_what_this_run_added() {
     OUT="$(<"$SANDBOX/int.out")"
     assert_contains "$OUT" "route was interrupted by a signal" "the reason is not empty"
     assert_not_contains "$OUT" "the only change made was the git upgrade of this run" "an interrupted upgrade did not upgrade anything"
-    assert_contains "$OUT" "left behind by the failed git upgrade" "the summary says what the interrupted attempt left"
+    assert_contains "$OUT" "the failed git upgrade of this run left behind" "the summary says what the interrupted attempt left"
     assert_not_contains "$OUT" "failed: "$'\n' "no empty reason"
     assert_empty "$(ppa_files)" "what this run added is removed"
 }
@@ -548,7 +550,7 @@ test_a_failed_route_and_failed_fallback_do_not_claim_an_upgrade() {
     gsg install --upgrade-git </dev/null
     assert_rc 1 "both fail"
     assert_not_contains "$ERR" "the only change made was the git upgrade of this run" "nothing was upgraded, so the text must not say so"
-    assert_contains "$ERR" "left behind by the failed git upgrade" "it says what the failed attempt left"
+    assert_contains "$ERR" "the failed git upgrade of this run left behind" "it says what the failed attempt left"
 }
 
 test_the_rebuild_plan_prints_the_aside_lines_before_the_rebuild_and_a_refusal_prints_no_plan() {
@@ -649,6 +651,8 @@ test_on_a_failing_route_a_neighbours_files_stay_and_an_unjudged_key_stops_the_up
     assert_not_contains "$(gu_log)" "vendor" "no root command names a vendor file"
     assert_contains "$ERR" "vendor.gpg" "the key is named"
     assert_contains "$ERR" "cannot tell" "with the reason"
+    assert_contains "$ERR" ": removed git-core" "the stop text names the PPA files that were removed"
+    assert_contains "$ERR" "refreshed apt; cannot tell" "and that apt was refreshed"
     assert_empty "$(ppa_files)" "the files that are provably the PPA's were removed"
     assert_not_contains "$(gu_log)" "make " "no source build while a key cannot be judged"
 }

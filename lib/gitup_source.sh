@@ -271,6 +271,12 @@ gitup_source_compile() {
 GITUP_SRC_CP=(cp -dR "--preserve=timestamps,links" --)
 gitup_source_docdir() { printf '%s/share/doc/git-%s-local' "$GITUP_PREFIX" "$GITUP_PIN_VER"; }
 
+# ^ invariant prints the clause GITUP_CHANGED holds during the copy; the next step comes first and the clause has no bracket, since brew_unchanged_text wraps it
+gitup_source_copy_clause() {
+    printf 'files of git %s may be partly copied into %s, so run %s install --upgrade-git again to finish the copy, MANIFEST.partial in %s lists them' \
+        "$GITUP_PIN_VER" "$GITUP_PREFIX" "$GSG_NAME" "$1"
+}
+
 gitup_source_install() {
     local docdir f dir seen=" " copying
     docdir="$(gitup_source_docdir)"
@@ -278,7 +284,7 @@ gitup_source_install() {
     gitup_source_check_foreign "$GITUP_BUILD_DIR/MANIFEST" || return 1
     gitup_elevate mkdir -p -- "$docdir" && gitup_elevate install -m 644 -- "$GITUP_BUILD_DIR/MANIFEST" "$docdir/MANIFEST.partial" || return 1
     # ^ invariant the clause is recorded before the copy starts => an interrupt still reports files in the prefix and the next step
-    copying="files of git $GITUP_PIN_VER may be partly copied into $GITUP_PREFIX (their MANIFEST.partial is saved in $docdir, so running install --upgrade-git again finishes the copy)"
+    copying="$(gitup_source_copy_clause "$docdir")" || return 1
     gitup_changed_add "$copying"
     gitup_elevate "${GITUP_SRC_CP[@]}" "$GITUP_STAGE$GITUP_PREFIX/." "$GITUP_PREFIX/" || return 1
     gitup_changed_drop "$copying"

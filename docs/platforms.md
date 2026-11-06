@@ -4,7 +4,7 @@
 |---|---|
 | RHEL 9-compatible (x86_64) | Supported. RHEL 9-compatible (tested on Rocky Linux 9.7); there `/usr/local/bin/git` is built from source and `/usr/bin/git` 2.52 is left alone. |
 | Ubuntu 24.04 LTS | Supported. The whole suite and an install E2E with real downloads run in a podman `ubuntu:24.04` container, as a non-root user, with mawk as the default awk: `tests/platform/ubuntu.sh`. `install` offers the git upgrade: see [Ubuntu and Debian (apt)](#ubuntu-and-debian-apt). |
-| Ubuntu 22.04 LTS and Debian 13 | Offer written and tested against stand-ins (2.34.1 on 22.04 takes the PPA in its older `.list` form, Debian takes the source build). The container runs `tests/platform/ubuntu.sh --os ubuntu-22.04 --phase upgrade` and `--os debian-13 --phase upgrade` are written but **were not run yet**. |
+| Ubuntu 22.04 LTS and Debian 13 | Offer tested against stand-ins (2.34.1 on 22.04 takes the PPA in its older `.list` form, Debian takes the source build) and, with real apt, in debootstrap chroots (22.04, 24.04, Debian 13, 20.04). Debian 13 also ran the `--phase upgrade` container E2E (source route, 21/0). **Not run:** an Ubuntu 22.04 container and an x86_64 container ([details](#ubuntu-and-debian-apt)). |
 | macOS arm64 (tested on macOS 26.7.1) | Supported, with Homebrew: see [macOS (Homebrew)](#macos-homebrew). The whole suite and an install E2E in a scratch home run on a real Mac. |
 | Windows x86_64 (tested on Windows Server 2019) | Supported with Git for Windows: see [Windows (Git for Windows)](#windows-git-for-windows). No weekly timer; the lifecycle test suites do not run there. |
 | WSL (Ubuntu, Debian, RPM distributions) | Implemented, fixture-tested, and run for real on hosted WSL 1 and WSL 2 (runs 42237326449 and 42240922868, both legs pass); Ubuntu 24.04, an RPM distribution, a `metadata` mount and a typed yes are not run, see [WSL](#wsl-windows-subsystem-for-linux). WSL 1 on Windows Server 2019 blue-screened the maintainer's host twice in its own driver; the cause is not established. |
@@ -110,7 +110,7 @@ No, offered on every install that finds the old package git next to a qualifying
 - **Undo:** `git-secret-guard restore-system-git` acts on what is on disk (the record, the `dnf.conf` marker, the links). It puts back every recorded file that is
   our link or missing (hash checked), accepts a file that is neither ours nor the saved original only when `rpm -qf` names `git-core` as its owner and
   `rpm -V git-core` does not list it (otherwise it says so and the backup stays), removes the `dnf.conf` entry from the marker alone (a package you added
-  to the line stays, and an unrelated line below the marker is kept), and removes the backup directory last, then the empty `/var/lib/git-secret-guard`. A Ctrl-C or SIGTERM during the restore ends it with
+  to the line stays, and an unrelated line below the marker is kept), and removes the backup directory last, then the empty `/var/lib/git-secret-guard` (a second run removes one a by-hand restore left behind). A Ctrl-C or SIGTERM during the restore ends it with
   the state of the machine and the command to run next (`restore-system-git` again; the backup is removed last, so a repeat is safe), and no temporary directory is left
   behind. The upgrade plan and the takeover plan list every privileged command by its full path, `mkdir` included, and those are the files that run. It needs no
   network and no dnf, and says `nothing to restore` on a second run. `uninstall` stops in every takeover state except none (active, partial, undone, broken) and names
@@ -118,8 +118,8 @@ No, offered on every install that finds the old package git next to a qualifying
   `install --take-over-system-git` refuse and print those commands, built from the saved originals in `orig/` (or `dnf reinstall` when the originals are gone). `active`
   needs the `excludepkgs` line itself below the marker, not only the marker comment; a rerun of `install --take-over-system-git` puts a deleted line back.
   `status` and `doctor` report an active takeover and a
-  leftover one as a problem, with the fix: `PARTIAL` (`/usr/bin/git` is still our link, so commits are scanned; finish with `install --take-over-system-git`
-  or undo with `restore-system-git`) and `UNDONE` (`/usr/bin/git` is not our link, so commits through it are no longer scanned).
+  leftover one as a problem, with the fix: "the takeover is half done" (`/usr/bin/git` is still our link, so commits are scanned; finish with `install --take-over-system-git`
+  or undo with `restore-system-git`) and "the takeover is partly undone" (`/usr/bin/git` is not our link, so commits through it are no longer scanned).
 - **A rebuild under an active takeover is refused**, before any privileged command: `cp` would replace the files the links point at in place, and an
   interruption there would break `/usr/bin/git`. The way out is `restore-system-git`, `install --upgrade-git`, then the takeover again.
 - A takeover is recorded on the machine only by its backup directory and its symlinks; no key was added to the install state.
@@ -142,6 +142,10 @@ does (private copy of the tracked files, `env -i`, `CONTAINERS_CONF` with an emp
   `install --upgrade-git` takes the package route (dnf 5), a blocked fake key, a rerun, and the takeover has nothing to do.
   To bump the digest: `curl -I -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json'
   https://registry.fedoraproject.org/v2/fedora/manifests/44` and read `docker-content-digest` (it equals the DIGEST column of `podman images --digests`).
+- **`sudo` and Ctrl-C.** With `use_pty` (on by default since sudo 1.9.14) `sudo` runs the command on its own pseudo-terminal. A Ctrl-C
+  typed during a `sudo` call can then be absorbed there and never reach bash, so the interrupt traps of `install` and `restore-system-git` do not fire; the
+  privileged command finishes or fails by itself and the run goes on. Every step can be repeated (backup last, partial states are
+  reported by `status` and `doctor`). The test suite sends its signals to the process group of the CLI and not through a terminal.
 - **Not proved:** SELinux. The containers run without an enforcing policy, so `restorecon` is called and logged but its effect, and `sshd` serving
   `git-upload-pack` through the taken-over path, need the manual run on an enforcing Rocky VM. The takeover and the Rocky E2E were not run against the reference host.
 
@@ -181,7 +185,7 @@ source build).
 
 **The PPA route, in this order (the order is a security rule).**
 
-0. **The PPA files already on the machine are looked at first**, before the candidate chooses a route (a wrong key with a 2.56 candidate must not take the package route). Files that pass the key check below are kept and used as they are: no `add-apt-repository`, nothing removed if the route fails. Files that are no enabled PPA (a leftover key or a disabled entry does not hide the distribution's own good package: when apt's candidate is new enough and not offered by a PPA, the leftover goes aside and the package route follows) (only a key left by `add-apt-repository -r`, an entry with `Enabled: no` (apt reads the false words `no false without off disable 0`, any case), commented-out lines) or that carry another key are moved to a root-owned `/var/lib/git-secret-guard/ppa-aside-<UTC>/` (never deleted; the output names the place and prints the `mv -n` commands that put each file back; `install` and `uninstall` keep that directory) and apt is refreshed before the fresh route starts. The rebuild route (a build of ours older than the pin) runs the same preflight and lists the same commands. The scan reads the URL on any non-comment line, so `URIs:https://...` and a folded `URIs:` value are found too. An entry for the PPA under any other file name (found by content in `sources.list`, `*.list` and `*.sources`) cannot be checked and stops the route with the file named.
+0. **The PPA files already on the machine are looked at first**, before the candidate chooses a route (a wrong key with a 2.56 candidate must not take the package route). Files that pass the key check below are kept and used as they are: no `add-apt-repository`, nothing removed if the route fails. A file is no enabled PPA when it holds only a key left by `add-apt-repository -r`, an entry with `Enabled: no`, or commented-out lines. Apt reads the false words `no false without off disable 0` in any case. A leftover key or a disabled entry does not hide the distribution's own good package: when apt's candidate is new enough and not offered by a PPA, the leftover goes aside and the package route follows. Files that are no enabled PPA, or that carry another key, are moved to a root-owned `/var/lib/git-secret-guard/ppa-aside-<UTC>/` (never deleted; the output names the place and prints the `mv -n` commands that put each file back; `install` and `uninstall` keep that directory) and apt is refreshed before the fresh route starts. The rebuild route (a build of ours older than the pin) runs the same preflight and lists the same commands. The scan reads the URL on any non-comment line, so `URIs:https://...` and a folded `URIs:` value are found too. An entry for the PPA under any other file name (found by content in `sources.list`, `*.list` and `*.sources`) cannot be checked and stops the route with the file named.
 1. As root, only when `add-apt-repository` or `gpg` is missing: `apt-get update`, then `apt-get install -y --no-install-recommends software-properties-common gnupg`. An `add-apt-repository` whose `--help` does not name `--no-update` (Linux Mint's) is not used: the source build follows.
 2. `add-apt-repository -y -n ppa:git-core/ppa`. `-n` runs no `apt-get update`, so no apt run has seen the new key yet. The real tool keeps an entry that exists and imports the key into the existing keyring, so its result can hold more keys than the pin.
 The layouts add-apt-repository wrote on real systems (E2E of 2026-11-05, WSL 1 chroots):
@@ -220,8 +224,13 @@ distribution's `/usr/bin/git` in place, so `install` still warns about it; `--ta
 
 The container runs: `tests/platform/ubuntu.sh --phase upgrade` (24.04, `.sources` form), `tests/platform/ubuntu.sh --os ubuntu-22.04 --phase upgrade` (22.04, `.list` form) and
 `tests/platform/ubuntu.sh --os debian-13 --phase upgrade` (source route) start from the stock git, run `install --upgrade-git` as a non-root user with real apt, the real PPA and real downloads,
-check the file form of the PPA, a blocked fake key, a rerun and uninstall. **They were written without a container runtime on the development host and have not been run yet**, and the launcher's mount
-and `/dev` baselines were written for the 24.04 image and must be checked on the new ones.
+check the file form of the PPA, a blocked fake key, a rerun and uninstall.
+
+Ran on 2026-11-06 (arm64 Mac, podman, branch head 29763a8). `mac-linux.sh` takes `ubuntu|rocky` only, has no `--os` and always starts the 24.04 image:
+- `ubuntu:24.04@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852`, via `mac-linux.sh ubuntu --phase upgrade`: E2E 27 passed, 0 failed, PPA route (2.43.0 to 2.56.0 from the PPA package).
+- `debian:13@sha256:9c6e381421d0f48d1b8133e573f33c185ee16cbf505eda9c4a8a4791b25ea8a6` (the `ubuntu.sh` pin), via the same podman command `mac-linux.sh` builds with that image and `ubuntu-container.sh --expect-os debian:13 --skip-isolation <reason> --phase upgrade`: E2E 21 passed, 0 failed, source route (2.47.3 to `/usr/local` 2.56.0).
+
+**Not run:** the Ubuntu 22.04 container (`--os` cannot be forwarded through `mac-linux.sh`) and any x86_64 container. Earlier real-apt chroot runs (22.04, 24.04, Debian 13, 20.04) covered the file forms.
 
 ### By hand
 

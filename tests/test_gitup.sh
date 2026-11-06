@@ -242,7 +242,7 @@ test_another_refusal_stops_the_upgrade_from_starting() {
 
 test_a_class_with_no_module_keeps_todays_refusal_and_offers_nothing() {
     local id
-    for id in ubuntu debian alpine; do
+    for id in alpine archlinux; do
         lc_begin && gu_old_git 2.43.0 && gu_os_release "ID=$id" || return 1
         gsg install </dev/null
         assert_rc 1 "old git on $id"

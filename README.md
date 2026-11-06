@@ -11,7 +11,7 @@ git config-based hook, so it runs alongside whatever hooks a repository brings (
 |---|---|---|
 | **Windows x86_64** (tested on Windows Server 2019) | [Git for Windows](https://git-scm.com/download/win) with git 2.54 or newer | `jq` (a pinned, checksum-verified `jq.exe`); `taskkill`, `timeout`, `curl` and `tar` come with Windows and Git for Windows |
 | **macOS arm64** (tested on macOS 26.7.1; x86_64 is mapped but not tested) | Homebrew | bash 4.4+, `coreutils`, `util-linux` and `jq`, with `brew install`, after its other checks have passed |
-| **Linux** x86_64 or arm64 (tested on RHEL 9-compatible Rocky Linux 9.7 and on Ubuntu 24.04 in a podman container) | bash, `jq`, `setsid`, `timeout`, and `curl` plus `tar` to download the scanners; git 2.54 or newer, unless `install` can upgrade it for you | on RHEL, Rocky, AlmaLinux and Fedora, an old or missing git, if you agree; anything else it names, with how to get it |
+| **Linux** x86_64 or arm64 (the suite and install E2E ran on Rocky Linux 9.7 and Ubuntu 24.04 in podman containers; the git upgrade on Ubuntu and Debian has only run against stand-ins, its container runs are written and not run yet) | bash, `jq`, `setsid`, `timeout`, and `curl` plus `tar` to download the scanners; git 2.54 or newer, unless `install` can upgrade it for you | on RHEL, Rocky, AlmaLinux, Fedora, Ubuntu and Debian, an old or missing git, if you agree; anything else it names, with how to get it |
 
 **git 2.54 or newer has to be first on `PATH`** on every platform: older git ignores config hooks without any message.
 When `install` finds an older or missing git, what happens depends on the platform:
@@ -19,7 +19,8 @@ When `install` finds an older or missing git, what happens depends on the platfo
 - **RHEL, Rocky, AlmaLinux and Fedora:** `install` shows its plan and offers to upgrade git (the default is No; with no terminal, pass `--upgrade-git`). It uses the
   distribution's package when that is new enough, and otherwise builds the pinned source into `/usr/local`. If an old package git stays in `/usr/bin`, `install` also offers
   `--take-over-system-git`, which points it at the new build (undo: `restore-system-git`). See [docs/platforms.md](docs/platforms.md#rhel-rocky-and-fedora-rpm).
-- **Other platforms:** `install` refuses and prints how to get a newer git. Ubuntu 24.04 ships 2.43: see [docs/platforms.md](docs/platforms.md) for the PPA or a source build.
+- **Ubuntu and Debian (and derivatives such as Linux Mint):** `install` shows its plan and offers to upgrade git the same way. It uses the distribution's package when that is new enough; on Ubuntu otherwise the git-core PPA (`ppa:git-core/ppa`, signing key checked against a pinned fingerprint), and on Debian, when the PPA lags, or on Linux Mint (its `add-apt-repository` has no `-n`, read from source, not run), the pinned source build. Ubuntu 22.04 ships 2.34 and 24.04 ships 2.43. See [docs/platforms.md](docs/platforms.md#ubuntu-and-debian-apt).
+- **Other platforms:** `install` refuses and prints how to get a newer git.
 
 ## Install
 

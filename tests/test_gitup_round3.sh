@@ -64,24 +64,6 @@ test_the_takeover_plan_has_a_heading_and_lists_its_commands_with_full_paths() {
     done
 }
 
-# ^ invariant the plan lines of a command output without the as-root prefix; the annotation [only when ...] marks a command run only in its own case
-plan_lines() { grep -E '^  as root: ' <<<"$1" | sed -E 's/^  as root: //'; }
-# ^ invariant a command with the machine specific parts replaced by the placeholders the plan uses, <build dir>, <work dir> and <file> for each of the six files
-norm_cmd() {
-    sed -E \
-        -e "s#[^ ]*/gsg-git-build\\.[A-Za-z0-9]+#<build dir>#g" \
-        -e "s#$SANDBOX/tmp/tmp\\.[A-Za-z0-9]+#<work dir>#g" \
-        -e 's#(/\.?)(git-receive-pack|git-upload-archive|git-upload-pack|git-shell|scalar|git)(\.gsg-new|\.gsg-restore)?( |$)#\1<file>\3\4#g'
-}
-sudo_cmds() { gu_log | grep -E '^sudo -- ' | sed 's/^sudo -- //' | norm_cmd | LC_ALL=C sort -u; }
-plan_all_cmds() { plan_lines "$1" | sed -E 's/  \[only when [^]]*\]$//' | norm_cmd | LC_ALL=C sort -u; }
-plan_required_cmds() { plan_lines "$1" | grep -v '\[only when ' | norm_cmd | LC_ALL=C sort -u; }
-
-# ^ invariant check_plan_matches_log compares whole commands, not tool paths => a second use of a tool with other arguments cannot slip through
-check_plan_matches_log() {
-    assert_eq "$(comm -13 <(plan_all_cmds "$1") <(sudo_cmds))" "" "$2: every command sudo ran is a command of the plan"
-    assert_eq "$(comm -23 <(plan_required_cmds "$1") <(sudo_cmds))" "" "$2: every command of the plan without an annotation ran"
-}
 
 test_what_the_plan_prints_is_what_sudo_runs() {
     gu_tk_start || return 1

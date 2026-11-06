@@ -5,6 +5,9 @@
 
 configure_hook() { :; }
 
+# shellcheck source=tests/apt.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/apt.sh"
+
 LC_ENV=()
 # shellcheck disable=SC2034
 LC_HOME="" LC_BIN="" LC_DATA="" LC_STATE="" LC_FIX=""
@@ -218,12 +221,13 @@ fi
 echo "	not a dynamic executable" >&2
 exit 1
 EOF
+    lc_apt_standins || return 1
     chmod 755 "$SANDBOX/pathbin/sudo" "$SANDBOX/pathbin/dnf" "$SANDBOX/pathbin/restorecon" "$SANDBOX/pathbin/make" "$SANDBOX/pathbin/df" "$SANDBOX/pathbin/ldd" "$SANDBOX/pathbin/rpm" || return 1
     # ^ why exec wrappers, not symlinks or copies; gitup_system_bin wants a regular file owned by the test user, and macOS kills a copied system binary
     # ^ why TEST_BASE_PATH, not /usr/bin; on macOS the GNU directory comes first, and the install needs GNU mv -T
     local -a base_dirs
     IFS=: read -r -a base_dirs <<<"$TEST_BASE_PATH"
-    for tool in cp rm mv mkdir install ln rmdir touch; do
+    for tool in cp rm mv mkdir install ln rmdir touch env; do
         src=""
         for dir in "${base_dirs[@]}"; do
             if [ -x "$dir/$tool" ]; then
@@ -369,7 +373,7 @@ lc_begin() {
     if [ "$TEST_IS_WINDOWS" -eq 1 ]; then LC_EXE=.exe; fi
     rm -rf -- "$LC_HOME" "$SANDBOX/xdg" "$SANDBOX/pathbin" "$LC_FIX" "$SANDBOX/systemctl.log" "$SANDBOX/systemctl.fail" \
         "$SANDBOX/launchctl.log" "$SANDBOX/launchctl.fail" "$SANDBOX/launchctl.failonce" "$SANDBOX/launchctl.loaded" "$SANDBOX/brew.map" \
-        "$SANDBOX"/gitup.log "$SANDBOX"/sudo.fail "$SANDBOX"/dnf.* "$SANDBOX"/make.* "$SANDBOX"/rpm.* "$SANDBOX"/sudo.failon "$SANDBOX"/sudo.skip "$SANDBOX"/newgit.broken "$SANDBOX"/df.avail "$SANDBOX"/ldd.out "$SANDBOX/root" "$SANDBOX/os-release" || return 1
+        "$SANDBOX"/gitup.log "$SANDBOX"/sudo.fail "$SANDBOX"/dnf.* "$SANDBOX"/make.* "$SANDBOX"/rpm.* "$SANDBOX"/sudo.failon "$SANDBOX"/sudo.skip "$SANDBOX"/newgit.broken "$SANDBOX"/df.avail "$SANDBOX"/ldd.out "$SANDBOX"/apt.* "$SANDBOX/root" "$SANDBOX/os-release" || return 1
     mkdir -p -- "$LC_HOME" "$SANDBOX/xdg/data" "$SANDBOX/xdg/state" "$SANDBOX/pathbin" || return 1
     lc_brew_reset || return 1
     lc_systemctl_standin || return 1
@@ -464,7 +468,7 @@ lc_path_without() {
         if compgen -G "$d/*" >/dev/null; then ln -sfn "$d"/* "$dir/" || return 1; fi
     done
     rm -f -- "$dir/$1" || return 1
-    for name in systemctl launchctl brew uname git sudo dnf restorecon make df ldd rpm; do
+    for name in systemctl launchctl brew uname git sudo dnf restorecon make df ldd rpm apt-get apt-cache add-apt-repository gpg; do
         if [ "$1" = "$name" ] || [ ! -e "$SANDBOX/pathbin/$name" ]; then continue; fi
         ln -sfn -- "$SANDBOX/pathbin/$name" "$dir/$name" || return 1
     done

@@ -4,6 +4,11 @@ set -o pipefail
 
 # ^ external digest = OCI index (manifest list) of ubuntu:24.04 from the registry; lookup and bump steps in doc:docs/platforms.md#maintainer-notes
 IMAGE=docker.io/library/ubuntu:24.04@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852
+# ^ external the other two images, same lookup; 22.04 proves the .list form of the PPA, Debian 13 the source route (--os selects them)
+IMAGE_2204=docker.io/library/ubuntu:22.04@sha256:076e7bf82319619f28dd0aa9c02ab34b055ad37100395b4f49a2ffba04fb5e11
+IMAGE_DEBIAN=docker.io/library/debian:13@sha256:9c6e381421d0f48d1b8133e573f33c185ee16cbf505eda9c4a8a4791b25ea8a6
+OS_ID=ubuntu
+OS_VERSION=24.04
 TOTAL_TIMEOUT_SECONDS=5400
 PULL_TIMEOUT_SECONDS=600
 CLEANUP_TIMEOUT_SECONDS=60
@@ -12,9 +17,9 @@ HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)" || exit 2
 PROJECT="${HERE%/tests/platform}"
 
 usage() {
-    printf 'usage: tests/platform/ubuntu.sh [--dry-run] [--timeout SECONDS] [container script options]\n'
-    printf 'Runs tests/run.sh and an install E2E in a podman %s container.\n' "$IMAGE"
-    printf 'Options it does not know go to ubuntu-container.sh (--git ppa|source|auto, --phase prepare|e2e|suite).\n'
+    printf 'usage: tests/platform/ubuntu.sh [--os ubuntu-24.04|ubuntu-22.04|debian-13] [--dry-run] [--timeout SECONDS] [container script options]\n'
+    printf 'Runs tests/run.sh and an install E2E in a podman %s container; --os selects the pinned image of Ubuntu 22.04 or Debian 13 instead.\n' "$IMAGE"
+    printf 'Options it does not know go to ubuntu-container.sh (--git ppa|source|auto, --phase prepare|e2e|suite|upgrade); --phase upgrade is the real install --upgrade-git E2E.\n'
 }
 
 dry=0
@@ -22,6 +27,18 @@ passthru=()
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --dry-run) dry=1 ;;
+        --os)
+            shift
+            case "${1:-}" in
+                ubuntu-24.04) ;;
+                ubuntu-22.04) IMAGE="$IMAGE_2204" OS_ID=ubuntu OS_VERSION=22.04 ;;
+                debian-13) IMAGE="$IMAGE_DEBIAN" OS_ID=debian OS_VERSION=13 ;;
+                *)
+                    printf 'ubuntu.sh: --os needs ubuntu-24.04, ubuntu-22.04 or debian-13\n' >&2
+                    exit 2
+                    ;;
+            esac
+            ;;
         --timeout)
             shift
             if [[ ${1:-} != [1-9]* ]] || [[ $1 == *[!0-9]* ]]; then
@@ -100,7 +117,7 @@ done
 # ^ hazard dropping --init or timeout -k => time limit never fires; test:test_the_run_has_an_init_process_and_a_kill_after_so_the_outer_timeout_fires
 cmd=(timeout --foreground -k 60 "$TOTAL_TIMEOUT_SECONDS" "${PODMAN_ENV[@]}" GSG_PLATFORM_SENTINEL="$SENTINEL"
     podman run --rm --init --name "$name" --pull=never --http-proxy=false
-    -v "$copy:/src:ro,Z" "$IMAGE" bash /src/tests/platform/ubuntu-container.sh "${host_ns[@]}" --image "$IMAGE" "${passthru[@]}")
+    -v "$copy:/src:ro,Z" "$IMAGE" bash /src/tests/platform/ubuntu-container.sh "${host_ns[@]}" --image "$IMAGE" --expect-os "$OS_ID:$OS_VERSION" "${passthru[@]}")
 
 if [ "$dry" -eq 1 ]; then
     printf 'arg: %s\n' "${cmd[@]}"
@@ -126,8 +143,8 @@ printf 'containers.conf layers ignored: CONTAINERS_CONF=%s (every system and use
 "${cmd[@]}"
 rc=$?
 if [ "$rc" -eq 0 ]; then
-    printf 'UBUNTU PLATFORM TEST: PASS (image %s)\n' "$IMAGE"
+    printf '%s PLATFORM TEST: PASS (image %s)\n' "${OS_ID^^}" "$IMAGE"
 else
-    printf 'UBUNTU PLATFORM TEST: FAIL (container run exit %s, image %s)\n' "$rc" "$IMAGE"
+    printf '%s PLATFORM TEST: FAIL (container run exit %s, image %s)\n' "${OS_ID^^}" "$rc" "$IMAGE"
 fi
 exit "$rc"

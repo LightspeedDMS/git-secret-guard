@@ -311,3 +311,36 @@ gu_interrupt_run() {
     fi
     OUT="$(<"$SANDBOX/int.out")"
 }
+
+# ^ invariant the plan lines of a command output without the as-root prefix; the annotation [only when ...] marks a command run only in its own case
+plan_lines() { grep -E '^  as root: ' <<<"$1" | sed -E 's/^  as root: //'; }
+# ^ invariant a command with the machine specific parts replaced by the placeholders the plan uses, <build dir>, <work dir> and <file> for each of the six files
+norm_cmd() {
+    sed -E \
+        -e "s#[^ ]*/gsg-git-build\\.[A-Za-z0-9]+#<build dir>#g" \
+        -e "s#$SANDBOX/tmp/tmp\\.[A-Za-z0-9]+#<work dir>#g" \
+        -e 's#(rm -f -- )<the git-core PPA files[^>]*>#\1<ppa files>#' \
+        -e 's#(rm -f -- )[^<]*git-core-ubuntu-ppa.*$#\1<ppa files>#' \
+        -e 's#(/\.?)(git-receive-pack|git-upload-archive|git-upload-pack|git-shell|scalar|git)(\.gsg-new|\.gsg-restore)?( |$)#\1<file>\3\4#g'
+}
+sudo_cmds() { gu_log | grep -E '^sudo -- ' | sed 's/^sudo -- //' | norm_cmd | LC_ALL=C sort -u; }
+plan_all_cmds() { plan_lines "$1" | sed -E 's/  \[only when [^]]*\]$//' | norm_cmd | LC_ALL=C sort -u; }
+plan_required_cmds() { plan_lines "$1" | grep -v '\[only when ' | norm_cmd | LC_ALL=C sort -u; }
+
+# ^ invariant check_plan_matches_log compares whole commands, not tool paths => a second use of a tool with other arguments cannot slip through
+check_plan_matches_log() {
+    assert_eq "$(comm -13 <(plan_all_cmds "$1") <(sudo_cmds))" "" "$2: every command sudo ran is a command of the plan"
+    assert_eq "$(comm -23 <(plan_required_cmds "$1") <(sudo_cmds))" "" "$2: every command of the plan without an annotation ran"
+}
+
+# ^ invariant gua_run BODY ARGS... is gu_run with the apt module loaded, the paths set and the class ubuntu (GU_CLASS overrides it)
+# shellcheck disable=SC2016
+gua_run() {
+    local body="$1"
+    shift
+    gu_run 'source "$GSG_ROOT/lib/gitup_apt.sh" || exit 9; gitup_paths || exit 9; GITUP_CLASS="${GU_CLASS:-ubuntu}"; INSTALL_TIMEOUT_BIN="$(type -P timeout)"; '"$body" "$@"
+}
+
+# ^ invariant gua_reply FN ARGS... is gu_reply for the apt module; stdout is REPLY and the function's own output is dropped
+# shellcheck disable=SC2016
+gua_reply() { gua_run '"$@" >/dev/null; rc=$?; printf "%s" "$REPLY"; exit "$rc"' "$@"; }

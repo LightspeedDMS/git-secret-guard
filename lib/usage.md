@@ -4,8 +4,8 @@ Machine-wide pre-commit secret scanning (trufflehog + betterleaks) through a git
 
 commands:
   install [--replace-hooks-path] [--with-timer] [--upgrade-git] [--take-over-system-git]
-        --upgrade-git lets install upgrade or rebuild git where its module can (RHEL, Rocky, Fedora; macOS through
-        Homebrew, as your user): it prints the plan with each privileged command, then runs it. In a terminal install
+        --upgrade-git lets install upgrade or rebuild git where its module can (RHEL, Rocky, Fedora, Ubuntu, Debian; macOS
+        through Homebrew, as your user): it prints the plan with each privileged command, then runs it. In a terminal install
         asks first (default No); without a terminal the flag is the only way to say yes. Exit 3 = a module hands the
         upgrade off to finish outside install; nothing else changed.
         --take-over-system-git (RPM systems) points the old package /usr/bin/git and its siblings at the new

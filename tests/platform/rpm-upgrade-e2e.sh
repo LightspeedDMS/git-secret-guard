@@ -32,6 +32,10 @@ run() {
 show() { printf '        | %s\n' "$@"; }
 has() { [[ $OUT == *"$1"* ]]; }
 rc_is() { [ "$RC" -eq "$1" ]; }
+# ^ why the probe repository alone, not every enabled one; unrelated mirror skew failed a run once with no code change
+dnf_update_probe() { run sudo dnf --assumeno --disablerepo='*' --enablerepo=gsgprobe update; }
+# ^ invariant true when a Problem line or the package line under it names git or perl-Git; a Problem about other packages (mirror skew) does not count
+git_problem_in_output() { printf '%s\n' "$OUT" | grep -Eq '^([[:space:]]*Problem|[[:space:]]+- ).*(git|perl-Git)'; }
 fake_key() { printf '%s%s' "AKI""A" "Q7XK2MWB4HZ5NR3T"; }
 git_ver() { "$1" --version | sed 's/^git version //'; }
 ver_ge_254() {
@@ -220,7 +224,7 @@ rocky_takeover() {
     check "install alone offers the takeover" has "--take-over-system-git"
     check "and /usr/bin/git is still the RPM file" test "$(usrbin_sums)" = "$SUMS_BEFORE"
     if fake_repo; then ok "a local repository with git packages 2.99.0 is set up"; else bad "the local repository could not be built"; fi
-    run sudo dnf --assumeno update
+    dnf_update_probe
     check "control: before the takeover dnf update would upgrade git-core" has "git-core"
     run "$GSG" install --take-over-system-git </dev/null
     show "$(printf '%s' "$OUT" | grep -E 'dnf stops|pin bump|rpm -V will|restore-system-git|now point' | head -n 6)"
@@ -245,13 +249,15 @@ rocky_takeover() {
 
 rocky_takeover_dnf() {
     printf '== Rocky: dnf update, rerun, status, uninstall with the takeover active\n'
-    run sudo dnf --assumeno update
+    dnf_update_probe
     show "$(printf '%s' "$OUT" | grep -E 'git|Problem|Transaction Summary|Nothing' | head -n 5)"
     check "dnf update no longer offers git-core" not has "git-core"
-    check "and reports no problem" not has "Problem"
+    check "and reports no problem that names git or perl-Git" not git_problem_in_output
     # shellcheck disable=SC2016
-    check "the rest of dnf update still resolves" bash -c '[[ $1 == *"Transaction Summary"* || $1 == *"Nothing to do"* ]]' _ "$OUT"
+    check "the probe repository update ends in a transaction summary or nothing to do" bash -c '[[ $1 == *"Transaction Summary"* || $1 == *"Nothing to do"* ]]' _ "$OUT"
     check "/usr/bin/git still points at /usr/local/bin after dnf update" test "$(readlink /usr/bin/git)" = /usr/local/bin/git
+    run sudo dnf --assumeno update
+    show "dnf update over every enabled repository (not a check, mirrors can be out of step): $(printf '%s' "$OUT" | grep -E 'Problem|Transaction Summary|Nothing to do' | head -n 2 | tr '\n' ' ')"
     run "$GSG" install --take-over-system-git </dev/null
     check "a second takeover changes nothing and says so" has "nothing to take over"
     run "$GSG" status

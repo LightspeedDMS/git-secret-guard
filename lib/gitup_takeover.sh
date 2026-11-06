@@ -205,7 +205,7 @@ gitup_tk_status() {
         if [ "$git_ours" -eq 1 ]; then
             GITUP_TK_STATE=broken GITUP_TK_TEXT="$GITUP_USRBIN/git is a link of ours but there is no record $GITUP_TK_RECORD; the originals, if any, are in $GITUP_TK_ORIG"
         elif [ "$marker" -eq 1 ]; then
-            GITUP_TK_STATE=undone GITUP_TK_TEXT="UNDONE (the excludepkgs entry of a takeover is in $GITUP_DNFCONF but there is no record in $GITUP_TK_DIR, so nothing is taken over and dnf skips git updates); run: $GSG_NAME restore-system-git to remove the dnf entry"
+            GITUP_TK_STATE=undone GITUP_TK_TEXT="the takeover is partly undone (the excludepkgs entry of a takeover is in $GITUP_DNFCONF but there is no record in $GITUP_TK_DIR, so nothing is taken over and dnf skips git updates); run: $GSG_NAME restore-system-git to remove the dnf entry"
         fi
         return 0
     fi
@@ -228,9 +228,9 @@ gitup_tk_status() {
     fi
     GITUP_TK_STATE=undone
     if [ "$git_ours" -eq 1 ]; then
-        GITUP_TK_TEXT="PARTIAL ($links of $total links are in place, the dnf entry is $([ "$marker" -eq 1 ] && echo present || echo gone)); $GITUP_USRBIN/git still reaches the new git; run: $GSG_NAME install --take-over-system-git to finish it, or $GSG_NAME restore-system-git to undo it"
+        GITUP_TK_TEXT="the takeover is half done ($links of $total links are in place, the dnf entry is $([ "$marker" -eq 1 ] && echo present || echo gone)); $GITUP_USRBIN/git still reaches the new git; run: $GSG_NAME install --take-over-system-git to finish it, or $GSG_NAME restore-system-git to undo it"
     else
-        GITUP_TK_TEXT="UNDONE ($links of $total links are in place, the dnf entry is $([ "$marker" -eq 1 ] && echo present || echo gone)); commits made through $GITUP_USRBIN/git are no longer scanned; run: $GSG_NAME restore-system-git to finish undoing it, or $GSG_NAME install --take-over-system-git to take over again"
+        GITUP_TK_TEXT="the takeover is partly undone ($links of $total links are in place, the dnf entry is $([ "$marker" -eq 1 ] && echo present || echo gone)); commits made through $GITUP_USRBIN/git are no longer scanned; run: $GSG_NAME restore-system-git to finish undoing it, or $GSG_NAME install --take-over-system-git to take over again"
     fi
 }
 
@@ -582,6 +582,19 @@ gitup_tk_clean_leftovers() {
     gitup_elevate rm -f -- "${list[@]}"
 }
 
+# ^ invariant true when the parent of the backup is a real empty directory; a link or a directory holding another file of ours is not
+gitup_tk_varlib_empty() {
+    [ -d "$GITUP_VARLIB" ] && [ ! -L "$GITUP_VARLIB" ] && [ -z "$(ls -A -- "$GITUP_VARLIB" 2>/dev/null)" ]
+}
+
+# ^ invariant the parent of the backup goes only when empty; rc 0 = removed, 1 = nothing to remove or it stayed
+gitup_tk_drop_varlib() {
+    if ! gitup_tk_varlib_empty; then return 1; fi
+    if gitup_elevate rmdir -- "$GITUP_VARLIB"; then return 0; fi
+    printf '%s: left the empty directory %s\n' "$GSG_NAME" "$GITUP_VARLIB" >&2
+    return 1
+}
+
 # ^ invariant acts on what is on disk (record, dnf marker, links); rc 0 = every recorded file is the RPM file again, the dnf entry and the backup are gone
 # ^ order the backup directory goes last, after every file and the dnf entry are fine; a stopped run can be repeated
 gitup_tk_restore_core() {
@@ -612,10 +625,7 @@ gitup_tk_restore_core() {
     gitup_tk_clean_leftovers || printf '%s: could not remove a temporary file below %s (a directory in the way is left alone)\n' "$GSG_NAME" "$GITUP_USRBIN" >&2
     if [ "$bad" -eq 0 ]; then gitup_tk_conf_remove "$pkgs" || bad=1; fi
     if [ "$bad" -eq 0 ] && { [ -e "$GITUP_TK_DIR" ] || [ -L "$GITUP_TK_DIR" ]; }; then gitup_elevate rm -rf -- "$GITUP_TK_DIR" || bad=1; fi
-    # ^ invariant the parent of the backup goes only when empty => a directory another tool of ours put files in stays
-    if [ "$bad" -eq 0 ] && [ -d "$GITUP_VARLIB" ] && [ ! -L "$GITUP_VARLIB" ] && [ -z "$(ls -A -- "$GITUP_VARLIB" 2>/dev/null)" ]; then
-        gitup_elevate rmdir -- "$GITUP_VARLIB" || printf '%s: left the empty directory %s\n' "$GSG_NAME" "$GITUP_VARLIB" >&2
-    fi
+    if [ "$bad" -eq 0 ]; then gitup_tk_drop_varlib || true; fi
     return "$bad"
 }
 
@@ -671,7 +681,18 @@ gitup_tk_apply() {
 gitup_tk_restore_stopped() {
     trap '' INT TERM HUP
     gitup_tk_status
-    printf '\n%s: restore-system-git was interrupted. %s\n' "$GSG_NAME" "$GITUP_TK_TEXT" >&2
+    # ^ why its own message for state none, not the generic one; the last file was back before the signal, only the backup or an empty directory can be left
+    if [ "$GITUP_TK_STATE" = none ]; then
+        if [ -e "$GITUP_TK_DIR" ] || [ -L "$GITUP_TK_DIR" ]; then
+            printf '\n%s: restore-system-git was interrupted at its last step; the RPM files are back and the backup directory %s is left; remove it by hand: sudo rm -rf -- %s\n' "$GSG_NAME" "$GITUP_TK_DIR" "$GITUP_TK_DIR" >&2
+        elif gitup_tk_varlib_empty; then
+            printf '\n%s: restore-system-git was interrupted at its last step; the RPM files are back and the empty directory %s is left; run %s restore-system-git to remove it\n' "$GSG_NAME" "$GITUP_VARLIB" "$GSG_NAME" >&2
+        else
+            printf '\n%s: restore-system-git was interrupted at its last step; the restore had finished and nothing is left to do\n' "$GSG_NAME" >&2
+        fi
+        exit "$1"
+    fi
+    printf '\n%s: restore-system-git was interrupted. %s\n' "$GSG_NAME" "${GITUP_TK_TEXT%%; run: *}" >&2
     printf '%s: run: %s restore-system-git (it can be repeated; the saved originals stay until the restore finishes)\n' "$GSG_NAME" "$GSG_NAME" >&2
     exit "$1"
 }
@@ -683,6 +704,7 @@ gitup_tk_restore() {
     gitup_tk_status
     if [ "$GITUP_TK_STATE" = none ]; then
         printf '%s: nothing to restore: there is no takeover record in %s\n' "$GSG_NAME" "$GITUP_TK_DIR"
+        if gitup_tk_drop_varlib; then printf '%s: removed the empty directory %s\n' "$GSG_NAME" "$GITUP_VARLIB"; fi
         return 0
     fi
     if [ "$GITUP_TK_STATE" = broken ]; then

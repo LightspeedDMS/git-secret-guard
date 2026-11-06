@@ -284,6 +284,7 @@ brew_cli_bootstrap() {
         brew_find || return 1
         brew_paths || return 1
         if ! brew_bash_ok "$BREW_BASH"; then
+            trap - INT TERM HUP
             brew_run_install bash || return 1
             if ! brew_bash_ok "$BREW_BASH"; then
                 printf '%s: brew install bash finished but %s is not a bash %s or newer; install refused, %s\n' \

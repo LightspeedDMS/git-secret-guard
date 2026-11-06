@@ -26,7 +26,7 @@ than 2.54 or missing, `install` offers to upgrade it on RHEL, Rocky, AlmaLinux, 
 > example below is the RHEL host, where `/usr/bin/git` is 2.52.
 >
 > Any git older than 2.54 ignores config hooks: no error, no scan. `install` warns
-> for every other reachable git older than 2.54 (all `git` on `PATH` plus `/usr/bin/git`; on this machine
+> for every other reachable git older than 2.54 (all `git` on `PATH` plus `/usr/bin/git` and the git GitHub Desktop bundles at `/usr/lib/github-desktop/resources/app/git/bin/git`, for which the warning says only that whether its commits are scanned has not been tested; on this machine
 > `/usr/bin/git` is 2.52) and goes on, because the git that matters is the one your commits run. Commits made with the
 > old one are **not scanned**; call `/usr/local/bin/git` (or put it first on `PATH`) wherever you commit. On RHEL, Rocky and
 > AlmaLinux, `install --take-over-system-git` points an old package `/usr/bin/git` at the new build, which also covers cron

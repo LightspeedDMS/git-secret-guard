@@ -82,8 +82,9 @@ gitup_paths() {
         printf '%s: GSG_GITUP_ROOT must be an absolute path without control characters, got [%s]\n' "$GSG_NAME" "${GITUP_ROOT//[[:cntrl:]]/?}" >&2
         return 1
     fi
-    if [[ $GITUP_ROOT =~ ^/+$ ]]; then
-        printf '%s: GSG_GITUP_ROOT must name a directory below /, got [%s]\n' "$GSG_NAME" "$GSG_GITUP_ROOT" >&2
+    # ^ why refuse any . or .. part, not only slashes; /. and /a/.. name the filesystem root as well and the prefixes below would reach the real /usr
+    if [[ $GITUP_ROOT =~ ^/+$ ]] || [[ $GITUP_ROOT =~ (^|/)\.\.?(/|$) ]]; then
+        printf '%s: GSG_GITUP_ROOT must name a directory below / without . or .. parts, got [%s]\n' "$GSG_NAME" "$GSG_GITUP_ROOT" >&2
         return 1
     fi
     GITUP_ROOT="${GITUP_ROOT%/}"
@@ -350,14 +351,15 @@ gitup_need_elevation() {
     printf '%s: neither root nor sudo is available, so nothing was run; %s\n' "$GSG_NAME" "$(brew_unchanged_text)" >&2
     printf '%s: run these commands as root, then run install again:\n' "$GSG_NAME" >&2
     for cmd in "${GITUP_PRIV_CMDS[@]}"; do
-        if [[ $cmd == *"<build dir>"* ]]; then
+        # ^ why a skip, not a rewrite; a <placeholder> names a file or directory only the run knows, an [only when ...] line is no command of its own
+        if [[ $cmd == *"<"*">"* || $cmd == *"[only when"* ]]; then
             skipped=1
             continue
         fi
         printf '  %s\n' "$cmd" >&2
     done
     if [ "$skipped" -eq 1 ]; then
-        printf '%s: the commands that copy from <build dir> use the build this tool makes as your user and cannot be typed by hand; run the whole install as root, or install sudo\n' "$GSG_NAME" >&2
+        printf '%s: other commands of the plan (the ones with a <placeholder>, such as the copy from <build dir>, or a condition on the machine) use what this tool builds as your user or depend on the machine and cannot be typed by hand; run the whole install as root, or install sudo\n' "$GSG_NAME" >&2
     fi
     return 1
 }

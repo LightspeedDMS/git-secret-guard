@@ -101,13 +101,25 @@ jobs:
           [Console]::OutputEncoding = [System.Text.Encoding]::Unicode
           "wsl.exe on this runner:"
           wsl.exe --status
-          wsl.exe --import $env:WSL_TARGET $dir $file --version $env:WSLV
-          if ($LASTEXITCODE -ne 0) {
-            "wsl --import --version $env:WSLV failed ($LASTEXITCODE); trying the older form with the default version set first"
-            wsl.exe --set-default-version $env:WSLV
-            wsl.exe --import $env:WSL_TARGET $dir $file
-            if ($LASTEXITCODE -ne 0) { throw "wsl --import failed ($LASTEXITCODE)" }
+          # Each attempt is logged. The tar is tried as shipped, as .tar.gz, and unpacked to a plain .tar; the version is given with --version and then through the default version.
+          $tarGz = Join-Path $env:RUNNER_TEMP 'rootfs.tar.gz'
+          $tar = Join-Path $env:RUNNER_TEMP 'rootfs.tar'
+          Copy-Item -LiteralPath $file -Destination $tarGz
+          $in = [System.IO.File]::OpenRead($tarGz)
+          $gz = New-Object System.IO.Compression.GZipStream($in, [System.IO.Compression.CompressionMode]::Decompress)
+          $out = [System.IO.File]::Create($tar)
+          $gz.CopyTo($out); $out.Close(); $gz.Close(); $in.Close()
+          "unpacked tar: $((Get-Item $tar).Length) bytes"
+          $done = $false
+          foreach ($src in @($file, $tarGz, $tar)) {
+            foreach ($withVersion in @($true, $false)) {
+              if ($done) { break }
+              if ($withVersion) { wsl.exe --import $env:WSL_TARGET $dir $src --version $env:WSLV } else { wsl.exe --set-default-version $env:WSLV; wsl.exe --import $env:WSL_TARGET $dir $src }
+              "import of $src (--version: $withVersion) exit $LASTEXITCODE"
+              if ($LASTEXITCODE -eq 0) { $done = $true }
+            }
           }
+          if (-not $done) { throw "wsl --import failed in every form" }
           wsl.exe --list --verbose
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 

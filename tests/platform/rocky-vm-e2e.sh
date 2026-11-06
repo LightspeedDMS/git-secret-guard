@@ -122,7 +122,7 @@ vm_restored() {
 
 # ^ invariant a confined domain is tried when runcon can enter it; the control (/usr/bin/true) tells a refused transition from a refused git
 vm_confined_run() {
-    sudo runcon -t httpd_t -- "$@" 2>&1 | head -n 2 | tr '\n' ' '
+    sudo runcon -u system_u -r system_r -t httpd_t -- "$@" 2>&1 | head -n 2 | tr '\n' ' '
     printf '(rc %s)' "${PIPESTATUS[0]}"
 }
 

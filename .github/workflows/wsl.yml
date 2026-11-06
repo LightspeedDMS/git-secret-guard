@@ -2,7 +2,7 @@ name: wsl
 
 # Real WSL checks on a disposable GitHub-hosted Windows runner (story #31). It never runs on a pull request and never blocks one.
 # tests/platform/wsl-ci.sh holds the scenarios and refuses to run unless GITHUB_ACTIONS is set, so it cannot run on a developer machine.
-# workflow_dispatch works only for a workflow file that is on the default branch, so until this file is merged the branch push below starts it.
+# It runs only when started by hand: Actions, wsl, Run workflow.
 on:
   workflow_dispatch:
     inputs:
@@ -13,9 +13,6 @@ on:
         options:
           - Ubuntu-22.04
           - Ubuntu-24.04
-  # TEMPORARY: remove this push trigger before the branch is merged; it exists only to start the workflow from the feature branch
-  push:
-    branches: [feat/gitup-wsl]
 
 permissions:
   contents: read

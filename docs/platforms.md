@@ -484,7 +484,7 @@ that could be a bug gets fixed.
 > GitHub runner (below), never on that machine.
 
 **Status: implemented, fixture-tested and run for real on hosted WSL 1 and WSL 2 (runs 42237326449 and 42240922868, both legs pass).** Still unproven: Ubuntu 24.04 in WSL, an RPM distribution in WSL, a `metadata` mount of the drive, a typed yes at the prompt, and the Windows Server 2019 build 17763 host (a crash there is neither explained nor cleared). What a WSL 1 chroot E2E of the apt route on Windows Server 2019 showed is recorded in issue #29
-(its comments). The `wsl` workflow (`.github/workflows/wsl.yml`, started by hand or, while its temporary branch trigger exists, by a push to `feat/gitup-wsl`) runs the scenarios below on a hosted runner; until its first results are written into
+(its comments). The `wsl` workflow (`.github/workflows/wsl.yml`, started by hand from the Actions tab) runs the scenarios below on a hosted runner; until its first results are written into
 this section, treat what the status line lists as unproven as unproven. The measured answers are in the table below.
 
 WSL runs a real Linux distribution, so `install` takes the Linux path and the distribution's own git route: Ubuntu and Debian follow
@@ -510,7 +510,6 @@ WSL runs a real Linux distribution, so `install` takes the Linux path and the di
 **Order of the real run.** The workflow runs `facts`, `upgrade`, `mount-for-user` and `mntc`, writes their results to the job summary and uploads the logs, and only then runs `tests`, the rename `probe` and the
 `installed-cli` phase, because the probe is the kind of operation that coincided with the first blue screen (no cause is claimed). `tests` comes after the first upload for the same reason:
 `test_install` has an installed-copy test that runs under the plain-kernel pin and so renames the directory of a running script; it failed on WSL 1 as the measured limit predicts, and now skips there with that reason while a second test runs the WSL 1 path through the fixture seams. A failure on WSL 1 stays recorded, not hidden. `tests/platform/wsl-ci.sh` refuses to run unless `GITHUB_ACTIONS` is `true`.
-Until the workflow file is on the default branch, a temporary `push` trigger for `feat/gitup-wsl` starts it (`workflow_dispatch` works only for a file on the default branch); that trigger is removed before the merge.
 
 **Tested where.** `tests/test_wsl.sh` drives all of this through fixture kernel files (`GSG_WSL_OSRELEASE`, `GSG_WSL_INTEROP`, `GSG_WSL_SYSTEMD_DIR`, announced on stderr like the other test seams, except that seams which look like plain Linux are silent) and a faked
 `uname`, so it runs on Linux, macOS and Git for Windows alike. The real runs are `tests/platform/wsl-ci.sh`, started by `.github/workflows/wsl.yml`.
@@ -534,7 +533,7 @@ by GitHub in the places read**; the first real run answered it: both versions st
 | Rename of the directory of a running script | rc 0 | rc 1, `Permission denied` |
 | `main`'s installed-CLI `install` | passes | `mv ... Permission denied`, rc 1 |
 | This branch's installed-CLI `install` | passes | passes |
-| Test files (`GSG_TEST_JOBS=1`) | 272 passed, 0 failed (run 42240922868) | 269 passed, 0 failed, 3 skipped: one `test_install` test that needs the real rename and two `test_timer` tests that need systemd-analyze |
+| Test files (`GSG_TEST_JOBS=1`) | 273 passed, 0 failed (run 42263902872) | 270 passed, 0 failed, 3 skipped: one `test_install` test that needs the real rename and two `test_timer` tests that need systemd-analyze |
 | `/mnt/c` mount | 9p, `uid=0;gid=0` | drvfs, `uid=0,gid=0,case=off` |
 
 The first run's `mntc` phase failed on both legs because the runner mounts the drive for root while the test user is `gsg`. The workflow now remounts `/mnt/c` for that user (phase `mount-for-user`, as root, before `mntc`); the second run passed on both legs with the mount shown as `uid=1000,gid=1000` (drvfs on WSL 1, 9p on WSL 2).

@@ -70,7 +70,8 @@ wsl_check_timer() {
 }
 
 # ^ external Windows refuses to rename a directory with a running script in it (probed)
-# ^ hazard HYPOTHESIS not shown yet; WSL 1 does the same (installed-CLI install failed there with mv Permission denied, #29) and the CI job probes it
+# ^ external renaming the directory of a running script fails on WSL 1 (4.4.0-20348-Microsoft, rc 1) and works on WSL 2 (6.18.54.1-microsoft-standard-WSL2)
+# ^ see doc:docs/platforms.md#wsl-windows-subsystem-for-linux (run 42237326449)
 install_pins_running_script() {
     if tools_is_windows; then return 0; fi
     if ! wsl_is; then return 1; fi

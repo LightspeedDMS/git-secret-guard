@@ -80,6 +80,12 @@ jobs:
         shell: wsl-bash -u gsg {0}
         run: bash "$WS/tests/platform/wsl-ci.sh" upgrade
 
+      # The runner mounts the drive for root; a developer's mount carries their own uid. Root remounts it for the test user here, and the next step runs as that user.
+      - name: Mount /mnt/c for the test user
+        if: ${{ !cancelled() }}
+        shell: wsl-bash -u root {0}
+        run: bash "$WS/tests/platform/wsl-ci.sh" mount-for-user
+
       - name: Repository and checkout under /mnt/c
         if: ${{ !cancelled() }}
         shell: wsl-bash -u gsg {0}
@@ -109,14 +115,14 @@ jobs:
           if-no-files-found: warn
 
       # After the first upload on purpose: test_install has an installed-copy test that runs under the plain-kernel pin, so on WSL 1 it renames the directory of a running
-      # script, the operation that coincided with the first blue screen. A failure of it on WSL 1 is evidence for the hypothesis and is recorded, not hidden.
+      # script, the operation that coincided with the first blue screen. A failure of it on WSL 1 is the measured rename limit and is recorded, not hidden.
       - name: Test files that apply (GSG_TEST_JOBS=1)
         if: ${{ !cancelled() }}
         timeout-minutes: 60
         shell: wsl-bash -u gsg {0}
         run: bash "$WS/tests/platform/wsl-ci.sh" tests
 
-      - name: Rename probe (hypothesis for the installed-CLI mv error)
+      - name: Rename probe (the installed-CLI mv error)
         if: ${{ !cancelled() }}
         shell: wsl-bash -u gsg {0}
         run: bash "$WS/tests/platform/wsl-ci.sh" probe

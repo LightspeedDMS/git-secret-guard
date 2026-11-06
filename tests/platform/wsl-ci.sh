@@ -3,7 +3,7 @@
 set -u
 # ^ external runs inside a WSL distribution on a disposable GitHub Windows runner (.github/workflows/wsl.yml) and refuses to run anywhere else
 # ^ security the fake credential is built at runtime from fragments and never printed; every output is checked for its absence before any of it is shown
-# ^ coupled phases are facts probe upgrade mntc installed-cli tests, one per workflow step; WS is the checkout, MAIN a checkout of main, LOGS the log directory
+# ^ coupled phases are facts probe upgrade mount-for-user mntc installed-cli tests, one per workflow step; WS, MAIN and LOGS come from the workflow
 
 PHASE="${1:-}"
 WS="${WS:-}"
@@ -22,6 +22,8 @@ if [ "${GITHUB_ACTIONS:-}" != true ]; then
     exit 2
 fi
 mkdir -p -- "$LOGS" || exit 2
+: >>"$RESULTS" || exit 2
+if [ "$(id -u)" -eq 0 ]; then chmod 666 "$RESULTS" || exit 2; fi
 ok() { printf 'PASS    %s\n' "$1" | tee -a "$RESULTS"; }
 bad() {
     printf 'FAIL    %s\n' "$1" | tee -a "$RESULTS"
@@ -61,12 +63,13 @@ need_ws() {
     fi
 }
 
-# ^ invariant commit_probe DIR CONTENT LABEL commits CONTENT in a fresh repository and sets RC and OUT; rc 1 = the repository could not be made
+# ^ invariant commit_probe DIR CONTENT LABEL commits CONTENT in a fresh repository, sets RC and OUT; rc 1 = no repository, the error is in LOGS/LABEL-prep.log
 commit_probe() {
     local d="$1" content="$2" label="$3"
+    case "$d" in /?*/?*) ;; *) return 1 ;; esac
     rm -rf -- "${d:?}" && mkdir -p -- "$d" || return 1
-    git init -q "$d" && git -C "$d" config user.name gsg && git -C "$d" config user.email gsg@example.invalid || return 1
-    printf '%s\n' "$content" >"$d/a.txt" && git -C "$d" add a.txt || return 1
+    run "$label-prep" bash -c 'git init -q "$1" && git -C "$1" config user.name gsg && git -C "$1" config user.email gsg@example.invalid && printf "%s\n" "$2" >"$1/a.txt" && git -C "$1" add a.txt' _ "$d" "$content"
+    [ "$RC" -eq 0 ] || return 1
     run "$label" git -C "$d" commit -q -m probe
 }
 
@@ -102,18 +105,18 @@ phase_facts() {
     info "wsl_version says $(bash -c 'source "$1/lib/wsl.sh" && wsl_version && echo "$REPLY"' _ "$WS")"
 }
 
-# ^ hazard HYPOTHESIS not shown yet; the installed-CLI install fails on WSL 1 as the running script pins its directory, and this probe renames one
+# ^ external renaming the directory of a running script fails on WSL 1 (4.4.0-20348-Microsoft, rc 1) and works on WSL 2 (6.18.54.1-microsoft-standard-WSL2)
 phase_probe() {
     local base
     need_ws
     base="$(mktemp -d "$HOME/rename-probe.XXXXXX")" || exit 2
     case "$base" in /?*) ;; *) exit 2 ;; esac
     mkdir -p -- "$base/share/bin" || exit 2
-    printf '#!/usr/bin/env bash\nmv "$1/share" "$1/moved"; echo "HYPOTHESIS probe, rename of the directory holding this running script: rc=$?"\n[ -d "$1/moved" ] && mv "$1/moved" "$1/share"\nmv "$1/share/bin" "$1/share/bin2"; echo "HYPOTHESIS probe, rename of its parent directory: rc=$?"\n[ -d "$1/share/bin2" ] && mv "$1/share/bin2" "$1/share/bin"\nexit 0\n' >"$base/share/bin/run"
+    printf '#!/usr/bin/env bash\nmv "$1/share" "$1/moved"; echo "probe, rename of the directory holding this running script: rc=$?"\n[ -d "$1/moved" ] && mv "$1/moved" "$1/share"\nmv "$1/share/bin" "$1/share/bin2"; echo "probe, rename of its parent directory: rc=$?"\n[ -d "$1/share/bin2" ] && mv "$1/share/bin2" "$1/share/bin"\nexit 0\n' >"$base/share/bin/run"
     chmod 755 -- "$base/share/bin/run"
     run probe "$base/share/bin/run" "$base"
     show "$OUT"
-    info "HYPOTHESIS probe (rc 0 for both renames counts against the hypothesis, a failure supports it): $(printf '%s' "$OUT" | tr '\n' ' ')"
+    info "rename probe (measured: rc 1 on WSL 1 build 20348, rc 0 on WSL 2): $(printf '%s' "$OUT" | tr '\n' ' ')"
     rm -rf -- "${base:?}"
 }
 
@@ -157,14 +160,41 @@ phase_upgrade() {
     fi
 }
 
+# ^ external the runner mounts the drive for root (WSL 1 drvfs uid=0, WSL 2 9p uid=0); a developer mount carries their uid (uid=1000 measured on a distribution)
+# ^ invariant mount-for-user runs as root before mntc and remounts /mnt/c for the test user; mntc runs as the user and fails if the mount is not theirs
+phase_mount_for_user() {
+    local user=gsg u g
+    if [ "$(id -u)" -ne 0 ]; then bad "mount-for-user must run as root"; return 0; fi
+    if ! id "$user" >/dev/null 2>&1; then bad "the user $user does not exist"; return 0; fi
+    u="$(id -u "$user")"
+    g="$(id -g "$user")"
+    case "$u$g" in '' | *[!0-9]*) bad "no numeric uid and gid for $user"; return 0 ;; esac
+    info "mount of /mnt/c before: $(grep ' /mnt/c ' /proc/mounts | cut -c1-200)"
+    run mount-umount umount /mnt/c
+    if [ "$RC" -ne 0 ]; then
+        info "umount /mnt/c failed (rc $RC), trying a lazy umount"
+        run mount-umount-lazy umount -l /mnt/c
+    fi
+    run mount-mount mount -t drvfs 'C:' /mnt/c -o "uid=$u,gid=$g,noatime"
+    if [ "$RC" -ne 0 ]; then
+        info "mount -t drvfs failed (rc $RC): $(printf '%s' "$OUT" | head -n 2 | tr '\n' ' ' | cut -c1-200)"
+        run mount-remount mount -o "remount,uid=$u,gid=$g" /mnt/c
+    fi
+    info "mount of /mnt/c after: $(grep ' /mnt/c ' /proc/mounts | cut -c1-200)"
+    check "/mnt/c is mounted for $user (uid $u)" bash -c 'grep -Eq " /mnt/c .*uid=$1[,;]" /proc/mounts' _ "$u"
+}
+
 # ^ invariant a repository and an install checkout under /mnt/c; WSL 1 mounts the drive without metadata and files show mode 777
 phase_mntc() {
     need_ws
     if [ ! -d /mnt/c ]; then bad "/mnt/c is not mounted"; return 0; fi
     mkdir -p -- "$MNTC" || { bad "cannot create $MNTC"; return 0; }
     info "mount of /mnt/c: $(grep ' /mnt/c ' /proc/mounts | cut -c1-200)"
+    check "the drive is mounted for this user (uid $(id -u)), as on a developer's machine" bash -c 'grep -Eq " /mnt/c .*uid=$1[,;]" /proc/mounts' _ "$(id -u)"
     blocked_and_clean "$MNTC/repo" mntc-repo
-    rm -rf -- "${MNTC:?}/checkout" && cp -a -- "$WS" "$MNTC/checkout" || { bad "cannot copy the checkout to $MNTC"; return 0; }
+    case "$MNTC" in /mnt/c/?*) ;; *) bad "MNTC is not a directory below /mnt/c"; return 0 ;; esac
+    run mntc-copy bash -c 'rm -rf -- "$1/checkout" && cp -a -- "$2" "$1/checkout"' _ "$MNTC" "$WS"
+    if [ "$RC" -ne 0 ]; then bad "cannot copy the checkout to $MNTC (rc $RC, see mntc-copy.log)"; return 0; fi
     info "a file in the /mnt/c checkout shows mode $(stat -c %a "$MNTC/checkout/bin/git-secret-guard")"
     run mntc-install "$MNTC/checkout/bin/git-secret-guard" install
     check "install from a checkout under /mnt/c exits 0 (rc $RC)" rc_is 0
@@ -172,7 +202,7 @@ phase_mntc() {
     blocked_and_clean "$HOME/repo-after-mntc" mntc-install
 }
 
-# ^ hazard HYPOTHESIS see phase_probe; main has no WSL pin, its installed CLI is the unfixed code, and this phase records whether its install fails
+# ^ external main has no WSL pin and its installed CLI is the unfixed code; its install fails on WSL 1 with mv Permission denied and passes on WSL 2
 phase_installed_cli() {
     need_ws
     local cli="$HOME/.local/bin/git-secret-guard"
@@ -182,7 +212,7 @@ phase_installed_cli() {
         run main-installed-cli "$cli" install
         info "main: the installed CLI install, rc $RC; $(printf '%s' "$OUT" | grep -E 'mv:|cannot move|Permission denied' | head -n 2 | cut -c1-240)"
     else
-        bad "no checkout of main was given, so the unfixed code was not run and the hypothesis cannot be judged"
+        bad "no checkout of main was given, so the unfixed code was not run"
     fi
     run branch-install "$WS/bin/git-secret-guard" install
     check "this branch: install from the checkout exits 0 (rc $RC)" rc_is 0
@@ -215,11 +245,12 @@ case "$PHASE" in
     facts) phase_facts ;;
     probe) phase_probe ;;
     upgrade) phase_upgrade ;;
+    mount-for-user) phase_mount_for_user ;;
     mntc) phase_mntc ;;
     installed-cli) phase_installed_cli ;;
     tests) phase_tests ;;
     *)
-        printf 'usage: tests/platform/wsl-ci.sh facts|probe|upgrade|mntc|installed-cli|tests\n' >&2
+        printf 'usage: tests/platform/wsl-ci.sh facts|probe|upgrade|mount-for-user|mntc|installed-cli|tests\n' >&2
         exit 2
         ;;
 esac

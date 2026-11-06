@@ -332,6 +332,19 @@ assert_no_file() { [ ! -e "$1" ] || fail "${2:-assert_no_file}: unexpected $1"; 
 
 skip_test() { printf '%s\n' "$1" >"$SANDBOX/.skip"; exit 0; }
 
+# ^ external measured on WSL 1 (build 20348); without systemd, systemd-analyze --user verify fails for any unit with a device monitor and a system bus error
+# ^ invariant analyze_blocked_reason [BIN] prints why BIN cannot verify anything here, nothing when it can; it verifies a good unit => a bad unit is no reason
+analyze_blocked_reason() {
+    local bin="${1:-systemd-analyze}" out
+    case "${SANDBOX:-}" in /?*) ;; *) return 1 ;; esac
+    mkdir -p -- "$SANDBOX/run-probe" && chmod 700 "$SANDBOX/run-probe" || return 1
+    printf '[Service]\nExecStart=/usr/bin/true\n' >"$SANDBOX/run-probe/probe.service" || return 1
+    out="$(env -i HOME="$SANDBOX/home" PATH=/usr/bin:/bin XDG_RUNTIME_DIR="$SANDBOX/run-probe" "$bin" --user verify "$SANDBOX/run-probe/probe.service" 2>&1)" || true
+    case "$out" in
+        *"Failed to start device monitor"* | *"Failed to connect to system bus"*) printf 'systemd-analyze cannot run here, no systemd (%s)' "${out%%$'\n'*}" ;;
+    esac
+}
+
 no_leak() { assert_not_contains "$OUT" "$1" "stdout leak"; assert_not_contains "$ERR" "$1" "stderr leak"; }
 
 # ^ invariant prints the reason tests/windows-skips.list gives for test $1 of file $2; rc 1 when it has none, or off Windows

@@ -206,7 +206,7 @@ test_a_windows_git_is_never_taken_for_a_git_of_the_distribution() {
     assert_not_contains "$OUT" "git.exe" "install_collect_gits looks for git, not git.exe"
 }
 
-# ^ hazard HYPOTHESIS not shown yet; WSL 1 refuses to rename a directory with a running script in it, as Windows does, and the CI job probes it
+# ^ external renaming the directory of a running script fails on WSL 1 (4.4.0-20348-Microsoft, rc 1) and works on WSL 2 (6.18.54.1-microsoft-standard-WSL2)
 test_the_running_script_pin_covers_windows_and_wsl1_only() {
     wsl_kernel "$WSL1_KERNEL" || return 1
     wsl 'install_pins_running_script; echo "wsl1=$?"'
@@ -408,6 +408,18 @@ test_the_ci_script_refuses_to_run_outside_github_actions() {
     assert_no_file "$SANDBOX/home/wsl-logs" "and created nothing"
     run_cap env -i "${GSG_ENV[@]}" GITHUB_ACTIONS=false bash "$GSG_PROJECT/tests/platform/wsl-ci.sh" facts
     assert_rc 2 "only the value true counts"
+}
+
+
+# ^ external measured on WSL 1 (build 20348); without systemd, systemd-analyze --user verify fails for any unit with a device monitor and a system bus error
+test_the_systemd_analyze_probe_names_a_machine_that_cannot_verify_and_never_a_unit_problem() {
+    local stub="$SANDBOX/analyze-stub"
+    printf '#!/bin/sh\necho "Failed to start device monitor: Invalid argument"\necho "Failed to connect to system bus: No such file or directory"\nexit 1\n' >"$stub" && chmod 755 "$stub" || return 1
+    assert_contains "$(analyze_blocked_reason "$stub")" "Failed to start device monitor" "no systemd: a reason, so the test skips"
+    printf '#!/bin/sh\necho "x.service: Unknown key name Foo in section Service"\nexit 1\n' >"$stub" || return 1
+    assert_empty "$(analyze_blocked_reason "$stub")" "a real unit problem is no reason to skip"
+    printf '#!/bin/sh\nexit 0\n' >"$stub" || return 1
+    assert_empty "$(analyze_blocked_reason "$stub")" "a working systemd-analyze is no reason either"
 }
 
 run_file_tests

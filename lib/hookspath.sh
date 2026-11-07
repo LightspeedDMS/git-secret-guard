@@ -238,13 +238,21 @@ install_check_config_writable() {
 
 # ^ external hook list line = name, "disabled<TAB>name" (enabled=false) or "event-disabled<TAB>name" (hook.pre-commit.enabled=false); git 2.56
 # ^ invariant hooklist_read ERRFILE [GIT_ARGS...] sets HL_STATUS = effective, disabled, event-disabled or absent; HL_RC = git's exit status; REPLY = its message
+# ^ invariant HL_BOUND = the timeout command prefix for the git call (empty = unbounded); status sets it from the settings, doctor's git is its own bounded shim
+HL_BOUND=()
+
+# ^ invariant the bound is 30 seconds under the settings' timeout binary; without usable settings the call is unbounded, and it runs no user hook
+hooklist_bind_timeout() {
+    HL_BOUND=()
+    if load_settings "$GSG_SHARE/settings" 2>/dev/null && ! tool_unusable timeout "${TIMEOUT_BIN:-}" >/dev/null; then HL_BOUND=("$TIMEOUT_BIN" -k 5 30); fi
+}
 # ^ invariant returns 0 = listed (an empty list too, also a command without its event), 2 = an event without its command (git exits 128), 1 = git failed
 hooklist_read() {
     local errfile="$1" line
     local -a listed=()
     shift
     HL_STATUS=absent
-    mapfile -t listed < <("$GSG_GIT" "$@" hook list pre-commit 2>"$errfile")
+    mapfile -t listed < <("${HL_BOUND[@]}" "$GSG_GIT" "$@" hook list pre-commit 2>"$errfile")
     wait "$!"
     HL_RC=$?
     first_message "$errfile"
@@ -263,8 +271,8 @@ hooklist_read() {
 }
 
 # ^ security every local variable git names is unset (GIT_DIR and the like); GIT_CONFIG_PARAMETERS and GIT_CONFIG_COUNT stay, a commit sees them too
-# ^ external GIT_DEFAULT_HASH and GIT_DEFAULT_REF_FORMAT shape a new repository only => a bad value would fail the throwaway init, no commit elsewhere
-# ^ invariant hooklist_probe WORK = git hook list in an empty --template= bare repository below WORK; rc 0 sets HL_STATUS, rc 1 HL_STEP HL_RC REPLY
+# ^ security no git init => it writes HEAD and fires reference-transaction hooks (core.hooksPath and config); the bare repository is built by hand
+# ^ invariant hooklist_probe WORK = git hook list on HEAD, objects/ and refs/ written below WORK; rc 0 sets HL_STATUS, rc 1 HL_STEP HL_RC REPLY (subshell only)
 hooklist_probe() {
     local work="$1" vars v rc repo="$1/repo"
     if tools_is_windows; then repo="$(cygpath -m "$work")/repo" || repo="$work/repo"; fi
@@ -283,12 +291,10 @@ hooklist_probe() {
         unset "$v"
     done <<<"$vars"
     unset GIT_DEFAULT_HASH GIT_DEFAULT_REF_FORMAT
-    HL_STEP=init
-    "$GSG_GIT" init -q --bare --template= "$repo" >/dev/null 2>"$work/err.txt"
-    rc=$?
-    if [ "$rc" -ne 0 ]; then
-        first_message "$work/err.txt"
-        HL_RC="$rc"
+    HL_STEP="build the probe repository"
+    if ! mkdir -p -- "$work/repo/objects" "$work/repo/refs" || ! printf 'ref: refs/heads/main\n' >"$work/repo/HEAD"; then
+        HL_RC=1
+        REPLY="cannot write below the temp directory"
         return 1
     fi
     HL_STEP="hook list pre-commit"

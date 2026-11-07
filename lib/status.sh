@@ -80,6 +80,26 @@ status_hook_locate() {
     fi
 }
 
+# ^ external a conditional include (includeIf gitdir, onbranch, hasconfig) never matches the throwaway repository => doctor sees such settings, status cannot
+# ^ security only the file holding the includeIf is named, never its condition or path; informational, never a problem
+status_conditional_includes() {
+    local i scope file seen=" " list=""
+    hp_records -C / config --show-scope --show-origin -z --get-regexp '^includeif\..*\.path$'
+    if [ "$?" -gt 1 ]; then return 0; fi
+    for ((i = 0; i + 2 < ${#GSG_HP_OUT[@]}; i += 3)); do
+        scope="${GSG_HP_OUT[i]}"
+        file="${GSG_HP_OUT[i + 1]#file:}"
+        file="${file//[^[:print:]]/?}"
+        if [ "$scope" != global ] && [ "$scope" != system ]; then continue; fi
+        if [[ $seen == *" $file "* ]]; then continue; fi
+        seen+="$file "
+        list+="${list:+, }$file ($scope)"
+    done
+    if [ -n "$list" ]; then
+        status_line "conditional includes" "$list holds an includeIf; settings reached through one (gitdir, onbranch, hasconfig) are not seen here, only per repository by $GSG_NAME doctor (informational)"
+    fi
+}
+
 # ^ invariant rc 0 = git lists the hook as running before commits; rc 1 = a MISMATCH line was printed; runs in a subshell, see status_hook_listing
 # ^ order traps before mktemp => an interrupt leaves no directory behind; the probe unsets the caller's repository variables in its own subshell
 status_hook_ask() {
@@ -92,6 +112,7 @@ status_hook_ask() {
         status_line "hook list" "MISMATCH (cannot create a temp directory to ask git about the hook; check TMPDIR; commits may be unscanned)"
         return 1
     }
+    hooklist_bind_timeout
     res="$(hooklist_probe_line "$STATUS_TMP")"
     IFS=$'\t' read -r kind step rc msg <<<"$res"
     if [ "$kind" != ok ]; then
@@ -243,7 +264,10 @@ status_run() {
     status_line "share dir" "$GSG_SHARE"
     status_hook_command
     status_config
-    if [ "$git_ok" -eq 0 ]; then status_hook_listing; fi
+    if [ "$git_ok" -eq 0 ]; then
+        status_hook_listing
+        status_conditional_includes
+    fi
     if [ "$ST_PREV_SET" = yes ]; then
         status_line "previous core.hooksPath" "$ST_PREV"
     else

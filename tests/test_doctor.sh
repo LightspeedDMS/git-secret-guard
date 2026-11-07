@@ -127,6 +127,22 @@ test_the_machine_section_keeps_the_verdict_when_the_setting_cannot_be_located() 
     assert_contains "$OUT" "PROBLEM  hook: git reports the hook disabled; the setting could not be located" "a PROBLEM, and git still decides"
 }
 
+# ^ security the machine section asks git through the shared probe, built by hand => no reference-transaction hook runs
+test_the_machine_section_runs_no_hook_of_the_users() {
+    dr_begin || return 1
+    mkdir -p -- "$SANDBOX/rthooks" || return 1
+    printf '#!/bin/sh\necho ran >>"%s/rt.marker"\ncat >/dev/null\nexit 0\n' "$SANDBOX" >"$SANDBOX/rthooks/reference-transaction" || return 1
+    chmod 755 "$SANDBOX/rthooks/reference-transaction" || return 1
+    printf '#!/bin/sh\necho ran >>"%s/rt.config.marker"\ncat >/dev/null\nexit 0\n' "$SANDBOX" >"$SANDBOX/rtconfig.sh" || return 1
+    chmod 755 "$SANDBOX/rtconfig.sh" || return 1
+    gitx config --global core.hooksPath "$SANDBOX/rthooks" || return 1
+    gitx config --global hook.rt.event reference-transaction || return 1
+    gitx config --global hook.rt.command "$SANDBOX/rtconfig.sh" || return 1
+    doctor
+    assert_no_file "$SANDBOX/rt.marker" "no core.hooksPath hook ran"
+    assert_no_file "$SANDBOX/rt.config.marker" "and no config hook ran"
+}
+
 test_the_machine_section_never_prints_a_hook_config_value() {
     local marker
     dr_begin || return 1

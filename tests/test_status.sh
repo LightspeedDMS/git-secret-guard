@@ -307,7 +307,7 @@ test_status_says_why_a_value_less_enabled_key_blocks_every_commit() {
     st_install_for_hook_cases || return 1
     for section in git-secret-guard pre-commit; do
         st_hook_case "$section" 1 "enabled"
-        assert_contains "$OUT" "hook list: MISMATCH (git init failed with exit" "git cannot even start the check"
+        assert_contains "$OUT" "hook list: MISMATCH (git hook list pre-commit failed with exit" "git itself refuses the listing"
         assert_contains "$OUT" "hook.$section.enabled" "git's own message names the key"
         assert_contains "$OUT" "hook enabled: hook.$section.enabled has no value in the global config" "and the scan names scope and file"
     done
@@ -336,7 +336,7 @@ test_status_exits_1_when_the_hook_is_missing_from_the_listing() {
     gitx config --global --unset hook.git-secret-guard.command || return 1
     gsg status
     assert_rc 1 "an event without its command"
-    assert_contains "$OUT" "hook list: MISMATCH (git init failed with exit 128" "git itself refuses the half-configured hook"
+    assert_contains "$OUT" "hook list: MISMATCH (git hook list pre-commit failed with exit 128" "git itself refuses the half-configured hook"
     assert_contains "$OUT" "'hook.git-secret-guard.command' must be configured" "and its words name the key"
 }
 
@@ -426,7 +426,7 @@ test_status_cleans_non_printing_characters_out_of_the_origin_file_name() {
 test_status_reports_each_failing_git_step_and_prints_no_control_character() {
     local word esc=$'\033'
     fresh_install
-    for word in rev-parse init hook; do
+    for word in rev-parse hook; do
         st_git_stub "" "$word" "${esc}[31mboom ${esc}[0m" || return 1
         gsg status
         assert_rc 1 "git $word fails"
@@ -509,6 +509,65 @@ test_an_interrupt_during_the_hook_check_stops_status_with_130() {
     assert_not_contains "$OUT" "previous core.hooksPath" "none of the later lines is printed"
     assert_not_contains "$OUT" "originals moved aside" "status does not carry on"
     assert_eq "$(st_tmp_listing)" "" "SIGINT removed the throwaway repository"
+}
+
+# ^ security the probe runs no hook of the user's; git init fires reference-transaction => the repository is built by hand, nothing is initialised
+# ^ invariant a reference-transaction script in core.hooksPath and a config hook for the event both write a marker; neither may exist after status or doctor
+st_rt_traps() {
+    mkdir -p -- "$SANDBOX/rthooks" || return 1
+    printf '#!/bin/sh\necho ran >>"%s/rt.marker"\ncat >/dev/null\nexit 0\n' "$SANDBOX" >"$SANDBOX/rthooks/reference-transaction" || return 1
+    chmod 755 "$SANDBOX/rthooks/reference-transaction" || return 1
+    printf '#!/bin/sh\necho ran >>"%s/rt.config.marker"\ncat >/dev/null\nexit 0\n' "$SANDBOX" >"$SANDBOX/rtconfig.sh" || return 1
+    chmod 755 "$SANDBOX/rtconfig.sh" || return 1
+    gitx config --global core.hooksPath "$(st_native_sandbox)/rthooks" || return 1
+    gitx config --global hook.rt.event reference-transaction || return 1
+    gitx config --global hook.rt.command "$(st_native_sandbox)/rtconfig.sh" || return 1
+}
+
+test_status_runs_no_hook_of_the_users_while_it_asks_git() {
+    fresh_install
+    st_rt_traps || return 1
+    gsg status
+    assert_rc 0 "a healthy install"
+    assert_no_file "$SANDBOX/rt.marker" "no core.hooksPath hook ran during the probe"
+    assert_no_file "$SANDBOX/rt.config.marker" "and no config hook for reference-transaction ran"
+}
+
+# ^ invariant the settings' timeout binary bounds git hook list; a wrapper records the call and can fail it with 124
+test_status_bounds_the_hook_listing_with_the_settings_timeout() {
+    local real
+    fresh_install
+    real="$(sed -n 's#^TIMEOUT_BIN=##p' "$LC_DATA/settings" | head -n 1)"
+    real="$(eval "printf '%s' $real")"
+    # shellcheck disable=SC2016
+    printf '#!/bin/sh\nprintf "%%s\n" "$*" >>"%s/timeout.log"\ncase " $* " in *" hook list "*) if [ -f "%s/timeout.fail" ]; then exit 124; fi ;; esac\nexec "%s" "$@"\n' "$SANDBOX" "$SANDBOX" "$real" >"$SANDBOX/mytimeout" || return 1
+    chmod 755 "$SANDBOX/mytimeout" || return 1
+    sed -i "s#^TIMEOUT_BIN=.*#TIMEOUT_BIN=$SANDBOX/mytimeout#" "$LC_DATA/settings" || return 1
+    gsg status
+    assert_rc 0 "a bounded listing still works"
+    assert_contains "$(cat "$SANDBOX/timeout.log")" "hook list pre-commit" "git hook list ran under the timeout binary"
+    : >"$SANDBOX/timeout.fail"
+    gsg status
+    assert_rc 1 "a listing that times out"
+    assert_contains "$OUT" "hook list: MISMATCH (git hook list pre-commit failed with exit 124" "is a MISMATCH naming the exit status"
+}
+
+# ^ external a conditional include (gitdir, onbranch, hasconfig) never matches the throwaway repository => doctor sees what it switches off, status cannot
+test_status_says_once_that_conditional_includes_are_only_seen_by_doctor() {
+    local inc
+    fresh_install
+    gsg status
+    assert_not_contains "$OUT" "conditional include" "nothing to say without one"
+    inc="$SANDBOX/cond.cfg"
+    printf '[hook "git-secret-guard"]\n\tenabled = false\n' >"$inc" || return 1
+    gitx config --global "includeIf.gitdir:$(st_native_sandbox)/work/.path" "$(st_native_sandbox)/cond.cfg" || return 1
+    gsg status
+    assert_rc 0 "informational, not a problem"
+    assert_contains "$OUT" "conditional includes: " "one plain line"
+    assert_contains "$OUT" "doctor" "that points at doctor"
+    assert_contains "$OUT" "gitconfig" "and names the file that holds the include"
+    assert_not_contains "$OUT" "cond.cfg" "never the include path"
+    assert_not_contains "$OUT" "/work/" "nor its condition"
 }
 
 test_status_accepts_a_git_found_through_a_relative_path_entry() {

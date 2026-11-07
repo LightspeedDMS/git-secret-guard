@@ -188,7 +188,9 @@ doctor_values_text() {
 # ^ invariant rc 1 = a PROBLEM was printed; an absent hook or a failed step add one only when no config-shape problem explains it (arg 1 = 1)
 doctor_hook_verdict() {
     local prior="$1" res kind step rc msg want i origin value printed=0
+    hooklist_bind_timeout
     res="$(hooklist_probe_line "$DR_WORK")"
+    HL_BOUND=()
     IFS=$'\t' read -r kind step rc msg <<<"$res"
     case "$kind:$step" in
         ok:effective) return 0 ;;

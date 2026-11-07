@@ -131,4 +131,45 @@ test_status_flags_an_unusable_timeout_in_the_settings() {
     assert_contains "$OUT" "timeout: /nonexistent/timeout (MISSING or not executable)" "flagged"
 }
 
+# ^ invariant the old git is first on PATH => it is the git in use; the real one stays behind it as the wrapper's target
+status_with_git_version() {
+    printf '#!/bin/sh\nif [ "$1" = --version ]; then echo "git version %s"; exit 0; fi\nexec %s "$@"\n' "$1" "$GIT" >"$SANDBOX/pathbin/git" || return 1
+    chmod 755 "$SANDBOX/pathbin/git"
+}
+
+test_status_names_the_git_in_use_and_its_version() {
+    fresh_install
+    gsg status
+    assert_rc 0 "a git that can run config hooks"
+    assert_contains "$OUT" "git in use: " "the line exists on every run"
+    assert_contains "$OUT" "(git $("$GIT" --version | sed -e 's/^git version //' -e 's/.windows.*//' -e 's/.vfs.*//'))" "with the version"
+}
+
+test_status_exits_1_when_the_git_in_use_is_older_than_2_54() {
+    fresh_install
+    status_with_git_version 2.52.0 || return 1
+    gsg status
+    assert_rc 1 "commits are not scanned"
+    assert_contains "$OUT" "git 2.52.0" "the version"
+    assert_contains "$OUT" "commits are not scanned" "says what it means"
+    assert_contains "$OUT" "install --upgrade-git" "and what to run"
+}
+
+test_status_ignores_an_old_git_that_is_not_first_on_path() {
+    fresh_install
+    mkdir -p -- "$SANDBOX/lastbin" || return 1
+    printf '#!/bin/sh\necho "git version 2.52.0"\n' >"$SANDBOX/lastbin/git" && chmod 755 "$SANDBOX/lastbin/git" || return 1
+    gsg status
+    assert_rc 0 "an old git behind the first one is the doctor's business"
+    assert_not_contains "$OUT" "2.52.0" "and not named"
+}
+
+test_status_counts_a_missing_jq_setsid_or_timeout_as_a_problem() {
+    fresh_install
+    sed -i 's#^JQ_BIN=.*#JQ_BIN=/nonexistent/jq#' "$LC_DATA/settings" || return 1
+    gsg status
+    assert_rc 1 "a missing jq stops every commit"
+    assert_contains "$OUT" "jq: /nonexistent/jq (MISSING or not executable)" "flagged"
+}
+
 run_file_tests

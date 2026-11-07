@@ -105,12 +105,28 @@ status_unfinished_copy() {
     if gitup_source_unfinished_copy; then status_line "git build" "$REPLY"; fi
 }
 
+# ^ invariant names the first git on PATH and its version on every run; older than 2.54 (or unreadable) is a problem => its config hooks never fire
+# ^ coupled a second old git behind the first is not judged here, doctor reports it
+status_git() {
+    local ver
+    if ! ver="$(install_git_version "$GSG_GIT")"; then
+        status_line "git in use" "$GSG_GIT (version unreadable; if it is older than 2.54 commits are not scanned) MISMATCH"
+        status_problem
+    elif install_git_is_new_enough "$GSG_GIT"; then
+        status_line "git in use" "$GSG_GIT (git $ver)"
+    else
+        status_line "git in use" "$GSG_GIT (git $ver) MISMATCH: config hooks need git >= 2.54, so commits are not scanned; run: $GSG_NAME install --upgrade-git"
+        status_problem
+    fi
+}
+
 status_run() {
     STATUS_PROBLEMS=0
     paths_init || return 1
     lifecycle_note_global_config
     lifecycle_require_git || return 1
     state_read || return 1
+    status_git
     if [ "$ST_EXISTS" -ne 1 ]; then
         printf '%s: not installed (no state file at %s)\n' "$GSG_NAME" "$GSG_STATE_FILE"
         if gitup_system_git_state && [ "$GITUP_TK_STATE" != none ]; then status_system_git; fi

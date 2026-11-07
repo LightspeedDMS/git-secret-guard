@@ -216,13 +216,13 @@ there; left in place` (or that no hash was recorded).
 
 ## `status` and `version`
 
-`git-secret-guard status` prints the installed version, hook command path, whether the global config matches, the
+`git-secret-guard status` names the git in use (the first on `PATH`) and its version on every run, then prints the installed version, hook command path, whether the global config matches, the
 recorded previous `core.hooksPath`, the **effective** `core.hooksPath` (every global-scope value with the file it
 lives in, also from the XDG config and included files; informational, config hooks run whatever it says), the backup
 path, the tools installed by us, the originals install moved aside, and each tool's path with its detected and
 pinned version. A tool counts as `ok` only when it reports the pinned version the way install judges it (the version
 as a whole word, or with a `v` prefix), so `8.30.1-rc1` is a `MISMATCH` here exactly as install would replace it. It exits 0 when everything matches and 1 when it is not installed or a line says `MISMATCH` or
-`MISSING`. `git-secret-guard version` prints `git-secret-guard <x.y.z>`. `git-secret-guard help` lists the commands. `status` looks at the installation only; the repositories are the job
+`MISSING`; the git in use older than 2.54 is a `MISMATCH` (commits are not scanned; the line says to run `install --upgrade-git`), while a second old git behind it on `PATH` is not judged here (that is `doctor`'s job). `git-secret-guard version` prints `git-secret-guard <x.y.z>`. `git-secret-guard help` lists the commands. `status` looks at the installation only; the repositories are the job
 of [`doctor`](doctor.md).
 
 ## Maintainer notes

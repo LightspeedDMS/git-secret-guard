@@ -30,7 +30,7 @@ If you decline, and on every other platform, it refuses and prints how to get a 
 > for every other reachable git older than 2.54 (all `git` on `PATH` plus `/usr/bin/git` and the git GitHub Desktop bundles at `/usr/lib/github-desktop/resources/app/git/bin/git`, which the warning names: a commit made by it was measured to skip the scan, see [CI on real platforms](platforms.md#ci-on-real-platforms); on this machine
 > `/usr/bin/git` is 2.52) and goes on, because the git that matters is the one your commits run. Commits made with the
 > old one are **not scanned**; call `/usr/local/bin/git` (or put it first on `PATH`) wherever you commit. On RHEL, Rocky and
-> AlmaLinux, `install --take-over-system-git` points an old package `/usr/bin/git` at the new build, which also covers cron
+> AlmaLinux (where `/bin` links to `/usr/bin`, the prompt and the warnings name `/usr/bin/git`, whichever spelling `PATH` finds first), `install --take-over-system-git` points an old package `/usr/bin/git` at the new build, which also covers cron
 > jobs and scripts that call it by full path (undo: `restore-system-git`).
 
 ## What `install` does

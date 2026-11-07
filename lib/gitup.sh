@@ -569,10 +569,10 @@ gitup_offer_takeover() {
         fi
         return 0
     fi
-    gitup_consent "$GITUP_TAKEOVER_FLAG" "Take over $found with the plan above?"
+    gitup_consent "$GITUP_TAKEOVER_FLAG" "Take over $(install_display_path "$found") with the plan above?"
     crc=$?
     if [ "$crc" -ne 0 ]; then
-        printf '%s: %s was left as it is; to take it over run: %s install --take-over-system-git\n' "$GSG_NAME" "$found" "$GSG_NAME"
+        printf '%s: %s was left as it is; to take it over run: %s install --take-over-system-git\n' "$GSG_NAME" "$(install_display_path "$found")" "$GSG_NAME"
         return 0
     fi
     gitup_need_elevation || return 1
@@ -610,7 +610,7 @@ gitup_offers() {
 # ^ invariant prints the sentence the other-git warning adds for a git the module could take over; nothing for any other git
 gitup_takeover_note() {
     if [ -z "$GITUP_MODULE" ] || ! gitup_has takeover_supported || ! gitup_call takeover_supported "$1"; then return 0; fi
-    printf '; cron jobs and scripts that call %s by its full path are not scanned either, and %s install --take-over-system-git can point it at the new git' "$1" "$GSG_NAME"
+    printf '; cron jobs and scripts that call %s by its full path are not scanned either, and %s install --take-over-system-git can point it at the new git' "$(install_display_path "$1")" "$GSG_NAME"
 }
 
 # ^ invariant a module's takeover_status sets GITUP_TK_STATE (none, active, undone or broken), GITUP_TK_TEXT (one line) and GITUP_TK_HOWTO (the undo by hand)

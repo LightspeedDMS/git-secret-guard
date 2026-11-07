@@ -76,7 +76,7 @@ group and others cannot write, and the plan prints its full path (`as root: /usr
 
 The package-owned git in `/usr/bin` is **not touched** by any of this: `rpm -q git-core` reports the same version and `rpm -V git-core`
 reports nothing. `/usr/local/bin/git` comes first on `PATH` in a login shell, under `sudo` and in the systemd manager, **not** in cron
-(`/etc/crontab` sets `PATH=/sbin:/bin:/usr/sbin:/usr/bin`): a script that calls `/usr/bin/git` by its full path is not scanned, and `install`
+(`/etc/crontab` sets `PATH=/sbin:/bin:/usr/sbin:/usr/bin`; a job in `/etc/cron.d` logged `PATH=/usr/bin:/bin` on the reference host; either way there is no `/usr/local/bin`): a script that calls `/usr/bin/git` by its full path is not scanned, and `install`
 keeps warning about it and names `--take-over-system-git`. A Homebrew git is never a route on Linux (it needs Homebrew's glibc and loads
 code from a tree the user owns).
 

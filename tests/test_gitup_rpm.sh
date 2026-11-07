@@ -50,7 +50,7 @@ test_a_machine_whose_repositories_offer_a_new_enough_git_is_upgraded_through_dnf
     gsg install --upgrade-git </dev/null
     assert_rc 0 "package route"
     assert_contains "$OUT" "route: package" "the plan names the package route"
-    assert_contains "$(gu_log)" "dnf install -y git-core" "dnf installed git-core"
+    assert_contains "$(gu_log)" "dnf install -y --disablerepo=* --enablerepo=baseos git-core" "dnf installed git-core"
     assert_not_contains "$(gu_log)" "make -C" "no build ran"
     assert_eq "$(pathbin_git_version)" "git version 2.55.0" "git is the repository's"
 }
@@ -65,10 +65,10 @@ test_an_old_package_git_is_upgraded_with_dnf_upgrade_because_dnf_install_leaves_
     printf 'git-core-2.47.0-1.fc41.x86_64\n' >"$SANDBOX/rpm.nevra"
     gsg install --upgrade-git </dev/null
     assert_rc 0 "package route with an installed old git-core"
-    assert_contains "$OUT" "as root: $SANDBOX/pathbin/dnf upgrade -y git-core" "the plan says upgrade"
+    assert_contains "$OUT" "as root: $SANDBOX/pathbin/dnf upgrade -y --disablerepo=* --enablerepo=baseos git-core" "the plan says upgrade"
     check_plan_matches_log "$OUT" "the package route over an installed git-core"
-    assert_contains "$(gu_log)" "dnf upgrade -y git-core" "and dnf upgraded git-core"
-    assert_not_contains "$(gu_log)" "dnf install -y git-core" "dnf install is not used on an installed package"
+    assert_contains "$(gu_log)" "dnf upgrade -y --disablerepo=* --enablerepo=baseos git-core" "and dnf upgraded git-core"
+    assert_not_contains "$(gu_log)" "dnf install -y --disablerepo=* --enablerepo=baseos git-core" "dnf install is not used on an installed package"
     assert_eq "$(pathbin_git_version)" "git version 2.55.0" "git is the repository's"
 }
 
@@ -78,8 +78,8 @@ test_a_missing_git_core_is_installed_with_dnf_install() {
     printf '2.55.0' >"$SANDBOX/dnf.upgrade_to"
     gsg install --upgrade-git </dev/null
     assert_rc 0 "package route without git-core installed"
-    assert_contains "$OUT" "as root: $SANDBOX/pathbin/dnf install -y git-core" "the plan says install"
-    assert_not_contains "$(gu_log)" "dnf upgrade -y git-core" "and upgrade is not used"
+    assert_contains "$OUT" "as root: $SANDBOX/pathbin/dnf install -y --disablerepo=* --enablerepo=baseos git-core" "the plan says install"
+    assert_not_contains "$(gu_log)" "dnf upgrade -y --disablerepo=* --enablerepo=baseos git-core" "and upgrade is not used"
 }
 
 test_the_repository_query_is_read_only_bounded_and_never_answers_a_prompt() {

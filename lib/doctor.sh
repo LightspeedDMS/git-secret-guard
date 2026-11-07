@@ -36,12 +36,6 @@ doctor_split_record() {
     if [[ $1 == *$'\n'* ]]; then REC_VALUE="${1#*$'\n'}"; fi
 }
 
-# ^ external real git 2.56 treats an empty value as false too (git hook list says disabled); a valueless key has no value and is the caller's to exclude
-doctor_is_false() {
-    case "${1,,}" in false | no | off | 0 | "") return 0 ;; esac
-    return 1
-}
-
 # shellcheck disable=SC2329
 doctor_cleanup() {
     # ^ invariant rm -rf only on the absolute mktemp directory this run made
@@ -87,7 +81,7 @@ doctor_require_git() {
     lifecycle_require_git || return 1
     if ! install_git_is_new_enough "$GSG_GIT"; then
         ver="$(install_git_version "$GSG_GIT")" || ver="of unknown version"
-        printf '%s: the git on PATH (%s) is git %s; doctor needs git >= 2.54 to see config-based hooks\n' "$GSG_NAME" "$GSG_GIT" "$ver" >&2
+        printf '%s: the git on PATH (%s) is git %s; doctor needs git >= 2.54 to see config-based hooks\n' "$GSG_NAME" "$(gitup_display_path "$GSG_GIT")" "$ver" >&2
         return 1
     fi
 }
@@ -217,14 +211,21 @@ doctor_check_hook_config() {
                 cmd_src+="${cmd_src:+; }$scope ${origin#file:}"
                 if [ "$value" = "$want" ]; then cmd_ok=$((cmd_ok + 1)); fi
                 ;;
-            hook.git-secret-guard.enabled)
-                if [[ ${GSG_HP_OUT[i + 2]} == *$'\n'* ]] && doctor_is_false "$value"; then
-                    doctor_machine_line PROBLEM "hook: hook.git-secret-guard.enabled=$value in the $scope config (${origin#file:}) switches the hook off everywhere; remove it"
-                    bad=1
-                fi
-                ;;
         esac
     done
+    if hp_hook_enabled_scan; then
+        for i in "${!HP_EN_KIND[@]}"; do
+            origin="${HP_EN_ORIGIN[$i]#file:}"
+            if [ "${HP_EN_KIND[$i]}" = valueless ]; then
+                doctor_machine_line PROBLEM "hook: ${HP_EN_KEY[$i]} has no value in the ${HP_EN_SCOPE[$i]} config (${origin//[^[:print:]]/?}); git commands fail until it is removed"
+            else
+                value="${HP_EN_VALUE[$i]//[^[:print:]]/?}"
+                trunc_text "$value" 40
+                doctor_machine_line PROBLEM "hook: ${HP_EN_KEY[$i]}=$REPLY in the ${HP_EN_SCOPE[$i]} config (${origin//[^[:print:]]/?}) switches the hook off everywhere; remove it"
+            fi
+            bad=1
+        done
+    fi
     if [ "$ev_n" -eq 0 ]; then
         doctor_machine_line PROBLEM "hook: hook.git-secret-guard.event is [unset], want exactly [pre-commit]; run git-secret-guard install"
         bad=1

@@ -30,36 +30,39 @@ status_hook_command() {
     fi
 }
 
-# ^ external the config records come in precedence order => the last record of a key is the value git uses
-# ^ invariant a switched-off hook is a MISMATCH naming key, scope, file and value, never command or event; doctor_is_false defines off
+# ^ external git config --show-scope exists from git 2.26; an older git is a MISMATCH on the git line already, the scope lines say not read
+status_git_lists_scopes() {
+    local ver
+    ver="$(install_git_version "$GSG_GIT" 2>/dev/null)" || return 1
+    gitup_version_at_least "$ver" 2.26
+}
+
+# ^ invariant a switched-off or valueless hook.<name>.enabled is a MISMATCH naming key, scope, file and for an off hook its value, never command or event
+# ^ coupled the scan judges by git's own parser, last scope wins; below git 2.26 there is no --show-scope, the line says not checked
 status_hook_enabled() {
-    local rc i scope origin key value rec seen=0
-    local -A off_scope=() off_origin=() off_value=()
-    hp_records -C / config --show-scope --show-origin -z --get-regexp '^hook\.(git-secret-guard|pre-commit)\.enabled$'
-    rc=$?
-    if [ "$rc" -gt 1 ]; then
-        status_line "hook enabled" "cannot read the git config (git config exit $rc) MISMATCH"
+    local i value adv
+    if ! status_git_lists_scopes; then
+        status_line "hook enabled" "not checked (the git in use is older than 2.26 or unreadable, and cannot list config scopes)"
+        return 0
+    fi
+    if ! hp_hook_enabled_scan; then
+        status_line "hook enabled" "MISMATCH cannot read the git config${GSG_HP_ERR:+: $GSG_HP_ERR}"
         status_problem
         return 0
     fi
-    for ((i = 0; i + 2 < ${#GSG_HP_OUT[@]}; i += 3)); do
-        scope="${GSG_HP_OUT[i]}" origin="${GSG_HP_OUT[i + 1]}" rec="${GSG_HP_OUT[i + 2]}"
-        doctor_split_record "$rec"
-        key="$REC_KEY" value="$REC_VALUE"
-        off_scope[$key]="" off_origin[$key]="" off_value[$key]=""
-        if [[ $rec == *$'\n'* ]] && doctor_is_false "$value"; then
-            off_scope[$key]="$scope" off_origin[$key]="${origin#file:}" off_value[$key]="$value"
+    for i in "${!HP_EN_KIND[@]}"; do
+        hp_hook_enabled_advice "$i"
+        adv="$REPLY"
+        if [ "${HP_EN_KIND[$i]}" = valueless ]; then
+            status_line "hook enabled" "MISMATCH ${HP_EN_KEY[$i]} has no value in the ${HP_EN_SCOPE[$i]} config (${HP_EN_ORIGIN[$i]#file:}); git commands fail until it is removed; $adv"
+        else
+            value="${HP_EN_VALUE[$i]//[^[:print:]]/?}"
+            trunc_text "$value" 40
+            status_line "hook enabled" "MISMATCH ${HP_EN_KEY[$i]}=$REPLY in the ${HP_EN_SCOPE[$i]} config (${HP_EN_ORIGIN[$i]#file:}) switches the hook off, commits are not scanned; $adv"
         fi
-    done
-    for key in hook.git-secret-guard.enabled hook.pre-commit.enabled; do
-        if [ -z "${off_scope[$key]:-}" ]; then continue; fi
-        seen=1
-        scope="${off_scope[$key]}" value="${off_value[$key]//[^[:print:]]/?}"
-        trunc_text "$value" 40
-        status_line "hook enabled" "MISMATCH $key=$REPLY in the $scope config (${off_origin[$key]//[^[:print:]]/?}) switches the hook off, commits are not scanned; run: git config --$scope --unset $key"
         status_problem
     done
-    if [ "$seen" -eq 0 ]; then status_line "hook enabled" "yes (neither hook.git-secret-guard.enabled nor hook.pre-commit.enabled switches it off)"; fi
+    if [ "${#HP_EN_KIND[@]}" -eq 0 ]; then status_line "hook enabled" "yes (neither hook.git-secret-guard.enabled nor hook.pre-commit.enabled switches it off)"; fi
 }
 
 # ^ invariant informational only => config hooks run whatever core.hooksPath says, this line never counts as a problem
@@ -142,12 +145,12 @@ status_unfinished_copy() {
 status_git() {
     local ver
     if ! ver="$(install_git_version "$GSG_GIT")"; then
-        status_line "git in use" "$GSG_GIT (version unreadable; if it is older than 2.54 commits are not scanned) MISMATCH"
+        status_line "git in use" "$(gitup_display_path "$GSG_GIT") (version unreadable; if it is older than 2.54 commits are not scanned) MISMATCH"
         status_problem
     elif install_git_is_new_enough "$GSG_GIT"; then
-        status_line "git in use" "$GSG_GIT (git $ver)"
+        status_line "git in use" "$(gitup_display_path "$GSG_GIT") (git $ver)"
     else
-        status_line "git in use" "$GSG_GIT (git $ver) MISMATCH: config hooks need git >= 2.54, so commits are not scanned; run: $GSG_NAME install --upgrade-git"
+        status_line "git in use" "$(gitup_display_path "$GSG_GIT") (git $ver) MISMATCH: config hooks need git >= 2.54, so commits are not scanned; run: $GSG_NAME install --upgrade-git"
         status_problem
     fi
 }
@@ -158,6 +161,7 @@ status_run() {
     lifecycle_note_global_config
     lifecycle_require_git || return 1
     state_read || return 1
+    if [ -z "${GITUP_SYSTEM_PATH:-}" ]; then gitup_paths || return 1; fi
     status_git
     if [ "$ST_EXISTS" -ne 1 ]; then
         printf '%s: not installed (no state file at %s)\n' "$GSG_NAME" "$GSG_STATE_FILE"
@@ -175,7 +179,11 @@ status_run() {
     else
         status_line "previous core.hooksPath" "unset"
     fi
-    status_hooks_path || return 1
+    if status_git_lists_scopes; then
+        status_hooks_path || return 1
+    else
+        status_line "core.hooksPath (effective)" "not read (the git in use cannot list config scopes)"
+    fi
     status_line "hooks backup" "${ST_BACKUP:-none}"
     status_line "tools installed by us" "${ST_TOOLS:-none}"
     local entry asides=""

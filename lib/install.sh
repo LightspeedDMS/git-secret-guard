@@ -140,7 +140,7 @@ install_require_git() {
     }
     if ! install_git_is_new_enough "$GSG_GIT"; then
         ver="$(install_git_version "$GSG_GIT")" || ver="of unknown version"
-        printf '%s: the git on PATH (%s) is git %s; config-based hooks need git >= 2.54, install refused\n' "$GSG_NAME" "$GSG_GIT" "$ver" >&2
+        printf '%s: the git on PATH (%s) is git %s; config-based hooks need git >= 2.54, install refused\n' "$GSG_NAME" "$(gitup_display_path "$GSG_GIT")" "$ver" >&2
         install_git_hint
         return 1
     fi
@@ -198,7 +198,7 @@ install_report_other_gits() {
         if install_git_is_new_enough "$cand"; then continue; fi
         ver="$(install_git_version "$cand")" || ver="of unknown version"
         printf '%s: warning: %s is git %s; %s (the git in use is %s, git %s)%s\n' \
-            "$GSG_NAME" "$(gitup_display_path "$cand")" "$ver" "$(install_old_git_effect "$cand")" "$GSG_GIT" "$(install_git_version "$GSG_GIT")" "$(gitup_takeover_note "$cand")" >&2
+            "$GSG_NAME" "$(gitup_display_path "$cand")" "$ver" "$(install_old_git_effect "$cand")" "$(gitup_display_path "$GSG_GIT")" "$(install_git_version "$GSG_GIT")" "$(gitup_takeover_note "$cand")" >&2
         brew_old_git_note "$cand"
     done
 }

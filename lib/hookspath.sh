@@ -235,3 +235,49 @@ install_check_config_writable() {
     printf '%s: cannot write the global git config; %s\n' "$GSG_NAME" "$(brew_unchanged_text)" >&2
     return 1
 }
+
+# ^ external git config --type=bool parses as git does (00, 0k, 0x0, -0, empty = false), the last scope wins; probed on git 2.56
+# ^ external a valueless hook.<name>.enabled makes git add, commit, init and clone exit 128 in whichever scope it sits, even when a later scope sets true
+# ^ invariant sets HP_EN_KIND (off | valueless), HP_EN_KEY, HP_EN_SCOPE, HP_EN_ORIGIN, HP_EN_VALUE per finding; rc 1 = config unreadable
+hp_hook_enabled_scan() {
+    local rc i key scope origin rec out
+    local -A last_scope=() last_origin=() last_value=()
+    HP_EN_KIND=() HP_EN_KEY=() HP_EN_SCOPE=() HP_EN_ORIGIN=() HP_EN_VALUE=()
+    hp_records -C / config --show-scope --show-origin -z --get-regexp '^hook\.(git-secret-guard|pre-commit)\.enabled$'
+    rc=$?
+    if [ "$rc" -gt 1 ]; then return 1; fi
+    for ((i = 0; i + 2 < ${#GSG_HP_OUT[@]}; i += 3)); do
+        scope="${GSG_HP_OUT[i]}" origin="${GSG_HP_OUT[i + 1]}" rec="${GSG_HP_OUT[i + 2]}"
+        key="${rec%%$'\n'*}"
+        if [[ $rec != *$'\n'* ]]; then
+            HP_EN_KIND+=(valueless) HP_EN_KEY+=("$key") HP_EN_SCOPE+=("$scope") HP_EN_ORIGIN+=("$origin") HP_EN_VALUE+=("")
+            continue
+        fi
+        last_scope[$key]="$scope" last_origin[$key]="$origin" last_value[$key]="${rec#*$'\n'}"
+    done
+    for key in hook.git-secret-guard.enabled hook.pre-commit.enabled; do
+        if [ -z "${last_scope[$key]:-}" ]; then continue; fi
+        out="$("$GSG_GIT" -C / config --type=bool --get "$key" 2>/dev/null)" || continue
+        if [ "$out" != false ]; then continue; fi
+        HP_EN_KIND+=(off) HP_EN_KEY+=("$key") HP_EN_SCOPE+=("${last_scope[$key]}") HP_EN_ORIGIN+=("${last_origin[$key]}") HP_EN_VALUE+=("${last_value[$key]}")
+    done
+}
+
+# ^ invariant sets REPLY = how to remove entry I; the git config form only for the global file git writes, else the named file to edit
+# ^ why the named file, not a system unset; an unset needs root, fails for an included file or a command-line setting
+hp_hook_enabled_advice() {
+    local i="$1" file="${HP_EN_ORIGIN[$1]#file:}" scope="${HP_EN_SCOPE[$1]}" main=""
+    file="${file//[^[:print:]]/?}"
+    case "$scope" in
+        global)
+            if [ -n "${GIT_CONFIG_GLOBAL:-}" ]; then main="$GIT_CONFIG_GLOBAL"; else main="${HOME:-}/.gitconfig"; fi
+            if [ "$file" = "$main" ]; then
+                REPLY="run: git config --global --unset ${HP_EN_KEY[$i]} (or remove the line from $file)"
+                return 0
+            fi
+            ;;
+        command) REPLY="unset the setting in the environment or the command line that sets it"; return 0 ;;
+    esac
+    REPLY="remove the line from $file (the $scope config)"
+    if [ "$scope" = system ]; then REPLY+=", as root"; fi
+}

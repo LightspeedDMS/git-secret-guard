@@ -86,6 +86,26 @@ test_a_duplicated_or_disabled_hook_config_is_a_problem() {
     assert_contains "$OUT" "hook.git-secret-guard.enabled=false in the global config ($SANDBOX/gitconfig) switches the hook off everywhere; remove it" "names the file"
 }
 
+test_the_machine_section_judges_enabled_by_gits_own_parser_and_names_a_valueless_key() {
+    local v
+    dr_begin || return 1
+    for v in 00 0k 0x0 -0; do
+        gitx config --global hook.git-secret-guard.enabled "$v" || return 1
+        doctor
+        assert_rc 1 "[$v] is false for git"
+        assert_contains "$OUT" "hook.git-secret-guard.enabled=$v in the global config" "[$v] named"
+    done
+    gitx config --global hook.git-secret-guard.enabled true || return 1
+    gitx config --global hook.pre-commit.enabled 0k || return 1
+    doctor
+    assert_contains "$OUT" "hook.pre-commit.enabled=0k in the global config" "the event key too"
+    gitx config --global --unset hook.pre-commit.enabled || return 1
+    printf '[hook "git-secret-guard"]\n\tenabled\n' >>"$SANDBOX/gitconfig" || return 1
+    doctor
+    assert_rc 1 "a key without a value"
+    assert_contains "$OUT" "PROBLEM  hook: hook.git-secret-guard.enabled has no value in the global config ($SANDBOX/gitconfig); git commands fail until" "a PROBLEM"
+}
+
 test_the_machine_section_never_prints_a_hook_config_value() {
     local marker
     dr_begin || return 1

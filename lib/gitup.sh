@@ -403,7 +403,7 @@ gitup_describe_git() {
         return 0
     fi
     ver="$(install_git_version "$GSG_GIT")" || ver="of unknown version"
-    printf 'the git on PATH (%s) is git %s' "$GSG_GIT" "$ver"
+    printf 'the git on PATH (%s) is git %s' "$(gitup_display_path "$GSG_GIT")" "$ver"
 }
 
 gitup_refuse_path_fix() {

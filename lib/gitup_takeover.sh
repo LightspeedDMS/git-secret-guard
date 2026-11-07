@@ -234,20 +234,32 @@ gitup_tk_status() {
     fi
 }
 
-# ^ invariant rc 0 = the file, or the target of a symlink below the prefix, has the trusted owner and no group or other write bit; rc 1 sets GITUP_REASON
-# ^ why the target of a link is judged, not the link; a symlink shows mode 777, and git installs its siblings as symlinks (INSTALL_SYMLINKS=1)
+# ^ invariant rc 0 = the file, or each link of a chain and its target, has the trusted owner and no group or other write bit; rc 1 sets GITUP_REASON
+# ^ why the links are judged one by one, not only the target; a link shows mode 777, and git installs its siblings as symlinks (INSTALL_SYMLINKS=1)
+# ^ security a path in a message shows control characters as ?; the directories a chain passes through are not judged here, as no file's directory is
 gitup_tk_check_owner() {
-    local path="$1" uid mode stat_out real prefix_real
+    local path="$1" uid mode stat_out prefix_real hop next real hops=0 shown
+    shown="${path//[^[:print:]]/?}"
     if [ -L "$path" ]; then
-        real="$(realpath -- "$path")" || gitup_tk_fail "cannot resolve the link $path" || return 1
         prefix_real="$(realpath -- "$GITUP_PREFIX")" || gitup_tk_fail "cannot resolve $GITUP_PREFIX" || return 1
-        if [[ $real != "$prefix_real"/* ]]; then gitup_tk_fail "$path is a link out of $GITUP_PREFIX" || return 1; fi
-        path="$real"
+        hop="$path"
+        while [ -L "$hop" ]; do
+            hops=$((hops + 1))
+            if [ "$hops" -gt 16 ]; then gitup_tk_fail "$shown is a chain of more than 16 links" || return 1; fi
+            uid="$(stat -c '%u' -- "$hop")" || gitup_tk_fail "cannot read the owner of the link ${hop//[^[:print:]]/?}" || return 1
+            if [ "$uid" != "$(gitup_trusted_uid)" ]; then gitup_tk_fail "the link ${hop//[^[:print:]]/?} is owned by user $uid, not by the trusted user" || return 1; fi
+            next="$(readlink -- "$hop")" || gitup_tk_fail "cannot read the link ${hop//[^[:print:]]/?}" || return 1
+            if [[ $next != /* ]]; then next="${hop%/*}/$next"; fi
+            real="$(realpath -m -- "$next")" || gitup_tk_fail "cannot resolve the link ${hop//[^[:print:]]/?}" || return 1
+            if [[ $real != "$prefix_real"/* ]]; then gitup_tk_fail "$shown is a link out of $GITUP_PREFIX (a hop points at ${real//[^[:print:]]/?})" || return 1; fi
+            hop="$next"
+        done
+        path="$(realpath -- "$path")" || gitup_tk_fail "cannot resolve the link $shown" || return 1
     fi
-    stat_out="$(stat -c '%u %a' -- "$path")" || gitup_tk_fail "cannot read the owner of $path" || return 1
+    stat_out="$(stat -c '%u %a' -- "$path")" || gitup_tk_fail "cannot read the owner of $shown" || return 1
     read -r uid mode <<<"$stat_out"
-    if [ "$uid" != "$(gitup_trusted_uid)" ]; then gitup_tk_fail "$path is owned by user $uid, not by the trusted user" || return 1; fi
-    if [ $((8#$mode & 8#022)) -ne 0 ]; then gitup_tk_fail "$path is writable by group or others (mode $mode)" || return 1; fi
+    if [ "$uid" != "$(gitup_trusted_uid)" ]; then gitup_tk_fail "$shown is owned by user $uid, not by the trusted user" || return 1; fi
+    if [ $((8#$mode & 8#022)) -ne 0 ]; then gitup_tk_fail "$shown is writable by group or others (mode $mode)" || return 1; fi
 }
 
 GITUP_TK_FILES_LIMIT=5000

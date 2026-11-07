@@ -250,7 +250,7 @@ test_the_per_repository_retry_stops_when_its_total_time_budget_is_used_up() {
     printf '*' >"$SANDBOX/dnf.hang"
     gsg install </dev/null
     assert_contains "$OUT" "the other repositories were not tried: the retry budget of 2s was used up" "the plan says the retry stopped"
-    n="$(grep -c 'could not be queried' <<<"$OUT")"
+    n="$(grep -c 'could not be read' <<<"$OUT")"
     if [ "$n" -ge 6 ]; then fail "all six repositories were tried ($n lines) although the budget was two seconds"; fi
 }
 

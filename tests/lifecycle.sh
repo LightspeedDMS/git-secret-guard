@@ -134,7 +134,8 @@ case " $* " in
     *" repoquery "*)
         if [ -f "$d/dnf.hang" ] && { [ -z "$repo" ] || [ "$repo" = "$(cat "$d/dnf.hang")" ] || [ "$(cat "$d/dnf.hang")" = "*" ]; }; then exec sleep 60; fi
         if [ -f "$d/dnf.badrepo" ] && { [ -z "$repo" ] || [ "$repo" = "$(cat "$d/dnf.badrepo")" ]; }; then
-            echo "Importing GPG key 0xDEADBEEF: Is this ok [y/N]: Operation aborted." >&2
+            printf '%s\n' "Importing GPG key 0xDEADBEEF:" ' Userid     : "Some Vendor"' ' Fingerprint: 0000' ' From       : https://vendor.invalid/key' "Is this ok [y/N]: Operation aborted." >&2
+            echo "Error: Failed to download metadata for repo '${repo:-all}': repomd.xml GPG signature verification error: Bad GPG signature" >&2
             exit 1
         fi
         if [ -f "$d/dnf.candidate" ]; then cat "$d/dnf.candidate"; fi

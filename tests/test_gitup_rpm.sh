@@ -98,11 +98,27 @@ test_a_repository_whose_key_is_not_imported_is_named_and_the_route_falls_back_to
     printf '2.55.0\n' >"$SANDBOX/dnf.candidate"
     gsg install </dev/null
     assert_rc 1 "no consent, only the plan matters"
-    assert_contains "$OUT$ERR" "repository acli could not be queried" "the failing repository is named"
-    assert_not_contains "$OUT$ERR" "repository baseos could not be queried" "and the good one is not"
+    assert_contains "$OUT$ERR" "repository acli could not be read" "the failing repository is named"
+    assert_not_contains "$OUT$ERR" "repository baseos could not be read" "and the good one is not"
     assert_contains "$OUT" "route: source" "the route falls back to source"
     assert_contains "$(gu_log)" "--disablerepo=* --enablerepo=acli" "each repository was queried alone"
     assert_not_contains "$(grep -E 'repoquery|repolist' "$SANDBOX/gitup.log")" " -y" "no key was imported"
+}
+
+# ^ invariant the query runs unprivileged => a failing repository is not called broken; dnf key-import chatter stays out, its Error line stays
+test_the_failed_repository_line_says_the_user_could_not_read_it_and_keeps_dnfs_chatter_out() {
+    gu_rpm_setup || return 1
+    printf 'baseos\nacli\n' >"$SANDBOX/dnf.repos"
+    printf 'acli' >"$SANDBOX/dnf.badrepo"
+    gsg install </dev/null
+    assert_contains "$OUT$ERR" "repository acli could not be read by this unprivileged query" "named, and not called broken"
+    assert_contains "$OUT$ERR" "a repository that works for root can fail here" "says why it proves nothing"
+    assert_contains "$OUT$ERR" "dnf said: Error: Failed to download metadata for repo 'acli'" "a real dnf error is kept"
+    assert_not_contains "$OUT$ERR" "Importing GPG key" "no key import text"
+    assert_not_contains "$OUT$ERR" "Userid" "and no key owner"
+    assert_not_contains "$OUT$ERR" "needs a key that is not imported" "the old guess is gone"
+    assert_contains "$OUT" "route: source (a repository could not be read by the unprivileged query, so the package route is not trusted)" "the rule is unchanged"
+    assert_not_contains "$(gu_log)" "sudo" "no privileged command ran before consent"
 }
 
 test_a_repository_that_hangs_ends_within_the_timeout_and_is_named() {
@@ -112,7 +128,7 @@ test_a_repository_that_hangs_ends_within_the_timeout_and_is_named() {
     SECONDS=0
     gsg install </dev/null
     assert_rc 1 "no consent"
-    assert_contains "$OUT$ERR" "repository slow could not be queried" "the hanging repository is named"
+    assert_contains "$OUT$ERR" "repository slow could not be read" "the hanging repository is named"
     [ "$SECONDS" -lt 40 ] || fail "the plan took $SECONDS seconds"
 }
 

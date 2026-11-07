@@ -38,9 +38,11 @@ the upgrade changed.
 
 **The repository query cannot hang or import a key.** It is `dnf --assumeno -q repoquery --latest-limit=1 --queryformat '%{version}\n' git-core`
 (the same on dnf 4 on Rocky 9 and dnf 5 on Fedora 44), with stdin from `/dev/null`, bounded by a timeout (60 seconds, kept short in tests by
-`GSG_GITUP_QUERY_TIMEOUT`), and `--assumeno` answers every prompt, a GPG key import included, with no. A third-party repository whose key is
-not imported (the `acli` repository on the reference host stops at such a prompt) makes the query fail; install then asks each enabled
-repository alone, **names the ones that fail**, imports nothing, and takes the source route. That per-repository retry has a total budget
+`GSG_GITUP_QUERY_TIMEOUT`), and `--assumeno` answers every prompt, a GPG key import included, with no. The query runs as your user, not as root. A third-party repository
+that fails for the user while it works for root (the `acli` repository on the reference host; the reason is not established, a key held per user is the likely one) makes the query fail; install then asks each enabled
+repository alone, **names the ones that fail** as "could not be read by this unprivileged query" (a repository that works for root can fail there, so it is not called broken), shows
+the first `Error:` line dnf wrote and none of its key-import text, imports nothing, and takes the source route, because a package route is only trusted when every repository was read. No privileged
+command runs to retry the query: the plan is what you consent to. That per-repository retry has a total budget
 (twice the query timeout); repositories beyond it are not tried and the plan says so.
 
 **The privileged `dnf install -y` is different.** `-y` answers yes to every prompt, a repository GPG key import included (read from dnf's

@@ -132,6 +132,7 @@ test_status_flags_an_unusable_timeout_in_the_settings() {
 }
 
 # ^ invariant the old git is first on PATH => it is the git in use; the real one stays behind it as the wrapper's target
+# shellcheck disable=SC2016
 status_with_git_version() {
     printf '#!/bin/sh\nif [ "$1" = --version ]; then echo "git version %s"; exit 0; fi\nexec %s "$@"\n' "$1" "$GIT" >"$SANDBOX/pathbin/git" || return 1
     chmod 755 "$SANDBOX/pathbin/git"

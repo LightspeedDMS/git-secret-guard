@@ -236,11 +236,82 @@ install_check_config_writable() {
     return 1
 }
 
+# ^ external hook list line = name, "disabled<TAB>name" (enabled=false) or "event-disabled<TAB>name" (hook.pre-commit.enabled=false); git 2.56
+# ^ invariant hooklist_read ERRFILE [GIT_ARGS...] sets HL_STATUS = effective, disabled, event-disabled or absent; HL_RC = git's exit status; REPLY = its message
+# ^ invariant returns 0 = listed (an empty list too, also a command without its event), 2 = an event without its command (git exits 128), 1 = git failed
+hooklist_read() {
+    local errfile="$1" line
+    local -a listed=()
+    shift
+    HL_STATUS=absent
+    mapfile -t listed < <("$GSG_GIT" "$@" hook list pre-commit 2>"$errfile")
+    wait "$!"
+    HL_RC=$?
+    first_message "$errfile"
+    # ^ external hook list exit 1 + "no hooks found" on stderr = an empty list, not a failure
+    # ^ external git 2.56 exits 128 with "'hook.git-secret-guard.command' must be configured or ... must be removed" when only the command key is gone
+    if [ "$HL_RC" -ne 0 ] && [[ $REPLY == *"must be configured or"* ]]; then return 2; fi
+    if [ "$HL_RC" -ne 0 ] && { [ "$HL_RC" -ne 1 ] || [[ $REPLY != *"no hooks found"* ]]; }; then return 1; fi
+    for line in "${listed[@]}"; do
+        case "$line" in
+            git-secret-guard) HL_STATUS=effective ;;
+            $'disabled\tgit-secret-guard') HL_STATUS=disabled ;;
+            $'event-disabled\tgit-secret-guard') HL_STATUS=event-disabled ;;
+        esac
+    done
+    return 0
+}
+
+# ^ security every local variable git names is unset (GIT_DIR and the like); GIT_CONFIG_PARAMETERS and GIT_CONFIG_COUNT stay, a commit sees them too
+# ^ external GIT_DEFAULT_HASH and GIT_DEFAULT_REF_FORMAT shape a new repository only => a bad value would fail the throwaway init, no commit elsewhere
+# ^ invariant hooklist_probe WORK = git hook list in an empty --template= bare repository below WORK; rc 0 sets HL_STATUS, rc 1 HL_STEP HL_RC REPLY
+hooklist_probe() {
+    local work="$1" vars v rc repo="$1/repo"
+    if tools_is_windows; then repo="$(cygpath -m "$work")/repo" || repo="$work/repo"; fi
+    HL_STEP="rev-parse --local-env-vars"
+    vars="$("$GSG_GIT" rev-parse --local-env-vars 2>"$work/err.txt")"
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
+        first_message "$work/err.txt"
+        HL_RC="$rc"
+        return 1
+    fi
+    while IFS= read -r v; do
+        case "$v" in
+            "" | GIT_CONFIG_PARAMETERS | GIT_CONFIG_COUNT) continue ;;
+        esac
+        unset "$v"
+    done <<<"$vars"
+    unset GIT_DEFAULT_HASH GIT_DEFAULT_REF_FORMAT
+    HL_STEP=init
+    "$GSG_GIT" init -q --bare --template= "$repo" >/dev/null 2>"$work/err.txt"
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
+        first_message "$work/err.txt"
+        HL_RC="$rc"
+        return 1
+    fi
+    HL_STEP="hook list pre-commit"
+    hooklist_read "$work/err.txt" --git-dir="$repo"
+}
+
+# ^ invariant prints "ok<TAB>STATUS" or "fail<TAB>STEP<TAB>EXIT<TAB>MESSAGE" for the caller to parse; the probe unsets stay in its subshell
+hooklist_probe_line() {
+    (
+        if hooklist_probe "$1"; then
+            printf 'ok\t%s\n' "$HL_STATUS"
+        else
+            printf 'fail\t%s\t%s\t%s\n' "$HL_STEP" "$HL_RC" "$REPLY"
+        fi
+    )
+}
+
 # ^ external hook.c parses EACH enabled value with git_parse_maybe_bool and skips unparseable ones => the last valid value decides (v2.54.0, v2.55.0)
 # ^ external a valueless hook.<name>.enabled makes git add, commit, init and clone exit 128 in whichever scope it sits, even when a later scope sets true
-# ^ invariant sets HP_EN_KIND (off | ignored | default | unjudged | valueless), _KEY, _SCOPE, _ORIGIN, _VALUE per finding; rc 1 = unreadable
+# ^ invariant location only, git hook list decides => names the setting git blamed (off, unjudged, valueless) with key, scope, file, value; rc 1 = unreadable
 hp_hook_enabled_scan() {
-    local rc i j key scope origin rec ver dec inv decval kind bad
+    local rc i j key scope origin rec dec decval bad
+    # ^ why no git version gate, not the 2.55 rule; git reports event-disabled only where it reads hook.<event>.enabled
     local -a r_key=() r_scope=() r_origin=() r_value=()
     HP_EN_KIND=() HP_EN_KEY=() HP_EN_SCOPE=() HP_EN_ORIGIN=() HP_EN_VALUE=()
     hp_records -C / config --show-scope --show-origin -z --get-regexp '^hook\.(git-secret-guard|pre-commit)\.enabled$'
@@ -255,20 +326,15 @@ hp_hook_enabled_scan() {
         fi
         r_key+=("$key") r_scope+=("$scope") r_origin+=("$origin") r_value+=("${rec#*$'\n'}")
     done
-    ver="$(install_git_version "$GSG_GIT" 2>/dev/null)" || ver=0
     for key in hook.git-secret-guard.enabled hook.pre-commit.enabled; do
-        # ^ external hook.<event>.enabled needs git 2.55; hook.c at v2.54.0 has only the friendly-name key
-        if [ "$key" = hook.pre-commit.enabled ] && ! gitup_version_at_least "$ver" 2.55; then continue; fi
-        dec=-1 decval="" inv=() bad=-1
+        dec=-1 decval="" bad=-1
         for j in "${!r_key[@]}"; do
             if [ "${r_key[$j]}" != "$key" ]; then continue; fi
             hp_bool_value "${r_value[$j]}"
             rc=$?
             if [ "$rc" -eq 0 ]; then
-                dec="$j" decval="$REPLY" inv=()
-            elif [ "$rc" -eq 1 ]; then
-                inv+=("$j")
-            else
+                dec="$j" decval="$REPLY"
+            elif [ "$rc" -eq 2 ]; then
                 bad="$j"
                 r_value[bad]="$REPLY"
                 break
@@ -276,16 +342,9 @@ hp_hook_enabled_scan() {
         done
         if [ "$bad" -ge 0 ]; then
             HP_EN_KIND+=(unjudged) HP_EN_KEY+=("$key") HP_EN_SCOPE+=("${r_scope[$bad]}") HP_EN_ORIGIN+=("${r_origin[$bad]}") HP_EN_VALUE+=("${r_value[$bad]}")
-            continue
-        fi
-        if [ "$dec" -ge 0 ] && [ "$decval" = false ]; then
+        elif [ "$dec" -ge 0 ] && [ "$decval" = false ]; then
             HP_EN_KIND+=(off) HP_EN_KEY+=("$key") HP_EN_SCOPE+=("${r_scope[$dec]}") HP_EN_ORIGIN+=("${r_origin[$dec]}") HP_EN_VALUE+=("${r_value[$dec]}")
         fi
-        kind=ignored
-        if [ "$dec" -lt 0 ]; then kind=default; fi
-        for j in "${inv[@]}"; do
-            HP_EN_KIND+=("$kind") HP_EN_KEY+=("$key") HP_EN_SCOPE+=("${r_scope[$j]}") HP_EN_ORIGIN+=("${r_origin[$j]}") HP_EN_VALUE+=("${r_value[$j]}")
-        done
     done
 }
 

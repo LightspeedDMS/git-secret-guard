@@ -37,20 +37,30 @@ status_git_lists_scopes() {
     gitup_version_at_least "$ver" 2.26
 }
 
-# ^ invariant a switched-off or valueless hook.<name>.enabled is a MISMATCH naming key, scope, file and for an off hook its value, never command or event
-# ^ coupled the scan judges by git's own parser, last scope wins; below git 2.26 there is no --show-scope, the line says not checked
-status_hook_enabled() {
-    local i value adv origin
-    if ! status_git_lists_scopes; then
-        status_line "hook enabled" "not checked (the git in use is older than 2.26 or unreadable, and cannot list config scopes)"
-        return 0
+STATUS_TMP=""
+
+# ^ invariant rm -rf only on the absolute mktemp directory this run made; runs from the EXIT trap of the subshell in status_hook_listing
+status_cleanup() {
+    if [ -n "$STATUS_TMP" ] && [ "${STATUS_TMP#/}" != "$STATUS_TMP" ] && ! rm -rf -- "$STATUS_TMP"; then
+        printf '%s: cannot remove %s\n' "$GSG_NAME" "$STATUS_TMP" >&2
     fi
+}
+
+# ^ security the message is first_message output (control characters replaced, cut at 200) => no escape sequence reaches the terminal
+status_hook_failed() {
+    status_line "hook list" "MISMATCH (git $1 failed with exit $2${3:+: $3}; commits may be blocked or unscanned until it works)"
+}
+
+# ^ invariant location only => git already said the hook is off or failed; the scan names key, scope, file and advice, and never decides
+# ^ invariant a failing scan or an empty result is reported plainly and changes nothing; an enabled value is printed, never a command or event
+status_hook_locate() {
+    local want="$1" i adv origin value found=0
     if ! hp_hook_enabled_scan; then
-        status_line "hook enabled" "MISMATCH cannot read the git config${GSG_HP_ERR:+: $GSG_HP_ERR}"
-        status_problem
+        status_line "hook enabled" "git reports the hook disabled; the setting could not be located (the git config could not be read; find it with: git config --show-origin --get-all $want)"
         return 0
     fi
     for i in "${!HP_EN_KIND[@]}"; do
+        if [ "${HP_EN_KEY[$i]}" != "$want" ] && [ "${HP_EN_KIND[$i]}" != valueless ]; then continue; fi
         hp_hook_enabled_advice "$i"
         adv="$REPLY"
         origin="${HP_EN_ORIGIN[$i]#file:}"
@@ -58,24 +68,68 @@ status_hook_enabled() {
         value="${HP_EN_VALUE[$i]//[^[:print:]]/?}"
         trunc_text "$value" 40
         value="$REPLY"
+        found=1
         case "${HP_EN_KIND[$i]}" in
-            valueless)
-                status_line "hook enabled" "MISMATCH ${HP_EN_KEY[$i]} has no value in the ${HP_EN_SCOPE[$i]} config ($origin); git commands fail until it is removed; $adv"
-                status_problem
-                ;;
-            ignored) status_line "hook enabled" "${HP_EN_KEY[$i]}=$value in the ${HP_EN_SCOPE[$i]} config ($origin) is not a boolean, git ignores it" ;;
-            default) status_line "hook enabled" "${HP_EN_KEY[$i]}=$value in the ${HP_EN_SCOPE[$i]} config ($origin) is not a boolean and no other value is set, so git's default applies and the hook stays on" ;;
-            unjudged)
-                status_line "hook enabled" "MISMATCH ${HP_EN_KEY[$i]} could not be judged (the boolean probe failed: $value); the hook may be switched off"
-                status_problem
-                ;;
-            *)
-                status_line "hook enabled" "MISMATCH ${HP_EN_KEY[$i]}=$value in the ${HP_EN_SCOPE[$i]} config ($origin) switches the hook off, commits are not scanned; $adv"
-                status_problem
-                ;;
+            valueless) status_line "hook enabled" "${HP_EN_KEY[$i]} has no value in the ${HP_EN_SCOPE[$i]} config ($origin); git commands fail until it is removed; $adv" ;;
+            unjudged) status_line "hook enabled" "git reports the hook disabled; the setting could not be located (the boolean probe failed: $value)" ;;
+            *) status_line "hook enabled" "${HP_EN_KEY[$i]}=$value in the ${HP_EN_SCOPE[$i]} config ($origin) switches the hook off, commits are not scanned; $adv" ;;
         esac
     done
-    if [ "${#HP_EN_KIND[@]}" -eq 0 ]; then status_line "hook enabled" "yes (neither hook.git-secret-guard.enabled nor hook.pre-commit.enabled switches it off)"; fi
+    if [ "$found" -eq 0 ] && [ "$want" != valueless ]; then
+        status_line "hook enabled" "git reports the hook disabled; the setting could not be located (find it with: git config --show-origin --get-all $want)"
+    fi
+}
+
+# ^ invariant rc 0 = git lists the hook as running before commits; rc 1 = a MISMATCH line was printed; runs in a subshell, see status_hook_listing
+# ^ order traps before mktemp => an interrupt leaves no directory behind; the probe unsets the caller's repository variables in its own subshell
+status_hook_ask() {
+    local res kind step rc msg
+    trap status_cleanup EXIT
+    trap 'exit 129' HUP
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    STATUS_TMP="$(mktemp -d)" || {
+        status_line "hook list" "MISMATCH (cannot create a temp directory to ask git about the hook; check TMPDIR; commits may be unscanned)"
+        return 1
+    }
+    res="$(hooklist_probe_line "$STATUS_TMP")"
+    IFS=$'\t' read -r kind step rc msg <<<"$res"
+    if [ "$kind" != ok ]; then
+        if [ "$kind" != fail ]; then
+            status_hook_failed "hook probe" "?" "no answer"
+            return 1
+        fi
+        status_hook_failed "$step" "$rc" "$msg"
+        status_hook_locate valueless
+        return 1
+    fi
+    case "$step" in
+        effective) return 0 ;;
+        disabled)
+            status_line "hook enabled" "MISMATCH (git hook list pre-commit shows git-secret-guard as disabled by hook.git-secret-guard.enabled, so commits are not scanned)"
+            status_hook_locate hook.git-secret-guard.enabled
+            ;;
+        event-disabled)
+            status_line "hook enabled" "MISMATCH (git hook list pre-commit shows git-secret-guard as event-disabled by hook.pre-commit.enabled, so commits are not scanned)"
+            status_hook_locate hook.pre-commit.enabled
+            ;;
+        *)
+            status_line "hook list" "MISMATCH (git-secret-guard is not in git hook list pre-commit, so commits are not scanned; run $GSG_NAME install)"
+            ;;
+    esac
+    return 1
+}
+
+# ^ why git hook list in a throwaway bare repository, not config reads => git alone decides what an enabled value means
+# ^ external git 2.56 reads false no off 0 00 0k 0x0 -0 and empty as off; a bad value after false stays off; a value-less key fails init
+# ^ external hook.pre-commit.enabled=false stops every pre-commit config hook (git hook list says event-disabled); doc:docs/doctor.md
+status_hook_listing() {
+    local rc
+    (status_hook_ask)
+    rc=$?
+    # ^ external bash counts a child with an INT trap and exit 130 as having survived the signal => the parent follows or prints on
+    if [ "$rc" -gt 128 ]; then exit "$rc"; fi
+    if [ "$rc" -ne 0 ]; then status_problem; fi
 }
 
 # ^ invariant informational only => config hooks run whatever core.hooksPath says, this line never counts as a problem
@@ -160,11 +214,13 @@ status_git() {
     if ! ver="$(install_git_version "$GSG_GIT")"; then
         status_line "git in use" "$(gitup_display_path "$GSG_GIT") (version unreadable; if it is older than 2.54 commits are not scanned) MISMATCH"
         status_problem
+        return 1
     elif install_git_is_new_enough "$GSG_GIT"; then
         status_line "git in use" "$(gitup_display_path "$GSG_GIT") (git $ver)"
     else
         status_line "git in use" "$(gitup_display_path "$GSG_GIT") (git $ver) MISMATCH: config hooks need git >= 2.54, so commits are not scanned; run: $GSG_NAME install --upgrade-git"
         status_problem
+        return 1
     fi
 }
 
@@ -175,7 +231,8 @@ status_run() {
     lifecycle_require_git || return 1
     state_read || return 1
     if [ -z "${GITUP_SYSTEM_PATH:-}" ]; then gitup_paths || return 1; fi
-    status_git
+    local git_ok=0
+    status_git || git_ok=1
     if [ "$ST_EXISTS" -ne 1 ]; then
         printf '%s: not installed (no state file at %s)\n' "$GSG_NAME" "$GSG_STATE_FILE"
         if gitup_system_git_state && [ "$GITUP_TK_STATE" != none ]; then status_system_git; fi
@@ -186,7 +243,7 @@ status_run() {
     status_line "share dir" "$GSG_SHARE"
     status_hook_command
     status_config
-    status_hook_enabled
+    if [ "$git_ok" -eq 0 ]; then status_hook_listing; fi
     if [ "$ST_PREV_SET" = yes ]; then
         status_line "previous core.hooksPath" "$ST_PREV"
     else

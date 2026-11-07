@@ -154,7 +154,7 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/logs"
           set -o pipefail
-          bash tests/run.sh tests/test_platform.sh tests/test_mac_runner.sh tests/test_platform_rpm.sh tests/test_platform_vm.sh tests/test_gitup_rpm.sh tests/test_gitup_followups.sh tests/test_gitup_contract.sh tests/test_prerequisites.sh tests/test_gitup_takeover.sh tests/test_gitup_apt.sh tests/test_gitup_round3.sh tests/test_gitup_robust.sh 2>&1 | tee "$RUNNER_TEMP/logs/platform-unit.log"
+          bash tests/run.sh tests/test_platform.sh tests/test_mac_runner.sh tests/test_platform_rpm.sh tests/test_platform_vm.sh tests/test_gitup_rpm.sh tests/test_gitup_followups.sh tests/test_gitup_contract.sh tests/test_prerequisites.sh tests/test_gitup_takeover.sh tests/test_gitup_apt.sh tests/test_gitup_round3.sh tests/test_gitup_robust.sh tests/test_status.sh tests/test_doctor.sh 2>&1 | tee "$RUNNER_TEMP/logs/platform-unit.log"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:

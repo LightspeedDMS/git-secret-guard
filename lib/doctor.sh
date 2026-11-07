@@ -184,6 +184,52 @@ doctor_values_text() {
     REPLY="has $n $noun ($src), $ok of them $label"
 }
 
+# ^ invariant the verdict comes from hooklist_probe_line, the reader status shares; the value scan only locates the setting git blamed
+# ^ invariant rc 1 = a PROBLEM was printed; an absent hook or a failed step add one only when no config-shape problem explains it (arg 1 = 1)
+doctor_hook_verdict() {
+    local prior="$1" res kind step rc msg want i origin value printed=0
+    hooklist_bind_timeout
+    res="$(hooklist_probe_line "$DR_WORK")"
+    HL_BOUND=()
+    IFS=$'\t' read -r kind step rc msg <<<"$res"
+    case "$kind:$step" in
+        ok:effective) return 0 ;;
+        ok:disabled) want=hook.git-secret-guard.enabled ;;
+        ok:event-disabled) want=hook.pre-commit.enabled ;;
+        ok:*)
+            if [ "$prior" -eq 0 ]; then doctor_machine_line PROBLEM "hook: git-secret-guard is not in git hook list pre-commit, so commits are not scanned; run git-secret-guard install"; return 1; fi
+            return 0
+            ;;
+        *)
+            want=valueless
+            if [ "$kind" != fail ]; then step="hook probe" rc="?" msg="no answer"; fi
+            ;;
+    esac
+    if hp_hook_enabled_scan; then
+        for i in "${!HP_EN_KIND[@]}"; do
+            if [ "${HP_EN_KEY[$i]}" != "$want" ] && [ "${HP_EN_KIND[$i]}" != valueless ]; then continue; fi
+            origin="${HP_EN_ORIGIN[$i]#file:}"
+            origin="${origin//[^[:print:]]/?}"
+            value="${HP_EN_VALUE[$i]//[^[:print:]]/?}"
+            trunc_text "$value" 40
+            value="$REPLY"
+            case "${HP_EN_KIND[$i]}" in
+                valueless) doctor_machine_line PROBLEM "hook: ${HP_EN_KEY[$i]} has no value in the ${HP_EN_SCOPE[$i]} config ($origin); git commands fail until it is removed" ;;
+                unjudged) doctor_machine_line PROBLEM "hook: git reports the hook disabled; the setting could not be located (the boolean probe failed: $value)" ;;
+                *) doctor_machine_line PROBLEM "hook: ${HP_EN_KEY[$i]}=$value in the ${HP_EN_SCOPE[$i]} config ($origin) switches the hook off everywhere; remove it" ;;
+            esac
+            printed=1
+        done
+    fi
+    if [ "$printed" -eq 1 ]; then return 1; fi
+    if [ "$want" = valueless ]; then
+        if [ "$prior" -eq 0 ]; then doctor_machine_line PROBLEM "hook: git $step failed with exit $rc${msg:+: $msg}; commits may be blocked or unscanned until it works"; return 1; fi
+        return 0
+    fi
+    doctor_machine_line PROBLEM "hook: git reports the hook disabled; the setting could not be located (find it with: git config --show-origin --get-all $want)"
+    return 1
+}
+
 # ^ external git config --show-scope --show-origin -z --get-regexp = "scope NUL origin NUL key NL value NUL" (probed on git 2.56)
 # ^ why -C /, not the current directory; the machine view must not include a repository's local config
 doctor_check_hook_config() {
@@ -213,31 +259,6 @@ doctor_check_hook_config() {
                 ;;
         esac
     done
-    if hp_hook_enabled_scan; then
-        for i in "${!HP_EN_KIND[@]}"; do
-            origin="${HP_EN_ORIGIN[$i]#file:}"
-            origin="${origin//[^[:print:]]/?}"
-            value="${HP_EN_VALUE[$i]//[^[:print:]]/?}"
-            trunc_text "$value" 40
-            value="$REPLY"
-            case "${HP_EN_KIND[$i]}" in
-                valueless)
-                    doctor_machine_line PROBLEM "hook: ${HP_EN_KEY[$i]} has no value in the ${HP_EN_SCOPE[$i]} config ($origin); git commands fail until it is removed"
-                    bad=1
-                    ;;
-                ignored) doctor_machine_line WARNING "hook: ${HP_EN_KEY[$i]}=$value in the ${HP_EN_SCOPE[$i]} config ($origin) is not a boolean, git ignores it" ;;
-                default) doctor_machine_line WARNING "hook: ${HP_EN_KEY[$i]}=$value in the ${HP_EN_SCOPE[$i]} config ($origin) is not a boolean and no other value is set, so git's default applies and the hook stays on" ;;
-                unjudged)
-                    doctor_machine_line PROBLEM "hook: ${HP_EN_KEY[$i]} could not be judged (the boolean probe failed: $value); the hook may be switched off"
-                    bad=1
-                    ;;
-                *)
-                    doctor_machine_line PROBLEM "hook: ${HP_EN_KEY[$i]}=$value in the ${HP_EN_SCOPE[$i]} config ($origin) switches the hook off everywhere; remove it"
-                    bad=1
-                    ;;
-            esac
-        done
-    fi
     if [ "$ev_n" -eq 0 ]; then
         doctor_machine_line PROBLEM "hook: hook.git-secret-guard.event is [unset], want exactly [pre-commit]; run git-secret-guard install"
         bad=1
@@ -257,6 +278,7 @@ doctor_check_hook_config() {
         doctor_machine_line PROBLEM "hook: $msg; run git-secret-guard install"
         bad=1
     fi
+    doctor_hook_verdict "$bad" || bad=1
     if [ "$bad" -eq 0 ]; then
         doctor_machine_line ok "hook: hook.git-secret-guard.event=pre-commit, command=$want (executable)"
     fi

@@ -238,9 +238,9 @@ install_check_config_writable() {
 
 # ^ external git config --type=bool parses as git does (00, 0k, 0x0, -0, empty = false), the last scope wins; probed on git 2.56
 # ^ external a valueless hook.<name>.enabled makes git add, commit, init and clone exit 128 in whichever scope it sits, even when a later scope sets true
-# ^ invariant sets HP_EN_KIND (off | valueless), HP_EN_KEY, HP_EN_SCOPE, HP_EN_ORIGIN, HP_EN_VALUE per finding; rc 1 = config unreadable
+# ^ invariant sets HP_EN_KIND (off | notbool | valueless), HP_EN_KEY, HP_EN_SCOPE, HP_EN_ORIGIN, HP_EN_VALUE per finding; rc 1 = config unreadable
 hp_hook_enabled_scan() {
-    local rc i key scope origin rec out
+    local rc i key scope origin rec out ver kind
     local -A last_scope=() last_origin=() last_value=()
     HP_EN_KIND=() HP_EN_KEY=() HP_EN_SCOPE=() HP_EN_ORIGIN=() HP_EN_VALUE=()
     hp_records -C / config --show-scope --show-origin -z --get-regexp '^hook\.(git-secret-guard|pre-commit)\.enabled$'
@@ -255,11 +255,15 @@ hp_hook_enabled_scan() {
         fi
         last_scope[$key]="$scope" last_origin[$key]="$origin" last_value[$key]="${rec#*$'\n'}"
     done
+    ver="$(install_git_version "$GSG_GIT" 2>/dev/null)" || ver=0
     for key in hook.git-secret-guard.enabled hook.pre-commit.enabled; do
         if [ -z "${last_scope[$key]:-}" ]; then continue; fi
-        out="$("$GSG_GIT" -C / config --type=bool --get "$key" 2>/dev/null)" || continue
-        if [ "$out" != false ]; then continue; fi
-        HP_EN_KIND+=(off) HP_EN_KEY+=("$key") HP_EN_SCOPE+=("${last_scope[$key]}") HP_EN_ORIGIN+=("${last_origin[$key]}") HP_EN_VALUE+=("${last_value[$key]}")
+        # ^ external hook.<event>.enabled needs git 2.55; hook.c at v2.54.0 has only the friendly-name key
+        if [ "$key" = hook.pre-commit.enabled ] && ! gitup_version_at_least "$ver" 2.55; then continue; fi
+        kind=off
+        out="$("$GSG_GIT" -C / config --type=bool --get "$key" 2>/dev/null)" || kind=notbool
+        if [ "$kind" = off ] && [ "$out" != false ]; then continue; fi
+        HP_EN_KIND+=("$kind") HP_EN_KEY+=("$key") HP_EN_SCOPE+=("${last_scope[$key]}") HP_EN_ORIGIN+=("${last_origin[$key]}") HP_EN_VALUE+=("${last_value[$key]}")
     done
 }
 

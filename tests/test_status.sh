@@ -289,4 +289,40 @@ test_status_names_usr_bin_git_when_bin_is_a_link_and_comes_first() {
     assert_not_contains "$OUT" "$r/bin/git" "the link spelling appears nowhere"
 }
 
+# ^ external hook.<event>.enabled exists from git 2.55 (hook.c at v2.54.0 has only the friendly-name key) => judged only on a git reading it
+test_status_ignores_the_event_key_on_a_git_older_than_2_55_and_judges_it_from_2_55() {
+    fresh_install
+    status_hook_switch global hook.pre-commit.enabled false || return 1
+    status_with_git_version 2.54.0 || return 1
+    gsg status
+    assert_rc 0 "git 2.54 does not read hook.pre-commit.enabled"
+    assert_not_contains "$OUT" "hook.pre-commit.enabled=false" "so it is not named"
+    status_with_git_version 2.55.0 || return 1
+    gsg status
+    assert_rc 1 "git 2.55 reads it"
+    assert_contains "$OUT" "MISMATCH hook.pre-commit.enabled=false in the global config" "and it is named"
+}
+
+test_status_cleans_non_printing_characters_out_of_the_origin_file_name() {
+    case "$(uname -s)" in MINGW* | MSYS* | CYGWIN*) skip_test "Windows cannot create a file name with a control character" ;; esac
+    local inc
+    fresh_install
+    inc="$SANDBOX/inc"$'\001'"x.cfg"
+    gitx config -f "$inc" hook.git-secret-guard.enabled false || return 1
+    gitx config --global include.path "$inc" || return 1
+    gsg status
+    assert_rc 1 "an included file switches the hook off"
+    assert_contains "$OUT" "hook.git-secret-guard.enabled=false in the global config" "named"
+    assert_not_contains "$OUT" $'\001' "and the control character is gone from the file name"
+}
+
+test_status_says_a_value_git_cannot_read_as_a_boolean_leaves_the_hook_on() {
+    fresh_install
+    status_hook_switch global hook.git-secret-guard.enabled maybe || return 1
+    gsg status
+    assert_rc 0 "git still runs the hook"
+    assert_contains "$OUT" "hook.git-secret-guard.enabled=maybe in the global config" "the value and scope are named"
+    assert_contains "$OUT" "is not a boolean git reads as off; the hook stays on" "and the hook is said to stay on"
+}
+
 run_file_tests

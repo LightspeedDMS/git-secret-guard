@@ -106,6 +106,22 @@ test_the_machine_section_judges_enabled_by_gits_own_parser_and_names_a_valueless
     assert_contains "$OUT" "PROBLEM  hook: hook.git-secret-guard.enabled has no value in the global config ($SANDBOX/gitconfig); git commands fail until" "a PROBLEM"
 }
 
+# shellcheck disable=SC2016
+test_the_machine_section_judges_the_event_key_only_from_git_2_55_and_warns_about_a_non_boolean_value() {
+    dr_begin || return 1
+    gitx config --global hook.pre-commit.enabled false || return 1
+    printf '#!/bin/sh\nif [ "$1" = --version ]; then echo "git version 2.54.0"; exit 0; fi\nexec %s "$@"\n' "$GIT" >"$SANDBOX/pathbin/git" || return 1
+    chmod 755 "$SANDBOX/pathbin/git"
+    doctor
+    assert_not_contains "$OUT" "hook.pre-commit.enabled=false" "git 2.54 does not read it"
+    gitx config --global --unset hook.pre-commit.enabled || return 1
+    rm -f -- "$SANDBOX/pathbin/git"
+    gitx config --global hook.git-secret-guard.enabled maybe || return 1
+    doctor
+    assert_contains "$OUT" "WARNING  hook: hook.git-secret-guard.enabled=maybe in the global config" "a value git does not read as off is said"
+    assert_contains "$OUT" "the hook stays on" "and that the hook stays on"
+}
+
 test_the_machine_section_never_prints_a_hook_config_value() {
     local marker
     dr_begin || return 1

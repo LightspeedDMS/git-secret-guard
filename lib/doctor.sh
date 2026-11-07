@@ -216,14 +216,21 @@ doctor_check_hook_config() {
     if hp_hook_enabled_scan; then
         for i in "${!HP_EN_KIND[@]}"; do
             origin="${HP_EN_ORIGIN[$i]#file:}"
-            if [ "${HP_EN_KIND[$i]}" = valueless ]; then
-                doctor_machine_line PROBLEM "hook: ${HP_EN_KEY[$i]} has no value in the ${HP_EN_SCOPE[$i]} config (${origin//[^[:print:]]/?}); git commands fail until it is removed"
-            else
-                value="${HP_EN_VALUE[$i]//[^[:print:]]/?}"
-                trunc_text "$value" 40
-                doctor_machine_line PROBLEM "hook: ${HP_EN_KEY[$i]}=$REPLY in the ${HP_EN_SCOPE[$i]} config (${origin//[^[:print:]]/?}) switches the hook off everywhere; remove it"
-            fi
-            bad=1
+            origin="${origin//[^[:print:]]/?}"
+            value="${HP_EN_VALUE[$i]//[^[:print:]]/?}"
+            trunc_text "$value" 40
+            value="$REPLY"
+            case "${HP_EN_KIND[$i]}" in
+                valueless)
+                    doctor_machine_line PROBLEM "hook: ${HP_EN_KEY[$i]} has no value in the ${HP_EN_SCOPE[$i]} config ($origin); git commands fail until it is removed"
+                    bad=1
+                    ;;
+                notbool) doctor_machine_line WARNING "hook: ${HP_EN_KEY[$i]}=$value in the ${HP_EN_SCOPE[$i]} config ($origin) is not a boolean git reads as off; the hook stays on" ;;
+                *)
+                    doctor_machine_line PROBLEM "hook: ${HP_EN_KEY[$i]}=$value in the ${HP_EN_SCOPE[$i]} config ($origin) switches the hook off everywhere; remove it"
+                    bad=1
+                    ;;
+            esac
         done
     fi
     if [ "$ev_n" -eq 0 ]; then

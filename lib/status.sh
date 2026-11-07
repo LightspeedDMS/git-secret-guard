@@ -40,7 +40,7 @@ status_git_lists_scopes() {
 # ^ invariant a switched-off or valueless hook.<name>.enabled is a MISMATCH naming key, scope, file and for an off hook its value, never command or event
 # ^ coupled the scan judges by git's own parser, last scope wins; below git 2.26 there is no --show-scope, the line says not checked
 status_hook_enabled() {
-    local i value adv
+    local i value adv origin
     if ! status_git_lists_scopes; then
         status_line "hook enabled" "not checked (the git in use is older than 2.26 or unreadable, and cannot list config scopes)"
         return 0
@@ -53,14 +53,22 @@ status_hook_enabled() {
     for i in "${!HP_EN_KIND[@]}"; do
         hp_hook_enabled_advice "$i"
         adv="$REPLY"
-        if [ "${HP_EN_KIND[$i]}" = valueless ]; then
-            status_line "hook enabled" "MISMATCH ${HP_EN_KEY[$i]} has no value in the ${HP_EN_SCOPE[$i]} config (${HP_EN_ORIGIN[$i]#file:}); git commands fail until it is removed; $adv"
-        else
-            value="${HP_EN_VALUE[$i]//[^[:print:]]/?}"
-            trunc_text "$value" 40
-            status_line "hook enabled" "MISMATCH ${HP_EN_KEY[$i]}=$REPLY in the ${HP_EN_SCOPE[$i]} config (${HP_EN_ORIGIN[$i]#file:}) switches the hook off, commits are not scanned; $adv"
-        fi
-        status_problem
+        origin="${HP_EN_ORIGIN[$i]#file:}"
+        origin="${origin//[^[:print:]]/?}"
+        value="${HP_EN_VALUE[$i]//[^[:print:]]/?}"
+        trunc_text "$value" 40
+        value="$REPLY"
+        case "${HP_EN_KIND[$i]}" in
+            valueless)
+                status_line "hook enabled" "MISMATCH ${HP_EN_KEY[$i]} has no value in the ${HP_EN_SCOPE[$i]} config ($origin); git commands fail until it is removed; $adv"
+                status_problem
+                ;;
+            notbool) status_line "hook enabled" "${HP_EN_KEY[$i]}=$value in the ${HP_EN_SCOPE[$i]} config ($origin) is not a boolean git reads as off; the hook stays on" ;;
+            *)
+                status_line "hook enabled" "MISMATCH ${HP_EN_KEY[$i]}=$value in the ${HP_EN_SCOPE[$i]} config ($origin) switches the hook off, commits are not scanned; $adv"
+                status_problem
+                ;;
+        esac
     done
     if [ "${#HP_EN_KIND[@]}" -eq 0 ]; then status_line "hook enabled" "yes (neither hook.git-secret-guard.enabled nor hook.pre-commit.enabled switches it off)"; fi
 }

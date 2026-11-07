@@ -133,6 +133,7 @@ test_debian_uses_the_pinned_source_build_and_never_tries_a_ppa() {
     assert_rc 0 "Debian source route"
     assert_contains "$OUT" "route: source" "the plan names the source route"
     assert_contains "$OUT" "Debian has no PPA" "and says why there is no PPA"
+    assert_contains "$OUT" "can upgrade packages that are already installed, and the plan does not count them" "the dependency install says it can upgrade installed packages"
     assert_not_contains "$OUT$ERR" "ppa:git-core" "no PPA is mentioned as a step"
     assert_not_contains "$(gu_log)" "add-apt-repository" "no PPA was attempted"
     assert_contains "$(apt_calls)" "install -y --no-install-recommends build-essential libcurl4-openssl-dev libssl-dev libexpat1-dev zlib1g-dev perl libpcre2-dev xz-utils tar" "the build dependencies come from apt"

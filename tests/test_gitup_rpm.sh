@@ -91,18 +91,46 @@ test_the_repository_query_is_read_only_bounded_and_never_answers_a_prompt() {
     assert_not_contains "$(grep repoquery "$SANDBOX/gitup.log")" " -y" "the query never says yes"
 }
 
-test_a_repository_whose_key_is_not_imported_is_named_and_the_route_falls_back_to_source() {
+# ^ invariant story 28 changed on purpose => an unread repository no longer decides the route; the readable ones do, root excludes it
+test_an_unread_repository_is_excluded_and_the_readable_ones_decide_the_package_route() {
     gu_rpm_setup || return 1
     printf 'baseos\nacli\n' >"$SANDBOX/dnf.repos"
     printf 'acli' >"$SANDBOX/dnf.badrepo"
-    printf '2.55.0\n' >"$SANDBOX/dnf.candidate"
-    gsg install </dev/null
-    assert_rc 1 "no consent, only the plan matters"
+    printf '2.55.0\n' >"$SANDBOX/dnf.candidate.baseos"
+    gsg install --upgrade-git </dev/null
+    assert_rc 0 "the package route runs"
     assert_contains "$OUT$ERR" "repository acli could not be read" "the failing repository is named"
     assert_not_contains "$OUT$ERR" "repository baseos could not be read" "and the good one is not"
-    assert_contains "$OUT" "route: source" "the route falls back to source"
+    assert_contains "$OUT" "route: package" "the readable repository decides"
+    assert_contains "$OUT" "-y --disablerepo=acli git-core" "root excludes the unread repository"
     assert_contains "$(gu_log)" "--disablerepo=* --enablerepo=acli" "each repository was queried alone"
-    assert_not_contains "$(grep -E 'repoquery|repolist' "$SANDBOX/gitup.log")" " -y" "no key was imported"
+    assert_not_contains "$(grep -E 'repoquery|repolist' "$SANDBOX/gitup.log")" " -y" "no key was imported by a query"
+    check_plan_matches_log "$OUT" "the package plan with --disablerepo"
+}
+
+test_readable_repositories_that_offer_only_an_old_git_send_the_route_to_source_and_the_unread_one_is_not_considered() {
+    gu_rpm_setup || return 1
+    printf 'baseos\nacli\n' >"$SANDBOX/dnf.repos"
+    printf 'acli' >"$SANDBOX/dnf.badrepo"
+    printf '2.52.0\n' >"$SANDBOX/dnf.candidate.baseos"
+    gsg install </dev/null
+    assert_contains "$OUT" "route: source (the repositories that could be read offer 2.52.0, not 2.54 or newer)" "what the readable ones offer"
+    assert_contains "$OUT" "repository acli could not be read by this unprivileged query" "the unread one is named"
+    assert_contains "$OUT" "(not considered for the route)" "and said not to be considered"
+}
+
+test_an_incomplete_check_keeps_the_source_route_whatever_a_readable_repository_offers() {
+    local mode
+    for mode in nolist nothing; do
+        gu_rpm_setup || return 1
+        printf 'baseos\nacli\n' >"$SANDBOX/dnf.repos"
+        printf '2.55.0\n' >"$SANDBOX/dnf.candidate.baseos"
+        printf 'acli' >"$SANDBOX/dnf.badrepo"
+        if [ "$mode" = nolist ]; then printf 'repolist' >"$SANDBOX/dnf.fail"; else printf 'acli\n' >"$SANDBOX/dnf.repos"; fi
+        gsg install </dev/null
+        assert_contains "$OUT" "route: source (the check of the repositories was incomplete, so the package route is not trusted)" "[$mode] source"
+        assert_not_contains "$OUT" "route: package" "[$mode] no package route"
+    done
 }
 
 # ^ invariant the query runs unprivileged => a failing repository is not called broken; dnf key-import chatter stays out, its Error line stays
@@ -112,13 +140,26 @@ test_the_failed_repository_line_says_the_user_could_not_read_it_and_keeps_dnfs_c
     printf 'acli' >"$SANDBOX/dnf.badrepo"
     gsg install </dev/null
     assert_contains "$OUT$ERR" "repository acli could not be read by this unprivileged query" "named, and not called broken"
-    assert_contains "$OUT$ERR" "a repository that works for root can fail here" "says why it proves nothing"
+    assert_contains "$OUT$ERR" "a repository that works for root can fail here, so this does not mean it is broken" "says why it proves nothing"
     assert_contains "$OUT$ERR" "dnf said: Error: Failed to download metadata for repo 'acli'" "a real dnf error is kept"
     assert_not_contains "$OUT$ERR" "Importing GPG key" "no key import text"
     assert_not_contains "$OUT$ERR" "Userid" "and no key owner"
     assert_not_contains "$OUT$ERR" "needs a key that is not imported" "the old guess is gone"
-    assert_contains "$OUT" "route: source (a repository could not be read by the unprivileged query, so the package route is not trusted)" "the rule is unchanged"
     assert_not_contains "$(gu_log)" "sudo" "no privileged command ran before consent"
+}
+
+test_a_signal_during_the_query_leaves_no_dnf_text_in_tmpdir() {
+    local pid
+    gu_rpm_setup || return 1
+    printf 'slow' >"$SANDBOX/dnf.hang"
+    printf 'baseos\nslow\n' >"$SANDBOX/dnf.repos"
+    env -i "${LC_ENV[@]}" "${EXTRA_ENV[@]}" "$GSG_PROJECT/bin/git-secret-guard" install </dev/null >/dev/null 2>&1 &
+    pid=$!
+    sleep 3
+    assert_eq "$(find "$SANDBOX/tmp" -maxdepth 1 -name 'gsg-dnf*' | wc -l)" 0 "no file with dnf's output exists during the query"
+    kill -TERM "$pid" 2>/dev/null
+    wait "$pid" 2>/dev/null
+    assert_eq "$(find "$SANDBOX/tmp" -maxdepth 1 -name 'gsg-dnf*' | wc -l)" 0 "and none after the signal"
 }
 
 test_the_build_needs_perl_interpreter_and_not_the_perl_metapackage() {
@@ -151,8 +192,8 @@ test_the_plan_states_the_effect_of_the_dependency_install_with_counts_from_a_dry
     printf 'Install  141 Packages\nUpgrade   10 Packages\n' >"$SANDBOX/dnf.summary"
     gsg install </dev/null
     assert_contains "$OUT" "dnf may upgrade packages that are already installed" "the warning"
-    assert_contains "$OUT" "dry run as your user: Install  141 Packages; Upgrade   10 Packages" "with the counts"
-    assert_contains "$(gu_log)" "--assumeno -q install gcc make perl-interpreter" "the dry run asks for the missing names"
+    assert_contains "$OUT" "dry run (--assumeno): Install  141 Packages; Upgrade   10 Packages" "with the counts"
+    assert_contains "$(gu_log)" "--assumeno install gcc make perl-interpreter" "the dry run asks for the missing names, without -q (dnf 4 hides its table under -q)"
     assert_not_contains "$(gu_log)" "sudo" "and runs without privileges"
 }
 
@@ -160,8 +201,41 @@ test_the_plan_says_so_when_the_dry_run_cannot_count() {
     gu_rpm_setup || return 1
     gsg install </dev/null
     assert_contains "$OUT" "dnf may upgrade packages that are already installed" "the warning stays"
-    assert_contains "$OUT" "could not be counted without privileges" "and the missing counts are admitted"
+    assert_contains "$OUT" "the size was not counted: dnf refuses a dry run of install to a user who is not root" "and the real cause is named"
     assert_not_contains "$OUT" "superuser privileges" "dnf's own refusal text is not shown"
+}
+
+test_a_dry_run_that_times_out_is_not_called_a_privilege_problem() {
+    gu_rpm_setup || return 1
+    set_env GSG_GITUP_QUERY_TIMEOUT=1
+    printf 'x' >"$SANDBOX/dnf.install.hang"
+    gsg install </dev/null
+    assert_contains "$OUT" "the size was not counted: the dry run timed out after 1s" "the cause is the timeout"
+    assert_not_contains "$OUT" "not root" "and not the user"
+}
+
+test_apply_runs_the_dependency_list_of_the_plan_even_when_rpm_answers_differently_afterwards() {
+    gu_rpm_setup || return 1
+    printf 'gcc\nmake\nperl-interpreter\nxz\ntar\nopenssl-devel\nzlib-devel\nlibcurl-devel\nexpat-devel\npcre2-devel\n' >"$SANDBOX/rpm.installed"
+    printf 'x' >"$SANDBOX/dnf.flip"
+    gsg install --upgrade-git </dev/null
+    assert_rc 0 "the build runs"
+    assert_contains "$OUT" "dnf install -y perl-ExtUtils-MakeMaker" "the plan lists the one missing name"
+    assert_contains "$(gu_log)" "dnf install -y perl-ExtUtils-MakeMaker" "root ran exactly that line"
+    assert_not_contains "$(gu_log)" "dnf install -y gcc" "and not the full list after rpm started failing"
+    check_plan_matches_log "$OUT" "the plan and the log"
+}
+
+test_the_key_note_matches_what_the_plan_runs_as_root() {
+    gu_rpm_setup || return 1
+    printf 'gcc\nmake\nperl-interpreter\nxz\ntar\nopenssl-devel\nzlib-devel\nlibcurl-devel\nexpat-devel\npcre2-devel\nperl-ExtUtils-MakeMaker\n' >"$SANDBOX/rpm.installed"
+    gsg install </dev/null
+    assert_contains "$OUT" "no dnf install runs in this plan, so no repository signing key can be imported by it" "no install, no key"
+    assert_not_contains "$OUT" "imported by this step" "and no claim about a step that does not run"
+    gu_rpm_setup || return 1
+    printf '2.55.0\n' >"$SANDBOX/dnf.candidate"
+    gsg install </dev/null
+    assert_contains "$OUT" "imported by this install (repositories nobody read are excluded)" "the package route carries its own note"
 }
 
 test_a_repository_that_hangs_ends_within_the_timeout_and_is_named() {

@@ -196,6 +196,10 @@ rocky_upgrade() {
     check "and says nothing was changed" has "nothing was changed"
     check "and no ~/.gitconfig was created by the write probe" test ! -e "$HOME/.gitconfig"
     check "and /usr/local/bin/git does not exist" test ! -e /usr/local/bin/git
+    # ^ invariant the build starts without perl-interpreter => the plan installs it and the source builds with it, never with the perl metapackage
+    if rpm -q perl-interpreter >/dev/null 2>&1; then sudo dnf remove -y perl-interpreter >/dev/null 2>&1 || true; fi
+    show "before the build: $(rpm -q perl-interpreter 2>&1 | head -n 1); $(rpm -q perl 2>&1 | head -n 1)"
+    check "perl-interpreter is not installed before the build" not rpm -q perl-interpreter
     run "$GSG" install --upgrade-git </dev/null
     show "$(printf '%s' "$OUT" | grep -E 'route:|building git|now; continuing|installed git-secret-guard' | head -n 6)"
     check "install --upgrade-git ends with exit 0" rc_is 0
@@ -207,7 +211,7 @@ rocky_upgrade() {
     check "/usr/local/bin/git is new enough" ver_ge_254 /usr/local/bin/git
     show "$(printf '%s' "$OUT" | grep -E 'dnf may upgrade|dry run' | cut -c1-200)"
     # shellcheck disable=SC2016
-    check "the plan names no perl metapackage (perl-interpreter is installed already on this image, so it is not listed either)" bash -c '[[ $1 != *" perl "* ]]' _ "$OUT"
+    check "the plan installs perl-interpreter and not the perl metapackage" bash -c '[[ $1 == *" perl-interpreter "* && $1 != *" perl "* ]]' _ "$OUT"
     check "and warns that dnf may upgrade installed packages" has "dnf may upgrade packages that are already installed"
     check "the build, made without the perl metapackage, ran: perl-interpreter is installed and can load ExtUtils::MakeMaker" bash -c 'rpm -q perl-interpreter >/dev/null && perl -MExtUtils::MakeMaker -e 1'
     show "perl metapackage afterwards: $(rpm -q perl 2>&1 | head -n 1)"

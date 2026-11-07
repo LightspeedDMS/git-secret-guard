@@ -492,6 +492,8 @@ gitup_apt_ppa_set_aside() {
     }
 }
 
+GITUP_APT_UPGRADE_NOTE="apt-get install -y of the build dependencies can upgrade packages that are already installed, and the plan does not count them"
+
 # ^ invariant prints the plan of the shared source build with every privileged line marked as the fallback of the PPA route
 # ^ why a temporary file, not a command substitution; the lists gitup_plan_priv fills must stay in this shell
 gitup_apt_plan_fallback() {
@@ -511,6 +513,7 @@ gitup_apt_plan_fallback() {
     done <"$tmp"
     rm -f -- "$tmp"
     for ((i = first; i < ${#GITUP_PRIV_CMDS[@]}; i++)); do GITUP_PRIV_CMDS[i]+="$mark"; done
+    gitup_plan_note "$GITUP_APT_UPGRADE_NOTE"
 }
 
 gitup_apt_plan_package() {
@@ -614,6 +617,7 @@ gitup_apt_plan_upgrade() {
     gitup_apt_prepare || return 1
     if [ "$class" = debian ]; then reason="$reason; Debian has no PPA"; fi
     gitup_source_print_plan "$reason"
+    gitup_plan_note "$GITUP_APT_UPGRADE_NOTE"
 }
 
 # ^ invariant the rebuild runs the PPA preflight of the upgrade; an unusable PPA gets its aside commands listed, an unreadable one refuses

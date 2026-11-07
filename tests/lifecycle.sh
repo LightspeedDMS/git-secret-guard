@@ -105,6 +105,8 @@ EOF
 #!/bin/sh
 d="$(cd "${0%/*}/.." && pwd -P)" || exit 1
 printf '%s\n' "rpm $*" >>"$d/gitup.log"
+# ^ invariant rpm.broken makes every later rpm call fail: the dnf stand-in creates it on its dry run when dnf.flip exists, so a test can change the rpm answer between plan and apply
+if [ -f "$d/rpm.broken" ]; then echo "error: rpm database is locked" >&2; exit 1; fi
 answer() { if [ -f "$d/$1" ]; then cat "$d/$1"; exit 0; fi; echo "error: the rpm stand-in has no $1" >&2; exit 1; }
 case "$*" in
     "-qf --qf %{NAME}\n -- "*) if [ -f "$d/rpm.owner" ]; then cat "$d/rpm.owner"; exit 0; fi; echo "file $5 is not owned by any package" >&2; exit 1 ;;
@@ -139,6 +141,7 @@ case " $* " in
             echo "Error: Failed to download metadata for repo '${repo:-all}': repomd.xml GPG signature verification error: Bad GPG signature" >&2
             exit 1
         fi
+        if [ -n "$repo" ] && [ -f "$d/dnf.candidate.$repo" ]; then cat "$d/dnf.candidate.$repo"; exit 0; fi
         if [ -f "$d/dnf.candidate" ]; then cat "$d/dnf.candidate"; fi
         exit 0
         ;;
@@ -149,6 +152,8 @@ case " $* " in
         ;;
     *" --assumeno "*" install "*)
         # ^ invariant the unprivileged dry run: dnf.summary is its output, rc 1 like dnf's "Operation aborted"; no file = dnf 4 refusing a user
+        if [ -f "$d/dnf.flip" ]; then : >"$d/rpm.broken"; fi
+        if [ -f "$d/dnf.install.hang" ]; then exec sleep 60; fi
         if [ -f "$d/dnf.summary" ]; then cat "$d/dnf.summary"; else echo "Error: This command has to be run with superuser privileges (under the root user on most systems)." >&2; fi
         exit 1
         ;;

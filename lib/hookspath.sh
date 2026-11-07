@@ -236,12 +236,12 @@ install_check_config_writable() {
     return 1
 }
 
-# ^ external git config --type=bool parses as git does (00, 0k, 0x0, -0, empty = false), the last scope wins; probed on git 2.56
+# ^ external hook.c parses EACH enabled value with git_parse_maybe_bool and skips unparseable ones => the last valid value decides (v2.54.0, v2.55.0)
 # ^ external a valueless hook.<name>.enabled makes git add, commit, init and clone exit 128 in whichever scope it sits, even when a later scope sets true
-# ^ invariant sets HP_EN_KIND (off | notbool | valueless), HP_EN_KEY, HP_EN_SCOPE, HP_EN_ORIGIN, HP_EN_VALUE per finding; rc 1 = config unreadable
+# ^ invariant sets HP_EN_KIND (off | notbool | valueless), _KEY, _SCOPE, _ORIGIN, _VALUE per finding; notbool = after the deciding value; rc 1 = unreadable
 hp_hook_enabled_scan() {
-    local rc i key scope origin rec out ver kind
-    local -A last_scope=() last_origin=() last_value=()
+    local rc i j key scope origin rec ver dec inv decval v
+    local -a r_key=() r_scope=() r_origin=() r_value=()
     HP_EN_KIND=() HP_EN_KEY=() HP_EN_SCOPE=() HP_EN_ORIGIN=() HP_EN_VALUE=()
     hp_records -C / config --show-scope --show-origin -z --get-regexp '^hook\.(git-secret-guard|pre-commit)\.enabled$'
     rc=$?
@@ -253,18 +253,33 @@ hp_hook_enabled_scan() {
             HP_EN_KIND+=(valueless) HP_EN_KEY+=("$key") HP_EN_SCOPE+=("$scope") HP_EN_ORIGIN+=("$origin") HP_EN_VALUE+=("")
             continue
         fi
-        last_scope[$key]="$scope" last_origin[$key]="$origin" last_value[$key]="${rec#*$'\n'}"
+        r_key+=("$key") r_scope+=("$scope") r_origin+=("$origin") r_value+=("${rec#*$'\n'}")
     done
     ver="$(install_git_version "$GSG_GIT" 2>/dev/null)" || ver=0
     for key in hook.git-secret-guard.enabled hook.pre-commit.enabled; do
-        if [ -z "${last_scope[$key]:-}" ]; then continue; fi
         # ^ external hook.<event>.enabled needs git 2.55; hook.c at v2.54.0 has only the friendly-name key
         if [ "$key" = hook.pre-commit.enabled ] && ! gitup_version_at_least "$ver" 2.55; then continue; fi
-        kind=off
-        out="$("$GSG_GIT" -C / config --type=bool --get "$key" 2>/dev/null)" || kind=notbool
-        if [ "$kind" = off ] && [ "$out" != false ]; then continue; fi
-        HP_EN_KIND+=("$kind") HP_EN_KEY+=("$key") HP_EN_SCOPE+=("${last_scope[$key]}") HP_EN_ORIGIN+=("${last_origin[$key]}") HP_EN_VALUE+=("${last_value[$key]}")
+        dec=-1 decval="" inv=()
+        for j in "${!r_key[@]}"; do
+            if [ "${r_key[$j]}" != "$key" ]; then continue; fi
+            if v="$(hp_bool_value "${r_value[$j]}")"; then
+                dec="$j" decval="$v" inv=()
+            else
+                inv+=("$j")
+            fi
+        done
+        if [ "$dec" -ge 0 ] && [ "$decval" = false ]; then
+            HP_EN_KIND+=(off) HP_EN_KEY+=("$key") HP_EN_SCOPE+=("${r_scope[$dec]}") HP_EN_ORIGIN+=("${r_origin[$dec]}") HP_EN_VALUE+=("${r_value[$dec]}")
+        fi
+        for j in "${inv[@]}"; do
+            HP_EN_KIND+=(notbool) HP_EN_KEY+=("$key") HP_EN_SCOPE+=("${r_scope[$j]}") HP_EN_ORIGIN+=("${r_origin[$j]}") HP_EN_VALUE+=("${r_value[$j]}")
+        done
     done
+}
+
+# ^ external one value through git's own boolean parser (00, 0k, 0x0, -0 and empty are false); rc 1 = git cannot parse it; no config file is read
+hp_bool_value() {
+    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_NOSYSTEM=1 "$GSG_GIT" -C / -c "gsg.probe=$1" config --type=bool --get gsg.probe 2>/dev/null
 }
 
 # ^ invariant sets REPLY = how to remove entry I; the git config form only for the global file git writes, else the named file to edit

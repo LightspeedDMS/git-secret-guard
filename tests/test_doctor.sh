@@ -122,6 +122,16 @@ test_the_machine_section_judges_the_event_key_only_from_git_2_55_and_warns_about
     assert_contains "$OUT" "the hook stays on" "and that the hook stays on"
 }
 
+test_the_machine_section_lets_the_last_valid_value_decide() {
+    dr_begin || return 1
+    gitx config -f "$SANDBOX/system.cfg" hook.git-secret-guard.enabled false || return 1
+    set_env GIT_CONFIG_NOSYSTEM=0 "GIT_CONFIG_SYSTEM=$SANDBOX/system.cfg"
+    gitx config --global hook.git-secret-guard.enabled maybe || return 1
+    doctor
+    assert_rc 1 "system false, global maybe: the hook does not run"
+    assert_contains "$OUT" "PROBLEM  hook: hook.git-secret-guard.enabled=false in the system config" "a PROBLEM naming the deciding value"
+}
+
 test_the_machine_section_never_prints_a_hook_config_value() {
     local marker
     dr_begin || return 1

@@ -29,8 +29,9 @@ commands:
         Undo a system git takeover: puts the saved RPM files back (hash checked), removes the dnf excludepkgs entry and the backup
         directory. Needs no network. Says "nothing to restore" and exits 0 when there is no takeover.
   status
-        Show the installed version, hook command, tool versions and the recorded core.hooksPath.
-        Exit 0 only when installed and the global config matches.
+        Show the installed version, hook command, the git in use, tool versions and the recorded core.hooksPath.
+        Exit 0 only when installed, the global config matches, the hook is not switched off, the first git on PATH
+        is >= 2.54 and no tool line says MISMATCH or MISSING.
   doctor [--roots DIR...]
         Coverage report: the machine (install, hook config, tools, core.hooksPath, old git)
         and every repository under the roots (default: your home directory, on macOS without ~/Library and ~/.Trash;

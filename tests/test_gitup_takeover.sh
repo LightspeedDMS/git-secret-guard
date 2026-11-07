@@ -105,15 +105,37 @@ test_the_takeover_judges_the_targets_of_libexec_symlinks_like_any_other_file() {
 
 # ^ invariant a chain of links is judged hop by hop; a hop outside the prefix refuses it even when the last target is inside
 test_the_takeover_refuses_a_link_chain_that_leaves_the_prefix_on_the_way() {
-    local d
-    gu_tk_start || return 1
-    d="$GU_ROOT/usr/local/libexec/git-core"
-    mkdir -p -- "$d" "$SANDBOX/outside" || return 1
-    ln -s "$GU_ROOT/usr/local/bin/git" "$SANDBOX/outside/hop" && ln -s "$SANDBOX/outside/hop" "$d/git-merge" || return 1
-    gsg install --take-over-system-git </dev/null
-    assert_rc 1 "the last target is inside the prefix and the middle hop is not"
-    assert_contains "$ERR" "the system git takeover was refused" "refused"
-    gu_untouched "chain through a hop outside the prefix"
+    local d case_name
+    for case_name in hop dotdot2 dotdot3; do
+        gu_tk_start || return 1
+        d="$GU_ROOT/usr/local/libexec/git-core"
+        mkdir -p -- "$d" "$SANDBOX/outside" || return 1
+        case "$case_name" in
+            hop) ln -s "$GU_ROOT/usr/local/bin/git" "$SANDBOX/outside/hop" && ln -s "$SANDBOX/outside/hop" "$d/git-merge" || return 1 ;;
+            dotdot2) ln -s ../.. "$d/git-merge" || return 1 ;;
+            dotdot3) ln -s ../../.. "$d/git-merge" || return 1 ;;
+        esac
+        gsg install --take-over-system-git </dev/null
+        assert_rc 1 "a link that ends outside the prefix or on it [$case_name]"
+        assert_contains "$ERR" "the system git takeover was refused" "refused [$case_name]"
+        gu_untouched "link chain [$case_name]"
+    done
+}
+
+# ^ invariant the owner of a link itself is judged; gitup_trusted_uid is overridden in a scratch shell, no root needed
+# shellcheck disable=SC2016
+test_the_owner_of_a_link_is_judged_and_not_only_the_owner_of_its_target() {
+    local p="$SANDBOX/prefix"
+    gu_rpm_setup || return 1
+    mkdir -p -- "$p/bin" || return 1
+    : >"$p/bin/real" && chmod 755 "$p/bin/real" && ln -s real "$p/bin/lnk" || return 1
+    gu_run 'source "$GSG_ROOT/lib/gitup_rpm.sh" || exit 9; GITUP_PREFIX="$1"; gitup_trusted_uid() { id -u; }
+        gitup_tk_check_owner "$1/bin/lnk"; echo "mine rc=$?"
+        gitup_trusted_uid() { echo 12345; }
+        gitup_tk_check_owner "$1/bin/lnk"; echo "other rc=$? reason=$GITUP_REASON"' "$p"
+    assert_contains "$OUT" "mine rc=0" "a link and a target of the trusted user pass"
+    assert_contains "$OUT" "other rc=1" "another trusted user refuses them"
+    assert_contains "$OUT" "the link " "and the refusal names the link, the first thing it judges"
 }
 
 # ^ security a link name with a control character is shown with a question mark in the refusal

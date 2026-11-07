@@ -11,7 +11,7 @@ if not defined GSG_BASH goto :missing
 exit /b %errorlevel%
 :missing
 rem The path stays inside double quotes: an ampersand in it would end the echo and run the rest of the line.
-if defined GSG_HALF >&2 echo git-secret-guard: Git for Windows at "%GSG_HALF%" looks half installed ^(usr\bin\bash.exe is missing; an installer may have been stopped^); run the installer kept in %LocalAppData%\git-secret-guard\git-upgrade ^(Git-version-64-bit.exe^), or download one from https://git-scm.com/download/win
+if defined GSG_HALF >&2 echo git-secret-guard: Git for Windows at "%GSG_HALF%" looks half installed ^(usr\bin\bash.exe is missing; an installer may have been stopped^); run the installer kept in "%LocalAppData%\git-secret-guard\git-upgrade" ^(Git-version-64-bit.exe^), or download one from https://git-scm.com/download/win
 if defined GSG_HALF exit /b 127
 >&2 echo git-secret-guard: Git for Windows was not found ^(no bash.exe next to git.exe or in "%ProgramFiles%\Git"^); install it from https://git-scm.com/download/win
 exit /b 127

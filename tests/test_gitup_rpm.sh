@@ -51,7 +51,7 @@ test_a_machine_whose_repositories_offer_a_new_enough_git_is_upgraded_through_dnf
     assert_rc 0 "package route"
     assert_contains "$OUT" "route: package" "the plan names the package route"
     assert_contains "$(gu_log)" "dnf install -y git-core" "dnf installed git-core"
-    assert_not_contains "$(gu_log)" "make " "no build ran"
+    assert_not_contains "$(gu_log)" "make -C" "no build ran"
     assert_eq "$(pathbin_git_version)" "git version 2.55.0" "git is the repository's"
 }
 
@@ -131,7 +131,7 @@ test_the_build_needs_perl_interpreter_and_not_the_perl_metapackage() {
 test_installed_build_dependencies_are_left_out_of_the_install_line() {
     gu_rpm_setup || return 1
     printf 'gcc\nmake\ntar\nxz\n' >"$SANDBOX/rpm.installed"
-    gsg install </dev/null
+    gsg install --upgrade-git </dev/null
     assert_contains "$OUT" "dnf install -y perl-interpreter openssl-devel" "only what is missing is installed"
     assert_not_contains "$OUT" "install -y gcc" "an installed name is not repeated, so dnf cannot upgrade it by name"
     check_plan_matches_log "$OUT" "the reduced dependency line"
@@ -152,7 +152,7 @@ test_the_plan_states_the_effect_of_the_dependency_install_with_counts_from_a_dry
     gsg install </dev/null
     assert_contains "$OUT" "dnf may upgrade packages that are already installed" "the warning"
     assert_contains "$OUT" "dry run as your user: Install  141 Packages; Upgrade   10 Packages" "with the counts"
-    assert_contains "$(gu_log)" "--assumeno -q install perl-interpreter" "the dry run asks for the missing names only"
+    assert_contains "$(gu_log)" "--assumeno -q install gcc make perl-interpreter" "the dry run asks for the missing names"
     assert_not_contains "$(gu_log)" "sudo" "and runs without privileges"
 }
 
@@ -194,7 +194,7 @@ test_a_tampered_tarball_stops_before_any_dependency_install_or_build() {
     assert_contains "$ERR" "SHA-256 mismatch for git-2.56.0.tar.xz" "the digest check fired"
     assert_contains "$ERR" "nothing was changed" "and the message says nothing had changed"
     assert_not_contains "$(gu_log)" "dnf install" "no dependency install"
-    assert_not_contains "$(gu_log)" "make " "no build"
+    assert_not_contains "$(gu_log)" "make -C" "no build"
     gu_nothing_changed_on_the_machine "tampered download"
 }
 

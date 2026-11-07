@@ -377,11 +377,11 @@ doctor_check_git() {
         cand="${GSG_GIT_CANDIDATES[$i]}"
         ver="$(install_git_version "$cand")" || ver=""
         if [ -n "$ver" ] && install_git_is_new_enough "$cand"; then
-            doctor_machine_line ok "git: $(install_display_path "$cand") $ver"
+            doctor_machine_line ok "git: $(gitup_display_path "$cand") $ver"
         elif install_git_is_bundled "$cand"; then
-            doctor_machine_line WARNING "git: $(install_display_path "$cand") is git ${ver:-of unknown version}; $(install_old_git_effect "$cand")"
+            doctor_machine_line WARNING "git: $(gitup_display_path "$cand") is git ${ver:-of unknown version}; $(install_old_git_effect "$cand")"
         else
-            doctor_machine_line WARNING "git: $(install_display_path "$cand") is git ${ver:-of unknown version}; it ignores config-based hooks without any message, so commits made with it are NOT scanned"
+            doctor_machine_line WARNING "git: $(gitup_display_path "$cand") is git ${ver:-of unknown version}; it ignores config-based hooks without any message, so commits made with it are NOT scanned"
         fi
     done
 }

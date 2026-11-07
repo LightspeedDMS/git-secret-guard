@@ -91,9 +91,11 @@ gitup_rpm_candidate() {
         GITUP_RPM_WHOLE="$REPLY"
         gitup_rpm_find_failed
         rm -f -- "$GITUP_RPM_ERRFILE"
+        GITUP_RPM_ERRFILE=/dev/null
         return 1
     fi
     rm -f -- "$GITUP_RPM_ERRFILE"
+    GITUP_RPM_ERRFILE=/dev/null
     while IFS= read -r v; do
         if [[ ! $v =~ ^[0-9]+(\.[0-9]+)*$ ]]; then continue; fi
         if [ -z "$GITUP_RPM_CANDIDATE" ] || gitup_version_at_least "$v" "$GITUP_RPM_CANDIDATE"; then GITUP_RPM_CANDIDATE="$v"; fi

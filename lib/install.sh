@@ -152,20 +152,6 @@ install_bundled_git_path() { printf '%s/usr/lib/github-desktop/resources/app/git
 # ^ invariant true for the git GitHub Desktop bundles; the warning names it, and the commit test in docs/platforms.md used it
 install_git_is_bundled() { [ "$1" = "$(install_bundled_git_path)" ]; }
 
-# ^ invariant display only => /bin/x shows as /usr/bin/x when /bin links to usr/bin (also sbin); identity stays on realpath
-# ^ why one helper, not a rewrite at collection; the candidate paths feed realpath, the dedupe and the takeover target, and only the words the user reads change
-install_display_path() {
-    local p="$1" root="${GITUP_ROOT:-}" d from to
-    for d in bin sbin; do
-        if [[ $p != "$root/$d/"* ]] || [ ! -L "$root/$d" ]; then continue; fi
-        from="$(realpath -- "$root/$d" 2>/dev/null)" || continue
-        to="$(realpath -- "$root/usr/$d" 2>/dev/null)" || continue
-        if [ -n "$from" ] && [ "$from" = "$to" ]; then p="$root/usr/$d/${p#"$root/$d/"}"; fi
-        break
-    done
-    printf '%s' "$p"
-}
-
 # ^ invariant prints why a git older than 2.54 matters; the bundled git is named and measured, any other git gets the plain claim
 install_old_git_effect() {
     if install_git_is_bundled "$1"; then
@@ -212,7 +198,7 @@ install_report_other_gits() {
         if install_git_is_new_enough "$cand"; then continue; fi
         ver="$(install_git_version "$cand")" || ver="of unknown version"
         printf '%s: warning: %s is git %s; %s (the git in use is %s, git %s)%s\n' \
-            "$GSG_NAME" "$(install_display_path "$cand")" "$ver" "$(install_old_git_effect "$cand")" "$GSG_GIT" "$(install_git_version "$GSG_GIT")" "$(gitup_takeover_note "$cand")" >&2
+            "$GSG_NAME" "$(gitup_display_path "$cand")" "$ver" "$(install_old_git_effect "$cand")" "$GSG_GIT" "$(install_git_version "$GSG_GIT")" "$(gitup_takeover_note "$cand")" >&2
         brew_old_git_note "$cand"
     done
 }

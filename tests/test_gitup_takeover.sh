@@ -61,14 +61,14 @@ test_a_path_below_a_bin_link_is_shown_below_usr_bin_and_other_paths_are_not_touc
     gu_rpm_setup || return 1
     mkdir -p -- "$r/usr/bin" "$r/usr/sbin" "$r/opt" "$r/other/bin" || return 1
     ln -s usr/bin "$r/bin" && ln -s usr/sbin "$r/sbin" || return 1
-    gu_run 'GITUP_ROOT="$1"; for p in "$1/bin/git" "$1/sbin/x" "$1/usr/bin/git" "$1/other/bin/git" "$1/binx/git"; do install_display_path "$p"; echo; done' "$r"
+    gu_run 'GITUP_ROOT="$1"; for p in "$1/bin/git" "$1/sbin/x" "$1/usr/bin/git" "$1/other/bin/git" "$1/binx/git"; do gitup_display_path "$p"; echo; done' "$r"
     assert_eq "$OUT" "$r/usr/bin/git
 $r/usr/sbin/x
 $r/usr/bin/git
 $r/other/bin/git
 $r/binx/git" "only a path below a link that points into usr is rewritten"
     rm -f -- "$r/bin" && mkdir -p -- "$r/bin" || return 1
-    gu_run 'GITUP_ROOT="$1"; install_display_path "$1/bin/git"' "$r"
+    gu_run 'GITUP_ROOT="$1"; gitup_display_path "$1/bin/git"' "$r"
     assert_eq "$OUT" "$r/bin/git" "a real /bin directory keeps its name"
 }
 

@@ -19,6 +19,32 @@ hp_records() {
     return "$rc"
 }
 
+# ^ external hook list line = name, "disabled<TAB>name" (enabled=false) or "event-disabled<TAB>name" (hook.pre-commit.enabled=false); git 2.56
+# ^ invariant hooklist_read ERRFILE [GIT_ARGS...] sets HL_STATUS = effective, disabled, event-disabled or absent; HL_RC = git's exit status; REPLY = its message
+# ^ invariant returns 0 = listed (an empty list too, also a command without its event), 2 = an event without its command (git exits 128), 1 = git failed
+hooklist_read() {
+    local errfile="$1" line
+    local -a listed=()
+    shift
+    HL_STATUS=absent
+    mapfile -t listed < <("$GSG_GIT" "$@" hook list pre-commit 2>"$errfile")
+    wait "$!"
+    HL_RC=$?
+    first_message "$errfile"
+    # ^ external hook list exit 1 + "no hooks found" on stderr = an empty list, not a failure
+    # ^ external git 2.56 exits 128 with "'hook.git-secret-guard.command' must be configured or ... must be removed" when only the command key is gone
+    if [ "$HL_RC" -ne 0 ] && [[ $REPLY == *"must be configured or"* ]]; then return 2; fi
+    if [ "$HL_RC" -ne 0 ] && { [ "$HL_RC" -ne 1 ] || [[ $REPLY != *"no hooks found"* ]]; }; then return 1; fi
+    for line in "${listed[@]}"; do
+        case "$line" in
+            git-secret-guard) HL_STATUS=effective ;;
+            $'disabled\tgit-secret-guard') HL_STATUS=disabled ;;
+            $'event-disabled\tgit-secret-guard') HL_STATUS=event-disabled ;;
+        esac
+    done
+    return 0
+}
+
 # ^ invariant git config --global exits 129 with "only one config file at a time" when GIT_CONFIG is set => the message names it
 hp_report_failure() {
     printf '%s: cannot read the global git config (%s exit %s)%s\n' "$GSG_NAME" "$1" "$2" "${GSG_HP_ERR:+: $GSG_HP_ERR}" >&2

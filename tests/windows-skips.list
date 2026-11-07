@@ -71,3 +71,5 @@ test_install::test_the_resolver_refuses_root_before_anything_could_back_it_up | 
 test_legacy_gitleaks::test_an_interruption_after_the_restore_never_lets_the_rerun_delete_the_users_gitleaks | NTFS ignores chmod, so a file mode cannot be kept or checked
 test_legacy_gitleaks::test_an_upgrade_restores_the_users_moved_aside_gitleaks_and_uninstall_then_leaves_the_machine_as_before | NTFS ignores chmod, so a file mode cannot be kept or checked
 test_gitup_followups::test_a_dangling_global_config_symlink_leaves_no_empty_file_at_its_target | native git cannot write through a dangling symlink, so the probe itself fails
+test_status::test_an_interrupted_status_leaves_no_temp_directory | no process groups on Windows; the cleanup trap is the same code the other status tests run
+test_status::test_an_interrupt_during_the_hook_check_stops_status_with_130 | no process groups on Windows; a signal cannot be sent to the group of one run

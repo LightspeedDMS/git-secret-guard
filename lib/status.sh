@@ -20,6 +20,107 @@ status_config() {
     fi
 }
 
+# ^ invariant git older than 2.54 or with an unreadable version = MISMATCH and a problem, judged as install judges it
+# ^ invariant only the first git on PATH counts => an old /usr/bin/git behind a build in /usr/local is doctor's business
+# ^ why install_git_hint on stdout, not stderr; the advice belongs next to its line
+status_git() {
+    local ver
+    if ! ver="$(install_git_version "$GSG_GIT")"; then
+        status_line "git" "$GSG_GIT MISMATCH (cannot read its version; a git older than 2.54 ignores config-based hooks without any message, so commits made with it are not scanned)"
+    elif install_git_is_new_enough "$GSG_GIT"; then
+        status_line "git" "$GSG_GIT $ver ok"
+        return 0
+    else
+        status_line "git" "$GSG_GIT $ver MISMATCH (needs git >= 2.54; $(install_old_git_effect "$GSG_GIT"))"
+    fi
+    status_problem
+    install_git_hint 2>&1
+    return 1
+}
+
+STATUS_TMP=""
+
+# ^ invariant rm -rf only on the absolute mktemp directory this run made; runs from the EXIT trap of the subshell in status_hook_listing
+status_cleanup() {
+    if [ -n "$STATUS_TMP" ] && [ "${STATUS_TMP#/}" != "$STATUS_TMP" ] && ! rm -rf -- "$STATUS_TMP"; then
+        printf '%s: cannot remove %s\n' "$GSG_NAME" "$STATUS_TMP" >&2
+    fi
+}
+
+# ^ security $3 is first_message output (control characters replaced, cut at 200) => no escape sequence reaches the terminal
+# ^ security only git's own words are printed; test:test_status_reports_each_failing_git_step_and_prints_no_control_character
+status_hook_failed() {
+    status_line "hook list" "MISMATCH (git $1 failed with exit $2${3:+: $3}; commits may be blocked or unscanned until it works)"
+}
+
+# ^ invariant rc 0 = git lists the hook as running before commits; rc 1 = a MISMATCH line was printed; runs in a subshell, see status_hook_listing
+# ^ order traps before mktemp => an interrupt leaves no directory behind; the local env vars git names are unset before any git call
+status_hook_ask() {
+    local vars v rc
+    trap status_cleanup EXIT
+    trap 'exit 129' HUP
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    STATUS_TMP="$(mktemp -d)" || {
+        status_line "hook list" "MISMATCH (cannot create a temp directory to ask git about the hook; check TMPDIR; commits may be unscanned)"
+        return 1
+    }
+    vars="$("$GSG_GIT" rev-parse --local-env-vars 2>"$STATUS_TMP/err.txt")"
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
+        first_message "$STATUS_TMP/err.txt"
+        status_hook_failed "rev-parse --local-env-vars" "$rc" "$REPLY"
+        return 1
+    fi
+    # ^ external git lists GIT_CONFIG_PARAMETERS and GIT_CONFIG_COUNT as local => a commit sees their config too and they stay set
+    while IFS= read -r v; do
+        case "$v" in
+            "" | GIT_CONFIG_PARAMETERS | GIT_CONFIG_COUNT) continue ;;
+        esac
+        unset "$v"
+    done <<<"$vars"
+    # ^ external these two only shape a new repository => a bad value fails the throwaway init and no commit in an existing one
+    unset GIT_DEFAULT_HASH GIT_DEFAULT_REF_FORMAT
+    "$GSG_GIT" init -q --bare --template= "$STATUS_TMP/repo" >/dev/null 2>"$STATUS_TMP/err.txt"
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
+        first_message "$STATUS_TMP/err.txt"
+        status_hook_failed init "$rc" "$REPLY"
+        return 1
+    fi
+    hooklist_read "$STATUS_TMP/err.txt" --git-dir="$STATUS_TMP/repo"
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
+        status_hook_failed "hook list pre-commit" "$HL_RC" "$REPLY"
+        return 1
+    fi
+    case "$HL_STATUS" in
+        effective) return 0 ;;
+        disabled)
+            status_line "hook enabled" "MISMATCH (git hook list pre-commit shows git-secret-guard as disabled by hook.git-secret-guard.enabled, so commits are not scanned; find it with: git config --show-origin --get-all hook.git-secret-guard.enabled)"
+            ;;
+        event-disabled)
+            status_line "hook enabled" "MISMATCH (git hook list pre-commit shows git-secret-guard as event-disabled by hook.pre-commit.enabled, so commits are not scanned; find it with: git config --show-origin --get-all hook.pre-commit.enabled)"
+            ;;
+        *)
+            status_line "hook list" "MISMATCH (git-secret-guard is not in git hook list pre-commit, so commits are not scanned; run $GSG_NAME install)"
+            ;;
+    esac
+    return 1
+}
+
+# ^ why git hook list in a throwaway bare repository, not config reads => git alone decides what an enabled value means
+# ^ external git 2.56 reads false no off 0 00 0k 0x0 -0 and empty as off; a bad value after false stays off; a value-less key fails init
+# ^ external hook.pre-commit.enabled=false stops every pre-commit config hook (git hook list says event-disabled); doc:docs/doctor.md
+status_hook_listing() {
+    local rc
+    (status_hook_ask)
+    rc=$?
+    # ^ external bash counts a child with an INT trap and exit 130 as having survived the signal => the parent follows or prints on
+    if [ "$rc" -gt 128 ]; then exit "$rc"; fi
+    if [ "$rc" -ne 0 ]; then status_problem; fi
+}
+
 status_hook_command() {
     local cmd="$GSG_SHARE/hooks/secret-scan"
     if [ -f "$cmd" ] && [ -x "$cmd" ]; then
@@ -121,6 +222,7 @@ status_run() {
     status_line "share dir" "$GSG_SHARE"
     status_hook_command
     status_config
+    if status_git; then status_hook_listing; fi
     if [ "$ST_PREV_SET" = yes ]; then
         status_line "previous core.hooksPath" "$ST_PREV"
     else

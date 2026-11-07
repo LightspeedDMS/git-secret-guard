@@ -6,7 +6,7 @@ Every command below works the same in Git Bash on Windows. From PowerShell or cm
 ```bash
 git clone <this repository> && cd git-secret-guard
 bin/git-secret-guard install        # also the upgrade: run it again from a newer checkout
-git-secret-guard status             # what is installed, and whether the global config still matches
+git-secret-guard status             # what is installed, and whether commits can still be scanned (git, hook config, tools)
 git-secret-guard doctor             # which repositories are not protected, and why (read-only except its findings record, see below)
 bin/git-secret-guard install --with-timer   # optional: also run doctor weekly (systemd user timer, a LaunchAgent on macOS; on Windows see doctor.md)
 git-secret-guard uninstall          # put back what was there before
@@ -222,11 +222,63 @@ lives in, also from the XDG config and included files; informational, config hoo
 path, the tools installed by us, the originals install moved aside, and each tool's path with its detected and
 pinned version. A tool counts as `ok` only when it reports the pinned version the way install judges it (the version
 as a whole word, or with a `v` prefix), so `8.30.1-rc1` is a `MISMATCH` here exactly as install would replace it. It exits 0 when everything matches and 1 when it is not installed or a line says `MISMATCH` or
-`MISSING`. `git-secret-guard version` prints `git-secret-guard <x.y.z>`. `git-secret-guard help` lists the commands. `status` looks at the installation only; the repositories are the job
-of [`doctor`](doctor.md).
+`MISSING`. `git-secret-guard version` prints `git-secret-guard <x.y.z>`. `git-secret-guard help` lists the commands. `status` looks at the machine (the
+installation, the git in use and the hook as git resolves it); the repositories are the job of [`doctor`](doctor.md).
+
+Besides the `MISMATCH` and `MISSING` lines above, `status` reports whether commits can be scanned, and exits 1 for each of these cases:
+
+- **The git in use.** On an installed machine every run prints `git: <path> <version> ok` for the first `git` on `PATH`. A git
+  older than 2.54 ignores config-based hooks without any message; the line then says `MISMATCH` and that commits made with it
+  are not scanned, the platform advice of `install` follows (for example `install --upgrade-git`), and the exit status is 1.
+  A version that cannot be read is the same `MISMATCH` and exit 1. The hook check below is skipped then, so there is one clear
+  line. Only the first git counts: a second, older git later on `PATH` (the package git 2.52 stays reachable next to a build in
+  `/usr/local`) does not change `status`; [`doctor`](doctor.md) lists it. With no git on `PATH` at all `status` prints
+  `git is not on PATH` on stderr and exits 1. The not-installed path prints no git line.
+- **A hook git does not run.** `status` does not read `enabled` values; it asks git. It makes an empty bare repository in
+  `TMPDIR`, removes the repository variables of the caller (`GIT_DIR`, `GIT_COMMON_DIR` and the like, and `GIT_DEFAULT_HASH`
+  and `GIT_DEFAULT_REF_FORMAT`, which only break the new repository; `GIT_CONFIG_COUNT` and `-c` settings stay), and reads
+  `git hook list pre-commit` there. It runs from the current directory with absolute paths, so a relative `PATH` entry for git
+  works. A relative `GIT_CONFIG_GLOBAL` is read from the directory `status` runs in, while git inside a repository reads it from
+  the top of that repository, so only an absolute value gives a reliable answer. System, global and command-line config therefore count, a repository's own
+  config does not (that is `doctor`'s job). Exit 1, with a `hook enabled: MISMATCH` line that names `hook.git-secret-guard.enabled`
+  or `hook.pre-commit.enabled` (git skips every pre-commit config hook while the second is off), when git lists the hook as
+  `disabled` or `event-disabled`: any value git reads as off (`false`, `no`, `off`, `0`, an empty value, `00`, `0k`, `0x0`, `-0`;
+  a value git cannot read after `false` leaves it off). Exit 1 with a `hook list: MISMATCH` line when the hook is not in the
+  listing, or when a step fails: a key without a value or an `event` without its `command` makes `git init` fail and every
+  commit die, a failed `mktemp` leaves nothing to ask. A lone value git cannot read leaves the hook working and is not reported.
+  The lines name the key or git's own message (control characters replaced, cut at 200 characters); this line never prints a
+  configured `command` or `event` value (the `global config` line does, on a `MISMATCH`). The empty repository is removed on
+  every exit. Ctrl-C (or a terminate signal) during the check ends `status` at once with exit 130 (143) and prints no further line.
+- **Missing runtime tools.** `jq`, `setsid` (`taskkill` on Windows) and `timeout` count like the scanners: `MISSING or not
+  executable` exits 1, because the hook blocks every commit in that state.
+
+`status` does not read the hook's own library files. A damaged share directory is caught by the hook itself, which blocks the
+commit with `cannot load ...; nothing was scanned`, so no unscanned commit lands, but `status` still exits 0.
 
 ## Maintainer notes
 
+- **`status` and "can commits be scanned".** `status_git` judges `$GSG_GIT` (the first git on `PATH`, set by
+  `lifecycle_require_git`) with `install_git_version` and `install_git_is_new_enough`, and prints the advice of
+  `install_git_hint`; it must not look at any other git (`test_status_ignores_a_second_old_git_that_is_not_first_on_path`).
+  It returns 1 for an old or unreadable git and `status_run` then skips the hook check (`test_status_skips_the_hook_listing_when_the_git_is_too_old_or_unreadable`).
+  `status_hook_listing` runs `status_hook_ask` in a subshell (its unset and traps never touch `status`): traps first, then `mktemp -d`,
+  `git rev-parse --local-env-vars` unset except `GIT_CONFIG_PARAMETERS` and `GIT_CONFIG_COUNT`
+  (`test_status_ignores_the_repository_a_caller_points_git_at`, `test_status_sees_a_disable_given_through_the_environment`), `git init -q --bare --template=`,
+  and `hooklist_read` (`lib/hookspath.sh`, the same reading `doctor_repo_hook` uses). No `enabled` value is ever judged by the
+  code (`test_status_exits_1_for_every_enabled_value_git_reads_as_off`, `test_status_stays_quiet_for_every_enabled_value_git_reads_as_on`).
+  Plain `git -C / hook list` does not do: outside a repository it does not report `event-disabled`. Cleanup is pinned by
+  `test_status_leaves_no_temp_directory_after_a_normal_run` and `test_an_interrupted_status_leaves_no_temp_directory`; the failure
+  lines by `test_status_reports_each_failing_git_step_and_prints_no_control_character` and `test_status_exits_1_when_only_its_own_mktemp_fails`;
+  Ctrl-C by `test_an_interrupt_during_the_hook_check_stops_status_with_130`. `--template=` stays: a template `config` would be copied into the
+  throwaway repository and turn into a false `MISMATCH` or an init failure, while the template is repository-level and `doctor`'s job
+  (`test_status_ignores_a_template_config_that_only_a_new_repository_would_copy`). Every path is absolute and nothing changes directory
+  (`test_status_accepts_a_git_found_through_a_relative_path_entry`); a relative `GIT_CONFIG_GLOBAL` is read from the directory `status` runs in,
+  git in a repository reads it from the repo top, and no attempt is made to follow that (`test_status_reads_a_relative_global_config_from_the_directory_it_runs_in`
+  claims only the first). The sites that call `status_problem`: `global config` (`status_config`), `hook command`, `settings` and the tool lines
+  (`status_hook_command`, `status_tools`), `git` (`status_git`), the hook listing (`status_hook_listing`) and `system git takeover` (`status_system_git`).
+  The temp directory is a plain `mktemp -d` like doctor's: it holds an empty repository, no scanned content, so the hook's rule
+  about a `TMPDIR` outside `HOME` on Windows does not apply. The not-installed path prints no git line: nothing is installed to
+  scan with, and it already exits 1.
 - **`git config` exit codes** (2.56): a plain set exits 5 on a multi-valued key (hence `--replace-all`); `--get-all` exits 1
   when the key is absent and also when `GIT_CONFIG_GLOBAL` is a directory; `--global --list` exits 128 for a missing file
   and for a directory, so "unwritable" is probed by setting and removing a `gsg-install-probe` section

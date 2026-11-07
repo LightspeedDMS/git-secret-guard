@@ -322,7 +322,7 @@ test_status_says_a_value_git_cannot_read_as_a_boolean_leaves_the_hook_on() {
     gsg status
     assert_rc 0 "git still runs the hook"
     assert_contains "$OUT" "hook.git-secret-guard.enabled=maybe in the global config" "the value and scope are named"
-    assert_contains "$OUT" "is not a boolean git reads as off; the hook stays on" "and the hook is said to stay on"
+    assert_contains "$OUT" "is not a boolean and no other value is set, so git's default applies and the hook stays on" "and the default is said"
 }
 
 # ^ external hook.c parses each enabled value with git_parse_maybe_bool and skips unparseable ones => the last valid value decides (git 2.56)
@@ -333,19 +333,36 @@ test_status_lets_the_last_valid_value_decide_and_skips_values_git_cannot_parse()
     gsg status
     assert_rc 1 "system false, global maybe: the hook does not run"
     assert_contains "$OUT" "MISMATCH hook.git-secret-guard.enabled=false in the system config" "the deciding value is named"
+    assert_contains "$OUT" "git ignores it" "the later maybe is called ignored"
+    assert_not_contains "$OUT" "stays on" "and the hook is not said to stay on beside a MISMATCH"
     fresh_install
     gitx config --global --add hook.git-secret-guard.enabled false || return 1
     gitx config --global --add hook.git-secret-guard.enabled maybe || return 1
     gsg status
     assert_rc 1 "false then maybe in one file: the hook does not run"
     assert_contains "$OUT" "MISMATCH hook.git-secret-guard.enabled=false in the global config" "named"
+    assert_not_contains "$OUT" "stays on" "no stays-on line beside the MISMATCH"
     fresh_install
     status_hook_switch system hook.git-secret-guard.enabled true || return 1
     status_hook_switch global hook.git-secret-guard.enabled maybe || return 1
     gsg status
     assert_rc 0 "system true, global maybe: the hook runs"
     assert_contains "$OUT" "hook.git-secret-guard.enabled=maybe in the global config" "the ignored value is said"
-    assert_contains "$OUT" "the hook stays on" "and that the hook stays on"
+    assert_contains "$OUT" "git ignores it" "the maybe is ignored"
+    assert_not_contains "$OUT" "stays on" "and no claim about the hook is made beside a valid value"
+}
+
+# shellcheck disable=SC2016
+test_status_says_so_when_the_bool_probe_fails_for_another_reason() {
+    fresh_install
+    status_hook_switch global hook.git-secret-guard.enabled false || return 1
+    printf '#!/bin/sh\nfor a in "$@"; do case "$a" in gsg.probe=*) echo "fatal: simulated failure" >&2; exit 128 ;; esac; done\nexec %s "$@"\n' "$GIT" >"$SANDBOX/pathbin/git" || return 1
+    chmod 755 "$SANDBOX/pathbin/git"
+    gsg status
+    assert_rc 1 "a probe that fails for another reason is never a quiet yes"
+    assert_contains "$OUT" "MISMATCH hook.git-secret-guard.enabled could not be judged" "said as a MISMATCH"
+    assert_contains "$OUT" "simulated failure" "with git's own words"
+    assert_not_contains "$OUT" "hook enabled: yes" "never a yes"
 }
 
 run_file_tests

@@ -225,7 +225,12 @@ doctor_check_hook_config() {
                     doctor_machine_line PROBLEM "hook: ${HP_EN_KEY[$i]} has no value in the ${HP_EN_SCOPE[$i]} config ($origin); git commands fail until it is removed"
                     bad=1
                     ;;
-                notbool) doctor_machine_line WARNING "hook: ${HP_EN_KEY[$i]}=$value in the ${HP_EN_SCOPE[$i]} config ($origin) is not a boolean git reads as off; the hook stays on" ;;
+                ignored) doctor_machine_line WARNING "hook: ${HP_EN_KEY[$i]}=$value in the ${HP_EN_SCOPE[$i]} config ($origin) is not a boolean, git ignores it" ;;
+                default) doctor_machine_line WARNING "hook: ${HP_EN_KEY[$i]}=$value in the ${HP_EN_SCOPE[$i]} config ($origin) is not a boolean and no other value is set, so git's default applies and the hook stays on" ;;
+                unjudged)
+                    doctor_machine_line PROBLEM "hook: ${HP_EN_KEY[$i]} could not be judged (the boolean probe failed: $value); the hook may be switched off"
+                    bad=1
+                    ;;
                 *)
                     doctor_machine_line PROBLEM "hook: ${HP_EN_KEY[$i]}=$value in the ${HP_EN_SCOPE[$i]} config ($origin) switches the hook off everywhere; remove it"
                     bad=1

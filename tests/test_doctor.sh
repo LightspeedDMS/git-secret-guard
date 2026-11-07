@@ -130,6 +130,19 @@ test_the_machine_section_lets_the_last_valid_value_decide() {
     doctor
     assert_rc 1 "system false, global maybe: the hook does not run"
     assert_contains "$OUT" "PROBLEM  hook: hook.git-secret-guard.enabled=false in the system config" "a PROBLEM naming the deciding value"
+    assert_contains "$OUT" "git ignores it" "the later maybe is called ignored"
+    assert_not_contains "$OUT" "stays on" "and the hook is not said to stay on beside a PROBLEM"
+}
+
+# shellcheck disable=SC2016
+test_the_machine_section_makes_a_failing_bool_probe_a_problem_not_a_yes() {
+    dr_begin || return 1
+    gitx config --global hook.git-secret-guard.enabled false || return 1
+    printf '#!/bin/sh\nfor a in "$@"; do case "$a" in gsg.probe=*) echo "fatal: simulated failure" >&2; exit 128 ;; esac; done\nexec %s "$@"\n' "$GIT" >"$SANDBOX/pathbin/git" || return 1
+    chmod 755 "$SANDBOX/pathbin/git"
+    doctor
+    assert_rc 1 "a probe that fails for another reason"
+    assert_contains "$OUT" "PROBLEM  hook: hook.git-secret-guard.enabled could not be judged" "a PROBLEM"
 }
 
 test_the_machine_section_never_prints_a_hook_config_value() {

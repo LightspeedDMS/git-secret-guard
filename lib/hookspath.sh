@@ -238,9 +238,9 @@ install_check_config_writable() {
 
 # ^ external hook.c parses EACH enabled value with git_parse_maybe_bool and skips unparseable ones => the last valid value decides (v2.54.0, v2.55.0)
 # ^ external a valueless hook.<name>.enabled makes git add, commit, init and clone exit 128 in whichever scope it sits, even when a later scope sets true
-# ^ invariant sets HP_EN_KIND (off | notbool | valueless), _KEY, _SCOPE, _ORIGIN, _VALUE per finding; notbool = after the deciding value; rc 1 = unreadable
+# ^ invariant sets HP_EN_KIND (off | ignored | default | unjudged | valueless), _KEY, _SCOPE, _ORIGIN, _VALUE per finding; rc 1 = unreadable
 hp_hook_enabled_scan() {
-    local rc i j key scope origin rec ver dec inv decval v
+    local rc i j key scope origin rec ver dec inv decval kind bad
     local -a r_key=() r_scope=() r_origin=() r_value=()
     HP_EN_KIND=() HP_EN_KEY=() HP_EN_SCOPE=() HP_EN_ORIGIN=() HP_EN_VALUE=()
     hp_records -C / config --show-scope --show-origin -z --get-regexp '^hook\.(git-secret-guard|pre-commit)\.enabled$'
@@ -259,27 +259,50 @@ hp_hook_enabled_scan() {
     for key in hook.git-secret-guard.enabled hook.pre-commit.enabled; do
         # ^ external hook.<event>.enabled needs git 2.55; hook.c at v2.54.0 has only the friendly-name key
         if [ "$key" = hook.pre-commit.enabled ] && ! gitup_version_at_least "$ver" 2.55; then continue; fi
-        dec=-1 decval="" inv=()
+        dec=-1 decval="" inv=() bad=-1
         for j in "${!r_key[@]}"; do
             if [ "${r_key[$j]}" != "$key" ]; then continue; fi
-            if v="$(hp_bool_value "${r_value[$j]}")"; then
-                dec="$j" decval="$v" inv=()
-            else
+            hp_bool_value "${r_value[$j]}"
+            rc=$?
+            if [ "$rc" -eq 0 ]; then
+                dec="$j" decval="$REPLY" inv=()
+            elif [ "$rc" -eq 1 ]; then
                 inv+=("$j")
+            else
+                bad="$j"
+                r_value[bad]="$REPLY"
+                break
             fi
         done
+        if [ "$bad" -ge 0 ]; then
+            HP_EN_KIND+=(unjudged) HP_EN_KEY+=("$key") HP_EN_SCOPE+=("${r_scope[$bad]}") HP_EN_ORIGIN+=("${r_origin[$bad]}") HP_EN_VALUE+=("${r_value[$bad]}")
+            continue
+        fi
         if [ "$dec" -ge 0 ] && [ "$decval" = false ]; then
             HP_EN_KIND+=(off) HP_EN_KEY+=("$key") HP_EN_SCOPE+=("${r_scope[$dec]}") HP_EN_ORIGIN+=("${r_origin[$dec]}") HP_EN_VALUE+=("${r_value[$dec]}")
         fi
+        kind=ignored
+        if [ "$dec" -lt 0 ]; then kind=default; fi
         for j in "${inv[@]}"; do
-            HP_EN_KIND+=(notbool) HP_EN_KEY+=("$key") HP_EN_SCOPE+=("${r_scope[$j]}") HP_EN_ORIGIN+=("${r_origin[$j]}") HP_EN_VALUE+=("${r_value[$j]}")
+            HP_EN_KIND+=("$kind") HP_EN_KEY+=("$key") HP_EN_SCOPE+=("${r_scope[$j]}") HP_EN_ORIGIN+=("${r_origin[$j]}") HP_EN_VALUE+=("${r_value[$j]}")
         done
     done
 }
 
-# ^ external one value through git's own boolean parser (00, 0k, 0x0, -0 and empty are false); rc 1 = git cannot parse it; no config file is read
+# ^ external one value through git's own boolean parser (00, 0k, 0x0, -0 and empty are false); no config file is read, LC_ALL=C pins the text
+# ^ external git 2.56 rejects a value with exit 128 and the text bad boolean config value X for gsg.probe; only this text means not-a-boolean
+# ^ invariant sets REPLY = true | false (rc 0), "" (rc 1, git cannot parse it), or git's first output line (rc 2, the probe failed for another reason)
 hp_bool_value() {
-    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_NOSYSTEM=1 "$GSG_GIT" -C / -c "gsg.probe=$1" config --type=bool --get gsg.probe 2>/dev/null
+    local out rc=0
+    out="$(GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_NOSYSTEM=1 LC_ALL=C "$GSG_GIT" -C / -c "gsg.probe=$1" config --type=bool --get gsg.probe 2>&1)" || rc=$?
+    REPLY="$out"
+    if [ "$rc" -eq 0 ] && { [ "$out" = true ] || [ "$out" = false ]; }; then return 0; fi
+    if [[ $out == "fatal: bad boolean config value "*" for 'gsg.probe'" ]]; then
+        REPLY=""
+        return 1
+    fi
+    REPLY="${out%%$'\n'*}"
+    return 2
 }
 
 # ^ invariant sets REPLY = how to remove entry I; the git config form only for the global file git writes, else the named file to edit

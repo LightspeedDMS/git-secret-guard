@@ -63,7 +63,12 @@ status_hook_enabled() {
                 status_line "hook enabled" "MISMATCH ${HP_EN_KEY[$i]} has no value in the ${HP_EN_SCOPE[$i]} config ($origin); git commands fail until it is removed; $adv"
                 status_problem
                 ;;
-            notbool) status_line "hook enabled" "${HP_EN_KEY[$i]}=$value in the ${HP_EN_SCOPE[$i]} config ($origin) is not a boolean git reads as off; the hook stays on" ;;
+            ignored) status_line "hook enabled" "${HP_EN_KEY[$i]}=$value in the ${HP_EN_SCOPE[$i]} config ($origin) is not a boolean, git ignores it" ;;
+            default) status_line "hook enabled" "${HP_EN_KEY[$i]}=$value in the ${HP_EN_SCOPE[$i]} config ($origin) is not a boolean and no other value is set, so git's default applies and the hook stays on" ;;
+            unjudged)
+                status_line "hook enabled" "MISMATCH ${HP_EN_KEY[$i]} could not be judged (the boolean probe failed: $value); the hook may be switched off"
+                status_problem
+                ;;
             *)
                 status_line "hook enabled" "MISMATCH ${HP_EN_KEY[$i]}=$value in the ${HP_EN_SCOPE[$i]} config ($origin) switches the hook off, commits are not scanned; $adv"
                 status_problem

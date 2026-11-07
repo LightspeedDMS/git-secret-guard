@@ -234,16 +234,16 @@ Besides the `MISMATCH` and `MISSING` lines above, `status` reports whether commi
   read). Only the first git counts: a second, older git later on `PATH` (the package git 2.52 stays reachable next to a build in
   `/usr/local`) does not change `status`; [`doctor`](doctor.md) lists it. With no git on `PATH` at all `status` prints
   `git is not on PATH` on stderr and exits 1.
-- **A hook git does not run.** `status` does not judge an `enabled` value; it asks git. It makes an empty bare repository in
+- **A hook git does not run.** `status` does not judge an `enabled` value; it asks git. It writes an empty bare repository by hand (`HEAD`, `objects/`, `refs/`; never `git init`, which writes `HEAD` and fires the user's `reference-transaction` hooks, from `core.hooksPath` and from config) in
   `TMPDIR`, removes the repository variables of the caller (`GIT_DIR`, `GIT_COMMON_DIR` and the like, and `GIT_DEFAULT_HASH`
   and `GIT_DEFAULT_REF_FORMAT`, which only break the new repository; `GIT_CONFIG_COUNT` and `-c` settings stay), and reads
   `git hook list pre-commit` there. It runs from the current directory with absolute paths, so a relative `PATH` entry for git
-  works. System, global and command-line config therefore count, a repository's own config does not (that is `doctor`'s job).
+  works. System, global and command-line config therefore count, a repository's own config does not, and neither does a conditional include (`includeIf`): that is `doctor`'s job (known limits below).
   Exit 1, with a `hook enabled: MISMATCH` line, when git lists the hook as `disabled` (`hook.git-secret-guard.enabled`) or
   `event-disabled` (`hook.pre-commit.enabled`, which stops every pre-commit config hook): any value git reads as off (`false`, `no`,
   `off`, `0`, an empty value, `00`, `0k`, `0x0`, `-0`; a value git cannot read after `false` leaves it off, and a lone value git
   cannot read leaves the hook working and is not reported). Exit 1 with a `hook list: MISMATCH` line when the hook is not in the
-  listing, or when a step fails: a key without a value or an `event` without its `command` makes `git init` fail and every commit die,
+  listing, or when a step fails: a key without a value or an `event` without its `command` makes `git hook list` itself fail ("missing value", exit 128) and every commit die,
   a failed `mktemp` leaves nothing to ask. When git says off, a second line **locates** the setting: `<key>=<value> in the <scope> config
   (<file>)` with how to remove it (`run: git config --global --unset <key>` only for the main global file, otherwise "remove the line
   from <file>", as root for the system config, or "unset the setting in the environment" for a command-line setting). That line comes
@@ -254,6 +254,12 @@ Besides the `MISMATCH` and `MISSING` lines above, `status` reports whether commi
   terminate signal) during the check ends `status` at once with exit 130 (143) and prints no further line.
 - **Missing runtime tools.** `jq`, `setsid` (`taskkill` on Windows) and `timeout` count like the scanners: `MISSING or not
   executable` exits 1, because the hook blocks every commit in that state.
+
+**Conditional includes are not seen.** git alone decides what an `enabled` value means, but only for the throwaway repository, and a conditional
+include (`includeIf "gitdir:..."`, `onbranch:`, `hasconfig:remote.*.url:`) never matches it. A setting reached through one, for example an
+`enabled = false` that applies only below a directory, does not change `status` (a commit under that directory still runs unscanned). When the global
+or system config holds any `includeIf`, `status` prints one informational line naming the file that holds it (never the condition or the included
+path); [`doctor`](doctor.md) checks each repository and finds such a disable.
 
 Known limits: `status` does not read the hook's own library files. A damaged share directory is caught by the hook itself, which blocks the
 commit with `cannot load ...; nothing was scanned`, so no unscanned commit lands, but `status` still exits 0. A relative `GIT_CONFIG_GLOBAL`
@@ -273,12 +279,15 @@ value gives a reliable answer.
   (`doctor_hook_verdict`), so the two commands cannot disagree. `hp_hook_enabled_scan` stays only to locate the setting git blamed (key,
   scope, file, advice) and never decides: no word list, no version gate for `hook.pre-commit.enabled` (git reports `event-disabled` only
   where it reads that key; the old 2.55 gate is gone because of that). A key without a value is the one finding the scan reports without
-  git's blame, after `git init` has failed. Plain `git -C / hook list` does not do: outside a repository it does not report
+  git's blame, after `git hook list` has failed. Plain `git -C / hook list` does not do: outside a repository it does not report
   `event-disabled`. Cleanup is pinned by `test_status_leaves_no_temp_directory_after_a_normal_run` and
   `test_an_interrupted_status_leaves_no_temp_directory`; the failure lines by `test_status_reports_each_failing_git_step_and_prints_no_control_character`
-  and `test_status_exits_1_when_only_its_own_mktemp_fails`; Ctrl-C by `test_an_interrupt_during_the_hook_check_stops_status_with_130`. `--template=`
-  stays: a template `config` would be copied into the throwaway repository and become a false `MISMATCH` or an init failure, while the template
-  is repository-level and `doctor`'s job (`test_status_ignores_a_template_config_that_only_a_new_repository_would_copy`). Every path is absolute
+  and `test_status_exits_1_when_only_its_own_mktemp_fails`; Ctrl-C by `test_an_interrupt_during_the_hook_check_stops_status_with_130`. The hand-built repository
+  has no `config` and no hooks, so a template `config` (which `init --template=` once had to be told not to copy) cannot leak in; a template is
+  repository-level and `doctor`'s job (`test_status_ignores_a_template_config_that_only_a_new_repository_would_copy`). Nothing the user configured
+  runs while `status` asks (`test_status_runs_no_hook_of_the_users_while_it_asks_git`, `test_the_machine_section_runs_no_hook_of_the_users`), and
+  `git hook list` runs under the settings' `timeout` binary, 30 seconds (`test_status_bounds_the_hook_listing_with_the_settings_timeout`); without usable
+  settings it is unbounded, but it runs no user hook either. Every path is absolute
   and nothing changes directory (`test_status_accepts_a_git_found_through_a_relative_path_entry`); on Windows the repository path is given to
   native git as `C:/...` (`cygpath -m`). The sites that call `status_problem`: `global config` (`status_config`), `hook command`, `settings` and the
   tool lines (`status_hook_command`, `status_tools`), `git in use` (`status_git`), the hook listing (`status_hook_listing`) and `system git takeover`

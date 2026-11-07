@@ -196,33 +196,21 @@ doctor_discover() {
     doctor_finish_discovery
 }
 
-# ^ external hook list line = name, "disabled<TAB>name" (enabled=false) or "event-disabled<TAB>name" (hook.pre-commit.enabled=false); git 2.56
 # ^ external a config origin inside the repository is shown relative to it (file:.git/config), see doctor_origin_text
 doctor_repo_hook() {
-    local line status="" rc i scope origin key want="$DR_HOOK_CMD"
-    local -a lines=()
+    local status rc i scope origin key want="$DR_HOOK_CMD"
     local -A last_value=() last_scope=() last_origin=()
-    mapfile -t lines < <("$GSG_GIT" hook list pre-commit 2>"$DR_WORK/hook.err")
-    wait "$!"
+    hooklist_read "$DR_WORK/hook.err"
     rc=$?
-    first_message "$DR_WORK/hook.err"
-    # ^ external hook list exit 1 + "no hooks found" on stderr = an empty list, not a failure
-    # ^ external git 2.56 exits 128 with "'hook.git-secret-guard.command' must be configured or ... must be removed" when only the command key is gone
-    if [ "$rc" -ne 0 ] && [[ $REPLY == *"must be configured or"* ]]; then
+    if [ "$rc" -eq 2 ]; then
         doctor_repo_finding PROBLEM "hook not reached: the global hook config is incomplete (see machine section)"
         return 0
     fi
-    if [ "$rc" -ne 0 ] && { [ "$rc" -ne 1 ] || [[ $REPLY != *"no hooks found"* ]]; }; then
-        doctor_repo_finding PROBLEM "cannot read the hooks git runs (git hook list pre-commit exit $rc${REPLY:+: $REPLY})"
+    if [ "$rc" -ne 0 ]; then
+        doctor_repo_finding PROBLEM "cannot read the hooks git runs (git hook list pre-commit exit $HL_RC${REPLY:+: $REPLY})"
         return 0
     fi
-    for line in "${lines[@]}"; do
-        case "$line" in
-            git-secret-guard) status=effective ;;
-            $'disabled\tgit-secret-guard') status=disabled ;;
-            $'event-disabled\tgit-secret-guard') status=event-disabled ;;
-        esac
-    done
+    status="$HL_STATUS"
     hp_records config --show-scope --show-origin -z --get-regexp '^hook\.(git-secret-guard\.(enabled|command)|pre-commit\.enabled)$'
     rc=$?
     if [ "$rc" -gt 1 ]; then

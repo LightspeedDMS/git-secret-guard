@@ -207,7 +207,7 @@ rocky_upgrade() {
     check "/usr/local/bin/git is new enough" ver_ge_254 /usr/local/bin/git
     show "$(printf '%s' "$OUT" | grep -E 'dnf may upgrade|dry run' | cut -c1-200)"
     # shellcheck disable=SC2016
-    check "the plan installs perl-interpreter and not the perl metapackage" bash -c '[[ $1 == *" perl-interpreter "* && $1 != *" make perl xz"* ]]' _ "$OUT"
+    check "the plan names no perl metapackage (perl-interpreter is installed already on this image, so it is not listed either)" bash -c '[[ $1 != *" perl "* ]]' _ "$OUT"
     check "and warns that dnf may upgrade installed packages" has "dnf may upgrade packages that are already installed"
     check "the build, made without the perl metapackage, ran: perl-interpreter is installed and can load ExtUtils::MakeMaker" bash -c 'rpm -q perl-interpreter >/dev/null && perl -MExtUtils::MakeMaker -e 1'
     show "perl metapackage afterwards: $(rpm -q perl 2>&1 | head -n 1)"

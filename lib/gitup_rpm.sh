@@ -123,12 +123,29 @@ gitup_rpm_candidate() {
     fi
     gitup_rpm_newest "$out"
     GITUP_RPM_CANDIDATE="$REPLY"
+    gitup_rpm_read_listing
+}
+
+# ^ external dnf 4.14 skips a repo file the user cannot read (0600), warns and returns 0 => it is not in this list, and the root command enables only these ids
+# ^ invariant GITUP_RPM_READ = ids of the enabled repositories after a successful whole query; no list = an incomplete check
+gitup_rpm_read_listing() {
+    local listing id rest
+    listing="$(gitup_rpm_list)" || listing=""
+    while read -r id rest; do
+        if [ -z "$id" ] || [ "$id" = repo ] || [[ ! $id =~ ^[A-Za-z0-9_.:-]+$ ]]; then continue; fi
+        GITUP_RPM_READ+=("$id")
+    done <<<"$listing"
+    if [ "${#GITUP_RPM_READ[@]}" -eq 0 ]; then
+        GITUP_RPM_FAILED+=("(the list of enabled repositories could not be read or holds no repository)")
+        GITUP_RPM_WHY+=("")
+        GITUP_RPM_INCOMPLETE=1
+    fi
 }
 
 # ^ invariant the note about prompts, worded by what the plan really runs as root; no dependency install means no prompt to answer
 gitup_rpm_keynote() {
     local where="this step"
-    if [ "$1" = package ]; then where="this install (repositories nobody read are excluded)"; fi
+    if [ "$1" = package ]; then where="this install (only the repositories the plan read are enabled)"; fi
     if [ "$1" = source ] && [ "${#GITUP_SRC_DEPS[@]}" -eq 0 ]; then
         printf 'no dnf install runs in this plan, so no repository signing key can be imported by it'
         return 0
@@ -196,14 +213,18 @@ gitup_rpm_print_unread() {
     done
 }
 
-# ^ invariant package route = git >= 2.54 from the repositories read and a complete check; the unread ones are excluded from the root command
+# ^ invariant package route = git >= 2.54 and a complete check; root enables only the repositories read (--disablerepo=* --enablerepo=ID), failing closed
 gitup_rpm_plan_package() {
-    local name disables=()
-    for name in "${GITUP_RPM_FAILED[@]}"; do disables+=("--disablerepo=$name"); done
-    GITUP_RPM_PKG_CMD=("$GITUP_DNF" "$GITUP_RPM_VERB" -y "${disables[@]}" git-core)
+    local id enabled=() shown=""
+    for id in "${GITUP_RPM_READ[@]}"; do
+        enabled+=("--enablerepo=$id")
+        shown+="${shown:+, }$id"
+    done
+    GITUP_RPM_PKG_CMD=("$GITUP_DNF" "$GITUP_RPM_VERB" -y "--disablerepo=*" "${enabled[@]}" git-core)
     GITUP_ROUTE=package
-    gitup_rpm_print_unread " (excluded from the install with --disablerepo, so root installs only from the repositories that were read)"
+    gitup_rpm_print_unread " (not enabled for root: only the repositories that were read are used)"
     printf '  route: package; %s offers git-core %s (the query that found it was read-only: it imported no key and answered no prompt)\n' "$GITUP_DNF" "$GITUP_RPM_CANDIDATE"
+    printf '  only the repositories read are enabled for root (%s); a repository file this user cannot read is not among them, and a dependency of git-core found only elsewhere makes dnf fail instead\n' "$shown"
     gitup_plan_priv "${GITUP_RPM_PKG_CMD[*]}"
     gitup_plan_note "$(gitup_rpm_keynote package)"
 }
@@ -221,14 +242,14 @@ gitup_rpm_plan_upgrade() {
     fi
     gitup_rpm_candidate || qrc=$?
     if [ -n "$GITUP_RPM_CANDIDATE" ] && gitup_version_at_least "$GITUP_RPM_CANDIDATE" "$GSG_MIN_GIT_MAJOR.$GSG_MIN_GIT_MINOR"; then offers=1; fi
-    if [ "$offers" -eq 1 ] && { [ "$qrc" -eq 0 ] || [ "$GITUP_RPM_INCOMPLETE" -eq 0 ]; }; then
+    if [ "$offers" -eq 1 ] && [ "$GITUP_RPM_INCOMPLETE" -eq 0 ]; then
         gitup_rpm_plan_package
         return 0
     fi
     gitup_rpm_print_unread " (not considered for the route)"
     reason="no enabled repository offers git-core 2.54 or newer"
     if [ -n "$GITUP_RPM_CANDIDATE" ]; then reason="the newest git-core the repositories offer is $GITUP_RPM_CANDIDATE"; fi
-    if [ "$qrc" -ne 0 ] && [ "$GITUP_RPM_INCOMPLETE" -eq 1 ]; then reason="the check of the repositories was incomplete, so the package route is not trusted"; fi
+    if [ "$GITUP_RPM_INCOMPLETE" -eq 1 ]; then reason="the check of the repositories was incomplete, so the package route is not trusted"; fi
     if [ "$qrc" -ne 0 ] && [ "$GITUP_RPM_INCOMPLETE" -eq 0 ]; then reason="the repositories that could be read offer ${GITUP_RPM_CANDIDATE:-no git-core}, not 2.54 or newer"; fi
     gitup_source_pins || return 1
     gitup_source_print_plan "$reason"

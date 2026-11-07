@@ -103,10 +103,34 @@ test_an_unread_repository_is_excluded_and_the_readable_ones_decide_the_package_r
     assert_contains "$OUT$ERR" "repository acli could not be read" "the failing repository is named"
     assert_not_contains "$OUT$ERR" "repository baseos could not be read" "and the good one is not"
     assert_contains "$OUT" "route: package" "the readable repository decides"
-    assert_contains "$OUT" "-y --disablerepo=acli git-core" "root excludes the unread repository"
+    assert_contains "$OUT" "-y --disablerepo=* --enablerepo=baseos git-core" "root enables only the repository that was read"
+    assert_not_contains "$OUT" "--enablerepo=acli" "and not the unread one"
     assert_contains "$(gu_log)" "--disablerepo=* --enablerepo=acli" "each repository was queried alone"
     assert_not_contains "$(grep -E 'repoquery|repolist' "$SANDBOX/gitup.log")" " -y" "no key was imported by a query"
     check_plan_matches_log "$OUT" "the package plan with --disablerepo"
+}
+
+# ^ external dnf 4.14 skips a repo file the user cannot read, with no error => it is missing from the user repolist, only an allow list keeps root off it
+test_root_enables_only_the_repositories_the_plan_read_even_when_the_whole_query_succeeds() {
+    gu_rpm_setup || return 1
+    printf 'baseos\nappstream\n' >"$SANDBOX/dnf.repos"
+    printf '2.55.0\n' >"$SANDBOX/dnf.candidate"
+    printf '2.55.0' >"$SANDBOX/dnf.upgrade_to"
+    gsg install --upgrade-git </dev/null
+    assert_rc 0 "the package route runs"
+    assert_contains "$OUT" "-y --disablerepo=* --enablerepo=baseos --enablerepo=appstream git-core" "the exact root command"
+    assert_contains "$OUT" "only the repositories read are enabled for root (baseos, appstream)" "the plan says so plainly"
+    check_plan_matches_log "$OUT" "the allow-list command"
+    assert_contains "$(gu_log)" "--disablerepo=* --enablerepo=baseos --enablerepo=appstream git-core" "and root ran it"
+}
+
+test_a_package_route_without_a_readable_repository_list_is_incomplete_and_goes_to_source() {
+    gu_rpm_setup || return 1
+    printf '2.55.0\n' >"$SANDBOX/dnf.candidate"
+    printf 'repolist' >"$SANDBOX/dnf.fail"
+    gsg install </dev/null
+    assert_contains "$OUT" "route: source (the check of the repositories was incomplete, so the package route is not trusted)" "no list, no allow list, no package route"
+    assert_not_contains "$OUT" "route: package" "and no root command with an open repository set"
 }
 
 test_readable_repositories_that_offer_only_an_old_git_send_the_route_to_source_and_the_unread_one_is_not_considered() {
@@ -236,7 +260,7 @@ test_the_key_note_matches_what_the_plan_runs_as_root() {
     gu_rpm_setup || return 1
     printf '2.55.0\n' >"$SANDBOX/dnf.candidate"
     gsg install </dev/null
-    assert_contains "$OUT" "imported by this install (repositories nobody read are excluded)" "the package route carries its own note"
+    assert_contains "$OUT" "imported by this install (only the repositories the plan read are enabled)" "the package route carries its own note"
 }
 
 test_a_repository_that_hangs_ends_within_the_timeout_and_is_named() {

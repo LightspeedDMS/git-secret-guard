@@ -650,6 +650,7 @@ gitup_apt_plan_refresh() {
     esac
     cat -- "$tmp"
     rm -f -- "$tmp"
+    gitup_plan_note "$GITUP_APT_UPGRADE_NOTE"
 }
 
 gitup_apt_plan() {

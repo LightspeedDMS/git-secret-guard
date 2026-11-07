@@ -147,7 +147,7 @@ case " $* " in
         ;;
     *" repolist "*)
         echo "repo id    repo name"
-        if [ -f "$d/dnf.repos" ]; then cat "$d/dnf.repos"; fi
+        if [ -f "$d/dnf.repos" ]; then cat "$d/dnf.repos"; else echo baseos; fi
         exit 0
         ;;
     *" --assumeno install "*)

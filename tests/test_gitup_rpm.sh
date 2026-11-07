@@ -23,7 +23,7 @@ test_a_rocky_machine_with_an_old_git_builds_the_pinned_source_when_the_user_acce
     assert_contains "$OUT" "git 2.56.0" "and the pinned version"
     assert_contains "$OUT" "git-2.56.0.tar.xz" "and the tarball"
     assert_contains "$OUT" "env -i with PATH=" "and the clean build environment"
-    assert_contains "$OUT" "as root: $SANDBOX/pathbin/dnf install -y gcc make" "and the dependency command with the full path of the dnf root will run"
+    assert_contains "$OUT" "as root: $SANDBOX/pathbin/dnf install -y gcc make perl-interpreter" "and the dependency command with the full path of the dnf root will run"
     assert_contains "$OUT" "/cp -dR --remove-destination --preserve=timestamps,links" "and the copy, which replaces an existing file instead of writing through a link"
     assert_contains "$(gu_log)" "make -C" "make ran"
     assert_contains "$(gu_log)" "prefix=$GU_ROOT/usr/local NO_RUST=1 NO_TCLTK=1 NO_GETTEXT=1 USE_LIBPCRE2=1" "with the proven flags and the prefix"
@@ -119,6 +119,49 @@ test_the_failed_repository_line_says_the_user_could_not_read_it_and_keeps_dnfs_c
     assert_not_contains "$OUT$ERR" "needs a key that is not imported" "the old guess is gone"
     assert_contains "$OUT" "route: source (a repository could not be read by the unprivileged query, so the package route is not trusted)" "the rule is unchanged"
     assert_not_contains "$(gu_log)" "sudo" "no privileged command ran before consent"
+}
+
+test_the_build_needs_perl_interpreter_and_not_the_perl_metapackage() {
+    gu_rpm_setup || return 1
+    gsg install </dev/null
+    assert_contains "$OUT" " gcc make perl-interpreter xz tar " "the interpreter is named"
+    assert_not_contains "$OUT" " make perl xz" "and the metapackage that pulls 141 packages is not"
+}
+
+test_installed_build_dependencies_are_left_out_of_the_install_line() {
+    gu_rpm_setup || return 1
+    printf 'gcc\nmake\ntar\nxz\n' >"$SANDBOX/rpm.installed"
+    gsg install </dev/null
+    assert_contains "$OUT" "dnf install -y perl-interpreter openssl-devel" "only what is missing is installed"
+    assert_not_contains "$OUT" "install -y gcc" "an installed name is not repeated, so dnf cannot upgrade it by name"
+    check_plan_matches_log "$OUT" "the reduced dependency line"
+}
+
+test_a_machine_with_every_build_dependency_runs_no_dependency_install() {
+    gu_rpm_setup || return 1
+    printf 'gcc\nmake\nperl-interpreter\nxz\ntar\nopenssl-devel\nzlib-devel\nlibcurl-devel\nexpat-devel\npcre2-devel\nperl-ExtUtils-MakeMaker\n' >"$SANDBOX/rpm.installed"
+    gsg install --upgrade-git </dev/null
+    assert_rc 0 "the build runs"
+    assert_not_contains "$(gu_log)" "dnf install -y" "no dependency install"
+    assert_contains "$OUT" "every build dependency is installed" "and the plan says so"
+}
+
+test_the_plan_states_the_effect_of_the_dependency_install_with_counts_from_a_dry_run() {
+    gu_rpm_setup || return 1
+    printf 'Install  141 Packages\nUpgrade   10 Packages\n' >"$SANDBOX/dnf.summary"
+    gsg install </dev/null
+    assert_contains "$OUT" "dnf may upgrade packages that are already installed" "the warning"
+    assert_contains "$OUT" "dry run as your user: Install  141 Packages; Upgrade   10 Packages" "with the counts"
+    assert_contains "$(gu_log)" "--assumeno -q install perl-interpreter" "the dry run asks for the missing names only"
+    assert_not_contains "$(gu_log)" "sudo" "and runs without privileges"
+}
+
+test_the_plan_says_so_when_the_dry_run_cannot_count() {
+    gu_rpm_setup || return 1
+    gsg install </dev/null
+    assert_contains "$OUT" "dnf may upgrade packages that are already installed" "the warning stays"
+    assert_contains "$OUT" "could not be counted without privileges" "and the missing counts are admitted"
+    assert_not_contains "$OUT" "superuser privileges" "dnf's own refusal text is not shown"
 }
 
 test_a_repository_that_hangs_ends_within_the_timeout_and_is_named() {

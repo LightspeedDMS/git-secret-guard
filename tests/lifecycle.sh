@@ -110,6 +110,7 @@ case "$*" in
     "-qf --qf %{NAME}\n -- "*) if [ -f "$d/rpm.owner" ]; then cat "$d/rpm.owner"; exit 0; fi; echo "file $5 is not owned by any package" >&2; exit 1 ;;
     "-q --qf %{NAME}-%{VERSION}-%{RELEASE}.%{ARCH}\n git-core") answer rpm.nevra ;;
     "-q --qf %{NAME}\n git-core") answer rpm.nevra ;;
+    "-q --qf %{NAME}\n "*) if [ -f "$d/rpm.installed" ] && grep -qx -- "$4" "$d/rpm.installed"; then echo "$4"; exit 0; fi; echo "package $4 is not installed" >&2; exit 1 ;;
     "-ql git-core") answer rpm.files ;;
     "-q --qf %{SOURCERPM}\n git-core") answer rpm.srpm ;;
     "-qa --qf %{NAME} %{SOURCERPM}\n") answer rpm.all ;;
@@ -145,6 +146,11 @@ case " $* " in
         echo "repo id    repo name"
         if [ -f "$d/dnf.repos" ]; then cat "$d/dnf.repos"; fi
         exit 0
+        ;;
+    *" --assumeno "*" install "*)
+        # ^ invariant the unprivileged dry run: dnf.summary is its output, rc 1 like dnf's "Operation aborted"; no file = dnf 4 refusing a user
+        if [ -f "$d/dnf.summary" ]; then cat "$d/dnf.summary"; else echo "Error: This command has to be run with superuser privileges (under the root user on most systems)." >&2; fi
+        exit 1
         ;;
     *" install "* | *" upgrade "*)
         # ^ invariant dnf.upgrade_to names the version a package upgrade brings; the git on the sandbox PATH then reports it and runs the real git

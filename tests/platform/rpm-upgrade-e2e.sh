@@ -205,6 +205,12 @@ rocky_upgrade() {
     check "every privileged command in the plan starts with an absolute path" test -z "$(printf '%s\n' "$OUT" | grep -E '^  as root: [^/]')"
     check "and the plan names mkdir" has "as root: /usr/bin/mkdir"
     check "/usr/local/bin/git is new enough" ver_ge_254 /usr/local/bin/git
+    show "$(printf '%s' "$OUT" | grep -E 'dnf may upgrade|dry run' | cut -c1-200)"
+    # shellcheck disable=SC2016
+    check "the plan installs perl-interpreter and not the perl metapackage" bash -c '[[ $1 == *" perl-interpreter "* && $1 != *" make perl xz"* ]]' _ "$OUT"
+    check "and warns that dnf may upgrade installed packages" has "dnf may upgrade packages that are already installed"
+    check "the build, made without the perl metapackage, ran: perl-interpreter is installed and can load ExtUtils::MakeMaker" bash -c 'rpm -q perl-interpreter >/dev/null && perl -MExtUtils::MakeMaker -e 1'
+    show "perl metapackage afterwards: $(rpm -q perl 2>&1 | head -n 1)"
     show "$(/usr/local/bin/git --version); PATH git: $(command -v git)"
     check "it comes first on PATH" test "$(command -v git)" = /usr/local/bin/git
     check "the RPM git-core is the same version" test "$(rpm -q git-core)" = "$PKG_BEFORE"

@@ -2,9 +2,10 @@
 # ^ coupled the git upgrade module of the rpm class (Rocky, RHEL, AlmaLinux, CentOS, Fedora); registered in lib/gitup.sh, contract in CONTRIBUTING.md
 # ^ external dnf 4 (Rocky 9) and dnf 5 (Fedora 44) both accept the repoquery call in gitup_rpm_query (probed in containers)
 
-GITUP_RPM_DEPS=(gcc make perl xz tar openssl-devel zlib-devel libcurl-devel expat-devel pcre2-devel perl-ExtUtils-MakeMaker)
+GITUP_RPM_DEPS=(gcc make perl-interpreter xz tar openssl-devel zlib-devel libcurl-devel expat-devel pcre2-devel perl-ExtUtils-MakeMaker)
 GITUP_RPM_FLAGS=(NO_RUST=1 NO_TCLTK=1 NO_GETTEXT=1 USE_LIBPCRE2=1)
 GITUP_RPM_FAILED=()
+GITUP_RPM_MISSING=()
 GITUP_RPM_WHY=()
 GITUP_RPM_ERRFILE=/dev/null
 GITUP_RPM_WHOLE=""
@@ -101,14 +102,44 @@ gitup_rpm_candidate() {
 
 GITUP_RPM_KEYNOTE="dnf install -y answers yes to every prompt, a repository signing key import included: a key that is pending for a configured repository would be imported by this step; the read-only query above imported none"
 
-# ^ invariant sets GITUP_SRC_DEPS (the dependency install command with the full dnf path) and GITUP_SRC_FLAGS for the shared source build; rc 1 = no usable dnf
+# ^ invariant sets GITUP_SRC_DEPS (full dnf path, only names rpm -q lacks; empty when none) and GITUP_SRC_FLAGS; rc 1 = no usable dnf
+# ^ why only the missing names, not all; dnf install -y also upgrades an installed name when a newer build exists
 gitup_rpm_prepare() {
+    local dep rpm_bin="" missing=()
     gitup_rpm_find_dnf || return 1
-    GITUP_SRC_DEPS=("$GITUP_DNF" install -y "${GITUP_RPM_DEPS[@]}")
+    if gitup_system_bin rpm; then rpm_bin="$REPLY"; fi
+    for dep in "${GITUP_RPM_DEPS[@]}"; do
+        if [ -n "$rpm_bin" ] && "$rpm_bin" -q --qf '%{NAME}\n' "$dep" >/dev/null 2>&1; then continue; fi
+        missing+=("$dep")
+    done
+    GITUP_RPM_MISSING=("${missing[@]}")
+    GITUP_SRC_DEPS=()
+    if [ "${#missing[@]}" -gt 0 ]; then GITUP_SRC_DEPS=("$GITUP_DNF" install -y "${missing[@]}"); fi
     GITUP_SRC_FLAGS=("${GITUP_RPM_FLAGS[@]}")
     # ^ external dnf 5 answers "already installed, nothing to do" to install of an older git-core (Fedora 44); upgrade ran there, on dnf 4 it is untested
     GITUP_RPM_VERB=install
-    if gitup_system_bin rpm && "$REPLY" -q --qf '%{NAME}\n' git-core >/dev/null 2>&1; then GITUP_RPM_VERB=upgrade; fi
+    if [ -n "$rpm_bin" ] && "$rpm_bin" -q --qf '%{NAME}\n' git-core >/dev/null 2>&1; then GITUP_RPM_VERB=upgrade; fi
+}
+
+# ^ invariant prints the effect of the dependency install as notes; counts come from an unprivileged dnf --assumeno or are admitted missing
+gitup_rpm_deps_note() {
+    local out line counts=""
+    if [ "${#GITUP_RPM_MISSING[@]}" -eq 0 ]; then
+        gitup_plan_note "every build dependency is installed, so no dependency install runs"
+        return 0
+    fi
+    out="$(gitup_rpm_dnf install "${GITUP_RPM_MISSING[@]}")" || true
+    while IFS= read -r line; do
+        if [[ $line =~ ^[[:space:]]*((Install|Installing|Upgrade|Upgrading|Remove|Removing|Downgrade|Downgrading)[:\ ]+[0-9]+\ [Pp]ackages?)$ ]]; then
+            line="${line#"${line%%[![:space:]]*}"}"
+            counts+="${counts:+; }$line"
+        fi
+    done <<<"$out"
+    if [ -n "$counts" ]; then
+        gitup_plan_note "dnf may upgrade packages that are already installed when a missing dependency needs a newer version of one; dry run as your user: $counts"
+    else
+        gitup_plan_note "dnf may upgrade packages that are already installed when a missing dependency needs a newer version of one; the size could not be counted without privileges"
+    fi
 }
 
 gitup_rpm_plan_upgrade() {
@@ -143,11 +174,17 @@ gitup_rpm_plan_upgrade() {
     if [ "${#GITUP_RPM_FAILED[@]}" -gt 0 ]; then reason="a repository could not be read by the unprivileged query, so the package route is not trusted"; fi
     gitup_source_pins || return 1
     gitup_source_print_plan "$reason"
+    gitup_rpm_deps_note
     gitup_plan_note "$GITUP_RPM_KEYNOTE"
 }
 
 # ^ invariant the refresh plan is the shared one; rc 0 = a stale build of ours, rc 2 = a takeover blocks the rebuild, rc 1 = nothing printed
-gitup_rpm_plan_refresh() { gitup_source_plan_refresh gitup_rpm_prepare; }
+gitup_rpm_plan_refresh() {
+    local rc=0
+    gitup_source_plan_refresh gitup_rpm_prepare || rc=$?
+    if [ "$rc" -eq 0 ]; then gitup_rpm_deps_note; fi
+    return "$rc"
+}
 
 gitup_rpm_plan() {
     GITUP_ROUTE=""

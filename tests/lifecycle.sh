@@ -150,7 +150,7 @@ case " $* " in
         if [ -f "$d/dnf.repos" ]; then cat "$d/dnf.repos"; fi
         exit 0
         ;;
-    *" --assumeno "*" install "*)
+    *" --assumeno install "*)
         # ^ invariant the unprivileged dry run: dnf.summary is its output, rc 1 like dnf's "Operation aborted"; no file = dnf 4 refusing a user
         if [ -f "$d/dnf.flip" ]; then : >"$d/rpm.broken"; fi
         if [ -f "$d/dnf.install.hang" ]; then exec sleep 60; fi

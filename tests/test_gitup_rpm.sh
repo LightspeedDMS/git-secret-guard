@@ -97,6 +97,7 @@ test_an_unread_repository_is_excluded_and_the_readable_ones_decide_the_package_r
     printf 'baseos\nacli\n' >"$SANDBOX/dnf.repos"
     printf 'acli' >"$SANDBOX/dnf.badrepo"
     printf '2.55.0\n' >"$SANDBOX/dnf.candidate.baseos"
+    printf '2.55.0' >"$SANDBOX/dnf.upgrade_to"
     gsg install --upgrade-git </dev/null
     assert_rc 0 "the package route runs"
     assert_contains "$OUT$ERR" "repository acli could not be read" "the failing repository is named"

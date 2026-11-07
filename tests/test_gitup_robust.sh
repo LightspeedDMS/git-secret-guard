@@ -136,7 +136,7 @@ test_a_refusal_after_the_upgrade_says_what_the_upgrade_changed() {
     mkdir -p -- "$LC_STATE" && printf 'garbage\n' >"$LC_STATE/state" || return 1
     gsg install --upgrade-git </dev/null
     assert_rc 1 "a malformed state file is still refused when git was missing"
-    assert_contains "$(gu_log)" "dnf install -y git-core" "the missing git was installed first"
+    assert_contains "$(gu_log)" "dnf install -y --disablerepo=* --enablerepo=baseos git-core" "the missing git was installed first"
     assert_contains "$ERR" "the only change made was the git upgrade of this run" "and the refusal says so"
 }
 

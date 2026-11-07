@@ -243,12 +243,14 @@ gitup_source_compile() {
         }
         gitup_changed_add "the package lists were refreshed before the build dependencies"
     fi
-    gitup_elevate "${GITUP_SRC_DEPS[@]}" || {
-        gitup_changed_add "the install of the build dependencies (${GITUP_SRC_DEPS[*]}) was started and failed, so the package manager may have installed part of them"
-        printf '%s: the build dependencies could not be installed\n' "$GSG_NAME" >&2
-        return 1
-    }
-    gitup_changed_add "the build dependencies were installed (${GITUP_SRC_DEPS[*]})"
+    if [ "${#GITUP_SRC_DEPS[@]}" -gt 0 ]; then
+        gitup_elevate "${GITUP_SRC_DEPS[@]}" || {
+            gitup_changed_add "the install of the build dependencies (${GITUP_SRC_DEPS[*]}) was started and failed, so the package manager may have installed part of them"
+            printf '%s: the build dependencies could not be installed\n' "$GSG_NAME" >&2
+            return 1
+        }
+        gitup_changed_add "the build dependencies were installed (${GITUP_SRC_DEPS[*]})"
+    fi
     install_find_bin make "$GITUP_BUILD_PATH" || {
         printf '%s: make was not found in PATH=%s after installing the build dependencies\n' "$GSG_NAME" "$GITUP_BUILD_PATH" >&2
         return 1
@@ -345,7 +347,7 @@ gitup_source_print_plan() {
     local docdir
     docdir="$(gitup_source_docdir)"
     if [ "${#GITUP_SRC_PRE[@]}" -gt 0 ]; then gitup_plan_priv "${GITUP_SRC_PRE[*]}"; fi
-    gitup_plan_priv "${GITUP_SRC_DEPS[*]}"
+    if [ "${#GITUP_SRC_DEPS[@]}" -gt 0 ]; then gitup_plan_priv "${GITUP_SRC_DEPS[*]}"; fi
     gitup_plan_priv "mkdir -p -- $docdir"
     gitup_plan_priv "install -m 644 -- <build dir>/MANIFEST $docdir/MANIFEST.partial"
     gitup_plan_priv "${GITUP_SRC_CP[*]} <build dir>/stage$GITUP_PREFIX/. $GITUP_PREFIX/"

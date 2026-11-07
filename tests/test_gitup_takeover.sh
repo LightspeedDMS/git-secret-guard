@@ -54,6 +54,35 @@ test_the_takeover_is_offered_on_any_install_and_declining_changes_nothing() {
     assert_eq "$(gu_conf)" "$GU_CONF_BEFORE" "still no dnf config"
 }
 
+# ^ invariant display only; the identity of the git (realpath, dedupe, takeover target) is never rewritten
+# shellcheck disable=SC2016
+test_a_path_below_a_bin_link_is_shown_below_usr_bin_and_other_paths_are_not_touched() {
+    local r="$SANDBOX/r"
+    gu_rpm_setup || return 1
+    mkdir -p -- "$r/usr/bin" "$r/usr/sbin" "$r/opt" "$r/other/bin" || return 1
+    ln -s usr/bin "$r/bin" && ln -s usr/sbin "$r/sbin" || return 1
+    gu_run 'GITUP_ROOT="$1"; for p in "$1/bin/git" "$1/sbin/x" "$1/usr/bin/git" "$1/other/bin/git" "$1/binx/git"; do gitup_display_path "$p"; echo; done' "$r"
+    assert_eq "$OUT" "$r/usr/bin/git
+$r/usr/sbin/x
+$r/usr/bin/git
+$r/other/bin/git
+$r/binx/git" "only a path below a link that points into usr is rewritten"
+    rm -f -- "$r/bin" && mkdir -p -- "$r/bin" || return 1
+    gu_run 'GITUP_ROOT="$1"; gitup_display_path "$1/bin/git"' "$r"
+    assert_eq "$OUT" "$r/bin/git" "a real /bin directory keeps its name"
+}
+
+test_the_takeover_prompt_and_warning_name_usr_bin_git_when_bin_is_a_link() {
+    gu_tk_start || return 1
+    rm -rf -- "${GU_ROOT:?}/bin" || return 1
+    ln -s usr/bin "$GU_ROOT/bin" || return 1
+    set_env PATH="$GU_ROOT/usr/local/bin:$GU_ROOT/bin:$SANDBOX/pathbin:$TEST_BASE_PATH"
+    gsg_pty $'\n' install
+    assert_contains "$OUT" "Take over $GU_ROOT/usr/bin/git with the plan above" "the prompt"
+    assert_contains "$OUT" "$GU_ROOT/usr/bin/git was left as it is" "the decline line"
+    assert_not_contains "$OUT$ERR" "$GU_ROOT/bin/git" "the link spelling appears nowhere"
+}
+
 test_answering_yes_at_the_takeover_prompt_takes_over() {
     gu_tk_start || return 1
     gsg_pty $'y\n' install

@@ -196,6 +196,14 @@ rocky_upgrade() {
     check "and says nothing was changed" has "nothing was changed"
     check "and no ~/.gitconfig was created by the write probe" test ! -e "$HOME/.gitconfig"
     check "and /usr/local/bin/git does not exist" test ! -e /usr/local/bin/git
+    # ^ invariant the build starts without perl-interpreter => the plan installs it and the source builds with it, never with the perl metapackage
+    # ^ why rpm -e --nodeps, not dnf remove; dnf remove took the stock git-core out with perl-interpreter (run 42358458414), and the later checks need it
+    show "required by: $(rpm -q --whatrequires perl-interpreter 2>&1 | head -n 8 | tr '\n' ' ')"
+    if rpm -q perl-interpreter >/dev/null 2>&1; then sudo rpm -e --nodeps perl-interpreter >/dev/null 2>&1 || true; fi
+    show "before the build: $(rpm -q perl-interpreter 2>&1 | head -n 1); $(rpm -q perl 2>&1 | head -n 1)"
+    check "perl-interpreter is not installed before the build" not rpm -q perl-interpreter
+    # shellcheck disable=SC2016
+    check "and the stock git-core is still the same version, rpm -V clean" bash -c '[ "$(rpm -q git-core)" = "$1" ] && [ -z "$(rpm -V git-core 2>&1)" ]' _ "$PKG_BEFORE"
     run "$GSG" install --upgrade-git </dev/null
     show "$(printf '%s' "$OUT" | grep -E 'route:|building git|now; continuing|installed git-secret-guard' | head -n 6)"
     check "install --upgrade-git ends with exit 0" rc_is 0
@@ -205,6 +213,12 @@ rocky_upgrade() {
     check "every privileged command in the plan starts with an absolute path" test -z "$(printf '%s\n' "$OUT" | grep -E '^  as root: [^/]')"
     check "and the plan names mkdir" has "as root: /usr/bin/mkdir"
     check "/usr/local/bin/git is new enough" ver_ge_254 /usr/local/bin/git
+    show "$(printf '%s' "$OUT" | grep -E 'dnf may upgrade|dry run' | cut -c1-200)"
+    # shellcheck disable=SC2016
+    check "the plan installs perl-interpreter and not the perl metapackage" bash -c '[[ $1 == *" perl-interpreter "* && $1 != *" perl "* ]]' _ "$OUT"
+    check "and warns that dnf may upgrade installed packages" has "dnf may upgrade packages that are already installed"
+    check "the build, made without the perl metapackage, ran: perl-interpreter is installed and can load ExtUtils::MakeMaker" bash -c 'rpm -q perl-interpreter >/dev/null && perl -MExtUtils::MakeMaker -e 1'
+    show "perl metapackage afterwards: $(rpm -q perl 2>&1 | head -n 1)"
     show "$(/usr/local/bin/git --version); PATH git: $(command -v git)"
     check "it comes first on PATH" test "$(command -v git)" = /usr/local/bin/git
     check "the RPM git-core is the same version" test "$(rpm -q git-core)" = "$PKG_BEFORE"

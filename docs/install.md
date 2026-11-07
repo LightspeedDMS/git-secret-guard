@@ -30,7 +30,7 @@ If you decline, and on every other platform, it refuses and prints how to get a 
 > for every other reachable git older than 2.54 (all `git` on `PATH` plus `/usr/bin/git` and the git GitHub Desktop bundles at `/usr/lib/github-desktop/resources/app/git/bin/git`, which the warning names: a commit made by it was measured to skip the scan, see [CI on real platforms](platforms.md#ci-on-real-platforms); on this machine
 > `/usr/bin/git` is 2.52) and goes on, because the git that matters is the one your commits run. Commits made with the
 > old one are **not scanned**; call `/usr/local/bin/git` (or put it first on `PATH`) wherever you commit. On RHEL, Rocky and
-> AlmaLinux, `install --take-over-system-git` points an old package `/usr/bin/git` at the new build, which also covers cron
+> AlmaLinux (where `/bin` is a link to `/usr/bin`, the prompt, the warnings, `status` and `doctor` show a path below `/bin` as `/usr/bin/git`; this changes the words only), `install --take-over-system-git` points an old package `/usr/bin/git` at the new build, which also covers cron
 > jobs and scripts that call it by full path (undo: `restore-system-git`).
 
 ## What `install` does
@@ -216,13 +216,13 @@ there; left in place` (or that no hash was recorded).
 
 ## `status` and `version`
 
-`git-secret-guard status` prints the installed version, hook command path, whether the global config matches, the
+`git-secret-guard status` names the git in use (the first on `PATH`) and its version on every run, then prints the installed version, hook command path, whether the global config matches, the
 recorded previous `core.hooksPath`, the **effective** `core.hooksPath` (every global-scope value with the file it
 lives in, also from the XDG config and included files; informational, config hooks run whatever it says), the backup
 path, the tools installed by us, the originals install moved aside, and each tool's path with its detected and
 pinned version. A tool counts as `ok` only when it reports the pinned version the way install judges it (the version
 as a whole word, or with a `v` prefix), so `8.30.1-rc1` is a `MISMATCH` here exactly as install would replace it. It exits 0 when everything matches and 1 when it is not installed or a line says `MISMATCH` or
-`MISSING`. `git-secret-guard version` prints `git-secret-guard <x.y.z>`. `git-secret-guard help` lists the commands. `status` looks at the installation only; the repositories are the job
+`MISSING`; a hook switched off by `hook.git-secret-guard.enabled` or `hook.pre-commit.enabled` in the global or system config (judged by git's own boolean parser, the last scope wins, exactly as in doctor; a key without a value in any scope also counts: every git command fails until it is removed) is a `MISMATCH` line `hook enabled: MISMATCH <key>=<value> in the <scope> config (<file>) ...; <advice>` where the advice is `run: git config --global --unset <key>` only for the main global file, otherwise "remove the line from <file>" (the system config needs root), or for a command-line setting to unset it where it is set; a key without a value says git commands fail until it is removed; git parses each `enabled` value on its own and skips the ones it cannot parse (`maybe`), so the last valid value decides; a skipped value is noted as ignored (and, when no valid value exists at all, as leaving git's default, on) and is not a problem, and a probe that fails for any other reason is a `MISMATCH` "could not be judged", never a yes; `hook.pre-commit.enabled` is judged only on git 2.55 or newer, where git reads it (the value of `enabled` is printed, never `command` or `event`); the git in use older than 2.54 is a `MISMATCH` (commits are not scanned; the line says to run `install --upgrade-git`), while a second old git behind it on `PATH` is not judged here (that is `doctor`'s job). `git-secret-guard version` prints `git-secret-guard <x.y.z>`. `git-secret-guard help` lists the commands. `status` looks at the installation only; the repositories are the job
 of [`doctor`](doctor.md).
 
 ## Maintainer notes

@@ -36,11 +36,6 @@ doctor_split_record() {
     if [[ $1 == *$'\n'* ]]; then REC_VALUE="${1#*$'\n'}"; fi
 }
 
-doctor_is_false() {
-    case "${1,,}" in false | no | off | 0) return 0 ;; esac
-    return 1
-}
-
 # shellcheck disable=SC2329
 doctor_cleanup() {
     # ^ invariant rm -rf only on the absolute mktemp directory this run made
@@ -86,7 +81,7 @@ doctor_require_git() {
     lifecycle_require_git || return 1
     if ! install_git_is_new_enough "$GSG_GIT"; then
         ver="$(install_git_version "$GSG_GIT")" || ver="of unknown version"
-        printf '%s: the git on PATH (%s) is git %s; doctor needs git >= 2.54 to see config-based hooks\n' "$GSG_NAME" "$GSG_GIT" "$ver" >&2
+        printf '%s: the git on PATH (%s) is git %s; doctor needs git >= 2.54 to see config-based hooks\n' "$GSG_NAME" "$(gitup_display_path "$GSG_GIT")" "$ver" >&2
         return 1
     fi
 }
@@ -216,14 +211,33 @@ doctor_check_hook_config() {
                 cmd_src+="${cmd_src:+; }$scope ${origin#file:}"
                 if [ "$value" = "$want" ]; then cmd_ok=$((cmd_ok + 1)); fi
                 ;;
-            hook.git-secret-guard.enabled)
-                if doctor_is_false "$value"; then
-                    doctor_machine_line PROBLEM "hook: hook.git-secret-guard.enabled=$value in the $scope config (${origin#file:}) switches the hook off everywhere; remove it"
-                    bad=1
-                fi
-                ;;
         esac
     done
+    if hp_hook_enabled_scan; then
+        for i in "${!HP_EN_KIND[@]}"; do
+            origin="${HP_EN_ORIGIN[$i]#file:}"
+            origin="${origin//[^[:print:]]/?}"
+            value="${HP_EN_VALUE[$i]//[^[:print:]]/?}"
+            trunc_text "$value" 40
+            value="$REPLY"
+            case "${HP_EN_KIND[$i]}" in
+                valueless)
+                    doctor_machine_line PROBLEM "hook: ${HP_EN_KEY[$i]} has no value in the ${HP_EN_SCOPE[$i]} config ($origin); git commands fail until it is removed"
+                    bad=1
+                    ;;
+                ignored) doctor_machine_line WARNING "hook: ${HP_EN_KEY[$i]}=$value in the ${HP_EN_SCOPE[$i]} config ($origin) is not a boolean, git ignores it" ;;
+                default) doctor_machine_line WARNING "hook: ${HP_EN_KEY[$i]}=$value in the ${HP_EN_SCOPE[$i]} config ($origin) is not a boolean and no other value is set, so git's default applies and the hook stays on" ;;
+                unjudged)
+                    doctor_machine_line PROBLEM "hook: ${HP_EN_KEY[$i]} could not be judged (the boolean probe failed: $value); the hook may be switched off"
+                    bad=1
+                    ;;
+                *)
+                    doctor_machine_line PROBLEM "hook: ${HP_EN_KEY[$i]}=$value in the ${HP_EN_SCOPE[$i]} config ($origin) switches the hook off everywhere; remove it"
+                    bad=1
+                    ;;
+            esac
+        done
+    fi
     if [ "$ev_n" -eq 0 ]; then
         doctor_machine_line PROBLEM "hook: hook.git-secret-guard.event is [unset], want exactly [pre-commit]; run git-secret-guard install"
         bad=1
@@ -377,11 +391,11 @@ doctor_check_git() {
         cand="${GSG_GIT_CANDIDATES[$i]}"
         ver="$(install_git_version "$cand")" || ver=""
         if [ -n "$ver" ] && install_git_is_new_enough "$cand"; then
-            doctor_machine_line ok "git: $cand $ver"
+            doctor_machine_line ok "git: $(gitup_display_path "$cand") $ver"
         elif install_git_is_bundled "$cand"; then
-            doctor_machine_line WARNING "git: $cand is git ${ver:-of unknown version}; $(install_old_git_effect "$cand")"
+            doctor_machine_line WARNING "git: $(gitup_display_path "$cand") is git ${ver:-of unknown version}; $(install_old_git_effect "$cand")"
         else
-            doctor_machine_line WARNING "git: $cand is git ${ver:-of unknown version}; it ignores config-based hooks without any message, so commits made with it are NOT scanned"
+            doctor_machine_line WARNING "git: $(gitup_display_path "$cand") is git ${ver:-of unknown version}; it ignores config-based hooks without any message, so commits made with it are NOT scanned"
         fi
     done
 }

@@ -86,6 +86,65 @@ test_a_duplicated_or_disabled_hook_config_is_a_problem() {
     assert_contains "$OUT" "hook.git-secret-guard.enabled=false in the global config ($SANDBOX/gitconfig) switches the hook off everywhere; remove it" "names the file"
 }
 
+test_the_machine_section_judges_enabled_by_gits_own_parser_and_names_a_valueless_key() {
+    local v
+    dr_begin || return 1
+    for v in 00 0k 0x0 -0; do
+        gitx config --global hook.git-secret-guard.enabled "$v" || return 1
+        doctor
+        assert_rc 1 "[$v] is false for git"
+        assert_contains "$OUT" "hook.git-secret-guard.enabled=$v in the global config" "[$v] named"
+    done
+    gitx config --global hook.git-secret-guard.enabled true || return 1
+    gitx config --global hook.pre-commit.enabled 0k || return 1
+    doctor
+    assert_contains "$OUT" "hook.pre-commit.enabled=0k in the global config" "the event key too"
+    gitx config --global --unset hook.pre-commit.enabled || return 1
+    printf '[hook "git-secret-guard"]\n\tenabled\n' >>"$SANDBOX/gitconfig" || return 1
+    doctor
+    assert_rc 1 "a key without a value"
+    assert_contains "$OUT" "PROBLEM  hook: hook.git-secret-guard.enabled has no value in the global config ($SANDBOX/gitconfig); git commands fail until" "a PROBLEM"
+}
+
+# shellcheck disable=SC2016
+test_the_machine_section_judges_the_event_key_only_from_git_2_55_and_warns_about_a_non_boolean_value() {
+    dr_begin || return 1
+    gitx config --global hook.pre-commit.enabled false || return 1
+    printf '#!/bin/sh\nif [ "$1" = --version ]; then echo "git version 2.54.0"; exit 0; fi\nexec %s "$@"\n' "$GIT" >"$SANDBOX/pathbin/git" || return 1
+    chmod 755 "$SANDBOX/pathbin/git"
+    doctor
+    assert_not_contains "$OUT" "hook.pre-commit.enabled=false" "git 2.54 does not read it"
+    gitx config --global --unset hook.pre-commit.enabled || return 1
+    rm -f -- "$SANDBOX/pathbin/git"
+    gitx config --global hook.git-secret-guard.enabled maybe || return 1
+    doctor
+    assert_contains "$OUT" "WARNING  hook: hook.git-secret-guard.enabled=maybe in the global config" "a value git does not read as off is said"
+    assert_contains "$OUT" "the hook stays on" "and that the hook stays on"
+}
+
+test_the_machine_section_lets_the_last_valid_value_decide() {
+    dr_begin || return 1
+    gitx config -f "$SANDBOX/system.cfg" hook.git-secret-guard.enabled false || return 1
+    set_env GIT_CONFIG_NOSYSTEM=0 "GIT_CONFIG_SYSTEM=$SANDBOX/system.cfg"
+    gitx config --global hook.git-secret-guard.enabled maybe || return 1
+    doctor
+    assert_rc 1 "system false, global maybe: the hook does not run"
+    assert_contains "$OUT" "PROBLEM  hook: hook.git-secret-guard.enabled=false in the system config" "a PROBLEM naming the deciding value"
+    assert_contains "$OUT" "git ignores it" "the later maybe is called ignored"
+    assert_not_contains "$OUT" "stays on" "and the hook is not said to stay on beside a PROBLEM"
+}
+
+# shellcheck disable=SC2016
+test_the_machine_section_makes_a_failing_bool_probe_a_problem_not_a_yes() {
+    dr_begin || return 1
+    gitx config --global hook.git-secret-guard.enabled false || return 1
+    printf '#!/bin/sh\nfor a in "$@"; do case "$a" in gsg.probe=*) echo "fatal: simulated failure" >&2; exit 128 ;; esac; done\nexec %s "$@"\n' "$GIT" >"$SANDBOX/pathbin/git" || return 1
+    chmod 755 "$SANDBOX/pathbin/git"
+    doctor
+    assert_rc 1 "a probe that fails for another reason"
+    assert_contains "$OUT" "PROBLEM  hook: hook.git-secret-guard.enabled could not be judged" "a PROBLEM"
+}
+
 test_the_machine_section_never_prints_a_hook_config_value() {
     local marker
     dr_begin || return 1

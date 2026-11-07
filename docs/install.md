@@ -286,7 +286,7 @@ value gives a reliable answer.
   has no `config` and no hooks, so a template `config` (which `init --template=` once had to be told not to copy) cannot leak in; a template is
   repository-level and `doctor`'s job (`test_status_ignores_a_template_config_that_only_a_new_repository_would_copy`). Nothing the user configured
   runs while `status` asks (`test_status_runs_no_hook_of_the_users_while_it_asks_git`, `test_the_machine_section_runs_no_hook_of_the_users`), and
-  `git hook list` runs under the settings' `timeout` binary, 30 seconds (`test_status_bounds_the_hook_listing_with_the_settings_timeout`); without usable
+  `git hook list` runs under the settings' `timeout --foreground` binary, 30 seconds (git stays in status's process group, so Ctrl-C ends it too) (`test_status_bounds_the_hook_listing_with_the_settings_timeout`); without usable
   settings it is unbounded, but it runs no user hook either. Every path is absolute
   and nothing changes directory (`test_status_accepts_a_git_found_through_a_relative_path_entry`); on Windows the repository path is given to
   native git as `C:/...` (`cygpath -m`). The sites that call `status_problem`: `global config` (`status_config`), `hook command`, `settings` and the

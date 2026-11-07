@@ -238,14 +238,16 @@ install_check_config_writable() {
 
 # ^ external hook list line = name, "disabled<TAB>name" (enabled=false) or "event-disabled<TAB>name" (hook.pre-commit.enabled=false); git 2.56
 # ^ invariant hooklist_read ERRFILE [GIT_ARGS...] sets HL_STATUS = effective, disabled, event-disabled or absent; HL_RC = git's exit status; REPLY = its message
-# ^ invariant HL_BOUND = the timeout command prefix for the git call (empty = unbounded); status sets it from the settings, doctor's git is its own bounded shim
+# ^ invariant HL_BOUND = timeout prefix for the git call (empty = unbounded); set by hooklist_bind_timeout for status and doctor machine checks
 HL_BOUND=()
 
 # ^ invariant the bound is 30 seconds under the settings' timeout binary; without usable settings the call is unbounded, and it runs no user hook
+# ^ why --foreground, not a plain timeout; git stays in the caller group and Ctrl-C reaches it, as in the hook adapters (hook list starts no child)
 hooklist_bind_timeout() {
     HL_BOUND=()
-    if load_settings "$GSG_SHARE/settings" 2>/dev/null && ! tool_unusable timeout "${TIMEOUT_BIN:-}" >/dev/null; then HL_BOUND=("$TIMEOUT_BIN" -k 5 30); fi
+    if load_settings "$GSG_SHARE/settings" 2>/dev/null && ! tool_unusable timeout "${TIMEOUT_BIN:-}" >/dev/null; then HL_BOUND=("$TIMEOUT_BIN" --foreground -k 5 30); fi
 }
+
 # ^ invariant returns 0 = listed (an empty list too, also a command without its event), 2 = an event without its command (git exits 128), 1 = git failed
 hooklist_read() {
     local errfile="$1" line

@@ -133,7 +133,7 @@ test_status_flags_an_unusable_timeout_in_the_settings() {
 
 # ^ coupled lc_begin puts $SANDBOX/pathbin first on the CLI PATH => a git written there is the one status measures
 # ^ invariant st_git_stub [VERSION [WORD [MESSAGE [stall]]]] answers --version with VERSION (default the real answer)
-# ^ invariant a call with the argument WORD prints MESSAGE and exits 3, or sleeps after touching git.stalled; every other call runs the real git
+# ^ invariant a call with the argument WORD prints MESSAGE and exits 3, or sleeps after writing its pid to git.stalled; every other call runs the real git
 st_git_stub() {
     local ver="${1:-}" word="${2:-}" msg="${3:-}" stall="${4:-}"
     rm -f -- "$SANDBOX/git.version" "$SANDBOX/git.fail.word" "$SANDBOX/git.fail.msg" "$SANDBOX/git.stall" "$SANDBOX/git.stalled"
@@ -148,7 +148,7 @@ if [ -f "$d/git.fail.word" ]; then
     w="$(cat "$d/git.fail.word")"
     for a in "$@"; do
         if [ "$a" = "$w" ]; then
-            if [ -f "$d/git.stall" ]; then : >"$d/git.stalled"; exec sleep 30; fi
+            if [ -f "$d/git.stall" ]; then echo $$ >"$d/git.stalled"; exec sleep 30; fi
             cat "$d/git.fail.msg" >&2
             exit 3
         fi
@@ -460,7 +460,7 @@ test_status_leaves_no_temp_directory_after_a_normal_run() {
 # ^ security only the group this function started is signalled; setsid makes the sh its own group leader and kill -SIG -- -PID stays inside it
 # ^ invariant st_signal_status SIGNAL stalls git hook list, signals the group, waits; sets ST_RC = the exit status of status and OUT = its output
 st_signal_status() {
-    local sig="$1" pid n
+    local sig="$1" pid n gpid
     rm -f -- "$SANDBOX/int.rc" "$SANDBOX/int.pid"
     st_git_stub "" hook "" stall || return 1
     # shellcheck disable=SC2016
@@ -493,6 +493,16 @@ st_signal_status() {
         if [ -z "$(st_tmp_listing)" ]; then break; fi
         sleep 0.1
     done
+    # ^ invariant git must not outlive the signal => timeout without --foreground would move it into its own group, out of reach of Ctrl-C
+    gpid="$(<"$SANDBOX/git.stalled")"
+    for ((n = 0; n < 50; n++)); do
+        if ! kill -0 "$gpid" 2>/dev/null; then break; fi
+        sleep 0.1
+    done
+    if kill -0 "$gpid" 2>/dev/null; then
+        kill -KILL "$gpid" 2>/dev/null
+        fail "git (pid $gpid) was still running after SIG$sig ended status"
+    fi
 }
 
 test_an_interrupted_status_leaves_no_temp_directory() {

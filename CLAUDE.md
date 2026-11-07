@@ -119,4 +119,4 @@ Bash tooling (no Python/Node): a git config hook (`hook.git-secret-guard.*`) run
 - A token in a remote URL path can appear in `EXEMPT_GIT_ERR` on the user's own stderr: accepted, it is the user's config shown to the user.
 - `/proc/self/mountinfo` field 5 is the mount point, fstype follows the lone `-`; `awk -F: '$1 == "fpr" {print $10}'` is right for `gpg --with-colons`.
 - `lib/extract.awk` writes nothing to stdout, so `2>&1 |` into the sanitizer swallows no extracted lines.
-- Doctor's git shim omits `--foreground` on purpose; the hook adapters keep it on purpose.
+- Doctor's git shim omits `--foreground` on purpose; the hook adapters keep it on purpose. The one `git hook list` bound of `status` and doctor's machine section (`hooklist_bind_timeout`) also keeps it: that call starts no child, so the shim's reason (a timeout must reach the whole group) does not apply, and without it Ctrl-C would not reach git.

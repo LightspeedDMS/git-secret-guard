@@ -250,7 +250,7 @@ gitup_tk_check_owner() {
             if [ "$uid" != "$(gitup_trusted_uid)" ]; then gitup_tk_fail "the link ${hop//[^[:print:]]/?} is owned by user $uid, not by the trusted user" || return 1; fi
             next="$(readlink -- "$hop")" || gitup_tk_fail "cannot read the link ${hop//[^[:print:]]/?}" || return 1
             if [[ $next != /* ]]; then next="${hop%/*}/$next"; fi
-            # ^ why the directory of the hop is resolved and its last name is not; resolving the hop itself would follow it and hide where it points
+            # ^ why the hop directory is resolved, not the hop; resolving the hop itself would follow it and hide where it points
             real="$(realpath -m -- "${next%/*}")/${next##*/}" || gitup_tk_fail "cannot resolve the link ${hop//[^[:print:]]/?}" || return 1
             if [[ $real != "$prefix_real"/* ]]; then gitup_tk_fail "$shown is a link out of $GITUP_PREFIX (a hop points at ${real//[^[:print:]]/?})" || return 1; fi
             hop="$next"

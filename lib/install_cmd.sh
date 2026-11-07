@@ -26,8 +26,8 @@ install_cli_cmd_text() {
         'set "GSG_RC=%errorlevel%"' 'if not "%GSG_RC%"=="0" exit /b %GSG_RC%' 'set "GSG_HANDOFF="' 'set "GSG_GIT_UPGRADED=1"' \
         "\"${bash_win//%/%%}\" \"${share_mixed//%/%%}/bin/git-secret-guard\" %*" 'exit /b %errorlevel%' ':half' \
         "if not exist \"${root_win//%/%%}\bin\bash.exe\" goto :gone" \
-        ">&2 echo git-secret-guard: Git for Windows at \"${root_win//%/%%}\" looks half installed ^(usr\bin\bash.exe is missing; an installer may have been stopped^); run the installer kept in %LocalAppData%\git-secret-guard\git-upgrade ^(Git-version-64-bit.exe^), or download one from https://git-scm.com/download/win" 'exit /b 127' ':gone' \
-        ">&2 echo git-secret-guard: Git for Windows at \"${root_win//%/%%}\" was not found ^(it was removed or moved^); install it from https://git-scm.com/download/win" 'exit /b 127'
+        ">&2 echo git-secret-guard: Git for Windows at \"${root_win//%/%%}\" looks half installed ^(usr\bin\bash.exe is missing; an installer may have been stopped^); run the installer kept in \"%LocalAppData%\git-secret-guard\git-upgrade\" ^(Git-version-64-bit.exe^), or download one from https://git-scm.com/download/win" 'exit /b 127' ':gone' \
+        ">&2 echo git-secret-guard: Git for Windows at \"${root_win//%/%%}\" was not found ^(no bin\\bash.exe: it was removed or moved, or an installer stopped before it finished^); install it from https://git-scm.com/download/win" 'exit /b 127'
 }
 
 # ^ invariant true only for a file install_cli_cmd_text wrote; the second line is the marker, whatever paths it names

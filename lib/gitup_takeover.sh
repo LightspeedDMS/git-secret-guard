@@ -256,6 +256,8 @@ gitup_tk_check_owner() {
             hop="$next"
         done
         path="$(realpath -- "$path")" || gitup_tk_fail "cannot resolve the link $shown" || return 1
+        # ^ why the final path is checked again, not only each hop; a last component of .. passes the string test above yet ends at the prefix or above
+        if [[ $path != "$prefix_real"/* ]]; then gitup_tk_fail "$shown is a link out of $GITUP_PREFIX (it ends at ${path//[^[:print:]]/?})" || return 1; fi
     fi
     stat_out="$(stat -c '%u %a' -- "$path")" || gitup_tk_fail "cannot read the owner of $shown" || return 1
     read -r uid mode <<<"$stat_out"

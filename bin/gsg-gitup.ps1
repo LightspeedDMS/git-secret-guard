@@ -1,6 +1,6 @@
 # ^ external powershell -NoProfile -ExecutionPolicy Bypass -File gsg-gitup.ps1 HANDOFF-FILE does the Git for Windows upgrade install --upgrade-git planned
 # ^ hazard it runs outside any Git for Windows bash, as the upgrade replaces it; code of the same user can edit this file and is not defended against
-# ^ invariant no environment variable is read or steers its checks; lock and signer sit in the tools.lock beside bin, and PSModulePath is reset
+# ^ invariant no environment variable is read or steers its checks, winget found through PATH apart; lock and signer sit in the tools.lock beside bin
 
 # ^ invariant exit 0 done; 10 installer refused (digest, signature, link, missing) and nothing ran; 11 elevation declined; 12 installer or winget failed
 

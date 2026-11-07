@@ -103,6 +103,32 @@ test_the_takeover_judges_the_targets_of_libexec_symlinks_like_any_other_file() {
     done
 }
 
+# ^ invariant a chain of links is judged hop by hop; a hop outside the prefix refuses it even when the last target is inside
+test_the_takeover_refuses_a_link_chain_that_leaves_the_prefix_on_the_way() {
+    local d
+    gu_tk_start || return 1
+    d="$GU_ROOT/usr/local/libexec/git-core"
+    mkdir -p -- "$d" "$SANDBOX/outside" || return 1
+    ln -s "$GU_ROOT/usr/local/bin/git" "$SANDBOX/outside/hop" && ln -s "$SANDBOX/outside/hop" "$d/git-merge" || return 1
+    gsg install --take-over-system-git </dev/null
+    assert_rc 1 "the last target is inside the prefix and the middle hop is not"
+    assert_contains "$ERR" "the system git takeover was refused" "refused"
+    gu_untouched "chain through a hop outside the prefix"
+}
+
+# ^ security a link name with a control character is shown with a question mark in the refusal
+test_a_refusal_for_a_libexec_link_never_prints_its_control_characters() {
+    local d name=$'evil\001name'
+    gu_tk_start || return 1
+    d="$GU_ROOT/usr/local/libexec/git-core"
+    mkdir -p -- "$d" || return 1
+    ln -s /bin/sh "$d/$name" || return 1
+    gsg install --take-over-system-git </dev/null
+    assert_rc 1 "a link out of the prefix"
+    assert_not_contains "$ERR" $'\001' "no control character reaches the terminal"
+    assert_contains "$ERR" "evil?name" "it is shown with a question mark"
+}
+
 test_the_takeover_states_its_cost_before_asking() {
     gu_tk_start || return 1
     gsg install </dev/null

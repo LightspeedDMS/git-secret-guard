@@ -36,8 +36,9 @@ doctor_split_record() {
     if [[ $1 == *$'\n'* ]]; then REC_VALUE="${1#*$'\n'}"; fi
 }
 
+# ^ external real git 2.56 treats an empty value as false too (git hook list says disabled); a valueless key has no value and is the caller's to exclude
 doctor_is_false() {
-    case "${1,,}" in false | no | off | 0) return 0 ;; esac
+    case "${1,,}" in false | no | off | 0 | "") return 0 ;; esac
     return 1
 }
 
@@ -217,7 +218,7 @@ doctor_check_hook_config() {
                 if [ "$value" = "$want" ]; then cmd_ok=$((cmd_ok + 1)); fi
                 ;;
             hook.git-secret-guard.enabled)
-                if doctor_is_false "$value"; then
+                if [[ ${GSG_HP_OUT[i + 2]} == *$'\n'* ]] && doctor_is_false "$value"; then
                     doctor_machine_line PROBLEM "hook: hook.git-secret-guard.enabled=$value in the $scope config (${origin#file:}) switches the hook off everywhere; remove it"
                     bad=1
                 fi

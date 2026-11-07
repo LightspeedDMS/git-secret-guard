@@ -30,6 +30,38 @@ status_hook_command() {
     fi
 }
 
+# ^ external the config records come in precedence order => the last record of a key is the value git uses
+# ^ invariant a switched-off hook is a MISMATCH naming key, scope, file and value, never command or event; doctor_is_false defines off
+status_hook_enabled() {
+    local rc i scope origin key value rec seen=0
+    local -A off_scope=() off_origin=() off_value=()
+    hp_records -C / config --show-scope --show-origin -z --get-regexp '^hook\.(git-secret-guard|pre-commit)\.enabled$'
+    rc=$?
+    if [ "$rc" -gt 1 ]; then
+        status_line "hook enabled" "cannot read the git config (git config exit $rc) MISMATCH"
+        status_problem
+        return 0
+    fi
+    for ((i = 0; i + 2 < ${#GSG_HP_OUT[@]}; i += 3)); do
+        scope="${GSG_HP_OUT[i]}" origin="${GSG_HP_OUT[i + 1]}" rec="${GSG_HP_OUT[i + 2]}"
+        doctor_split_record "$rec"
+        key="$REC_KEY" value="$REC_VALUE"
+        off_scope[$key]="" off_origin[$key]="" off_value[$key]=""
+        if [[ $rec == *$'\n'* ]] && doctor_is_false "$value"; then
+            off_scope[$key]="$scope" off_origin[$key]="${origin#file:}" off_value[$key]="$value"
+        fi
+    done
+    for key in hook.git-secret-guard.enabled hook.pre-commit.enabled; do
+        if [ -z "${off_scope[$key]:-}" ]; then continue; fi
+        seen=1
+        scope="${off_scope[$key]}" value="${off_value[$key]//[^[:print:]]/?}"
+        trunc_text "$value" 40
+        status_line "hook enabled" "MISMATCH $key=$REPLY in the $scope config (${off_origin[$key]//[^[:print:]]/?}) switches the hook off, commits are not scanned; run: git config --$scope --unset $key"
+        status_problem
+    done
+    if [ "$seen" -eq 0 ]; then status_line "hook enabled" "yes (neither hook.git-secret-guard.enabled nor hook.pre-commit.enabled switches it off)"; fi
+}
+
 # ^ invariant informational only => config hooks run whatever core.hooksPath says, this line never counts as a problem
 status_hooks_path() {
     local i list=""
@@ -137,6 +169,7 @@ status_run() {
     status_line "share dir" "$GSG_SHARE"
     status_hook_command
     status_config
+    status_hook_enabled
     if [ "$ST_PREV_SET" = yes ]; then
         status_line "previous core.hooksPath" "$ST_PREV"
     else

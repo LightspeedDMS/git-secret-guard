@@ -173,4 +173,70 @@ test_status_counts_a_missing_jq_setsid_or_timeout_as_a_problem() {
     assert_contains "$OUT" "jq: /nonexistent/jq (MISSING or not executable)" "flagged"
 }
 
+# ^ external real git 2.56 reads false, no, off, 0 (any case) and an empty value as off; true, yes, 1 and the rest leave it on; the last scope wins
+# ^ invariant the system scope uses GIT_CONFIG_SYSTEM with NOSYSTEM=0 (the harness sets 1); status names key, scope and value
+status_hook_switch() {
+    local scope="$1" key="$2" value="$3"
+    if [ "$scope" = global ]; then
+        gitx config --global "$key" "$value"
+    else
+        set_env GIT_CONFIG_NOSYSTEM=0 "GIT_CONFIG_SYSTEM=$SANDBOX/system.cfg"
+        gitx config -f "$SANDBOX/system.cfg" "$key" "$value"
+    fi
+}
+
+test_status_names_a_hook_switched_off_in_each_scope_and_key() {
+    local scope key value
+    for scope in global system; do
+        for key in hook.git-secret-guard.enabled hook.pre-commit.enabled; do
+            fresh_install
+            status_hook_switch "$scope" "$key" false || return 1
+            gsg status
+            assert_rc 1 "[$scope $key] switched off"
+            assert_contains "$OUT" "MISMATCH $key=false in the $scope config" "[$scope $key] key, value and scope are named"
+            assert_contains "$OUT" "git config --$scope --unset $key" "[$scope $key] and the way back"
+        done
+    done
+}
+
+test_status_treats_the_values_git_reads_as_false_as_off() {
+    local value
+    for value in no off 0 FALSE Off ""; do
+        fresh_install
+        status_hook_switch global hook.git-secret-guard.enabled "$value" || return 1
+        gsg status
+        assert_rc 1 "[$value] is false for git"
+        assert_contains "$OUT" "hook.git-secret-guard.enabled=$value in the global config" "[$value] is shown"
+    done
+}
+
+test_status_stays_clean_when_the_enabled_keys_are_true_or_unset() {
+    local scope value
+    fresh_install
+    gsg status
+    assert_rc 0 "unset"
+    assert_not_contains "$OUT" "switched off" "nothing said"
+    for value in true yes 1; do
+        fresh_install
+        status_hook_switch global hook.git-secret-guard.enabled "$value" || return 1
+        status_hook_switch global hook.pre-commit.enabled "$value" || return 1
+        gsg status
+        assert_rc 0 "[$value] keeps the hook on"
+    done
+}
+
+test_status_follows_the_last_value_across_scopes() {
+    fresh_install
+    status_hook_switch system hook.git-secret-guard.enabled false || return 1
+    status_hook_switch global hook.git-secret-guard.enabled true || return 1
+    gsg status
+    assert_rc 0 "a global true after a system false is on"
+    fresh_install
+    status_hook_switch system hook.git-secret-guard.enabled true || return 1
+    status_hook_switch global hook.git-secret-guard.enabled false || return 1
+    gsg status
+    assert_rc 1 "a global false after a system true is off"
+    assert_contains "$OUT" "in the global config" "and the scope that wins is named"
+}
+
 run_file_tests

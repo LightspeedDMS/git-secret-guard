@@ -649,4 +649,252 @@ test_status_ignores_bad_values_of_the_variables_git_names_as_local() {
     done
 }
 
+# ^ invariant the lists come out of lib/common.sh, the file the hook reads them from => this test and status hold no copy to drift
+st_share_list() {
+    # shellcheck disable=SC2016
+    bash -c 'source "$1/lib/common.sh" && if [ "$2" = libs ]; then printf "%s\n" "${GSG_HOOK_LIBS[@]}"; else printf "%s\n" "${GSG_HOOK_FILES[@]}"; fi' _ "$GSG_PROJECT" "$1"
+}
+
+st_commit_probe() {
+    new_repo "probe$RANDOM" && stage_file src/ok.txt hello "nothing secret" || return 1
+    commit_cap probe
+}
+
+test_the_hook_loads_exactly_the_libraries_in_the_shared_list() {
+    local lib f name listed
+    local -a libs=() files=() moved=()
+    fresh_install
+    mapfile -t libs < <(st_share_list libs)
+    mapfile -t files < <(st_share_list files)
+    if [ "${#libs[@]}" -lt 4 ] || [ -z "${libs[0]}" ]; then
+        fail "the shared list holds too few libraries (${#libs[@]})"
+        return 1
+    fi
+    assert_not_contains "$(<"$GSG_PROJECT/hooks/secret-scan")" "extract.sh exempt.sh" "the hook holds no list of its own"
+    assert_contains "$(<"$GSG_PROJECT/hooks/secret-scan")" 'GSG_HOOK_LIBS' "the hook loops over the shared list"
+    for lib in common.sh "${libs[@]}"; do
+        mv -- "$LC_DATA/lib/$lib" "$LC_DATA/lib/$lib.aside" || return 1
+        st_commit_probe
+        mv -- "$LC_DATA/lib/$lib.aside" "$LC_DATA/lib/$lib" || return 1
+        assert_rc 1 "$lib missing"
+        assert_contains "$ERR" "cannot load $LC_DATA/lib/$lib; nothing was scanned" "the hook names $lib"
+    done
+    while IFS= read -r f; do
+        name="${f#"$LC_DATA"/lib/}"
+        listed=0
+        for lib in common.sh "${libs[@]}" "${files[@]}"; do if [ "$lib" = "$name" ]; then listed=1; fi; done
+        if [ "$listed" -eq 1 ]; then continue; fi
+        mv -- "$f" "$f.aside" || return 1
+        moved+=("$f")
+    done < <(find "$LC_DATA/lib" -type f | sort)
+    [ "${#moved[@]}" -ge 10 ] || fail "only ${#moved[@]} unlisted files were moved aside"
+    st_commit_probe
+    for f in "${moved[@]}"; do mv -- "$f.aside" "$f" || return 1; done
+    assert_not_contains "$ERR" "cannot load" "no library outside the lists is loaded"
+    assert_not_contains "$ERR" "wrapper failed" "no file outside the lists is run by a scanner wrapper"
+    assert_not_contains "$ERR" "extracting" "no file outside the lists is read by the extraction"
+    assert_not_contains "$ERR" "unreadable" "no file outside the lists is read by an adapter"
+    assert_contains "$ERR" "scanner did not complete" "the hook reached the scanners without them"
+}
+
+test_the_hook_blocks_on_its_own_when_the_library_list_is_empty_or_unset() {
+    local variant file
+    for variant in '()' '("")' unset; do
+        fresh_install
+        file="$LC_DATA/lib/common.sh"
+        if [ "$variant" = unset ]; then
+            sed 's/^GSG_HOOK_LIBS=.*/unset GSG_HOOK_LIBS/' "$file" >"$SANDBOX/common.edit" || return 1
+        else
+            sed "s/^GSG_HOOK_LIBS=.*/GSG_HOOK_LIBS=$variant/" "$file" >"$SANDBOX/common.edit" || return 1
+        fi
+        cat -- "$SANDBOX/common.edit" >"$file" || return 1
+        st_commit_probe
+        assert_rc 1 "list $variant"
+        assert_contains "$ERR" "cannot load the hook library list (GSG_HOOK_LIBS in $LC_DATA/lib/common.sh); nothing was scanned." "list $variant: the hook's own block"
+        assert_not_contains "$ERR" "command not found" "list $variant: not by accident later on"
+    done
+}
+
+test_status_exits_1_when_the_hook_library_list_is_empty_or_unset() {
+    local variant file
+    for variant in '()' '("")' unset; do
+        fresh_install
+        file="$LC_DATA/lib/common.sh"
+        if [ "$variant" = unset ]; then
+            sed 's/^GSG_HOOK_LIBS=.*/unset GSG_HOOK_LIBS/' "$file" >"$SANDBOX/common.edit" || return 1
+        else
+            sed "s/^GSG_HOOK_LIBS=.*/GSG_HOOK_LIBS=$variant/" "$file" >"$SANDBOX/common.edit" || return 1
+        fi
+        cat -- "$SANDBOX/common.edit" >"$file" || return 1
+        run_cap env -i "${LC_ENV[@]}" "${EXTRA_ENV[@]}" "${TEST_BASH:-bash}" "$LC_DATA/bin/git-secret-guard" status </dev/null
+        assert_rc 1 "the installed CLI, list $variant"
+        assert_contains "$OUT" "hook libraries: MISMATCH (GSG_HOOK_LIBS in $file is unset or empty; the hook blocks every commit: nothing is scanned)" "list $variant: named"
+        assert_not_contains "$OUT" "files present and readable" "list $variant: no healthy line"
+        gsg status
+        assert_rc 0 "the checkout CLI reads its own common.sh, not the share's, list $variant"
+    done
+}
+
+test_the_hook_blocks_when_a_file_it_reads_is_missing() {
+    local rel
+    local -a files=()
+    fresh_install
+    mapfile -t files < <(st_share_list files)
+    if [ "${#files[@]}" -lt 5 ] || [ -z "${files[0]}" ]; then
+        fail "the shared file list holds too few entries (${#files[@]})"
+        return 1
+    fi
+    for rel in "${files[@]}"; do
+        mv -- "$LC_DATA/lib/$rel" "$LC_DATA/lib/$rel.aside" || return 1
+        st_commit_probe
+        mv -- "$LC_DATA/lib/$rel.aside" "$LC_DATA/lib/$rel" || return 1
+        assert_rc 1 "$rel missing"
+        assert_contains "$ERR" "${rel##*/}" "the hook names $rel"
+        assert_contains "$ERR" "To bypass this check for one commit" "and blocks the commit"
+    done
+}
+
+test_status_exits_1_and_names_each_file_the_hook_reads_when_it_is_missing() {
+    local rel
+    local -a libs=() files=() rels=()
+    fresh_install
+    mapfile -t libs < <(st_share_list libs)
+    mapfile -t files < <(st_share_list files)
+    rels=(common.sh "${libs[@]}" "${files[@]}")
+    gsg status
+    assert_rc 0 "an intact share"
+    assert_contains "$OUT" "hook libraries: ${#rels[@]} files present and readable" "the healthy line counts the files"
+    for rel in "${rels[@]}"; do
+        mv -- "$LC_DATA/lib/$rel" "$LC_DATA/lib/$rel.aside" || return 1
+        gsg status
+        mv -- "$LC_DATA/lib/$rel.aside" "$LC_DATA/lib/$rel" || return 1
+        assert_rc 1 "$rel missing"
+        assert_contains "$OUT" "hook libraries: MISMATCH (cannot read $LC_DATA/lib/$rel: missing; the hook blocks every commit: nothing is scanned)" "names $rel"
+    done
+}
+
+# ^ invariant arg 1 is missing or unreadable; runs the INSTALLED CLI (the share's copy) once per file the hook reads, each damaged alone
+# ^ coupled the CLI sources common.sh and exempt.sh itself => for those two bash stops it at startup with its own error, no status line exists
+st_installed_damage_loop() {
+    local mode="$1" rel path want_reason startup_error
+    local -a libs=() files=()
+    fresh_install
+    mapfile -t libs < <(st_share_list libs)
+    mapfile -t files < <(st_share_list files)
+    if [ "$mode" = missing ]; then
+        want_reason="missing"
+        startup_error="No such file or directory"
+    else
+        want_reason="not a readable file"
+        startup_error="Permission denied"
+    fi
+    for rel in common.sh "${libs[@]}" "${files[@]}"; do
+        path="$LC_DATA/lib/$rel"
+        if [ "$mode" = missing ]; then mv -- "$path" "$path.aside"; else chmod 000 "$path"; fi || return 1
+        run_cap env -i "${LC_ENV[@]}" "${EXTRA_ENV[@]}" "${TEST_BASH:-bash}" "$LC_DATA/bin/git-secret-guard" status </dev/null
+        if [ "$mode" = missing ]; then mv -- "$path.aside" "$path"; else chmod 644 "$path"; fi || return 1
+        assert_rc 1 "$rel $mode, installed CLI"
+        assert_not_contains "$OUT" "files present and readable" "$rel $mode: no healthy line"
+        case "$rel" in
+            common.sh | exempt.sh)
+                assert_contains "$ERR" "$path: $startup_error" "$rel $mode: bash's startup error names it"
+                assert_not_contains "$OUT" "hook libraries" "$rel $mode: the CLI never got as far as the status line"
+                ;;
+            *)
+                assert_contains "$OUT" "hook libraries: MISMATCH (cannot read $path: $want_reason; the hook blocks every commit: nothing is scanned)" "$rel $mode: the status line"
+                ;;
+        esac
+    done
+}
+
+test_the_installed_cli_reports_every_missing_file_the_hook_reads() {
+    st_installed_damage_loop missing
+}
+
+test_the_installed_cli_reports_every_unreadable_file_the_hook_reads() {
+    if [ "$(id -u)" -eq 0 ]; then skip_test "root reads any file, so no file is unreadable"; fi
+    st_installed_damage_loop unreadable
+}
+
+test_status_flags_an_unreadable_file_a_directory_and_a_dangling_link_in_place_of_a_library() {
+    local lib want
+    if [ "$(id -u)" -eq 0 ]; then skip_test "root reads any file, so no file is unreadable"; fi
+    fresh_install
+    lib="$LC_DATA/lib/report.sh"
+    want="hook libraries: MISMATCH (cannot read $lib: not a readable file; the hook blocks every commit: nothing is scanned)"
+    chmod 000 "$lib" || return 1
+    gsg status
+    assert_rc 1 "a file with no read permission"
+    assert_contains "$OUT" "$want" "named as not readable"
+    st_commit_probe
+    chmod 644 "$lib" || return 1
+    assert_contains "$ERR" "cannot load $lib; nothing was scanned" "the hook blocks on it too (it cannot source the file)"
+    mv -- "$lib" "$lib.aside" && mkdir -- "$lib" || return 1
+    gsg status
+    rmdir -- "$lib" && mv -- "$lib.aside" "$lib" || return 1
+    assert_rc 1 "a directory in place of the file"
+    assert_contains "$OUT" "$want" "named as not readable"
+    mv -- "$lib" "$lib.aside" && ln -s /nonexistent/report.sh "$lib" || return 1
+    gsg status
+    rm -f -- "$lib" && mv -- "$lib.aside" "$lib" || return 1
+    assert_rc 1 "a dangling link in place of the file"
+    assert_contains "$OUT" "$want" "named as not readable"
+    gsg status
+    assert_rc 0 "the share is whole again"
+}
+
+# ^ coupled a plain install of the host, no fake uname and no timer => the same test runs on Linux, macOS and Windows; the timer half is the next test
+test_status_checks_gnubin_dir_on_every_platform() {
+    local before
+    fresh_install
+    gsg status
+    assert_rc 0 "status"
+    assert_not_contains "$OUT" "GNUBIN_DIR" "unset prints nothing"
+    before="$OUT"
+    printf 'LAUNCHCTL_BIN=/nonexistent/launchctl\n' >>"$LC_DATA/settings" || return 1
+    gsg status
+    assert_rc 0 "a key only macOS reads, with a bad value and no timer"
+    assert_eq "$OUT" "$before" "the output is the same, byte for byte"
+    printf 'GNUBIN_DIR=%s\n' "$SANDBOX" >>"$LC_DATA/settings" || return 1
+    gsg status
+    assert_rc 0 "an absolute existing directory"
+    assert_contains "$OUT" "GNUBIN_DIR: $SANDBOX" "listed"
+    printf 'GNUBIN_DIR=relative/dir\n' >>"$LC_DATA/settings" || return 1
+    gsg status
+    assert_rc 1 "a relative GNUBIN_DIR, which the hook blocks on every platform"
+    assert_contains "$OUT" "GNUBIN_DIR: MISMATCH (GNUBIN_DIR in the settings file is not an absolute directory (relative/dir); the hook blocks every commit: nothing is scanned" "flagged"
+    assert_not_contains "$OUT" "launchctl" "still no launchctl line"
+    if grep -q '^bash:' <<<"$OUT"; then fail "a bash line outside macOS"; fi
+    st_commit_probe
+    assert_rc 1 "the commit itself"
+    assert_contains "$ERR" "GNUBIN_DIR in the settings file is not an absolute directory (relative/dir); nothing was scanned" "the hook says the same"
+}
+
+test_status_ignores_launchctl_bin_on_linux_even_with_a_timer() {
+    local before
+    lc_begin && lc_fake_uname Linux x86_64 && lc_make_fixtures && lc_use_fixtures || return 1
+    set_env PATH="$SANDBOX/pathbin:$TEST_BASE_PATH:${TEST_SETSID%/*}"
+    gsg install --with-timer
+    assert_rc 0 "a Linux install with a timer"
+    gsg status
+    assert_rc 0 "status"
+    before="$OUT"
+    printf 'LAUNCHCTL_BIN=/nonexistent/launchctl\n' >>"$LC_DATA/settings" || return 1
+    gsg status
+    assert_rc 0 "a key only macOS reads, with a bad value and a recorded timer"
+    assert_eq "$OUT" "$before" "the output is the same, byte for byte"
+    assert_not_contains "$OUT" "launchctl" "no launchctl line"
+}
+
+test_status_prints_one_line_per_damaged_file_and_still_exits_1() {
+    local n
+    fresh_install
+    mv -- "$LC_DATA/lib/report.sh" "$LC_DATA/lib/report.sh.aside" && mv -- "$LC_DATA/lib/extract.awk" "$LC_DATA/lib/extract.awk.aside" || return 1
+    gsg status
+    assert_rc 1 "two damaged files"
+    n="$(grep -c '^hook libraries: MISMATCH' <<<"$OUT")"
+    assert_eq "$n" 2 "one line each"
+    assert_not_contains "$OUT" "files present and readable" "no healthy line next to a damaged one"
+}
+
 run_file_tests

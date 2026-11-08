@@ -7,6 +7,28 @@ status_problem() {
     STATUS_PROBLEMS=$((STATUS_PROBLEMS + 1))
 }
 
+# ^ invariant names come from GSG_HOOK_LIBS and GSG_HOOK_FILES (lib/common.sh), the lists the hook loads from; a readable file is enough, none is sourced here
+# ^ coupled the text repeats the hook's own block, cannot load <path> and nothing was scanned; test:test_the_hook_loads_exactly_the_libraries_in_the_shared_list
+status_hook_files() {
+    local rel path why bad=0 total=0
+    if ! hook_libs_listed; then
+        status_line "hook libraries" "MISMATCH (GSG_HOOK_LIBS in $GSG_SHARE/lib/common.sh is unset or empty; the hook blocks every commit: nothing is scanned)"
+        status_problem
+        bad=1
+    fi
+    for rel in common.sh "${GSG_HOOK_LIBS[@]}" "${GSG_HOOK_FILES[@]}"; do
+        total=$((total + 1))
+        path="$GSG_SHARE/lib/$rel"
+        if [ -f "$path" ] && [ -r "$path" ]; then continue; fi
+        why="not a readable file"
+        if [ ! -e "$path" ] && [ ! -L "$path" ]; then why=missing; fi
+        status_line "hook libraries" "MISMATCH (cannot read $path: $why; the hook blocks every commit: nothing is scanned)"
+        status_problem
+        bad=$((bad + 1))
+    done
+    if [ "$bad" -eq 0 ]; then status_line "hook libraries" "$total files present and readable"; fi
+}
+
 status_config() {
     local events commands want_cmd
     want_cmd="$(hook_command_text "$GSG_SHARE" "$(share_recorded_bash "$GSG_SHARE")")" || return 1
@@ -181,6 +203,66 @@ status_tool() {
     fi
 }
 
+# ^ invariant macOS only; doctor's two checks (tool_unusable, brew_bash_ok asks the binary for its version), stdin closed
+# ^ hazard BASH_BIN naming a non-bash program with exit 0 => git counts the hook as passed, the commit lands unscanned; doc:docs/platforms.md
+status_bash() {
+    local msg why shown="${BASH_BIN:-}"
+    if msg="$(tool_unusable bash "$shown")"; then
+        msg="${msg//[[:cntrl:]]/?}"
+        # ^ external measured with a bash 5 on PATH, an unset or relative BASH_BIN still starts the hook; the reasons say what bash 3.2 would do
+        case "$shown" in
+            "") why="the hook command is the bare hook path, so a git client with /bin/bash 3.2 first on PATH runs it under bash 3.2 and the hook blocks every commit" ;;
+            /*) why="git cannot start the hook with it and the commit fails" ;;
+            *) why="git runs whichever bash its PATH finds first, and under bash 3.2 the hook blocks every commit" ;;
+        esac
+        status_line bash "MISMATCH ($msg; $why; run: $GSG_NAME install)"
+        status_problem
+    elif ! brew_bash_ok "$shown" </dev/null; then
+        shown="${shown//[[:cntrl:]]/?}"
+        status_line bash "MISMATCH ($shown does not report bash $BREW_BASH_MIN_MAJOR.$BREW_BASH_MIN_MINOR or newer; an old bash makes the hook block every commit and a program that is not bash can let commits pass unscanned; run: $GSG_NAME install)"
+        status_problem
+    else
+        status_line bash "$shown"
+    fi
+}
+
+# ^ invariant the rule is gnubin_dir_unusable (lib/common.sh), the hook's own; an unset GNUBIN_DIR prints nothing and is no problem
+status_gnubin() {
+    local shown="${GNUBIN_DIR:-}"
+    if [ -z "$shown" ]; then return 0; fi
+    shown="${shown//[[:cntrl:]]/?}"
+    if gnubin_dir_unusable; then
+        status_line GNUBIN_DIR "MISMATCH (GNUBIN_DIR in the settings file is not an absolute directory ($shown); the hook blocks every commit: nothing is scanned; run: $GSG_NAME install)"
+        status_problem
+    else
+        status_line GNUBIN_DIR "$shown"
+    fi
+}
+
+# ^ invariant a tool without a version pin is usable (absolute, executable file) or gets a MISSING line and a problem
+status_plain_tool() {
+    if tool_unusable "$1" "$2" >/dev/null; then
+        status_line "$1" "$2 (MISSING or not executable)"
+        status_problem
+    else
+        status_line "$1" "$2"
+    fi
+}
+
+# ^ invariant judged like doctor_check_agent does (tool_unusable, never run) and only when the state says a timer is installed
+status_launchctl() {
+    if [ "$ST_TIMER" != yes ]; then return 0; fi
+    status_plain_tool launchctl "$(settings_tool_bin launchctl)"
+}
+
+# ^ invariant GNUBIN_DIR is judged on every platform, the hook blocks on it everywhere; BASH_BIN and LAUNCHCTL_BIN are macOS-only lines
+# ^ order bash, GNUBIN_DIR, launchctl, after status_tools loaded the settings
+status_settings_keys() {
+    if brew_is_macos; then status_bash; fi
+    status_gnubin
+    if brew_is_macos; then status_launchctl; fi
+}
+
 status_tools() {
     local tool plat row bin
     if ! load_settings "$GSG_SHARE/settings" 2>/dev/null; then
@@ -202,13 +284,9 @@ status_tools() {
     done
     for tool in jq "$(gsg_proc_tool_name)" timeout; do
         bin="$(settings_tool_bin "$tool")" || return 1
-        if tool_unusable "$tool" "$bin" >/dev/null; then
-            status_line "$tool" "$bin (MISSING or not executable)"
-            status_problem
-        else
-            status_line "$tool" "$bin"
-        fi
+        status_plain_tool "$tool" "$bin"
     done
+    status_settings_keys
 }
 
 # ^ invariant one line for a class whose module has the takeover capability; a takeover undone by something else is a MISMATCH and a problem
@@ -263,6 +341,7 @@ status_run() {
     status_line "installed version" "$ST_VERSION"
     status_line "share dir" "$GSG_SHARE"
     status_hook_command
+    status_hook_files
     status_config
     if [ "$git_ok" -eq 0 ]; then
         status_hook_listing

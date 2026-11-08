@@ -211,13 +211,24 @@ jobs:
           cat "$RUNNER_TEMP/macos-versions.txt" >>"$GITHUB_STEP_SUMMARY"
 
       # The real-scanner tests read the pinned binaries from this cache (tests/lib.sh), never brew's latest release.
+      # GitHub release downloads sometimes answer 504 for minutes; the script skips what it has and verifies every download against tools.lock, so a retry is safe.
       - name: Fetch the pinned scanners
         run: |
           prefix="$(brew --prefix)"
           PATH="$prefix/bin:$prefix/opt/coreutils/libexec/gnubin:$PATH"
-          "$prefix/bin/bash" tests/fetch-test-tools.sh
+          delay=20
+          for attempt in 1 2 3 4; do
+            if "$prefix/bin/bash" tests/fetch-test-tools.sh; then exit 0; fi
+            if [ "$attempt" -lt 4 ]; then
+              echo "fetch attempt $attempt of 4 failed; trying again in ${delay}s"
+              sleep "$delay"
+              delay=$((delay * 2))
+            fi
+          done
+          echo "::error::the pinned scanners could not be fetched in 4 attempts (see the curl error above; a release download answering 5xx is an upstream outage)"
+          exit 1
 
-      # A failing suite fails this step; the later steps still run (if: always()) so the log is kept and the macOS-only tests are judged.
+      # A failing suite fails this step; the later steps still run (if: !cancelled()) so the log is kept and the macOS-only tests are judged.
       - name: Run the suite
         env:
           GSG_TEST_FILE_TIMEOUT: "1800"
@@ -230,7 +241,7 @@ jobs:
           exit "$rc"
 
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: ${{ !cancelled() }}
         with:
           name: macos-log
           path: |
@@ -240,7 +251,7 @@ jobs:
 
       # A job that skips the macOS-only tests proves nothing: each name in the list must be a PASS line of the log.
       - name: The macOS-only tests passed
-        if: always()
+        if: ${{ !cancelled() }}
         run: bash .github/scripts/check-macos-tests.sh tests/macos-only.list "$RUNNER_TEMP/macos.log"
 
   # Proves on a clean Windows machine what a user does: install, a leak is blocked, a clean commit passes, no leftovers, uninstall leaves nothing.

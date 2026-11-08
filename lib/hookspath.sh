@@ -255,7 +255,7 @@ hooklist_read() {
     shift
     HL_STATUS=absent
     # ^ why a foreground command and a file, not mapfile < <(...); bash 5.3 starts its child with SIGINT ignored => git outlived Ctrl-C; #68
-    "${HL_BOUND[@]}" "$GSG_GIT" "$@" hook list pre-commit >"$outfile" 2>"$errfile"
+    "${HL_BOUND[@]}" "$GSG_GIT" "$@" hook list pre-commit 2>"$errfile" >"$outfile"
     HL_RC=$?
     first_message "$errfile"
     # ^ external hook list exit 1 + "no hooks found" on stderr = an empty list, not a failure

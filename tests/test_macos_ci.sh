@@ -49,11 +49,22 @@ test_the_checker_fails_for_a_listed_name_that_is_not_in_the_log_at_all() {
     assert_contains "$OUT$ERR" "not in the log" "the reason is named"
 }
 
+# ^ invariant a rename leaves the old name gone and a longer new name passing => the old name must read as missing, never as passed
 test_the_checker_does_not_take_a_longer_test_name_for_the_listed_one() {
     mk_list "$SANDBOX/list" a::test_one
-    printf 'PASS    a::test_one_more\nSKIPPED a::test_one (reason)\n' >"$SANDBOX/log"
+    printf 'PASS    a::test_one_more\n' >"$SANDBOX/log"
     check "$SANDBOX/list" "$SANDBOX/log"
-    assert_rc 1 "a prefix is not the name"
+    assert_rc 1 "a longer name is not the listed name"
+    assert_contains "$OUT" "MISSING a::test_one (not in the log)" "the listed name is reported missing"
+}
+
+test_the_checker_judges_a_last_list_line_that_has_no_newline() {
+    printf 'a::test_one\na::test_two' >"$SANDBOX/list"
+    printf 'PASS    a::test_one\nSKIPPED a::test_two (reason)\n' >"$SANDBOX/log"
+    check "$SANDBOX/list" "$SANDBOX/log"
+    assert_rc 1 "the unterminated last line is read"
+    assert_contains "$OUT" "a::test_two" "and named"
+    assert_contains "$OUT" "1 of 2" "counted"
 }
 
 test_the_checker_refuses_an_empty_list_a_missing_list_and_a_missing_log() {

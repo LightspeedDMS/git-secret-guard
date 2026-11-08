@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ^ invariant usage check-macos-tests.sh LIST LOG; exit 0 = all listed PASS, 1 = one skipped, failed or absent, 2 = usage, unreadable file or empty list
 # ^ invariant the expectations come from names in the list, never a count; a renamed test is "not in the log" and fails
-# ^ external runs on a Mac before any brew bash is chosen => no mapfile, no associative arrays (bash 3.2)
+# ^ external CI runs it under Homebrew bash; by hand on a Mac /bin/bash is 3.2 => no mapfile, no associative arrays
 set -u
 set -o pipefail
 

@@ -87,7 +87,9 @@ test_the_unit_path_has_no_duplicate_entries() {
     case "$(lc_first_git_dir)" in
         /usr/local/bin) want=/usr/local/bin:/usr/bin:/bin ;;
         /usr/bin) want=/usr/bin:/usr/local/bin:/bin ;;
-        *) fail "the first git is in [$(lc_first_git_dir)], this test knows /usr/local/bin and /usr/bin"; return 1 ;;
+        # ^ external a Mac finds Homebrew's git in /opt/homebrew/bin first; another directory goes first and the rest follow, as below for /opt/git/bin
+        /?*) want="$(lc_first_git_dir):/usr/local/bin:/usr/bin:/bin" ;;
+        *) fail "no absolute git directory on the test PATH"; return 1 ;;
     esac
     assert_contains "$(<"$(unit_dir)/$SERVICE")" $'\nEnvironment="PATH='"$want"$'"\n' "the git dir is not repeated"
     # shellcheck disable=SC2016

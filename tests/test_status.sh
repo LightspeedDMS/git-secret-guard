@@ -464,7 +464,7 @@ st_signal_status() {
     rm -f -- "$SANDBOX/int.rc" "$SANDBOX/int.pid"
     st_git_stub "" hook "" stall || return 1
     # shellcheck disable=SC2016
-    (setsid sh -c 'echo $$ >"$1"; shift; exec "$@"' sh "$SANDBOX/int.pid" env --default-signal=INT env -i "${LC_ENV[@]}" "${EXTRA_ENV[@]}" "$GSG_PROJECT/bin/git-secret-guard" status >"$SANDBOX/int.out" 2>&1 </dev/null
+    ("$TEST_SETSID" sh -c 'echo $$ >"$1"; shift; exec "$@"' sh "$SANDBOX/int.pid" env --default-signal=INT env -i "${LC_ENV[@]}" "${EXTRA_ENV[@]}" "$GSG_PROJECT/bin/git-secret-guard" status >"$SANDBOX/int.out" 2>&1 </dev/null
         echo $? >"$SANDBOX/int.rc") &
     for ((n = 0; n < 100; n++)); do
         if [ -e "$SANDBOX/git.stalled" ]; then break; fi

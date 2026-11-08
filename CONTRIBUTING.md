@@ -170,7 +170,9 @@ Run it yourself with `.github/scripts/check-dco.sh origin/main HEAD`.
    stripped): it fails when your branch has a `FAIL` line the base does not (a new failure, or an old one whose message
    changed), or when your branch's log has no `SUMMARY` line. A push to the default branch runs that branch alone, so any
    failure counts. On Windows it runs the whole suite (pull requests and the default branch only) and, on every run, a
-   clean-machine install, leak and uninstall check; a failure in either fails the job.
+   clean-machine install, leak and uninstall check; a failure in either fails the job. On a GitHub-hosted arm64 Mac
+   (`macos-suite`, pull requests and the default branch only) it also runs the whole suite and fails unless every test
+   in `tests/macos-only.list` (the tests that skip anywhere else) shows as PASS; add a test that can only run on a Mac to that list.
 5. Link the issue in the PR description.
 
 ## License

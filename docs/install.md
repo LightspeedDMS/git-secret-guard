@@ -340,9 +340,10 @@ repository, so only an absolute value gives a reliable answer.
   two calls `doctor_check_machine` makes (`test_status_on_macos_exits_1_when_the_recorded_bash_is_not_an_executable_bash_4_4` breaks the file at the
   recorded path, so `global config` still matches and only the new line fails the run); `status_launchctl` reads `ST_TIMER`
   (`test_status_on_macos_checks_launchctl_only_when_a_timer_is_recorded`). Linux and Windows print no `bash:` or `launchctl:` line and `GNUBIN_DIR:`
-  only when the key is set (`test_status_checks_gnubin_dir_on_linux_but_not_the_macos_only_keys`: a bad `LAUNCHCTL_BIN` leaves the output byte-identical,
-  a relative `GNUBIN_DIR` is a `MISMATCH` with exit 1 and a real commit is blocked by the hook; `BASH_BIN` is not covered by that test, see the known
-  limit below).
+  only when the key is set (`test_status_checks_gnubin_dir_on_every_platform`, a plain install that also runs on Windows: a relative `GNUBIN_DIR` is a
+  `MISMATCH` with exit 1 and a real commit is blocked by the hook, a bad `LAUNCHCTL_BIN` without a timer changes nothing;
+  `test_status_ignores_launchctl_bin_on_linux_even_with_a_timer`, a Linux install with a timer, skipped on Windows: the output stays byte-identical;
+  `BASH_BIN` is covered by neither, see the known limit below).
   Everything macOS here runs through the fake `uname` on a Linux host. The temp directory is a plain `mktemp -d` like doctor's: it holds an empty repository, no scanned content, so the hook's
   rule about a `TMPDIR` outside `HOME` on Windows does not apply. The not-installed path prints the git line and no hook check.
 - **`git config` exit codes** (2.56): a plain set exits 5 on a multi-valued key (hence `--replace-all`); `--get-all` exits 1

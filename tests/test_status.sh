@@ -843,19 +843,17 @@ test_status_flags_an_unreadable_file_a_directory_and_a_dangling_link_in_place_of
     assert_rc 0 "the share is whole again"
 }
 
-test_status_checks_gnubin_dir_on_linux_but_not_the_macos_only_keys() {
+# ^ coupled a plain install of the host, no fake uname and no timer => the same test runs on Linux, macOS and Windows; the timer half is the next test
+test_status_checks_gnubin_dir_on_every_platform() {
     local before
-    lc_begin && lc_fake_uname Linux x86_64 && lc_make_fixtures && lc_use_fixtures || return 1
-    set_env PATH="$SANDBOX/pathbin:$TEST_BASE_PATH:${TEST_SETSID%/*}"
-    gsg install --with-timer
-    assert_rc 0 "a Linux install with a timer"
+    fresh_install
     gsg status
     assert_rc 0 "status"
     assert_not_contains "$OUT" "GNUBIN_DIR" "unset prints nothing"
     before="$OUT"
     printf 'LAUNCHCTL_BIN=/nonexistent/launchctl\n' >>"$LC_DATA/settings" || return 1
     gsg status
-    assert_rc 0 "a key only macOS reads, with a bad value"
+    assert_rc 0 "a key only macOS reads, with a bad value and no timer"
     assert_eq "$OUT" "$before" "the output is the same, byte for byte"
     printf 'GNUBIN_DIR=%s\n' "$SANDBOX" >>"$LC_DATA/settings" || return 1
     gsg status
@@ -866,10 +864,26 @@ test_status_checks_gnubin_dir_on_linux_but_not_the_macos_only_keys() {
     assert_rc 1 "a relative GNUBIN_DIR, which the hook blocks on every platform"
     assert_contains "$OUT" "GNUBIN_DIR: MISMATCH (GNUBIN_DIR in the settings file is not an absolute directory (relative/dir); the hook blocks every commit: nothing is scanned" "flagged"
     assert_not_contains "$OUT" "launchctl" "still no launchctl line"
-    assert_not_contains "$OUT" "bash:" "and no bash line"
+    if grep -q '^bash:' <<<"$OUT"; then fail "a bash line outside macOS"; fi
     st_commit_probe
     assert_rc 1 "the commit itself"
     assert_contains "$ERR" "GNUBIN_DIR in the settings file is not an absolute directory (relative/dir); nothing was scanned" "the hook says the same"
+}
+
+test_status_ignores_launchctl_bin_on_linux_even_with_a_timer() {
+    local before
+    lc_begin && lc_fake_uname Linux x86_64 && lc_make_fixtures && lc_use_fixtures || return 1
+    set_env PATH="$SANDBOX/pathbin:$TEST_BASE_PATH:${TEST_SETSID%/*}"
+    gsg install --with-timer
+    assert_rc 0 "a Linux install with a timer"
+    gsg status
+    assert_rc 0 "status"
+    before="$OUT"
+    printf 'LAUNCHCTL_BIN=/nonexistent/launchctl\n' >>"$LC_DATA/settings" || return 1
+    gsg status
+    assert_rc 0 "a key only macOS reads, with a bad value and a recorded timer"
+    assert_eq "$OUT" "$before" "the output is the same, byte for byte"
+    assert_not_contains "$OUT" "launchctl" "no launchctl line"
 }
 
 test_status_prints_one_line_per_damaged_file_and_still_exits_1() {

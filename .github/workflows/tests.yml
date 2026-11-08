@@ -217,53 +217,6 @@ jobs:
           PATH="$prefix/bin:$prefix/opt/coreutils/libexec/gnubin:$PATH"
           "$prefix/bin/bash" tests/fetch-test-tools.sh
 
-      - name: Probe TEMPORARY
-        run: |
-          prefix="$(brew --prefix)"
-          PATH="$prefix/bin:$prefix/opt/coreutils/libexec/gnubin:$PATH"
-          {
-          for sh in "$prefix/bin/bash" /bin/bash; do
-            echo "== $sh $("$sh" --version | head -1)"
-            echo "-- INT in a process substitution child (script started with default INT)"
-            env --default-signal=INT "$sh" -c 'mapfile -t x < <("$0" -c "trap -p INT; trap -p TERM"); printf "child: %s\n" "${x[@]:-none}"' "$sh"
-            echo "-- same, parent has trap exit 130 INT"
-            env --default-signal=INT "$sh" -c 'trap "exit 130" INT; mapfile -t x < <("$0" -c "trap -p INT; trap -p TERM"); printf "child: %s\n" "${x[@]:-none}"' "$sh"
-            echo "-- same, inside a subshell with that trap"
-            env --default-signal=INT "$sh" -c '( trap "exit 130" INT; mapfile -t x < <("$0" -c "trap -p INT; trap -p TERM"); printf "child: %s\n" "${x[@]:-none}" )' "$sh"
-            echo "-- background job child"
-            env --default-signal=INT "$sh" -c '"$0" -c "trap -p INT" & wait' "$sh"
-            echo "-- timeout --foreground inside a process substitution, then kill -INT of the group"
-            env --default-signal=INT "$sh" -c 'mapfile -t x < <(timeout --foreground -k 5 30 sh -c "trap -p INT; exec sleep 3"); printf "child: %s\n" "${x[@]:-none}"' "$sh"
-          done
-          } 2>&1 | tee -a "$RUNNER_TEMP/macos-versions.txt"
-
-      - name: Probe 2 TEMPORARY
-        run: |
-          prefix="$(brew --prefix)"
-          PATH="$prefix/bin:$prefix/opt/coreutils/libexec/gnubin:$PATH"
-          B="$prefix/bin/bash"
-          {
-            echo "== timeout: $(timeout --version | head -1) at $(command -v timeout); sleep at $(command -v sleep)"
-            # try LABEL N CMD...: starts CMD (which ends in a sleep N), sends SIGINT to that sleep alone, reports if it survived
-            try() {
-              label="$1"; n="$2"; shift 2
-              "$@" &
-              sleep 2
-              p="$(pgrep -f "sleep $n\$" | tail -1)"
-              if [ -z "$p" ]; then echo "$label: no sleep $n found"; wait; return 0; fi
-              kill -INT "$p"
-              sleep 1
-              if kill -0 "$p" 2>/dev/null; then echo "$label: sleep $p SURVIVED SIGINT"; kill -KILL "$p"; else echo "$label: sleep $p died of SIGINT"; fi
-              wait
-            }
-            try "procsub chain, bash 5.3" 41 env --default-signal=INT "$B" -c 'mapfile -t x < <(timeout --foreground -k 5 30 sleep 41)'
-            try "procsub chain, no timeout" 42 env --default-signal=INT "$B" -c 'mapfile -t x < <(sleep 42)'
-            try "plain chain with timeout --foreground" 43 env --default-signal=INT "$B" -c 'timeout --foreground -k 5 30 sleep 43'
-            try "plain chain with timeout (no --foreground)" 44 env --default-signal=INT "$B" -c 'timeout -k 5 30 sleep 44'
-            try "background job of bash 5.3" 45 env --default-signal=INT "$B" -c 'sleep 45 & wait'
-            try "plain sh job" 46 env --default-signal=INT sh -c 'sleep 46'
-          } 2>&1 | tee -a "$RUNNER_TEMP/macos-versions.txt"
-
       # A failing suite fails this step; the later steps still run (if: always()) so the log is kept and the macOS-only tests are judged.
       - name: Run the suite
         env:
@@ -272,7 +225,7 @@ jobs:
           set -o pipefail
           date -u +'start %H:%M:%S' | tee "$RUNNER_TEMP/macos.log"
           rc=0
-          "$(brew --prefix)/bin/bash" tests/run.sh tests/test_status.sh 2>&1 | tee -a "$RUNNER_TEMP/macos.log" || rc=$?
+          "$(brew --prefix)/bin/bash" tests/run.sh 2>&1 | tee -a "$RUNNER_TEMP/macos.log" || rc=$?
           date -u +'end   %H:%M:%S' | tee -a "$RUNNER_TEMP/macos.log"
           exit "$rc"
 

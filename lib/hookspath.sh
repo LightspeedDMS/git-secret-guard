@@ -250,18 +250,23 @@ hooklist_bind_timeout() {
 
 # ^ invariant returns 0 = listed (an empty list too, also a command without its event), 2 = an event without its command (git exits 128), 1 = git failed
 hooklist_read() {
-    local errfile="$1" line
+    local errfile="$1" outfile="$1.out" line
     local -a listed=()
     shift
     HL_STATUS=absent
-    mapfile -t listed < <("${HL_BOUND[@]}" "$GSG_GIT" "$@" hook list pre-commit 2>"$errfile")
-    wait "$!"
+    # ^ why a foreground command and a file, not mapfile < <(...); bash 5.3 starts its child with SIGINT ignored => git outlived Ctrl-C; #68
+    "${HL_BOUND[@]}" "$GSG_GIT" "$@" hook list pre-commit >"$outfile" 2>"$errfile"
     HL_RC=$?
     first_message "$errfile"
     # ^ external hook list exit 1 + "no hooks found" on stderr = an empty list, not a failure
     # ^ external git 2.56 exits 128 with "'hook.git-secret-guard.command' must be configured or ... must be removed" when only the command key is gone
     if [ "$HL_RC" -ne 0 ] && [[ $REPLY == *"must be configured or"* ]]; then return 2; fi
     if [ "$HL_RC" -ne 0 ] && { [ "$HL_RC" -ne 1 ] || [[ $REPLY != *"no hooks found"* ]]; }; then return 1; fi
+    if ! mapfile -t listed <"$outfile"; then
+        HL_RC=1
+        REPLY="cannot read the output of git hook list"
+        return 1
+    fi
     for line in "${listed[@]}"; do
         case "$line" in
             git-secret-guard) HL_STATUS=effective ;;

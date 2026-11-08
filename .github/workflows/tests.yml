@@ -244,21 +244,24 @@ jobs:
           B="$prefix/bin/bash"
           {
             echo "== timeout: $(timeout --version | head -1) at $(command -v timeout); sleep at $(command -v sleep)"
-            echo "-- chain with a process substitution (bash INT default -> procsub child -> timeout --foreground -> sleep)"
-            env --default-signal=INT "$B" -c 'mapfile -t x < <(timeout --foreground -k 5 30 sleep 8)' &
-            sleep 2
-            ps -axo pid,ppid,pgid,ignored,caught,command | grep -E "sleep 8|timeout --foreground" | grep -v grep
-            wait
-            echo "-- control chain without a process substitution"
-            env --default-signal=INT "$B" -c 'timeout --foreground -k 5 30 sleep 9' &
-            sleep 2
-            ps -axo pid,ppid,pgid,ignored,caught,command | grep -E "sleep 9|timeout --foreground" | grep -v grep
-            wait
-            echo "-- the same sleep started by a plain sh"
-            env --default-signal=INT sh -c 'sleep 7 & wait' &
-            sleep 2
-            ps -axo pid,ppid,pgid,ignored,caught,command | grep -E "sleep 7" | grep -v grep
-            wait
+            # try LABEL N CMD...: starts CMD (which ends in a sleep N), sends SIGINT to that sleep alone, reports if it survived
+            try() {
+              label="$1"; n="$2"; shift 2
+              "$@" &
+              sleep 2
+              p="$(pgrep -f "sleep $n\$" | tail -1)"
+              if [ -z "$p" ]; then echo "$label: no sleep $n found"; wait; return 0; fi
+              kill -INT "$p"
+              sleep 1
+              if kill -0 "$p" 2>/dev/null; then echo "$label: sleep $p SURVIVED SIGINT"; kill -KILL "$p"; else echo "$label: sleep $p died of SIGINT"; fi
+              wait
+            }
+            try "procsub chain, bash 5.3" 41 env --default-signal=INT "$B" -c 'mapfile -t x < <(timeout --foreground -k 5 30 sleep 41)'
+            try "procsub chain, no timeout" 42 env --default-signal=INT "$B" -c 'mapfile -t x < <(sleep 42)'
+            try "plain chain with timeout --foreground" 43 env --default-signal=INT "$B" -c 'timeout --foreground -k 5 30 sleep 43'
+            try "plain chain with timeout (no --foreground)" 44 env --default-signal=INT "$B" -c 'timeout -k 5 30 sleep 44'
+            try "background job of bash 5.3" 45 env --default-signal=INT "$B" -c 'sleep 45 & wait'
+            try "plain sh job" 46 env --default-signal=INT sh -c 'sleep 46'
           } 2>&1 | tee -a "$RUNNER_TEMP/macos-versions.txt"
 
       # A failing suite fails this step; the later steps still run (if: always()) so the log is kept and the macOS-only tests are judged.

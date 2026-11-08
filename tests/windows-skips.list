@@ -39,6 +39,11 @@ test_install::test_install_refuses_when_jq_setsid_or_timeout_is_not_reachable | 
 test_macos::test_doctor_accepts_the_macos_command_form_and_checks_the_recorded_bash | fakes a Mac; the fixtures of a Windows host do not fit
 test_macos::test_linux_install_never_calls_brew_and_writes_no_macos_settings | fakes Linux; the fixtures of a Windows host do not fit
 test_macos::test_load_settings_discards_inherited_bash_and_gnubin | fakes a Mac; the fixtures of a Windows host do not fit
+test_macos::test_status_on_macos_exits_1_when_the_recorded_bash_is_not_an_executable_bash_4_4 | NTFS has no executable bit, chmod 644 changes nothing
+test_macos::test_a_commit_with_a_recorded_bash_that_cannot_run_fails_and_one_that_is_no_bash_passes_unscanned | NTFS has no executable bit, chmod 644 changes nothing
+test_status::test_status_flags_an_unreadable_file_a_directory_and_a_dangling_link_in_place_of_a_library | NTFS ignores chmod, so nothing is unreadable
+test_status::test_the_installed_cli_reports_every_unreadable_file_the_hook_reads | NTFS ignores chmod, so nothing is unreadable
+test_status::test_status_ignores_launchctl_bin_on_linux_even_with_a_timer | installs a systemd timer, Windows has none
 test_real::test_real_betterleaks_unreadable_input_exits_clean_but_the_adapter_reports_it | NTFS ignores chmod, so nothing is unreadable
 test_real::test_real_trufflehog_lesson_3_unreadable_input_exits_0_yet_the_adapter_errors | NTFS ignores chmod, so nothing is unreadable
 test_state::test_state_round_trips_verbatim_values | NTFS ignores chmod, so modes 600 and 700 cannot be checked

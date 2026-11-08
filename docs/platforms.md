@@ -321,9 +321,25 @@ bin/git-secret-guard install        # lists what is missing, installs it with br
 - **`install --with-timer` installs a LaunchAgent** on macOS: `~/Library/LaunchAgents/com.lightspeeddms.git-secret-guard.doctor.plist`,
   loaded with `launchctl bootstrap gui/<uid>`, running doctor weekly through the recorded bash with its output in
   `doctor.log` in the state directory; `launchctl` is recorded as `LAUNCHCTL_BIN` (details in
-  [the launchd section of the doctor chapter](doctor.md#the-weekly-timer-on-macos-launchd)). `doctor` checks `BASH_BIN`
-  (executable, bash 4.4 or newer) and, when a timer is recorded, `LAUNCHCTL_BIN`, like the other recorded tools;
-  `status` checks neither.
+  [the launchd section of the doctor chapter](doctor.md#the-weekly-timer-on-macos-launchd)). `doctor` and `status` check `BASH_BIN`
+  (executable, bash 4.4 or newer) and, when a timer is recorded, `LAUNCHCTL_BIN`, like the other recorded tools. `status` also checks
+  `GNUBIN_DIR` (when set, an absolute existing directory, the rule the hook blocks on). The `bash:` and `launchctl:` lines of `status` exist on
+  macOS only, whatever the settings hold elsewhere; `GNUBIN_DIR:` is checked on every platform whenever the key is set, because the hook blocks
+  on it on every platform (unset prints nothing).
+- **What a commit does with a broken `BASH_BIN`.** Observed with git 2.56 through the fake-uname harness (`tests/test_macos.sh`), **not on a
+  real Mac**. The hook command is `'<BASH_BIN>' '<share>/hooks/secret-scan'`, and git runs it through `sh`. Each claim names its test, and in each
+  case `status` exits 1.
+  - `BASH_BIN` missing, a file without the executable bit, or a directory: the shell prints `<BASH_BIN>: No such file or directory`,
+    `Permission denied` or `Is a directory`, the hook never starts and the commit fails (exit 1, no commit made). A program that is no bash and
+    exits 3 also fails the commit, with no message. A program that is no bash and exits 0 starts nothing: git counts the hook as passed and the
+    commit **lands unscanned**, with no message
+    (`test_a_commit_with_a_recorded_bash_that_cannot_run_fails_and_one_that_is_no_bash_passes_unscanned`).
+  - `BASH_BIN` relative, or unset (the hook command is then the bare hook path): the hook still starts, under the bash `PATH` or the shebang finds,
+    and ran on to the scanners here because that bash is 5.x. Under a bash 3.2 first on `PATH` the hook's version check blocks every commit (read
+    in `hooks/secret-scan`, not run: no bash 3.2 was available)
+    (`test_status_on_macos_exits_1_when_the_recorded_bash_is_not_an_executable_bash_4_4`).
+  - A relative `GNUBIN_DIR` is the hook's own block, `GNUBIN_DIR in the settings file is not an absolute directory (...); nothing was scanned`
+    (`test_status_on_macos_exits_1_when_gnubin_dir_is_not_an_absolute_directory`).
 - **GNU flags and their answers.** `realpath -m`, `mktemp --suffix`, `mv -T`/`-n`, `install -T`, `chmod 700 -- DIR` and `sort -z` run from
   the GNU directory. `find -printf` (backup bounds) stays where `find` has it (Linux) and is `find -print0 | xargs stat` elsewhere (GNU or BSD `stat` format chosen by a probe);
   `find -ls` was tried and dropped, because an owner or group name with a space moves its size column;
@@ -832,7 +848,7 @@ The final full run, dispatched on `626295d` (the commits after it change documen
 | Takeover restore with the network off (`--network none` after `podman commit`) | PASS | same | stage 1 `41 passed, 0 failed`; stage 2 (only `lo`, `curl` and name lookup fail) `12 passed, 0 failed` |
 | Direct root run of the full flow, no `sudo` installed | PASS | same | `E2E SUMMARY: 65 passed, 0 failed` |
 | Real pin bump (git 2.55.0 built, then the current pin 2.56.0) | PASS | 42273585581 | `E2E SUMMARY: 17 passed, 0 failed` |
-| Rocky 9.8 VM, SELinux enforcing, KVM (`/dev/kvm` present) | PASS; the label finding is fixed and checked; a confined domain executing libexec programs is open (see the VM section) | 42304848378 | `SELinux is enforcing`; `E2E SUMMARY: 88 passed, 0 failed`; `ROCKY VM TEST: PASS (... accel kvm)` |
+| Rocky 9.8 VM, SELinux enforcing, KVM (`/dev/kvm` present) | PASS; the label finding is fixed and checked; a confined domain executing libexec programs was not run here and was later run on a real machine (see the VM section) | 42304848378 | `SELinux is enforcing`; `E2E SUMMARY: 88 passed, 0 failed`; `ROCKY VM TEST: PASS (... accel kvm)` |
 | GitHub Desktop's bundled git | measured | 42259957123, 42273585581 | `old git: exit 0; output: []` for 2.45.3 built from the tarball and for the git in the Desktop 3.4.13 `.deb` |
 | Windows scenarios | see "Windows" | | |
 
@@ -859,11 +875,13 @@ Without a writable `/dev/kvm` the launcher exits 3 and says that TCG software em
   and keeps `bin_t`. In the VM (run in the record above) the checks are real: `git` is `bin_t` with one link, `restorecon -n -R /usr/local/bin` reports nothing, and after a real `restorecon -R /usr/local` `git` is still `bin_t` and a clone served through it works.
   **The fix applies to new builds.** A build made before `INSTALL_SYMLINKS=1` has hard links, and at the same pin it is not rebuilt (the Rocky `bump` scenario runs `install --upgrade-git` again over such a build: no plan, the hard links stay, git keeps more than one name).
   Its first rebuild is the next pin bump: the copy uses `cp --remove-destination`, so each hard link is replaced by a symlink (the same scenario checks `stat -c %h /usr/local/bin/git` is 1 and `libexec/git-core/git-merge` is a symlink afterwards). Until then an administrator who runs `restorecon -R /usr/local`
-  on such a machine gets the old behaviour (`/usr/local/bin/git` becomes `usr_t`). Removing the files the MANIFEST lists and running `install --upgrade-git` again should rebuild at once; that was not run, and the dependency install of that rebuild can upgrade installed packages (see the source route, step 3).
+  on such a machine gets the old behaviour (`/usr/local/bin/git` becomes `usr_t`). Removing the files the MANIFEST lists and running `install --upgrade-git` again rebuilds at once. That ran on a real Rocky 9.7 machine (SELinux enforcing, main 6585b08) over a hard-link build: the new build has `git` with one link and `bin_t`, its libexec names are symlinks, and after a real `restorecon -R /usr/local` `git` is still `bin_t` (it changed 138 labels under `/usr/local`; the only git file among them is `share/gitweb/gitweb.cgi`, which became `httpd_sys_script_exec_t`). The dependency install of that rebuild did upgrade installed packages: its dnf transaction installed 141 packages and upgraded 10 (see the source route, step 3).
   The separate programs in `libexec/git-core` (`git-remote-https` and the like) are `usr_t`, as the policy says, from the day they are copied. The takeover judges the target of a symlinked sibling (`gitup_tk_check_owner`) instead of the 777 mode of the link.
   Whether a confined domain may execute `usr_t` files was asked of the policy with `sesearch -A -s DOMAIN -t TYPE -c file -p execute` (rule counts, run 42304848378): `httpd_t` 1 rule for `bin_t` and 1 for `usr_t`, `sshd_t` 1 and 1,
-  `git_script_t` 2 and 2. Equal counts suggest the same rules cover both types, not more. **Open:** no confined process was run (`runcon` cannot enter a confined domain from `unconfined_t` here, even for `/usr/bin/true`),
-  so whether a confined domain can execute the `usr_t` programs in `libexec/git-core` is unproven.
+  `git_script_t` 2 and 2. Equal counts suggest the same rules cover both types, not more. In the VM no confined process was run (`runcon` cannot enter a confined domain from `unconfined_t` there, even for `/usr/bin/true`).
+  **A confined process ran on a real Rocky 9.7 machine** (SELinux enforcing, main 6585b08): a CGI script under httpd, in `httpd_sys_script_t` as user `apache`, ran `/usr/local/bin/git`, `/usr/bin/git` through the takeover,
+  the separate `usr_t` programs `git-remote-http`, `git-http-fetch`, `git-imap-send`, `git-daemon` and `git-sh-i18n--envsubst` in `libexec/git-core`, and `git ls-remote` over HTTP, once with the hard-link layout and once with the symlink layout.
+  No execute was denied. The audit log held only `setpgid` denials of the probe's own `timeout` and the three positive controls (two reads and a write the policy must refuse, all denied). `sshd_t` and `httpd_t` itself were not run.
 
 ### GitHub Desktop's bundled git
 

@@ -254,6 +254,32 @@ Besides the `MISMATCH` and `MISSING` lines above, `status` reports whether commi
   terminate signal) during the check ends `status` at once with exit 130 (143) and prints no further line.
 - **Missing runtime tools.** `jq`, `setsid` (`taskkill` on Windows) and `timeout` count like the scanners: `MISSING or not
   executable` exits 1, because the hook blocks every commit in that state.
+- **A damaged share directory.** The line `hook libraries: <n> files present and readable` is printed on every installed run. A file the hook
+  sources or runs from `<share>/lib` that is missing, unreadable, or not a regular file (`common.sh`, `extract.sh`, `exempt.sh`, `report.sh`,
+  `proc.sh`, `extract.awk`, `run-scanner.sh`, `scanners/trufflehog.sh`, `scanners/betterleaks.sh`, `betterleaks-rule.toml`) gets one
+  `hook libraries: MISMATCH (cannot read <path>: <reason>; the hook blocks every commit: nothing is scanned)` line each and exit 1, with the reason
+  `missing` for an absent path and `not a readable file` for a file without read permission, a directory or a dangling link. The names come
+  from the same lists the hook loads from (`GSG_HOOK_LIBS`, `GSG_HOOK_FILES` in `lib/common.sh`). A readable file is enough: `status` never
+  sources them and does not judge their content. When `GSG_HOOK_LIBS` is unset or empty (`()` or only empty names) the hook blocks every commit
+  (`cannot load the hook library list ...; nothing was scanned`) and `status` prints `hook libraries: MISMATCH (GSG_HOOK_LIBS in <share>/lib/common.sh
+  is unset or empty; ...)` and exits 1, through the same `hook_libs_listed` (`lib/common.sh`). `status` reads the lists from the `common.sh` of
+  the CLI that runs: the installed `<share>/bin/git-secret-guard` reads the share's, so it sees this damage; a checkout CLI reads the checkout's
+  own and cannot (the file checks above still look at the share).
+  **`common.sh` and `exempt.sh` are the exception for the installed CLI.** It sources both itself at startup, so with either missing or
+  unreadable it never reaches `status`: bash prints its own error, `<start path>: line <n>: <share>/lib/exempt.sh: No such file or
+  directory` (`Permission denied` when unreadable), where `<start path>` is the path the CLI was started from (by name: `~/.local/bin/git-secret-guard`;
+  `<share>/bin/git-secret-guard` only when the share copy is run directly), nothing goes to stdout, and the exit status is 1; there is no `hook libraries` line. The file
+  is named and the exit code is right, the documented line is not printed. Every other listed file gets its `hook libraries: MISMATCH` line from the
+  installed CLI as well (`test_the_installed_cli_reports_every_missing_file_the_hook_reads`, `test_the_installed_cli_reports_every_unreadable_file_the_hook_reads`).
+- **Settings keys install records on macOS** (the `bash:` and `launchctl:` lines exist on macOS only; `GNUBIN_DIR:` is checked on every platform
+  whenever the key is set, because the hook blocks on it everywhere, and an unset key prints nothing). `BASH_BIN` must be an absolute executable file that
+  reports bash 4.4 or newer when asked (the check `doctor` uses, `brew_bash_ok`; the file is run with `-c` to print its version, nothing else). Otherwise
+  `bash: MISMATCH (...)`, exit 1, each with its own reason: an absolute path that is missing or not executable makes git fail every commit; an
+  unset `BASH_BIN` leaves the bare hook path as the command, and a relative one lets `PATH` choose the bash, so under a bash 3.2 first on `PATH`
+  the hook blocks every commit (both still start the hook under a newer bash); an old bash makes the hook block, and a program
+  that is no bash and exits 0 makes git commit **without a scan** ([observed](platforms.md#macos-homebrew), fake-uname harness only). A `GNUBIN_DIR` that is
+  set and not an absolute existing directory is `GNUBIN_DIR: MISMATCH (...)` (the hook blocks on it, same rule); unset is silent and fine. When
+  the state records a timer, `LAUNCHCTL_BIN` is judged like `jq` (`launchctl: <path> (MISSING or not executable)`); without a timer it is not read.
 
 **Conditional includes are not seen.** git alone decides what an `enabled` value means, but only for the throwaway repository, and a conditional
 include (`includeIf "gitdir:..."`, `onbranch:`, `hasconfig:remote.*.url:`) never matches it. A setting reached through one, for example an
@@ -261,10 +287,14 @@ include (`includeIf "gitdir:..."`, `onbranch:`, `hasconfig:remote.*.url:`) never
 or system config holds any `includeIf`, `status` prints one informational line naming the file that holds it (never the condition or the included
 path); [`doctor`](doctor.md) checks each repository and finds such a disable.
 
-Known limits: `status` does not read the hook's own library files. A damaged share directory is caught by the hook itself, which blocks the
-commit with `cannot load ...; nothing was scanned`, so no unscanned commit lands, but `status` still exits 0. A relative `GIT_CONFIG_GLOBAL`
-is read from the directory `status` runs in, while git inside a repository reads it from the top of that repository, so only an absolute
-value gives a reliable answer.
+Known limits: `status` checks that the hook's library files are readable, not what is in them (a library that is readable but edited is the
+hook's to reject). The file list is read from the `common.sh` of the CLI that runs, so a checkout CLI run against an older installed share can
+flag a file that share's hook does not use, and cannot see a list that is damaged in the share's own `common.sh`. A `BASH_BIN` line in the
+settings of a Linux install makes `global config` a `MISMATCH` (exit 1) although the hook scans normally: `status_config` builds the wanted
+command from the recorded bash on every platform (`hook_command_text`), while a Linux install configures the bare hook path. That is older than
+this check (the code before it did the same), a false alarm and never a silent pass, and it is left as it is. On macOS `status` runs the recorded `BASH_BIN` with `-c` and no timeout, as `doctor` does, so a `BASH_BIN` that hangs hangs
+`status`. A relative `GIT_CONFIG_GLOBAL` is read from the directory `status` runs in, while git inside a repository reads it from the top of that
+repository, so only an absolute value gives a reliable answer.
 
 ## Maintainer notes
 
@@ -290,8 +320,31 @@ value gives a reliable answer.
   settings it is unbounded, but it runs no user hook either. Every path is absolute
   and nothing changes directory (`test_status_accepts_a_git_found_through_a_relative_path_entry`); on Windows the repository path is given to
   native git as `C:/...` (`cygpath -m`). The sites that call `status_problem`: `global config` (`status_config`), `hook command`, `settings` and the
-  tool lines (`status_hook_command`, `status_tools`), `git in use` (`status_git`), the hook listing (`status_hook_listing`) and `system git takeover`
-  (`status_system_git`). The temp directory is a plain `mktemp -d` like doctor's: it holds an empty repository, no scanned content, so the hook's
+  tool lines (`status_hook_command`, `status_tools`, `status_plain_tool`), `hook libraries` (`status_hook_files`), the macOS lines
+  (`status_settings_keys`: `status_bash` and `status_launchctl` on macOS, `status_gnubin` everywhere), `git in use` (`status_git`), the hook listing (`status_hook_listing`) and
+  `system git takeover` (`status_system_git`).
+- **`status` and the share directory (#67).** The hook sources `common.sh`, then every name in `GSG_HOOK_LIBS` (`lib/common.sh`), and runs or reads the
+  names in `GSG_HOOK_FILES`; `status_hook_files` walks those same arrays, so there is no second list. The hook's own `for` loop took its list from
+  the array, pinned by `test_the_hook_loads_exactly_the_libraries_in_the_shared_list` (each listed library moved away in turn makes the real
+  commit say `cannot load <path>`; every library not listed moved away at once does not) and `test_the_hook_blocks_when_a_file_it_reads_is_missing`
+  (the five files). `test_status_exits_1_and_names_each_file_the_hook_reads_when_it_is_missing` loops the same lists through `status`;
+  `test_status_flags_an_unreadable_file_a_directory_and_a_dangling_link_in_place_of_a_library` (skipped as root and on Windows) and
+  `test_status_prints_one_line_per_damaged_file_and_still_exits_1` cover the other shapes. A new library the hook sources must be added to the
+  array or the first test fails. `test_the_hook_blocks_on_its_own_when_the_library_list_is_empty_or_unset` pins the hook's own block for a list that
+  is unset, `()` or `("")`; `test_status_exits_1_when_the_hook_library_list_is_empty_or_unset` pins the `status` side with the installed CLI (and
+  that the checkout CLI does not see it). `test_status_on_macos_runs_the_recorded_bash_with_stdin_closed` gives status an open pipe on stdin and a recorded bash
+  that reads it: `status_bash` closes stdin for `brew_bash_ok` or the run times out (rc 124). `status_tools` calls `status_settings_keys` at its end (it loads the settings; the keys are read
+  as loaded, so a settings failure already printed its own line; `status_bash` and `status_launchctl` run only when `brew_is_macos`). The `GNUBIN_DIR` rule is `gnubin_dir_unusable` in `lib/common.sh`, called
+  by the hook and by `status_gnubin` (`test_status_on_macos_exits_1_when_gnubin_dir_is_not_an_absolute_directory` runs a real commit for each case
+  and compares the two messages); it adds no install-time library to the hook's load path. `status_bash` is `tool_unusable` then `brew_bash_ok`, the
+  two calls `doctor_check_machine` makes (`test_status_on_macos_exits_1_when_the_recorded_bash_is_not_an_executable_bash_4_4` breaks the file at the
+  recorded path, so `global config` still matches and only the new line fails the run); `status_launchctl` reads `ST_TIMER`
+  (`test_status_on_macos_checks_launchctl_only_when_a_timer_is_recorded`). Linux and Windows print no `bash:` or `launchctl:` line and `GNUBIN_DIR:`
+  only when the key is set (`test_status_checks_gnubin_dir_on_every_platform`, a plain install that also runs on Windows: a relative `GNUBIN_DIR` is a
+  `MISMATCH` with exit 1 and a real commit is blocked by the hook, a bad `LAUNCHCTL_BIN` without a timer changes nothing;
+  `test_status_ignores_launchctl_bin_on_linux_even_with_a_timer`, a Linux install with a timer, skipped on Windows: the output stays byte-identical;
+  `BASH_BIN` is covered by neither, see the known limit below).
+  Everything macOS here runs through the fake `uname` on a Linux host. The temp directory is a plain `mktemp -d` like doctor's: it holds an empty repository, no scanned content, so the hook's
   rule about a `TMPDIR` outside `HOME` on Windows does not apply. The not-installed path prints the git line and no hook check.
 - **`git config` exit codes** (2.56): a plain set exits 5 on a multi-valued key (hence `--replace-all`); `--get-all` exits 1
   when the key is absent and also when `GIT_CONFIG_GLOBAL` is a directory; `--global --list` exits 128 for a missing file

@@ -145,11 +145,11 @@ test_the_cli_puts_the_recorded_gnu_directory_first_on_PATH() {
     assert_rc 0 "install"
     gnubin="$(brew_prefix)/opt/coreutils/libexec/gnubin"
     run_cap env -i PATH="$SANDBOX/pathbin:/usr/bin:/bin" "$bash_bin" -c \
-        'source "$1/lib/common.sh" && source "$1/lib/brew.sh" && GSG_ROOT="$2" && brew_use_gnubin && printf "%s" "$PATH"' _ "$GSG_PROJECT" "$LC_DATA"
+        'source "$1/lib/common.sh" && source "$1/lib/brew.sh" && GSG_ROOT="$2" && brew_use_gnubin && printf "%s" "$PATH"' _ "$GSG_PROJECT" "$LC_DATA" </dev/null
     assert_rc 0 "an installed copy"
     assert_eq "${OUT%%:*}" "$gnubin" "the GNU directory recorded in the share's settings comes first"
     run_cap env -i PATH="$SANDBOX/pathbin:/usr/bin:/bin" "$bash_bin" -c \
-        'source "$1/lib/common.sh" && source "$1/lib/brew.sh" && GSG_ROOT="$1" && brew_use_gnubin && printf "%s" "$PATH"' _ "$GSG_PROJECT"
+        'source "$1/lib/common.sh" && source "$1/lib/brew.sh" && GSG_ROOT="$1" && brew_use_gnubin && printf "%s" "$PATH"' _ "$GSG_PROJECT" </dev/null
     assert_rc 0 "a checkout without settings"
     assert_eq "${OUT%%:*}" "$gnubin" "brew's own gnubin comes first when nothing is installed yet"
 }
@@ -706,6 +706,189 @@ test_an_oversize_hooks_dir_is_refused_with_only_the_bsd_tools_on_path_and_before
     assert_contains "$ERR" "larger than" "names the bound"
     assert_eq "$(brew_calls)" "" "brew did not run"
     nothing_changed "oversize hooks dir"
+}
+
+# ^ external the macOS branch of status runs on any host through the fake uname; what it asks of a real Homebrew layout rests on these fixtures (issue #67)
+mac_status_setup() {
+    lc_begin && as_macos && lc_make_fixtures && lc_use_fixtures || return 1
+    gsg install
+    assert_rc 0 "install"
+}
+
+# ^ why a copy through SANDBOX, not sed -i; BSD and GNU sed take -i differently, and the footprint test lists everything under the share
+# ^ invariant arg 1 is a settings key, arg 2 its new value; the sandbox paths hold no sed metacharacter
+mac_status_set() {
+    sed "s#^$1=.*#$1=$2#" "$LC_DATA/settings" >"$SANDBOX/settings.edit" && cat -- "$SANDBOX/settings.edit" >"$LC_DATA/settings"
+}
+
+# ^ invariant arg 1 is a settings key; its line is removed through a copy kept outside the share, as in mac_status_set
+mac_status_unset() {
+    grep -v "^$1=" "$LC_DATA/settings" >"$SANDBOX/settings.edit"
+    [ "$?" -le 1 ] && cat -- "$SANDBOX/settings.edit" >"$LC_DATA/settings"
+}
+
+# ^ invariant the share, the state, HOME and TMPDIR hold exactly the same names after a status run; file contents of settings and state too
+mac_status_footprint() {
+    find "$LC_HOME" "$LC_DATA" "$LC_STATE" "$SANDBOX/tmp" | sort
+    cat -- "$LC_DATA/settings" "$LC_STATE/state"
+}
+
+# shellcheck disable=SC2016
+test_status_on_macos_exits_1_when_the_recorded_bash_is_not_an_executable_bash_4_4() {
+    local label before bb
+    mac_status_setup || return 1
+    bb="$(brew_prefix)/bin/bash"
+    gsg status
+    assert_rc 0 "a healthy macOS install"
+    assert_contains "$OUT" "bash: $bb" "the recorded bash is listed"
+    before="$(mac_status_footprint)"
+    cp -- "$LC_DATA/settings" "$SANDBOX/settings.orig" || return 1
+    mv -- "$bb" "$bb.real" || return 1
+    for label in missing not-executable directory bash-3-2 not-bash; do
+        rm -rf -- "$bb" || return 1
+        case "$label" in
+            missing) ;;
+            not-executable) printf '#!/bin/sh\nexit 0\n' >"$bb" && chmod 644 "$bb" ;;
+            directory) mkdir -- "$bb" ;;
+            bash-3-2) printf '#!/bin/sh\nif [ "$1" = -c ]; then printf 3.2; fi\n' >"$bb" && chmod 755 "$bb" ;;
+            not-bash) printf '#!/bin/sh\nexit 0\n' >"$bb" && chmod 755 "$bb" ;;
+        esac || return 1
+        gsg status
+        assert_rc 1 "$label"
+        assert_contains "$OUT" "global config: matches" "$label: the config line is quiet, the new line alone fails the run"
+        assert_contains "$OUT" "bash: MISMATCH (" "$label: flagged"
+        assert_contains "$OUT" "$bb" "$label: names the path"
+        assert_contains "$OUT" "run: git-secret-guard install" "$label: says how to fix it"
+        case "$label" in
+            bash-3-2 | not-bash) assert_contains "$OUT" "does not report bash 4.4 or newer" "$label: the version reason" ;;
+            *) assert_contains "$OUT" "git cannot start the hook with it and the commit fails" "$label: the start reason" ;;
+        esac
+    done
+    rm -rf -- "$bb" && mv -- "$bb.real" "$bb" || return 1
+    mac_status_set BASH_BIN bash || return 1
+    gitx config --global --replace-all hook.git-secret-guard.command "'bash' '$LC_DATA/hooks/secret-scan'" || return 1
+    gsg status
+    assert_rc 1 "a relative path"
+    assert_contains "$OUT" "bash: MISMATCH (bash must be an absolute path, got [bash]; git runs whichever bash its PATH finds first, and under bash 3.2 the hook blocks every commit" "relative: its own reason"
+    assert_not_contains "$OUT" "git cannot start the hook" "relative: the hook does start"
+    new_repo bash-relative && stage_file src/ok.txt hello "nothing secret" || return 1
+    commit_cap probe
+    assert_contains "$ERR" "scanner did not complete" "relative: measured, the hook runs on to the scanners under the bash PATH finds"
+    mac_status_unset BASH_BIN || return 1
+    gitx config --global --replace-all hook.git-secret-guard.command "$LC_DATA/hooks/secret-scan" || return 1
+    gsg status
+    assert_rc 1 "no BASH_BIN recorded"
+    assert_contains "$OUT" "global config: matches" "unset: the bare hook path is what the config wants"
+    assert_contains "$OUT" "bash: MISMATCH (bash is not configured in the settings file; the hook command is the bare hook path, so a git client with /bin/bash 3.2 first on PATH runs it under bash 3.2 and the hook blocks every commit" "unset: its own reason"
+    assert_not_contains "$OUT" "git cannot start the hook" "unset: the hook does start"
+    new_repo bash-unset && stage_file src/ok.txt hello "nothing secret" || return 1
+    commit_cap probe
+    assert_contains "$ERR" "scanner did not complete" "unset: measured, the hook runs on to the scanners under the bash PATH finds"
+    cat -- "$SANDBOX/settings.orig" >"$LC_DATA/settings" || return 1
+    gitx config --global --replace-all hook.git-secret-guard.command "'$bb' '$LC_DATA/hooks/secret-scan'" || return 1
+    gsg status
+    assert_rc 0 "the recorded bash is back"
+    assert_eq "$(mac_status_footprint)" "$before" "status wrote nothing under HOME, the share, the state or TMPDIR"
+}
+
+# shellcheck disable=SC2016
+test_status_on_macos_runs_the_recorded_bash_with_stdin_closed() {
+    local bb holder
+    mac_status_setup || return 1
+    bb="$(brew_prefix)/bin/bash"
+    mv -- "$bb" "$bb.real" || return 1
+    printf '#!/bin/sh\nread -r line\nif [ "$1" = -c ]; then printf 4.4; fi\n' >"$bb" && chmod 755 "$bb" || return 1
+    exec 3< <(exec sleep 40)
+    holder=$!
+    run_cap env -i "${LC_ENV[@]}" "${EXTRA_ENV[@]}" "$TEST_TIMEOUT" 20 "$GSG_PROJECT/bin/git-secret-guard" status <&3
+    kill "$holder" 2>/dev/null
+    exec 3<&-
+    assert_rc 0 "status finished (124 = it waited on the stdin it passed to the recorded bash)"
+    assert_contains "$OUT" "bash: $bb" "the recorded bash answered"
+}
+
+test_status_on_macos_exits_1_when_gnubin_dir_is_not_an_absolute_directory() {
+    local label value gnubin
+    mac_status_setup || return 1
+    gnubin="$(brew_prefix)/opt/coreutils/libexec/gnubin"
+    gsg status
+    assert_rc 0 "a healthy macOS install"
+    assert_contains "$OUT" "GNUBIN_DIR: $gnubin" "the recorded directory is listed"
+    printf 'x' >"$SANDBOX/not-a-dir" || return 1
+    mkdir -p -- "$SANDBOX/gnubin" || return 1
+    for label in relative:gnubin missing:"$SANDBOX/no-such-dir" file:"$SANDBOX/not-a-dir"; do
+        value="${label#*:}"
+        mac_status_set GNUBIN_DIR "$value" || return 1
+        gsg status
+        assert_rc 1 "${label%%:*}"
+        assert_contains "$OUT" "GNUBIN_DIR: MISMATCH (GNUBIN_DIR in the settings file is not an absolute directory ($value); the hook blocks every commit: nothing is scanned" "${label%%:*}: flagged"
+        new_repo "gnubin-${label%%:*}" && stage_file src/ok.txt hello "nothing secret" || return 1
+        commit_cap probe
+        assert_rc 1 "${label%%:*}: the commit itself"
+        assert_contains "$ERR" "GNUBIN_DIR in the settings file is not an absolute directory ($value); nothing was scanned" "${label%%:*}: the hook says the same"
+    done
+    mac_status_unset GNUBIN_DIR || return 1
+    gsg status
+    assert_rc 0 "no GNUBIN_DIR recorded"
+    assert_not_contains "$OUT" "GNUBIN_DIR" "and no line about it"
+}
+
+# ^ external observed with git 2.56 and the fake uname, never on a Mac; git runs the config hook through sh, the commit stops when sh cannot start BASH_BIN
+# ^ hazard a BASH_BIN of no bash with exit 0 => git counts the hook as passed and the commit lands unscanned; status must flag it
+# shellcheck disable=SC2016
+test_a_commit_with_a_recorded_bash_that_cannot_run_fails_and_one_that_is_no_bash_passes_unscanned() {
+    local label bb
+    mac_status_setup || return 1
+    bb="$(brew_prefix)/bin/bash"
+    mv -- "$bb" "$bb.real" || return 1
+    for label in missing not-executable directory not-bash-exit-3 not-bash; do
+        rm -rf -- "$bb" || return 1
+        case "$label" in
+            missing) ;;
+            not-executable) printf '#!/bin/sh\nexit 0\n' >"$bb" && chmod 644 "$bb" ;;
+            directory) mkdir -- "$bb" ;;
+            not-bash-exit-3) printf '#!/bin/sh\nexit 3\n' >"$bb" && chmod 755 "$bb" ;;
+            not-bash) printf '#!/bin/sh\nexit 0\n' >"$bb" && chmod 755 "$bb" ;;
+        esac || return 1
+        new_repo "badbash-$label" && stage_file src/ok.txt hello "nothing secret" || return 1
+        commit_cap probe
+        if [ "$label" = not-bash ]; then
+            assert_rc 0 "$label: the commit lands"
+            assert_eq "$(gitx rev-list --count HEAD)" 1 "$label: and nothing was scanned"
+        else
+            assert_rc 1 "$label: the commit fails"
+            if [ "$label" = not-bash-exit-3 ]; then
+                assert_empty "$ERR" "$label: and says nothing"
+            else
+                assert_contains "$ERR" "$bb" "$label: the shell names the bash it could not run"
+            fi
+            assert_eq "$(gitx rev-list --all --count)" 0 "$label: no commit was made"
+        fi
+        gsg status
+        assert_rc 1 "$label: status says so"
+    done
+}
+
+test_status_on_macos_checks_launchctl_only_when_a_timer_is_recorded() {
+    lc_begin && as_macos && lc_make_fixtures && lc_use_fixtures || return 1
+    gsg install --with-timer
+    assert_rc 0 "install with a timer"
+    gsg status
+    assert_rc 0 "a healthy install with a timer"
+    assert_contains "$OUT" "launchctl: $SANDBOX/pathbin/launchctl" "launchctl is listed"
+    mac_status_set LAUNCHCTL_BIN /nonexistent/launchctl || return 1
+    gsg status
+    assert_rc 1 "a launchctl that is not there"
+    assert_contains "$OUT" "launchctl: /nonexistent/launchctl (MISSING or not executable)" "flagged like the other tools"
+    mac_status_set LAUNCHCTL_BIN launchctl || return 1
+    gsg status
+    assert_rc 1 "a relative launchctl"
+    assert_contains "$OUT" "launchctl: launchctl (MISSING or not executable)" "flagged"
+    mac_status_setup || return 1
+    printf 'LAUNCHCTL_BIN=/nonexistent/launchctl\n' >>"$LC_DATA/settings" || return 1
+    gsg status
+    assert_rc 0 "no timer recorded, so launchctl is not looked at"
+    assert_not_contains "$OUT" "launchctl" "and not listed"
 }
 
 run_file_tests

@@ -321,9 +321,25 @@ bin/git-secret-guard install        # lists what is missing, installs it with br
 - **`install --with-timer` installs a LaunchAgent** on macOS: `~/Library/LaunchAgents/com.lightspeeddms.git-secret-guard.doctor.plist`,
   loaded with `launchctl bootstrap gui/<uid>`, running doctor weekly through the recorded bash with its output in
   `doctor.log` in the state directory; `launchctl` is recorded as `LAUNCHCTL_BIN` (details in
-  [the launchd section of the doctor chapter](doctor.md#the-weekly-timer-on-macos-launchd)). `doctor` checks `BASH_BIN`
-  (executable, bash 4.4 or newer) and, when a timer is recorded, `LAUNCHCTL_BIN`, like the other recorded tools;
-  `status` checks neither.
+  [the launchd section of the doctor chapter](doctor.md#the-weekly-timer-on-macos-launchd)). `doctor` and `status` check `BASH_BIN`
+  (executable, bash 4.4 or newer) and, when a timer is recorded, `LAUNCHCTL_BIN`, like the other recorded tools. `status` also checks
+  `GNUBIN_DIR` (when set, an absolute existing directory, the rule the hook blocks on). The `bash:` and `launchctl:` lines of `status` exist on
+  macOS only, whatever the settings hold elsewhere; `GNUBIN_DIR:` is checked on every platform whenever the key is set, because the hook blocks
+  on it on every platform (unset prints nothing).
+- **What a commit does with a broken `BASH_BIN`.** Observed with git 2.56 through the fake-uname harness (`tests/test_macos.sh`), **not on a
+  real Mac**. The hook command is `'<BASH_BIN>' '<share>/hooks/secret-scan'`, and git runs it through `sh`. Each claim names its test, and in each
+  case `status` exits 1.
+  - `BASH_BIN` missing, a file without the executable bit, or a directory: the shell prints `<BASH_BIN>: No such file or directory`,
+    `Permission denied` or `Is a directory`, the hook never starts and the commit fails (exit 1, no commit made). A program that is no bash and
+    exits 3 also fails the commit, with no message. A program that is no bash and exits 0 starts nothing: git counts the hook as passed and the
+    commit **lands unscanned**, with no message
+    (`test_a_commit_with_a_recorded_bash_that_cannot_run_fails_and_one_that_is_no_bash_passes_unscanned`).
+  - `BASH_BIN` relative, or unset (the hook command is then the bare hook path): the hook still starts, under the bash `PATH` or the shebang finds,
+    and ran on to the scanners here because that bash is 5.x. Under a bash 3.2 first on `PATH` the hook's version check blocks every commit (read
+    in `hooks/secret-scan`, not run: no bash 3.2 was available)
+    (`test_status_on_macos_exits_1_when_the_recorded_bash_is_not_an_executable_bash_4_4`).
+  - A relative `GNUBIN_DIR` is the hook's own block, `GNUBIN_DIR in the settings file is not an absolute directory (...); nothing was scanned`
+    (`test_status_on_macos_exits_1_when_gnubin_dir_is_not_an_absolute_directory`).
 - **GNU flags and their answers.** `realpath -m`, `mktemp --suffix`, `mv -T`/`-n`, `install -T`, `chmod 700 -- DIR` and `sort -z` run from
   the GNU directory. `find -printf` (backup bounds) stays where `find` has it (Linux) and is `find -print0 | xargs stat` elsewhere (GNU or BSD `stat` format chosen by a probe);
   `find -ls` was tried and dropped, because an owner or group name with a space moves its size column;

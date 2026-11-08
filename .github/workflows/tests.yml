@@ -224,7 +224,7 @@ jobs:
         run: |
           set -o pipefail
           date -u +'start %H:%M:%S' | tee "$RUNNER_TEMP/macos.log"
-          "$(brew --prefix)/bin/bash" tests/run.sh tests/test_macos.sh tests/test_hook.sh tests/test_launchd.sh tests/test_awk_portability.sh tests/test_macos_ci.sh 2>&1 | tee -a "$RUNNER_TEMP/macos.log"
+          "$(brew --prefix)/bin/bash" tests/run.sh 2>&1 | tee -a "$RUNNER_TEMP/macos.log"
           date -u +'end   %H:%M:%S' | tee -a "$RUNNER_TEMP/macos.log"
 
       - uses: actions/upload-artifact@v4

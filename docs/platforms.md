@@ -349,7 +349,7 @@ It needs no secrets (`contents: read`) and is bounded by `timeout-minutes: 120`.
   A new test that can only run on a Mac belongs in the list (`test_the_checker_*` and `test_the_list_*` in `tests/test_macos_ci.sh` check the checker and that every listed name is a real test function).
 - **Reading a run.** Job logs can be read only when the whole run has ended; the job uploads its log and the version list as the artifact `macos-log` (`gh run download RUN -n macos-log`).
 
-**Record** (run RUN_ID_PLACEHOLDER, on commit COMMIT_PLACEHOLDER; the commits after it change documentation only):
+**Record** (run 42461173630, on commit `316bc2a`; the commits after it change documentation only. All eight jobs of that run passed, `windows-suite` and the Ubuntu head and base suites included):
 
 | Item | Value |
 |---|---|
@@ -359,8 +359,8 @@ It needs no secrets (`contents: read`) and is bounded by `timeout-minutes: 120`.
 | bash | Homebrew 5.3.20 (the tests and the CLI); system `/bin/bash` 3.2.57 (the tests that need it) |
 | awk | `/usr/bin/awk`, one-true-awk 20200816 (`bwk`) |
 | other tools | jq 1.8.2, Homebrew 7.0.11, GNU coreutils `timeout` 9.12, `plutil` present |
-| Run time | the suite step took 21 minutes 21 seconds, the job 21 minutes 40 seconds |
-| Result | RESULT_PLACEHOLDER |
+| Run time | the suite took 21 minutes 47 seconds (log start to end), the whole job 22 minutes 10 seconds; the run before it, on the same code except one added test, took 21 minutes 21 seconds and 21 minutes 40 seconds |
+| Result | `SUMMARY: 958 passed, 0 failed, 331 skipped (total 1289)` |
 | macOS-only tests | `check-macos-tests.sh`: `28 of 28 macOS-only tests passed` |
 
 **What the first runs found** (all on a real Mac, none on Linux):

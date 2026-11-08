@@ -237,6 +237,30 @@ jobs:
           done
           } 2>&1 | tee -a "$RUNNER_TEMP/macos-versions.txt"
 
+      - name: Probe 2 TEMPORARY
+        run: |
+          prefix="$(brew --prefix)"
+          PATH="$prefix/bin:$prefix/opt/coreutils/libexec/gnubin:$PATH"
+          B="$prefix/bin/bash"
+          {
+            echo "== timeout: $(timeout --version | head -1) at $(command -v timeout); sleep at $(command -v sleep)"
+            echo "-- chain with a process substitution (bash INT default -> procsub child -> timeout --foreground -> sleep)"
+            env --default-signal=INT "$B" -c 'mapfile -t x < <(timeout --foreground -k 5 30 sleep 8)' &
+            sleep 2
+            ps -axo pid,ppid,pgid,ignored,caught,command | grep -E "sleep 8|timeout --foreground" | grep -v grep
+            wait
+            echo "-- control chain without a process substitution"
+            env --default-signal=INT "$B" -c 'timeout --foreground -k 5 30 sleep 9' &
+            sleep 2
+            ps -axo pid,ppid,pgid,ignored,caught,command | grep -E "sleep 9|timeout --foreground" | grep -v grep
+            wait
+            echo "-- the same sleep started by a plain sh"
+            env --default-signal=INT sh -c 'sleep 7 & wait' &
+            sleep 2
+            ps -axo pid,ppid,pgid,ignored,caught,command | grep -E "sleep 7" | grep -v grep
+            wait
+          } 2>&1 | tee -a "$RUNNER_TEMP/macos-versions.txt"
+
       # A failing suite fails this step; the later steps still run (if: always()) so the log is kept and the macOS-only tests are judged.
       - name: Run the suite
         env:

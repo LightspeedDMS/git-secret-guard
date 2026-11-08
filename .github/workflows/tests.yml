@@ -217,6 +217,26 @@ jobs:
           PATH="$prefix/bin:$prefix/opt/coreutils/libexec/gnubin:$PATH"
           "$prefix/bin/bash" tests/fetch-test-tools.sh
 
+      - name: Probe TEMPORARY
+        run: |
+          prefix="$(brew --prefix)"
+          PATH="$prefix/bin:$prefix/opt/coreutils/libexec/gnubin:$PATH"
+          {
+          for sh in "$prefix/bin/bash" /bin/bash; do
+            echo "== $sh $("$sh" --version | head -1)"
+            echo "-- INT in a process substitution child (script started with default INT)"
+            env --default-signal=INT "$sh" -c 'mapfile -t x < <("$0" -c "trap -p INT; trap -p TERM"); printf "child: %s\n" "${x[@]:-none}"' "$sh"
+            echo "-- same, parent has trap exit 130 INT"
+            env --default-signal=INT "$sh" -c 'trap "exit 130" INT; mapfile -t x < <("$0" -c "trap -p INT; trap -p TERM"); printf "child: %s\n" "${x[@]:-none}"' "$sh"
+            echo "-- same, inside a subshell with that trap"
+            env --default-signal=INT "$sh" -c '( trap "exit 130" INT; mapfile -t x < <("$0" -c "trap -p INT; trap -p TERM"); printf "child: %s\n" "${x[@]:-none}" )' "$sh"
+            echo "-- background job child"
+            env --default-signal=INT "$sh" -c '"$0" -c "trap -p INT" & wait' "$sh"
+            echo "-- timeout --foreground inside a process substitution, then kill -INT of the group"
+            env --default-signal=INT "$sh" -c 'mapfile -t x < <(timeout --foreground -k 5 30 sh -c "trap -p INT; exec sleep 3"); printf "child: %s\n" "${x[@]:-none}"' "$sh"
+          done
+          } 2>&1 | tee -a "$RUNNER_TEMP/macos-versions.txt"
+
       # A failing suite fails this step; the later steps still run (if: always()) so the log is kept and the macOS-only tests are judged.
       - name: Run the suite
         env:
@@ -225,7 +245,7 @@ jobs:
           set -o pipefail
           date -u +'start %H:%M:%S' | tee "$RUNNER_TEMP/macos.log"
           rc=0
-          "$(brew --prefix)/bin/bash" tests/run.sh 2>&1 | tee -a "$RUNNER_TEMP/macos.log" || rc=$?
+          "$(brew --prefix)/bin/bash" tests/run.sh tests/test_status.sh 2>&1 | tee -a "$RUNNER_TEMP/macos.log" || rc=$?
           date -u +'end   %H:%M:%S' | tee -a "$RUNNER_TEMP/macos.log"
           exit "$rc"
 

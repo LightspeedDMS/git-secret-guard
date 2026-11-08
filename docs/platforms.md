@@ -5,7 +5,7 @@
 | RHEL 9-compatible (x86_64) | Supported. RHEL 9-compatible (tested on Rocky Linux 9.7); there `/usr/local/bin/git` is built from source and `/usr/bin/git` 2.52 is left alone. |
 | Ubuntu 24.04 LTS | Supported. The whole suite and an install E2E with real downloads run in a podman `ubuntu:24.04` container, as a non-root user, with mawk as the default awk: `tests/platform/ubuntu.sh`. `install` offers the git upgrade: see [Ubuntu and Debian (apt)](#ubuntu-and-debian-apt). |
 | Ubuntu 22.04 LTS and Debian 13 | Offer tested against stand-ins (2.34.1 on 22.04 takes the PPA in its older `.list` form, Debian takes the source build) and, with real apt, in debootstrap chroots (22.04, 24.04, Debian 13, 20.04). Debian 13 also ran the `--phase upgrade` container E2E (source route, 21/0). **Not run:** an Ubuntu 22.04 container and an x86_64 container ([details](#ubuntu-and-debian-apt)). |
-| macOS arm64 (tested on macOS 26.7.1) | Supported, with Homebrew: see [macOS (Homebrew)](#macos-homebrew). The whole suite and an install E2E in a scratch home run on a real Mac. |
+| macOS arm64 (tested on macOS 26.7.1) | Supported, with Homebrew: see [macOS (Homebrew)](#macos-homebrew). The whole suite and an install E2E in a scratch home run on a real Mac, and the whole suite runs on every pull request on a GitHub-hosted Mac: see [CI on a hosted Mac](#ci-on-a-hosted-mac). |
 | Windows x86_64 (tested on Windows Server 2019) | Supported with Git for Windows: see [Windows (Git for Windows)](#windows-git-for-windows). No weekly timer; the lifecycle test suites do not run there. |
 | WSL (Ubuntu, Debian, RPM distributions) | Implemented, fixture-tested, and run for real on hosted WSL 1 and WSL 2: Ubuntu 22.04 and 24.04 on both, Rocky 9.8 and Fedora 44 on WSL 2 only (the vendor images cannot be imported on WSL 1), a typed yes and No, a `metadata` mount; see [WSL](#wsl-windows-subsystem-for-linux). WSL 1 on Windows Server 2019 blue-screened the maintainer's host twice in its own driver; the cause is not established. |
 | macOS x86_64 (Intel) | Mapped (`darwin_amd64` / `darwin_x64` rows of `tools.lock`) but **not tested**. |
@@ -338,6 +338,44 @@ bin/git-secret-guard install        # lists what is missing, installs it with br
   fake prefix (never a real `brew install`); the Linux-behaviour lifecycle suites run on a Mac under a fake Linux `uname`. Explained
   skips: the podman suite (`test_platform.sh`: Linux only), systemd tests (no `systemctl`), `hook.<event>.enabled` (Apple Git has no
   such key), the gawk and mawk cases when those awks are not installed.
+
+### CI on a hosted Mac
+
+The `macos-suite` job of `.github/workflows/tests.yml` runs the whole suite (`tests/run.sh`) on a GitHub-hosted arm64 Mac. It is a pull request check like `windows-suite`: it runs for pull requests and for `main`, not for every push to a feature branch.
+It needs no secrets (`contents: read`) and is bounded by `timeout-minutes: 120`. Setup is the macOS prerequisites above (`brew install bash coreutils util-linux jq`) and `tests/fetch-test-tools.sh` for the pinned scanners.
+
+- **Which git.** The job tries `/usr/bin/git`, then Homebrew's, and exports the first one that is 2.54 or newer as `GSG_TEST_GIT`; it fails with an error when neither is. The image's Apple Git is 2.50.1, which ignores `hook.<name>.command`, so the suite runs on Homebrew's git 2.56.0. The suite therefore did **not** run on an Apple git that meets the floor in CI; that case was only checked by hand on the maintainer's Mac (Apple Git 2.54.0).
+- **The macOS-only tests must pass, not skip.** `tests/macos-only.list` names the 28 tests that skip on every other system (`test_macos` 17, `test_hook` 4, `test_launchd` 3, the `bwk` tests of `test_awk_portability` 4). After the suite, `.github/scripts/check-macos-tests.sh` reads that list and the log and fails the job when a listed test is skipped, failed, or not in the log at all, so a rename cannot make it pass quietly. The story counted 29 (five `bwk` tests); the files hold four.
+  A new test that can only run on a Mac belongs in the list (`test_the_checker_*` and `test_the_list_*` in `tests/test_macos_ci.sh` check the checker and that every listed name is a real test function).
+- **Reading a run.** Job logs can be read only when the whole run has ended; the job uploads its log and the version list as the artifact `macos-log` (`gh run download RUN -n macos-log`).
+
+**Record** (run RUN_ID_PLACEHOLDER, on commit COMMIT_PLACEHOLDER; the commits after it change documentation only):
+
+| Item | Value |
+|---|---|
+| Runner image | `macos-26`, image `macos26` version 20261102.0473.1, arm64 |
+| macOS | 26.7.2 (25G332) |
+| git used by the tests | Homebrew 2.56.0 (`/opt/homebrew/bin/git`); `/usr/bin/git` is Apple Git 2.50.1 and was not used |
+| bash | Homebrew 5.3.20 (the tests and the CLI); system `/bin/bash` 3.2.57 (the tests that need it) |
+| awk | `/usr/bin/awk`, one-true-awk 20200816 (`bwk`) |
+| other tools | jq 1.8.2, Homebrew 7.0.11, GNU coreutils `timeout` 9.12, `plutil` present |
+| Run time | the suite step took 21 minutes 21 seconds, the job 21 minutes 40 seconds |
+| Result | RESULT_PLACEHOLDER |
+| macOS-only tests | `check-macos-tests.sh`: `28 of 28 macOS-only tests passed` |
+
+**What the first runs found** (all on a real Mac, none on Linux):
+
+- `test_status` interrupt tests started `status` through a bare `setsid`. On a Mac util-linux is keg-only and not on the test's `PATH`, so `status` never started. They use `$TEST_SETSID` now (reproduced on Linux with a `PATH` that lacks `setsid`).
+- `test_timer::test_the_unit_path_has_no_duplicate_entries` knew only `/usr/local/bin` and `/usr/bin` as the first git directory. With Homebrew's git first it is `/opt/homebrew/bin`; any other directory goes first and the rest follow, as the test already asserted for `/opt/git/bin`.
+- **Product bug.** `test_an_interrupt_during_the_hook_check_stops_status_with_130` failed with `git was still running after SIGINT ended status`. `hooklist_read` (used by `status` and by `doctor`) ran `git hook list` as `mapfile < <(timeout ... git hook list)`. On the runner,
+  Homebrew bash 5.3.20 starts a process substitution child with SIGINT ignored (`trap -p` in the child printed `trap -- '' SIGINT`). Measured on the runner with `kill -INT` sent to the `sleep` alone: a `sleep` started in a process substitution survived, with or without `timeout --foreground` in between;
+  the same `timeout --foreground ... sleep` outside a process substitution died. So a Ctrl-C ended `status` and left git running until its 30 second bound. On Linux the child of `timeout` showed no ignored signal (`SigIgn: 0` in `/proc`), and a bash 5.1.8 and a locally built bash 5.3.0 did not reproduce the failure.
+  `hooklist_read` (used by `status` and `doctor`) now runs git as a foreground command writing to `ERRFILE.out`. Because Linux cannot show the failure, `test_the_hook_list_call_runs_in_the_foreground_not_in_a_process_substitution` pins the code shape on every bash.
+  `hp_records` in the same file (`lib/hookspath.sh`) also reads `git config` through a process substitution; it was not part of the failing test and was not changed.
+
+**Still not covered by this job:** Intel Macs; a long-lived Mac with git-secret-guard already installed; GUI git clients; an Apple git that is 2.54 or newer (see above); macOS releases other than the image's (26.x).
+Of the 331 tests that skipped, 210 are the RPM source route tests, which need GNU `find` (`this PATH has only BSD find`); installing `findutils` would presumably run them (not tried). The rest are Linux, Windows or podman only, plus the `gawk` and `mawk` awk tests
+(not installed), three tests that need `pre-commit`, and the shellcheck gate (it runs in the Ubuntu job).
 
 ## Windows (Git for Windows)
 

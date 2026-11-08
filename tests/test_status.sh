@@ -521,6 +521,16 @@ test_an_interrupt_during_the_hook_check_stops_status_with_130() {
     assert_eq "$(st_tmp_listing)" "" "SIGINT removed the throwaway repository"
 }
 
+# ^ external bash 5.3 (macOS) starts a procsub child with SIGINT ignored => git outlived Ctrl-C; Linux bashes hide it => the code shape is pinned; #68
+# ^ invariant behaviour = test:test_an_interrupt_during_the_hook_check_stops_status_with_130; here git stays a foreground command of hooklist_read on every bash
+test_the_hook_list_call_runs_in_the_foreground_not_in_a_process_substitution() {
+    local body
+    body="$(awk '/^hooklist_read\(\) \{/ { on = 1 } on && !/^[[:space:]]*#/ { print } on && /^\}/ { exit }' "$GSG_PROJECT/lib/hookspath.sh")" || return 1
+    # shellcheck disable=SC2016
+    assert_contains "$body" 'hook list pre-commit >"$outfile"' "git writes to a file as a foreground command"
+    assert_not_contains "$body" '<(' "no process substitution in hooklist_read"
+}
+
 # ^ security the probe runs no hook of the user's; git init fires reference-transaction => the repository is built by hand, nothing is initialised
 # ^ invariant a reference-transaction script in core.hooksPath and a config hook for the event both write a marker; neither may exist after status or doctor
 st_rt_traps() {

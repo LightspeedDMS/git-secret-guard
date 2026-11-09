@@ -371,10 +371,10 @@ starts with a bare environment). Stdout and stderr go to `doctor.log` in the sta
   Tests: `test_an_interrupt_during_discovery_stops_doctor_and_leaves_no_find_behind` (stalled `find` stand-in, Ctrl-C to doctor's
   group, exit 130, stand-in gone) and `test_the_discovery_finds_run_in_the_foreground_not_in_a_process_substitution`.
   Bash defers a trap until the foreground child exits, so a TERM or HUP sent to doctor's pid alone now waits for the walk (Ctrl-C, the timeout and cgroup stops signal the group and are unaffected); same trade-off as `hooklist_read`.
-  **Measured on Linux (bash 5.1):** against the old process-substitution code the behaviour test fails (`find (pid ...) was
-  still running after SIGINT ended doctor`), so the leak was real here too, not only on bash 5.3; it passes with the foreground
-  form. **Mac measurement pending CI:** the `macos-suite` run (bash 5.3) was not available when this was written, so nothing
-  is claimed about the Mac beyond the PR #69 measurement of the same bash behaviour.
+  **Measured on Linux (bash 5.3.9, Fedora 44):** against the old process-substitution code the behaviour test fails (`find (pid ...) was
+  still running after SIGINT ended doctor`), so the leak was real there too, not only on the Mac; it passes with the foreground
+  form. **Mac (PR #72, `macos-suite`, macOS 26.7.2 arm64, Homebrew bash 5.3.20):** both new tests PASS with the foreground form.
+  The old code was not run on the Mac, so the Mac leak itself stays unmeasured; the Linux failure on the same bash series is the evidence.
 - **Worktrees**: `doctor_check_worktrees` runs `doctor_repo_hook` per checkout; repeats are dropped through `DR_SEEN` and
   `DR_TREE_LABEL`.
 - **Time bounds**: `doctor_bound_git` writes a `git` shim (first on `PATH`, also `GSG_GIT`) that runs git under

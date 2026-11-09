@@ -447,4 +447,67 @@ test_an_inherited_git_dir_cannot_point_every_check_at_one_repository() {
     assert_contains "$OUT" "summary: 2 repos, 1 covered" "and judged on its own"
 }
 
+# ^ security only the group this function started is signalled; setsid makes the sh its own group leader and kill -INT -- -PID stays inside it
+# ^ invariant dr_interrupt_find LABEL stalls the first find doctor runs, sends Ctrl-C to the group, waits; sets DR_RC, DR_FIND_PID = the stalled find's pid
+dr_interrupt_find() {
+    local mode="$1" pid n
+    rm -f -- "$SANDBOX/int.rc" "$SANDBOX/int.pid" "$SANDBOX/find.stalled"
+    # shellcheck disable=SC2016
+    printf '#!/bin/sh\necho $$ >"%s/find.stalled"\nexec sleep 30\n' "$SANDBOX" >"$SANDBOX/pathbin/find" || return 1
+    chmod 755 "$SANDBOX/pathbin/find" || return 1
+    # shellcheck disable=SC2016
+    ("$TEST_SETSID" sh -c 'echo $$ >"$1"; shift; exec "$@"' sh "$SANDBOX/int.pid" env --default-signal=INT env -i "${LC_ENV[@]}" "${EXTRA_ENV[@]}" "$GSG_PROJECT/bin/git-secret-guard" doctor --roots "$DR_ROOTS" >"$SANDBOX/int.out" 2>&1 </dev/null
+        echo $? >"$SANDBOX/int.rc") &
+    for ((n = 0; n < 100; n++)); do
+        if [ -e "$SANDBOX/find.stalled" ]; then break; fi
+        sleep 0.1
+    done
+    pid="$(<"$SANDBOX/int.pid")"
+    if [ ! -e "$SANDBOX/find.stalled" ]; then
+        kill -KILL -- "-$pid" 2>/dev/null
+        fail "doctor never reached its discovery find ($mode)"
+        return 1
+    fi
+    DR_FIND_PID="$(<"$SANDBOX/find.stalled")"
+    kill -INT -- "-$pid" 2>/dev/null
+    for ((n = 0; n < 100; n++)); do
+        if [ -e "$SANDBOX/int.rc" ]; then break; fi
+        sleep 0.1
+    done
+    if [ ! -e "$SANDBOX/int.rc" ]; then
+        kill -KILL -- "-$pid" 2>/dev/null
+        fail "doctor did not end after SIGINT"
+        return 1
+    fi
+    DR_RC="$(<"$SANDBOX/int.rc")"
+    OUT="$(<"$SANDBOX/int.out")"
+    for ((n = 0; n < 50; n++)); do
+        if ! kill -0 "$DR_FIND_PID" 2>/dev/null; then break; fi
+        sleep 0.1
+    done
+}
+
+# ^ external a procsub child can outlive Ctrl-C (bash 5.3 on macOS by measurement; this test failed on the old code on Linux too); Mac run pending CI (#71)
+test_an_interrupt_during_discovery_stops_doctor_and_leaves_no_find_behind() {
+    dr_begin && dr_repo calm || return 1
+    dr_interrupt_find discovery || return 1
+    assert_eq "$DR_RC" 130 "Ctrl-C ends doctor"
+    assert_not_contains "$OUT" "summary:" "doctor does not carry on to the report"
+    if kill -0 "$DR_FIND_PID" 2>/dev/null; then
+        kill -KILL "$DR_FIND_PID" 2>/dev/null
+        fail "find (pid $DR_FIND_PID) was still running after SIGINT ended doctor"
+    fi
+}
+
+# ^ invariant behaviour = test:test_an_interrupt_during_discovery_stops_doctor_and_leaves_no_find_behind; here both finds stay foreground commands on every bash
+test_the_discovery_finds_run_in_the_foreground_not_in_a_process_substitution() {
+    local body
+    body="$(awk '/^doctor_(discover|unreadable)\(\) \{/ { on = 1 } on && !/^[[:space:]]*#/ { print } on && /^\}/ { on = 0 }' "$GSG_PROJECT/lib/doctor_repos.sh")" || return 1
+    # shellcheck disable=SC2016
+    assert_contains "$body" '>"$DR_WORK/find.out" 2>"$DR_WORK/find.err"' "the discovery find writes to a file"
+    # shellcheck disable=SC2016
+    assert_contains "$body" '>"$DR_WORK/find2.out" 2>"$DR_WORK/find2.err"' "the permission re-check find writes to a file"
+    assert_not_contains "$body" '<(' "no process substitution in the discovery functions"
+}
+
 run_file_tests

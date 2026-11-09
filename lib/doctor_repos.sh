@@ -95,10 +95,11 @@ doctor_unreadable() {
     local -a dirs=() bad=()
     doctor_only_permission_denied "$DR_WORK/find.err" || return 1
     doctor_prune_args "$1"
-    mapfile -d '' -t dirs < <(LC_ALL=C find "$1" -maxdepth "$((GSG_DOCTOR_FIND_DEPTH - 1))" "${DR_PRUNE[@]}" -name node_modules -type d -prune -o -type d -print0 2>"$DR_WORK/find2.err")
-    wait "$!"
+    # ^ why a foreground command and a file, not mapfile < <(find ...); bash 5.3 starts its child with SIGINT ignored => find outlived Ctrl-C; #71, #68
+    LC_ALL=C find "$1" -maxdepth "$((GSG_DOCTOR_FIND_DEPTH - 1))" "${DR_PRUNE[@]}" -name node_modules -type d -prune -o -type d -print0 >"$DR_WORK/find2.out" 2>"$DR_WORK/find2.err"
     rc=$?
     if [ "$rc" -ne 0 ]; then doctor_only_permission_denied "$DR_WORK/find2.err" || return 1; fi
+    if ! mapfile -d '' -t dirs <"$DR_WORK/find2.out"; then return 1; fi
     for dir in "${dirs[@]}"; do
         if [ ! -r "$dir" ] || [ ! -x "$dir" ]; then bad+=("$dir"); fi
     done
@@ -165,13 +166,22 @@ doctor_finish_discovery() {
 
 # ^ invariant fills DR_KEYS (one per git common dir) and DR_SORTED (shown paths in order); rc 1 = bound hit or read failed
 # ^ invariant a linked worktree is grouped under its main repository by common dir; a repository git cannot open is kept, never skipped
-# ^ external wait "$!" after a process substitution = the command's own exit status (probed on bash 5.1.8)
 doctor_discover() {
     local root entry dir found=0 rc
     local -A seen=()
     doctor_discover_reset
     for root in "${DR_ROOT_LIST[@]}"; do
         doctor_prune_args "$root"
+        # ^ why a foreground command and a file, not done < <(find ...); bash 5.3 starts its child with SIGINT ignored => find outlived Ctrl-C; #71, #68
+        LC_ALL=C find "$root" -maxdepth "$GSG_DOCTOR_FIND_DEPTH" "${DR_PRUNE[@]}" -name node_modules -type d -prune -o -name .git -prune -print0 >"$DR_WORK/find.out" 2>"$DR_WORK/find.err"
+        rc=$?
+        if [ "$rc" -ne 0 ] && doctor_unreadable "$root"; then rc=0; fi
+        if [ "$rc" -ne 0 ]; then
+            first_message "$DR_WORK/find.err"
+            printf '%s: could not read everything under %s (find exit %s%s); narrow --roots or fix the permissions\n' \
+                "$GSG_NAME" "$root" "$rc" "${REPLY:+: ${REPLY//[[:cntrl:]]/?}}" >&2
+            return 1
+        fi
         while IFS= read -r -d '' entry; do
             found=$((found + 1))
             if [ "$found" -gt "$GSG_DOCTOR_MAX_ENTRIES" ]; then
@@ -182,16 +192,7 @@ doctor_discover() {
             if [[ -n ${seen[$dir]:-} ]]; then continue; fi
             seen[$dir]=1
             doctor_classify_dir "$dir"
-        done < <(LC_ALL=C find "$root" -maxdepth "$GSG_DOCTOR_FIND_DEPTH" "${DR_PRUNE[@]}" -name node_modules -type d -prune -o -name .git -prune -print0 2>"$DR_WORK/find.err")
-        wait "$!"
-        rc=$?
-        if [ "$rc" -ne 0 ] && doctor_unreadable "$root"; then rc=0; fi
-        if [ "$rc" -ne 0 ]; then
-            first_message "$DR_WORK/find.err"
-            printf '%s: could not read everything under %s (find exit %s%s); narrow --roots or fix the permissions\n' \
-                "$GSG_NAME" "$root" "$rc" "${REPLY:+: ${REPLY//[[:cntrl:]]/?}}" >&2
-            return 1
-        fi
+        done <"$DR_WORK/find.out"
     done
     doctor_finish_discovery
 }

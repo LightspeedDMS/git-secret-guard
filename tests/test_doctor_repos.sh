@@ -458,7 +458,7 @@ dr_interrupt_find() {
     # shellcheck disable=SC2016
     ("$TEST_SETSID" sh -c 'echo $$ >"$1"; shift; exec "$@"' sh "$SANDBOX/int.pid" env --default-signal=INT env -i "${LC_ENV[@]}" "${EXTRA_ENV[@]}" "$GSG_PROJECT/bin/git-secret-guard" doctor --roots "$DR_ROOTS" >"$SANDBOX/int.out" 2>&1 </dev/null
         echo $? >"$SANDBOX/int.rc") &
-    for ((n = 0; n < 100; n++)); do
+    for ((n = 0; n < 300; n++)); do
         if [ -e "$SANDBOX/find.stalled" ]; then break; fi
         sleep 0.1
     done

@@ -157,6 +157,15 @@ test_the_unlisted_check_refuses_bad_input() {
     assert_rc 2 "too few arguments"
 }
 
+test_the_unlisted_check_names_an_empty_list_instead_of_reading_the_logs_in_its_place() {
+    : >"$SANDBOX/list"
+    printf 'PASS    a::test_one\n' >"$SANDBOX/mac"
+    printf 'SKIPPED a::test_one (macOS only)\n' >"$SANDBOX/linux"
+    unlisted "$SANDBOX/list" "$SANDBOX/mac" "$SANDBOX/linux"
+    assert_rc 2 "an empty list"
+    assert_contains "$OUT$ERR" "$SANDBOX/list is empty" "the empty file is named"
+}
+
 # ^ invariant every real Mac-only skip wording of the suite is seen by MAC_REASON => the list in the repo is judged against a Linux log of the real tests
 test_the_unlisted_check_accepts_the_real_list_against_logs_built_from_it() {
     local id

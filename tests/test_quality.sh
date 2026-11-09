@@ -21,7 +21,7 @@ shellcheck_gate_skip_reason() {
 # ^ why project_scripts omits tests/fixtures/husky/h, not shellcheck it; verbatim third-party sh script
 project_scripts() {
     cd -- "$GSG_PROJECT" || return 1
-    printf '%s\n' hooks/secret-scan bin/git-secret-guard lib/*.sh lib/scanners/*.sh tests/*.sh tests/platform/*.sh tests/stubs/* .github/scripts/check-dco.sh .github/scripts/check-macos-tests.sh
+    printf '%s\n' hooks/secret-scan bin/git-secret-guard lib/*.sh lib/scanners/*.sh tests/*.sh tests/platform/*.sh tests/stubs/* .github/scripts/check-dco.sh .github/scripts/check-macos-tests.sh .github/scripts/check-macos-unlisted.sh
 }
 
 test_shellcheck_reports_nothing_on_every_script() {

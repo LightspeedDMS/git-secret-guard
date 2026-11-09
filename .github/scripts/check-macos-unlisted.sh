@@ -16,6 +16,11 @@ for f in "$1" "$2" "$3"; do
         printf 'check-macos-unlisted: cannot read %s\n' "$f" >&2
         exit 2
     fi
+    # ^ why -s in the shell, not left to awk; FNR == 1 never fires for a zero-byte file => the files shift and the error misleads
+    if [ ! -s "$f" ]; then
+        printf 'check-macos-unlisted: %s is empty, which proves nothing\n' "$f" >&2
+        exit 2
+    fi
 done
 
 awk -v pat="$MAC_REASON" '

@@ -95,11 +95,14 @@ doctor_unreadable() {
     local -a dirs=() bad=()
     doctor_only_permission_denied "$DR_WORK/find.err" || return 1
     doctor_prune_args "$1"
-    # ^ why a foreground command and a file, not mapfile < <(find ...); bash 5.3 starts its child with SIGINT ignored => find outlived Ctrl-C; #71, #68
+    # ^ why a foreground command and a file, not mapfile < <(find ...); async children start with SIGINT ignored => find outlived Ctrl-C; #71
     LC_ALL=C find "$1" -maxdepth "$((GSG_DOCTOR_FIND_DEPTH - 1))" "${DR_PRUNE[@]}" -name node_modules -type d -prune -o -type d -print0 >"$DR_WORK/find2.out" 2>"$DR_WORK/find2.err"
     rc=$?
     if [ "$rc" -ne 0 ]; then doctor_only_permission_denied "$DR_WORK/find2.err" || return 1; fi
-    if ! mapfile -d '' -t dirs <"$DR_WORK/find2.out"; then return 1; fi
+    if ! mapfile -d '' -t dirs <"$DR_WORK/find2.out"; then
+        printf '%s: cannot read the directory list of %s\n' "$GSG_NAME" "$1" >&2
+        return 1
+    fi
     for dir in "${dirs[@]}"; do
         if [ ! -r "$dir" ] || [ ! -x "$dir" ]; then bad+=("$dir"); fi
     done
@@ -168,11 +171,12 @@ doctor_finish_discovery() {
 # ^ invariant a linked worktree is grouped under its main repository by common dir; a repository git cannot open is kept, never skipped
 doctor_discover() {
     local root entry dir found=0 rc
+    local -a entries=()
     local -A seen=()
     doctor_discover_reset
     for root in "${DR_ROOT_LIST[@]}"; do
         doctor_prune_args "$root"
-        # ^ why a foreground command and a file, not done < <(find ...); bash 5.3 starts its child with SIGINT ignored => find outlived Ctrl-C; #71, #68
+        # ^ why a foreground command and a file, not done < <(find ...); async children start with SIGINT ignored => find outlived Ctrl-C; #71
         LC_ALL=C find "$root" -maxdepth "$GSG_DOCTOR_FIND_DEPTH" "${DR_PRUNE[@]}" -name node_modules -type d -prune -o -name .git -prune -print0 >"$DR_WORK/find.out" 2>"$DR_WORK/find.err"
         rc=$?
         if [ "$rc" -ne 0 ] && doctor_unreadable "$root"; then rc=0; fi
@@ -182,7 +186,11 @@ doctor_discover() {
                 "$GSG_NAME" "$root" "$rc" "${REPLY:+: ${REPLY//[[:cntrl:]]/?}}" >&2
             return 1
         fi
-        while IFS= read -r -d '' entry; do
+        if ! mapfile -d '' -t entries <"$DR_WORK/find.out"; then
+            printf '%s: cannot read the repository list of %s\n' "$GSG_NAME" "$root" >&2
+            return 1
+        fi
+        for entry in "${entries[@]}"; do
             found=$((found + 1))
             if [ "$found" -gt "$GSG_DOCTOR_MAX_ENTRIES" ]; then
                 printf '%s: more than %s repositories or worktrees under the roots; narrow --roots\n' "$GSG_NAME" "$GSG_DOCTOR_MAX_ENTRIES" >&2
@@ -192,7 +200,7 @@ doctor_discover() {
             if [[ -n ${seen[$dir]:-} ]]; then continue; fi
             seen[$dir]=1
             doctor_classify_dir "$dir"
-        done <"$DR_WORK/find.out"
+        done
     done
     doctor_finish_discovery
 }

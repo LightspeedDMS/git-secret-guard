@@ -363,6 +363,18 @@ starts with a bare environment). Stdout and stderr go to `doctor.log` in the sta
   `Permission denied` or `Operation not permitted` goes to `doctor_unreadable`, which returns 1 (exit 2) unless its second
   find names 1 to `GSG_DOCTOR_MAX_ENTRIES` unreadable directories; any other failure exits 2. Tests:
   `tests/test_doctor_home.sh`, `tests/test_doctor_repos.sh`.
+- **Ctrl-C and the discovery finds (#71).** PR #69 measured on the hosted Mac (bash 5.3.20) that a child started by a process
+  substitution ignores SIGINT, which made `git hook list` outlive Ctrl-C (`hooklist_read`). Both finds of `doctor_repos.sh`
+  (`doctor_discover`, `doctor_unreadable`) used the same shape, so they now run as foreground commands writing
+  `$DR_WORK/find.out` / `find2.out`, read after the exit status is taken (`rc=$?`, no `wait "$!"`). Cost: the repository count
+  limit (`GSG_DOCTOR_MAX_ENTRIES`) is checked after the whole walk, and the walk's output sits in the work dir until doctor ends.
+  Tests: `test_an_interrupt_during_discovery_stops_doctor_and_leaves_no_find_behind` (stalled `find` stand-in, Ctrl-C to doctor's
+  group, exit 130, stand-in gone) and `test_the_discovery_finds_run_in_the_foreground_not_in_a_process_substitution`.
+  Bash defers a trap until the foreground child exits, so a TERM or HUP sent to doctor's pid alone now waits for the walk (Ctrl-C, the timeout and cgroup stops signal the group and are unaffected); same trade-off as `hooklist_read`.
+  **Measured on Linux (bash 5.3.9, Fedora 44):** against the old process-substitution code the behaviour test fails (`find (pid ...) was
+  still running after SIGINT ended doctor`), so the leak was real there too, not only on the Mac; it passes with the foreground
+  form. **Mac (PR #72, `macos-suite`, macOS 26.7.2 arm64, Homebrew bash 5.3.20):** both new tests PASS with the foreground form.
+  The old code was not run on the Mac, so the Mac leak itself stays unmeasured; the Linux failure on the same bash series is the evidence.
 - **Worktrees**: `doctor_check_worktrees` runs `doctor_repo_hook` per checkout; repeats are dropped through `DR_SEEN` and
   `DR_TREE_LABEL`.
 - **Time bounds**: `doctor_bound_git` writes a `git` shim (first on `PATH`, also `GSG_GIT`) that runs git under

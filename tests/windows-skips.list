@@ -3,6 +3,7 @@ test_doctor::test_a_hook_command_that_is_missing_or_not_executable_is_a_problem 
 test_doctor::test_doctor_checks_the_timer_only_when_the_state_says_one_is_installed | installs a systemd timer, Windows has none
 test_doctor_repos::test_a_repository_whose_config_hangs_git_becomes_a_timed_out_finding_instead_of_a_hang | needs a FIFO, which Git for Windows cannot create for native git
 test_doctor_repos::test_a_timed_out_doctor_run_leaves_no_process_behind | needs ps -x and process groups
+test_doctor_repos::test_an_interrupt_during_discovery_stops_doctor_and_leaves_no_find_behind | no process groups on Windows; a signal cannot be sent to the group of one run
 test_doctor_repos::test_an_unreadable_directory_is_a_listed_problem_and_the_rest_is_still_checked | NTFS ignores chmod, so nothing is unreadable
 test_doctor_repos::test_control_characters_in_repository_names_never_reach_the_output | NTFS forbids control characters in file names
 test_doctor_findings::test_a_full_run_keeps_recorded_repos_it_could_not_have_seen_under_its_roots | NTFS ignores chmod, so nothing is unreadable

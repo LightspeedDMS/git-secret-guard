@@ -254,6 +254,22 @@ jobs:
         if: ${{ !cancelled() }}
         run: bash .github/scripts/check-macos-tests.sh tests/macos-only.list "$RUNNER_TEMP/macos.log"
 
+  # A Mac-only test that is not in tests/macos-only.list escapes the gate above. This job reads the Linux head log of `suite` (skip reasons) and the Mac log (PASS lines) and names such tests.
+  macos-list-complete:
+    needs: [suite, macos-suite]
+    if: ${{ !cancelled() && needs.macos-suite.result != 'skipped' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: logs
+          pattern: '*log*'
+          merge-multiple: true
+      - name: Every Mac-only test is in tests/macos-only.list
+        run: bash .github/scripts/check-macos-unlisted.sh tests/macos-only.list logs/macos.log logs/head.log
+
   # Proves on a clean Windows machine what a user does: install, a leak is blocked, a clean commit passes, no leftovers, uninstall leaves nothing.
   windows:
     runs-on: windows-2025

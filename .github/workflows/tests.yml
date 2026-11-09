@@ -167,6 +167,93 @@ jobs:
           GSG_TEST_FILE_TIMEOUT: "1800"
         run: tests\run.cmd
 
+  # The suite on a real Mac (arm64, Homebrew). Tests that need macOS skip everywhere else; tests/macos-only.list names them and the last step fails the job unless each one PASSED.
+  macos-suite:
+    # A pull request and main only, like windows-suite.
+    if: github.event_name != 'push' || github.ref == 'refs/heads/main'
+    runs-on: macos-26
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the prerequisites of docs/platforms.md
+        run: brew install bash coreutils util-linux jq
+
+      # tests/lib.sh defaults GSG_TEST_GIT to /usr/bin/git on macOS; a git below 2.54 ignores hook.<name>.command and would commit a leak unscanned.
+      - name: Choose the git and print the versions
+        run: |
+          prefix="$(brew --prefix)"
+          chosen=""
+          for cand in /usr/bin/git "$prefix/bin/git"; do
+            if [ ! -x "$cand" ]; then echo "$cand: not present"; continue; fi
+            ver="$("$cand" --version)"
+            echo "$cand: $ver"
+            if [ -z "$chosen" ] && [[ $ver =~ ^git\ version\ ([0-9]+)\.([0-9]+) ]]; then
+              if [ "${BASH_REMATCH[1]}" -gt 2 ] || { [ "${BASH_REMATCH[1]}" -eq 2 ] && [ "${BASH_REMATCH[2]}" -ge 54 ]; }; then chosen="$cand"; fi
+            fi
+          done
+          if [ -z "$chosen" ]; then
+            echo "::error::no git >= 2.54 on this image (/usr/bin/git or $prefix/bin/git)"
+            exit 1
+          fi
+          echo "GSG_TEST_GIT=$chosen" >>"$GITHUB_ENV"
+          {
+            echo "image: ${ImageOS:-?} ${ImageVersion:-?}"
+            echo "macOS: $(sw_vers -productVersion) $(sw_vers -buildVersion), $(uname -m)"
+            echo "tests use git: $chosen ($("$chosen" --version))"
+            echo "bash (Homebrew): $("$prefix/bin/bash" --version | head -1)"
+            echo "bash (system): $(/bin/bash --version | head -1)"
+            echo "awk (/usr/bin/awk): $(/usr/bin/awk --version 2>&1 | head -1)"
+            echo "jq: $(jq --version)"
+            echo "brew: $(brew --version | head -1)"
+            echo "plutil: $(command -v plutil || echo none)"
+          } | tee "$RUNNER_TEMP/macos-versions.txt"
+          cat "$RUNNER_TEMP/macos-versions.txt" >>"$GITHUB_STEP_SUMMARY"
+
+      # The real-scanner tests read the pinned binaries from this cache (tests/lib.sh), never brew's latest release.
+      # GitHub release downloads sometimes answer 504 for minutes; the script skips what it has and verifies every download against tools.lock, so a retry is safe.
+      - name: Fetch the pinned scanners
+        run: |
+          prefix="$(brew --prefix)"
+          PATH="$prefix/bin:$prefix/opt/coreutils/libexec/gnubin:$PATH"
+          delay=20
+          for attempt in 1 2 3 4; do
+            if "$prefix/bin/bash" tests/fetch-test-tools.sh; then exit 0; fi
+            if [ "$attempt" -lt 4 ]; then
+              echo "fetch attempt $attempt of 4 failed; trying again in ${delay}s"
+              sleep "$delay"
+              delay=$((delay * 2))
+            fi
+          done
+          echo "::error::the pinned scanners could not be fetched in 4 attempts (see the curl error above; a release download answering 5xx is an upstream outage)"
+          exit 1
+
+      # A failing suite fails this step; the later steps still run (if: !cancelled()) so the log is kept and the macOS-only tests are judged.
+      - name: Run the suite
+        env:
+          GSG_TEST_FILE_TIMEOUT: "1800"
+        run: |
+          set -o pipefail
+          date -u +'start %H:%M:%S' | tee "$RUNNER_TEMP/macos.log"
+          rc=0
+          "$(brew --prefix)/bin/bash" tests/run.sh 2>&1 | tee -a "$RUNNER_TEMP/macos.log" || rc=$?
+          date -u +'end   %H:%M:%S' | tee -a "$RUNNER_TEMP/macos.log"
+          exit "$rc"
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: macos-log
+          path: |
+            ${{ runner.temp }}/macos.log
+            ${{ runner.temp }}/macos-versions.txt
+          if-no-files-found: error
+
+      # A job that skips the macOS-only tests proves nothing: each name in the list must be a PASS line of the log.
+      - name: The macOS-only tests passed
+        if: ${{ !cancelled() }}
+        run: bash .github/scripts/check-macos-tests.sh tests/macos-only.list "$RUNNER_TEMP/macos.log"
+
   # Proves on a clean Windows machine what a user does: install, a leak is blocked, a clean commit passes, no leftovers, uninstall leaves nothing.
   windows:
     runs-on: windows-2025

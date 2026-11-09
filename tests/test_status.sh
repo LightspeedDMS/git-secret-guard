@@ -464,7 +464,7 @@ st_signal_status() {
     rm -f -- "$SANDBOX/int.rc" "$SANDBOX/int.pid"
     st_git_stub "" hook "" stall || return 1
     # shellcheck disable=SC2016
-    (setsid sh -c 'echo $$ >"$1"; shift; exec "$@"' sh "$SANDBOX/int.pid" env --default-signal=INT env -i "${LC_ENV[@]}" "${EXTRA_ENV[@]}" "$GSG_PROJECT/bin/git-secret-guard" status >"$SANDBOX/int.out" 2>&1 </dev/null
+    ("$TEST_SETSID" sh -c 'echo $$ >"$1"; shift; exec "$@"' sh "$SANDBOX/int.pid" env --default-signal=INT env -i "${LC_ENV[@]}" "${EXTRA_ENV[@]}" "$GSG_PROJECT/bin/git-secret-guard" status >"$SANDBOX/int.out" 2>&1 </dev/null
         echo $? >"$SANDBOX/int.rc") &
     for ((n = 0; n < 100; n++)); do
         if [ -e "$SANDBOX/git.stalled" ]; then break; fi
@@ -519,6 +519,30 @@ test_an_interrupt_during_the_hook_check_stops_status_with_130() {
     assert_not_contains "$OUT" "previous core.hooksPath" "none of the later lines is printed"
     assert_not_contains "$OUT" "originals moved aside" "status does not carry on"
     assert_eq "$(st_tmp_listing)" "" "SIGINT removed the throwaway repository"
+}
+
+# ^ external bash 5.3 (macOS) starts a procsub child with SIGINT ignored => git outlived Ctrl-C; Linux bashes hide it => the code shape is pinned; #68
+# ^ invariant behaviour = test:test_an_interrupt_during_the_hook_check_stops_status_with_130; here git stays a foreground command of hooklist_read on every bash
+test_the_hook_list_call_runs_in_the_foreground_not_in_a_process_substitution() {
+    local body
+    body="$(awk '/^hooklist_read\(\) \{/ { on = 1 } on && !/^[[:space:]]*#/ { print } on && /^\}/ { exit }' "$GSG_PROJECT/lib/hookspath.sh")" || return 1
+    # shellcheck disable=SC2016
+    assert_contains "$body" 'hook list pre-commit 2>"$errfile" >"$outfile"' "git writes to a file as a foreground command"
+    assert_not_contains "$body" '<(' "no process substitution in hooklist_read"
+}
+
+# ^ invariant a failed redirect of git's output lands in the error file => first_message reports it and no raw bash line reaches the user's stderr
+test_an_unwritable_hook_list_output_file_gives_a_clean_message_not_a_raw_bash_error() {
+    mkdir -p -- "$SANDBOX/hl/err.txt.out" || return 1
+    # shellcheck disable=SC2016
+    run_cap env -i PATH="$TEST_BASE_PATH" bash -c 'GSG_ROOT=$1; source "$1/lib/common.sh" && source "$1/lib/tools.sh" && source "$1/lib/hookspath.sh" || exit 9
+        GSG_GIT=$2; HL_BOUND=()
+        hooklist_read "$3/err.txt" --git-dir="$3/none"; rc=$?
+        printf "rc=%s HL_RC=%s REPLY=[%s]\n" "$rc" "$HL_RC" "$REPLY"' _ "$GSG_PROJECT" "$GIT" "$SANDBOX/hl"
+    assert_rc 0 "the probe shell itself ran"
+    assert_contains "$OUT" "rc=1 HL_RC=1" "fails closed"
+    assert_not_contains "$OUT" "REPLY=[]" "and says why"
+    assert_not_contains "$ERR" "hookspath.sh: line" "no raw bash error on stderr"
 }
 
 # ^ security the probe runs no hook of the user's; git init fires reference-transaction => the repository is built by hand, nothing is initialised

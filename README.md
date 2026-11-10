@@ -101,7 +101,7 @@ Details: [docs/exemptions.md](docs/exemptions.md).
 
 ## Limits
 
-- Commits made with git older than 2.54 are not scanned (check the git your IDE or GUI client bundles).
+- Commits made with git older than 2.54 are not scanned (check the git your IDE or GUI client bundles; for SmartGit see [docs/smartgit.md](docs/smartgit.md)).
 - Only `pre-commit` runs the scan: automatic merge commits, cherry-picks, rebases and `git am` are not scanned (a merge
   finished with `git commit` is).
 - Binary files, including UTF-16 text, are not scanned. On Windows that matters more than elsewhere: Windows PowerShell
@@ -120,6 +120,7 @@ The scan's limits are in [docs/scan.md](docs/scan.md#limits); install, exemption
 | [docs/exemptions.md](docs/exemptions.md) | `.secret-scan-ignore`, inline markers, betterleaks config, local switches |
 | [docs/doctor.md](docs/doctor.md) | the coverage report, its checks and exit status, the weekly timer |
 | [docs/platforms.md](docs/platforms.md) | supported platforms, setup on Windows, macOS and Ubuntu, the container tests |
+| [docs/smartgit.md](docs/smartgit.md) | using SmartGit with a git 2.54 or newer instead of its bundled git (Linux Flatpak, macOS, Windows), and installing Git LFS |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | development setup on every platform, running the tests, rules for changes, signing off commits |
 | [DCO.txt](DCO.txt) | the Developer Certificate of Origin 1.1 that every commit's `Signed-off-by:` line refers to |
 | [SECURITY.md](SECURITY.md) | how to report a vulnerability privately, and what to expect |

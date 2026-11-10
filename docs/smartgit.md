@@ -45,47 +45,47 @@ The Flatpak of SmartGit (`com.syntevo.SmartGit`) runs in a sandbox that cannot s
 
 Each of the four steps below is needed; skipping one fails in the way described next to it.
 
-1. **Allow SmartGit to run host commands.** `sudo flatpak override --system --talk-name=org.freedesktop.Flatpak com.syntevo.SmartGit`. This lets the app call `flatpak-spawn --host`, which **removes the sandbox for SmartGit**: it can then run any command on the host as you. Decide that on purpose. It applies from the next start of SmartGit; a running instance keeps the old permissions, and SmartGit then reports `Git executable is not valid` because the wrapper prints nothing.
-2. **Create the wrapper** at `~/.local/share/smartgit/host-bin/git` (`chmod 755`). Your home directory is shared with the sandbox under the same path, which is why the wrapper can live there:
+**1. Allow SmartGit to run host commands.** `sudo flatpak override --system --talk-name=org.freedesktop.Flatpak com.syntevo.SmartGit`. This lets the app call `flatpak-spawn --host`, which **removes the sandbox for SmartGit**: it can then run any command on the host as you. Decide that on purpose. It applies from the next start of SmartGit; a running instance keeps the old permissions, and SmartGit then reports `Git executable is not valid` because the wrapper prints nothing.
+**2. Create the wrapper** at `~/.local/share/smartgit/host-bin/git` (`chmod 755`). Your home directory is shared with the sandbox under the same path, which is why the wrapper can live there:
 
-   ```sh
-   #!/bin/sh
-   # run the HOST git from the SmartGit Flatpak.
-   # SmartGit passes credential.helper=/app/bin/smartgit.sh ..., a path that only exists
-   # inside the sandbox, so rewrite it to launch that helper through the host's flatpak.
-   n=$#
-   while [ "$n" -gt 0 ]; do
-       a=$1; shift
-       case "$a" in
-           "credential.helper=/app/bin/smartgit.sh "*)
-               a="credential.helper=!flatpak run --command=/app/bin/smartgit.sh com.syntevo.SmartGit ${a#credential.helper=/app/bin/smartgit.sh }"
-               ;;
-       esac
-       set -- "$@" "$a"
-       n=$((n - 1))
-   done
-   exec flatpak-spawn --host git "$@"
-   ```
+```sh
+#!/bin/sh
+# run the HOST git from the SmartGit Flatpak.
+# SmartGit passes credential.helper=/app/bin/smartgit.sh ..., a path that only exists
+# inside the sandbox, so rewrite it to launch that helper through the host's flatpak.
+n=$#
+while [ "$n" -gt 0 ]; do
+    a=$1; shift
+    case "$a" in
+        "credential.helper=/app/bin/smartgit.sh "*)
+            a="credential.helper=!flatpak run --command=/app/bin/smartgit.sh com.syntevo.SmartGit ${a#credential.helper=/app/bin/smartgit.sh }"
+            ;;
+    esac
+    set -- "$@" "$a"
+    n=$((n - 1))
+done
+exec flatpak-spawn --host git "$@"
+```
 
-   Without the rewrite, a commit works and a push that needs credentials fails, because the host cannot run `/app/bin/smartgit.sh`.
-3. **Move SmartGit's temporary directory into your home.** SmartGit writes the commit message to a file in its Java temp directory and passes the path to git; the sandbox's `/tmp` does not exist on the host, so the host git fails with `could not read log file '/tmp/smartgit.../commit....tmp': No such file or directory` (the hook has already run by then). Add one line to the file `~/.var/app/com.syntevo.SmartGit/config/smartgit/smartgit.vmoptions`, creating the directory first:
+Without the rewrite, a commit works and a push that needs credentials fails, because the host cannot run `/app/bin/smartgit.sh`.
 
-   ```
-   -Djava.io.tmpdir=/home/<you>/.cache/smartgit-tmp
-   ```
+**3. Move SmartGit's temporary directory into your home.** SmartGit writes the commit message to a file in its Java temp directory and passes the path to git; the sandbox's `/tmp` does not exist on the host, so the host git fails with `could not read log file '/tmp/smartgit.../commit....tmp': No such file or directory` (the hook has already run by then). Add one line to the file `~/.var/app/com.syntevo.SmartGit/config/smartgit/smartgit.vmoptions`, creating the directory first:
 
-   Use your real home path (no `~`, no variables), and `mkdir -p ~/.cache/smartgit-tmp`. SmartGit reads that file at start, so restart it.
-4. **Point SmartGit at the wrapper.** In the setup wizard or Preferences, Commands, choose *Other Git Executable* and **type** `/home/<you>/.local/share/smartgit/host-bin/git` (the file chooser is what produced the portal path above). `git --version` through the wrapper must say 2.54 or newer, and `git lfs version` must work:
+```
+-Djava.io.tmpdir=/home/<you>/.cache/smartgit-tmp
+```
 
-   ```bash
-   flatpak run --command=sh com.syntevo.SmartGit -c '~/.local/share/smartgit/host-bin/git --version'
-   ```
+Use your real home path (no `~`, no variables), and `mkdir -p ~/.cache/smartgit-tmp`. SmartGit reads that file at start, so restart it.
 
-   Run from inside the sandbox like this, the wrapper shows what SmartGit will see.
+**4. Point SmartGit at the wrapper.** In the setup wizard or Preferences, Commands, choose *Other Git Executable* and **type** `/home/<you>/.local/share/smartgit/host-bin/git` (the file chooser is what produced the portal path above). `git --version` through the wrapper must say 2.54 or newer, and `git lfs version` must work:
+
+```bash
+flatpak run --command=sh com.syntevo.SmartGit -c '~/.local/share/smartgit/host-bin/git --version'
+```
+
+Run from inside the sandbox like this, the wrapper shows what SmartGit will see.
 
 Not affected: your scanners and the hook stay in `~/.local/bin` and `~/.local/share/git-secret-guard`, which the host git uses; nothing of git-secret-guard is installed inside the Flatpak.
-
-The [setup-dev-rocky](https://github.com/jsbattig/setup-dev-rocky) repository automates all four steps in its `smartgit` module (`modules/smartgit.sh`), for Fedora and Rocky, and re-running it is safe.
 
 ## Linux, tarball or distribution package
 

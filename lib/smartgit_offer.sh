@@ -25,8 +25,17 @@ smartgit_refuse() {
     return 1
 }
 
-# ^ invariant rc 0 = running, 1 = not running, 2 = it cannot be told; a macOS app is looked for by its launcher path, the Flatpak by flatpak ps
+# ^ invariant rc 0 = running, 1 = not running, 2 = it cannot be told; only a macOS app is looked for, by its launcher path
 smartgit_is_running() { smartgit_kind_running "${SG_SET_KIND[$1]}"; }
+
+# ^ invariant the four steps verified by hand on Fedora with SmartGit 26.1 (docs/smartgit.md), printed for a Flatpak directory; this tool runs none of them
+smartgit_flatpak_manual_steps() {
+    printf '%s: by hand for the Flatpak (verified on Fedora with SmartGit 26.1, details and the wrapper script in docs/smartgit.md):\n' "$GSG_NAME" >&2
+    printf '  1. sudo flatpak override --system --talk-name=org.freedesktop.Flatpak %s   (this removes the sandbox for SmartGit)\n' "$SMARTGIT_FLATPAK_ID" >&2
+    printf '  2. create the wrapper ~/.local/share/smartgit/host-bin/git (chmod 755) that runs: flatpak-spawn --host git "$@"\n' >&2
+    printf '  3. add -Djava.io.tmpdir=<your home>/.cache/smartgit-tmp to ~/.var/app/%s/config/smartgit/smartgit.vmoptions\n' "$SMARTGIT_FLATPAK_ID" >&2
+    printf '  4. in SmartGit choose Other Git Executable and type the wrapper path\n' >&2
+}
 
 # ^ invariant rc 0 = settings directory $1 may be edited; every refusal prints why, says SmartGit was not changed and, where it helps, the manual steps
 smartgit_check_dir() {
@@ -35,8 +44,13 @@ smartgit_check_dir() {
         smartgit_refuse "$i" "SmartGit $major was not recorded: this tool has only seen SmartGit $SMARTGIT_RECORDED_MAJOR, and edits nothing it has not seen" 1
         return 1
     fi
-    if [ "$kind" != macos ] && [ "$kind" != flatpak ]; then
-        smartgit_refuse "$i" "a $kind settings directory is not one this tool edits (only macOS and the Flatpak were recorded)" 1
+    if [ "$kind" = flatpak ]; then
+        smartgit_refuse "$i" "the Flatpak settings are not edited by this tool (automation is deferred until a Linux spike)" 0
+        smartgit_flatpak_manual_steps
+        return 1
+    fi
+    if [ "$kind" != macos ]; then
+        smartgit_refuse "$i" "a $kind settings directory is not one this tool edits (only macOS was recorded)" 1
         return 1
     fi
     case "${SG_SET_STATE[$i]}" in
@@ -62,12 +76,9 @@ smartgit_check_dir() {
     fi
 }
 
-# ^ invariant true for a settings directory this run offers to change; its preferences are judgeable and, unless it is a Flatpak directory on its bundled git,
-# ^ invariant the git it is set to is read and older than the floor; a Flatpak directory on its bundled git is the exception, offered without a version check
-# ^ invariant as the sandbox hides the git from the tool (2.53.0 was measured for SmartGit 26.1)
+# ^ invariant true for a settings directory this run offers to change; its preferences are judgeable and the git it is set to is read and older than the floor
 smartgit_needs_change() {
     if [ "${SG_SET_STATE[$1]}" != ok ]; then return 1; fi
-    if [ "${SG_SET_KIND[$1]}" = flatpak ] && [ "${SG_SET_CHOICE[$1]}" = bundled ]; then return 0; fi
     [ "$(smartgit_scan_word "$1")" = no ]
 }
 
@@ -102,10 +113,6 @@ smartgit_dir_id() {
 
 smartgit_plan_dir() {
     local i="$1" id
-    if [ "${SG_SET_KIND[$i]}" = flatpak ]; then
-        smartgit_flatpak_plan_dir "$i"
-        return
-    fi
     id="$(smartgit_dir_id "${SG_SET_DIR[$i]}")" || {
         printf '%s: SmartGit: cannot compute the backup id of %s (cksum failed); SmartGit was not changed\n' "$GSG_NAME" "${SG_SET_DIR[$i]}" >&2
         return 1
@@ -149,7 +156,11 @@ smartgit_install_step() {
         return 0
     fi
     for i in "${!SG_SET_DIR[@]}"; do
-        if smartgit_needs_change "$i" || { [ "${SG_SET_STATE[$i]}" != ok ] && [ "${SG_SET_STATE[$i]}" != missing ]; }; then todo+=("$i"); fi
+        if smartgit_needs_change "$i" || { [ "${SG_SET_STATE[$i]}" != ok ] && [ "${SG_SET_STATE[$i]}" != missing ]; }; then
+            todo+=("$i")
+        elif [ "$flag" -eq 1 ] && [ "${SG_SET_STATE[$i]}" = ok ] && [ "${SG_SET_KIND[$i]}" != macos ] && [ "$(smartgit_scan_word "$i")" != yes ]; then
+            todo+=("$i")
+        fi
     done
     if [ "${#todo[@]}" -eq 0 ]; then
         smartgit_nothing_to_change "$flag"
@@ -184,29 +195,10 @@ smartgit_offer() {
     smartgit_lfs_plan || return "$flag"
     printf '  then: git --version and git lfs version through %s, and a fake-token commit in a scratch repository must be blocked; any failure restores the backup\n' "$GSG_GIT"
     gitup_need_elevation || return "$flag"
-    smartgit_sandbox_filter elig
-    if [ "${#elig[@]}" -eq 0 ]; then return "$flag"; fi
     if ! gitup_consent "$flag" "Point SmartGit at $GSG_GIT?"; then
         printf '%s: SmartGit was not changed\n' "$GSG_NAME"
         return 0
     fi
     smartgit_apply "${elig[@]}" || return 1
     return "$((flag * rc))"
-}
-
-# ^ security removing the sandbox needs its own yes, SMARTGIT_SANDBOX_FLAG=1 (--allow-smartgit-sandbox-removal) or a yes at the terminal;
-# ^ security --configure-smartgit alone is not enough
-# ^ invariant arg = the name of the eligible-index array; without this consent every Flatpak directory is dropped from it and a line says so
-smartgit_sandbox_filter() {
-    local -n arr="$1"
-    local i has=0
-    local -a kept=()
-    for i in "${arr[@]}"; do
-        if [ "${SG_SET_KIND[$i]}" = flatpak ]; then has=1; else kept+=("$i"); fi
-    done
-    if [ "$has" -eq 0 ]; then return 0; fi
-    if [ "${SMARTGIT_SANDBOX_FLAG:-0}" -ne 1 ] && gitup_consent 0 "The Flatpak setup removes the sandbox of SmartGit (step 1 above). Allow that?"; then SMARTGIT_SANDBOX_FLAG=1; fi
-    if [ "${SMARTGIT_SANDBOX_FLAG:-0}" -eq 1 ]; then return 0; fi
-    arr=("${kept[@]}")
-    printf '%s: the Flatpak setup was not done: there was no consent to remove the sandbox (answer yes at the question, or use --allow-smartgit-sandbox-removal)\n' "$GSG_NAME" >&2
 }

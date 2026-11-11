@@ -202,7 +202,7 @@ smartgit_verify_commits() {
     # shellcheck disable=SC2086
     unset $env_names
     key="$(printf '%s%s%s' 'AKI' 'A' 'Q7XK2MWB4HZ5NR3T')"
-    "$GSG_GIT" init -q "$work" || return 2
+    "$GSG_GIT" init -q --template= "$work" || return 2
     printf 'aws_access_key_id = %s\n' "$key" >"$work/leak.txt" || return 2
     "$GSG_GIT" -C "$work" add leak.txt || return 2
     if out="$("$GSG_GIT" "${gc[@]}" -C "$work" commit -q -m verify-secret 2>&1)"; then return 3; fi
@@ -241,24 +241,14 @@ smartgit_verify_run() {
     [ "$rc" -eq 0 ]
 }
 
-# ^ invariant rc 0 = running, 1 = not running, 2 = it cannot be told; kind macos is looked for by its launcher path, flatpak by flatpak ps
+# ^ invariant rc 0 = running, 1 = not running, 2 = it cannot be told; only the macOS app is edited, hence only it is looked for, by its launcher path
 smartgit_kind_running() {
-    local rc out
-    case "$1" in
-        macos)
-            smartgit_tool pgrep || return 2
-            "$REPLY" -f 'Contents/MacOS/SmartGit' >/dev/null 2>&1
-            rc=$?
-            if [ "$rc" -eq 0 ] || [ "$rc" -eq 1 ]; then return "$rc"; fi
-            return 2
-            ;;
-        flatpak)
-            smartgit_tool flatpak || return 2
-            out="$("$REPLY" ps --columns=application 2>/dev/null)" || return 2
-            if [[ $out == *"$SMARTGIT_FLATPAK_ID"* ]]; then return 0; fi
-            return 1
-            ;;
-    esac
+    local rc
+    if [ "$1" != macos ]; then return 2; fi
+    smartgit_tool pgrep || return 2
+    "$REPLY" -f 'Contents/MacOS/SmartGit' >/dev/null 2>&1
+    rc=$?
+    if [ "$rc" -eq 0 ] || [ "$rc" -eq 1 ]; then return "$rc"; fi
     return 2
 }
 
@@ -279,7 +269,6 @@ smartgit_restore_one() {
         printf '%s: restore by hand: in SmartGit open Preferences, Commands and choose the Git Executable you used before\n' "$GSG_NAME" >&2
         return 1
     }
-    if ! brew_is_macos; then kind=flatpak; fi
     if [ ! -f "$SGM_BACKUP" ] || ! got="$(smartgit_hash_file "$SGM_BACKUP")" || [ "$got" != "$SGM_ORIG_HASH" ]; then
         printf '%s: the backup %s is missing or does not match the manifest %s; nothing was restored; by hand: in SmartGit open Preferences, Commands and set the Git Executable back to %s\n' \
             "$GSG_NAME" "$SGM_BACKUP" "$mf" "$SGM_ORIG_EXEC" >&2
@@ -323,10 +312,37 @@ smartgit_restore_one() {
     fi
 }
 
+# ^ invariant rc 0 = SmartGit is not running; running, or not tellable, is refused with SmartGit untouched; arg = the settings directory index
+smartgit_assert_not_running() {
+    local rc
+    smartgit_kind_running "${SG_SET_KIND[$1]}"
+    rc=$?
+    if [ "$rc" -eq 1 ]; then return 0; fi
+    printf '%s: SmartGit %s: SmartGit is running or started meanwhile (or it cannot be told); exit it with Repository, Exit and run the command again; its preferences were not changed\n' \
+        "$GSG_NAME" "${SG_SET_MAJOR[$1]}" >&2
+    return 1
+}
+
+# ^ invariant an existing backup of a different file is renamed to a dated .kept name, never overwritten; one of the same file stays; arg = the preferences file
+smartgit_backup_aside() {
+    local cur old aside
+    if [ ! -e "$SGA_BACKUP" ]; then return 0; fi
+    cur="$(smartgit_hash_file "$1")" || return 1
+    old="$(smartgit_hash_file "$SGA_BACKUP")" || return 1
+    if [ "$cur" = "$old" ]; then return 0; fi
+    aside="$SGA_BACKUP.kept-$(date -u +%Y%m%dT%H%M%SZ)"
+    mv -n -- "$SGA_BACKUP" "$aside" || return 1
+    if [ -e "$SGA_BACKUP" ] || [ ! -e "$aside" ]; then
+        printf '%s: could not move the earlier backup %s aside; nothing was changed\n' "$GSG_NAME" "$SGA_BACKUP" >&2
+        return 1
+    fi
+    printf '%s: the earlier backup was kept as %s\n' "$GSG_NAME" "$aside"
+}
+
 # ^ invariant an earlier manifest of the same directory is finished or undone first (restore); an interrupted run never leaves two backups in play
 # ^ order backup, pending manifest, edit, final manifest; the original file is not touched before the backup hashes right and the pending manifest is written
 smartgit_apply_one() {
-    local i="$1" dir f orig_exec orig_abs new_abs=- stale target="${SGA_TARGET:-$GSG_GIT}"
+    local i="$1" dir f orig_exec orig_abs new_abs=- stale target="$GSG_GIT"
     dir="${SG_SET_DIR[$i]}"
     f="$dir/preferences.yml"
     smartgit_paths "$dir" || return 1
@@ -334,9 +350,11 @@ smartgit_apply_one() {
         printf '%s: cannot create %s\n' "$GSG_NAME" "$SGA_DIR" >&2
         return 1
     }
+    smartgit_clean_tmp || return 1
     for stale in "$dir"/.preferences.yml.gsg.??????; do
         if [ -f "$stale" ]; then smartgit_discard_tmp "$stale"; fi
     done
+    smartgit_assert_not_running "$i" || return 1
     if [ -e "$SGA_MANIFEST" ]; then
         smartgit_restore_one "$SGA_MANIFEST" || {
             printf '%s: an earlier change of %s could not be undone first; run %s restore-smartgit\n' "$GSG_NAME" "$dir" "$GSG_NAME" >&2
@@ -353,8 +371,13 @@ smartgit_apply_one() {
         orig_abs="$SGP_ABS"
         new_abs="$target"
     fi
+    smartgit_backup_aside "$f" || return 1
     smartgit_backup_make "$f" "$SGA_BACKUP" || return 1
     smartgit_manifest_write pending "$f" "$SGA_ORIG_HASH" "$orig_exec" "$orig_abs" "$target" "$new_abs" || return 1
+    if ! smartgit_assert_not_running "$i"; then
+        smartgit_drop_manifest "$SGA_MANIFEST" "$SGA_BACKUP" || printf '%s: could not drop the pending change of %s\n' "$GSG_NAME" "$f" >&2
+        return 1
+    fi
     smartgit_edit_prefs "$f" "$target" "$new_abs" || return 1
     smartgit_manifest_write final "$f" "$SGA_ORIG_HASH" "$orig_exec" "$orig_abs" "$target" "$new_abs"
 }
@@ -376,7 +399,6 @@ smartgit_rollback() {
             failed=1
         fi
     done
-    smartgit_flatpak_undo || failed=1
     if [ "$failed" -ne 0 ]; then
         printf '%s: SmartGit was NOT fully restored (see above); %s\n' "$GSG_NAME" "$(brew_unchanged_text)" >&2
     elif [ "$restored" -gt 0 ]; then
@@ -394,11 +416,10 @@ smartgit_apply() {
     smartgit_lfs_install_pkg || return 1
     smartgit_lfs_configure || return 1
     for i in "$@"; do
-        if [ "${SG_SET_KIND[$i]}" = flatpak ]; then
-            smartgit_flatpak_apply_one "$i" || { smartgit_rollback "$i" "${applied[@]}"; return 1; }
-        else
-            smartgit_apply_one "$i" || { smartgit_rollback "$i" "${applied[@]}"; return 1; }
-        fi
+        smartgit_apply_one "$i" || {
+            smartgit_rollback "$i" "${applied[@]}"
+            return 1
+        }
         applied+=("$i")
     done
     if ! smartgit_verify_run; then
@@ -410,18 +431,28 @@ smartgit_apply() {
     done
 }
 
-# ^ invariant true when this tool left a manifest or a record under <state dir>/smartgit (SmartGit settings, Flatpak steps, the git lfs install filter)
+# ^ invariant true when this tool left a manifest, a record or a temp file of an interrupted run under <state dir>/smartgit
 smartgit_has_records() {
     local f
-    for f in "$GSG_STATE_DIR"/smartgit/*.manifest "$GSG_STATE_DIR"/smartgit/lfs.record "$GSG_STATE_DIR"/smartgit/flatpak.record; do
+    for f in "$GSG_STATE_DIR"/smartgit/*.manifest "$GSG_STATE_DIR"/smartgit/lfs.record "$GSG_STATE_DIR"/smartgit/manifest.?????? "$GSG_STATE_DIR"/smartgit/lfs-tmp.??????; do
         if [ -e "$f" ]; then return 0; fi
     done
     return 1
 }
 
+# ^ invariant removes only the temp files this tool names (manifest.XXXXXX, lfs-tmp.XXXXXX) left in the smartgit state directory by an interrupted run
+smartgit_clean_tmp() {
+    local f rc=0
+    for f in "$GSG_STATE_DIR"/smartgit/manifest.?????? "$GSG_STATE_DIR"/smartgit/lfs-tmp.??????; do
+        if [ -f "$f" ]; then smartgit_discard_tmp "$f" || rc=1; fi
+    done
+    return "$rc"
+}
+
 # ^ invariant the manifest loop is bounded; every manifest is tried even after a failure, and the directory goes only when everything worked
 smartgit_restore_all() {
     local mf n=0 rc=0
+    smartgit_clean_tmp || rc=1
     for mf in "$GSG_STATE_DIR"/smartgit/*.manifest; do
         if [ ! -e "$mf" ]; then continue; fi
         n=$((n + 1))
@@ -432,7 +463,6 @@ smartgit_restore_all() {
         fi
         smartgit_restore_one "$mf" || rc=1
     done
-    smartgit_flatpak_undo || rc=1
     smartgit_lfs_undo || rc=1
     if [ "$rc" -eq 0 ]; then rmdir -- "$GSG_STATE_DIR/smartgit" 2>/dev/null || true; fi
     return "$rc"

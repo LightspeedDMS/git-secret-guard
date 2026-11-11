@@ -22,13 +22,13 @@ smartgit_reset_results() {
 smartgit_reset_results
 
 # ^ security the overrides move where SmartGit is looked for and what tools run; they skip no check and are announced like GSG_GITUP_ROOT
-# ^ invariant GSG_SMARTGIT_INSTALL_DIRS counts when set, even empty (= no installs); the other three count when non-empty, as their lookups read them
+# ^ invariant GSG_SMARTGIT_INSTALL_DIRS counts when set, even empty (= no installs); the other four count when non-empty, as their lookups read them
 smartgit_announce_overrides() {
     if [ "$SMARTGIT_ANNOUNCED" -eq 1 ]; then return 0; fi
-    if [ -z "${GSG_SMARTGIT_INSTALL_DIRS+x}${GSG_SMARTGIT_TOOL_DIR:-}${GSG_SMARTGIT_SETTINGS_BASE:-}${GSG_SMARTGIT_FLATPAK_BASE:-}" ]; then return 0; fi
+    if [ -z "${GSG_SMARTGIT_INSTALL_DIRS+x}${GSG_SMARTGIT_TOOL_DIR:-}${GSG_SMARTGIT_SETTINGS_BASE:-}${GSG_SMARTGIT_FLATPAK_BASE:-}${GSG_SMARTGIT_LAUNCH_PATH:-}" ]; then return 0; fi
     SMARTGIT_ANNOUNCED=1
-    printf '%s: TEST OVERRIDE active (GSG_SMARTGIT_INSTALL_DIRS=[%s] GSG_SMARTGIT_TOOL_DIR=[%s] GSG_SMARTGIT_SETTINGS_BASE=[%s] GSG_SMARTGIT_FLATPAK_BASE=[%s]); SmartGit is looked for there\n' \
-        "$GSG_NAME" "${GSG_SMARTGIT_INSTALL_DIRS:-}" "${GSG_SMARTGIT_TOOL_DIR:-}" "${GSG_SMARTGIT_SETTINGS_BASE:-}" "${GSG_SMARTGIT_FLATPAK_BASE:-}" >&2
+    printf '%s: TEST OVERRIDE active (GSG_SMARTGIT_INSTALL_DIRS=[%s] GSG_SMARTGIT_TOOL_DIR=[%s] GSG_SMARTGIT_SETTINGS_BASE=[%s] GSG_SMARTGIT_FLATPAK_BASE=[%s] GSG_SMARTGIT_LAUNCH_PATH=[%s]); SmartGit is looked for there\n' \
+        "$GSG_NAME" "${GSG_SMARTGIT_INSTALL_DIRS:-}" "${GSG_SMARTGIT_TOOL_DIR:-}" "${GSG_SMARTGIT_SETTINGS_BASE:-}" "${GSG_SMARTGIT_FLATPAK_BASE:-}" "${GSG_SMARTGIT_LAUNCH_PATH:-}" >&2
 }
 
 smartgit_platform() {
@@ -139,11 +139,34 @@ smartgit_find_desktop_files() {
     done
 }
 
+SMARTGIT_KILL_GRACE_SECONDS=5
+
+# ^ invariant runs a command under the doctor time bound (TIMEOUT_BIN, DR_LIMIT set during doctor), plainly otherwise; the child is killed after a grace period
+smartgit_bounded() {
+    if [ -n "${DR_LIMIT:-}" ] && [ -n "${TIMEOUT_BIN:-}" ]; then
+        "$TIMEOUT_BIN" -k "$SMARTGIT_KILL_GRACE_SECONDS" "$DR_LIMIT" "$@"
+    else
+        "$@"
+    fi
+}
+
+# ^ invariant prints the version of git $1 as install_git_version does (no config files read), under the doctor time bound; rc 1 = does not run or not git
+smartgit_git_version() {
+    local out
+    if brew_git_shim_unusable "$1"; then return 1; fi
+    out="$(GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null smartgit_bounded "$1" --version 2>/dev/null)" || return 1
+    if [[ $out =~ ^git\ version\ ([0-9]+)\.([0-9]+)(\.[0-9]+)? ]]; then
+        printf '%s.%s%s\n' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}"
+        return 0
+    fi
+    return 1
+}
+
 # ^ invariant flatpak info answers for both the user and the system installation; its Version line is the SmartGit version
 smartgit_find_flatpak() {
     local out ver=""
     smartgit_tool flatpak || return 0
-    out="$("$REPLY" info "$SMARTGIT_FLATPAK_ID" 2>/dev/null)" || return 0
+    out="$(smartgit_bounded "$REPLY" info "$SMARTGIT_FLATPAK_ID" 2>/dev/null)" || return 0
     if [[ $out =~ (^|$'\n')[[:space:]]*Version:[[:space:]]*([0-9][0-9.]*) ]]; then ver="${BASH_REMATCH[2]}"; fi
     smartgit_add_install flatpak "flatpak $SMARTGIT_FLATPAK_ID" "$ver"
 }
@@ -152,7 +175,7 @@ smartgit_find_flatpak() {
 smartgit_find_snap() {
     local out ver
     smartgit_tool snap || return 0
-    out="$("$REPLY" list smartgit 2>/dev/null)" || return 0
+    out="$(smartgit_bounded "$REPLY" list smartgit 2>/dev/null)" || return 0
     ver="$(awk 'NR == 2 { print $2 }' <<<"$out")"
     if [[ ! $ver =~ ^[0-9][0-9.]*$ ]]; then ver=""; fi
     smartgit_add_install snap "snap smartgit" "$ver"
@@ -289,8 +312,14 @@ smartgit_classify() {
 smartgit_add_settings() {
     local dir="$1" kind="$2" major="$3" ver=""
     SGP_CHOICE="" SGP_GITPATH=""
-    if smartgit_prefs_analyze "$dir/preferences.yml"; then smartgit_classify "$kind" "$major"; fi
-    if [ -n "$SGP_GITPATH" ] && [ -x "$SGP_GITPATH" ]; then ver="$(install_git_version "$SGP_GITPATH")" || ver=""; fi
+    if [ -L "$dir" ]; then
+        SGP_STATE=symlink SGP_WHY="$dir is a symbolic link"
+    elif [ ! -O "$dir" ]; then
+        SGP_STATE=owner SGP_WHY="$dir is not owned by you"
+    elif smartgit_prefs_analyze "$dir/preferences.yml"; then
+        smartgit_classify "$kind" "$major"
+    fi
+    if [ -n "$SGP_GITPATH" ] && [ -x "$SGP_GITPATH" ]; then ver="$(smartgit_git_version "$SGP_GITPATH")" || ver=""; fi
     SG_SET_DIR+=("$dir")
     SG_SET_MAJOR+=("$major")
     SG_SET_KIND+=("$kind")

@@ -383,16 +383,27 @@ hook_load_path() {
     printf '%s\n' hooks/secret-scan lib/common.sh lib/extract.sh lib/exempt.sh lib/report.sh lib/run-scanner.sh lib/scanners/*.sh
 }
 
+# ^ invariant grep exits 0 (match) or 1 (no match) when it worked and 2 when it failed; $1 = the exit status, $2 = the name of the grep
+grep_status_ok() { [ "$1" -le 1 ] || fail "$2 failed (exit $1)"; }
+
 test_the_hook_never_looks_tools_up_on_PATH() {
     cd -- "$GSG_PROJECT" || return 1
     local -a files=(bin/git-secret-guard lib/scanners/*.sh)
-    local f rc
+    local f matches others allowed
+    # ^ invariant the one allowed lookup outside install.sh and brew.sh is this line of smartgit_tool in lib/smartgit.sh, exactly once
+    # shellcheck disable=SC2016
+    local allowed_re='^lib/smartgit\.sh:[0-9]+:[[:space:]]*REPLY="\$\(type -P "\$1"\)" \|\| REPLY=""$'
     for f in hooks/secret-scan lib/*.sh; do
-        if [ "$f" != lib/install.sh ] && [ "$f" != lib/brew.sh ] && [ "$f" != lib/smartgit.sh ]; then files+=("$f"); fi
+        if [ "$f" != lib/install.sh ] && [ "$f" != lib/brew.sh ]; then files+=("$f"); fi
     done
-    grep -nE '(^|[;&|(`]|\$\()[[:space:]]*(command -v|which |type -P)' "${files[@]}"
-    rc=$?
-    assert_eq "$rc" 1 "no PATH lookup of a tool outside lib/install.sh, lib/brew.sh and lib/smartgit.sh (grep exit 1 = no match; 0 = found one, 2 = grep failed)"
+    matches="$(grep -nE '(^|[;&|(`]|\$\()[[:space:]]*(command -v|which |type -P)' "${files[@]}")"
+    grep_status_ok "$?" "the lookup scan"
+    others="$(grep -vE "$allowed_re" <<<"$matches")"
+    grep_status_ok "$?" "the filter grep"
+    allowed="$(grep -cE "$allowed_re" <<<"$matches")"
+    grep_status_ok "$?" "the counting grep"
+    assert_empty "$others" "no PATH lookup of a tool outside lib/install.sh, lib/brew.sh and the one line of smartgit_tool"
+    assert_eq "$allowed" 1 "the smartgit_tool lookup is there exactly once"
 }
 
 # ^ invariant the pattern of the hook guard; the guard and the test of its coverage share this one definition

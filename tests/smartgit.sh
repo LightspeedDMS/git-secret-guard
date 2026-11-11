@@ -7,6 +7,9 @@
 SG_APPS="" SG_APP="" SG_SETTINGS="" SG_PREFS="" SG_BACKUPS=""
 SG_FIXTURE="$GSG_PROJECT/tests/fixtures/smartgit/macos-26.1/preferences.yml"
 SG_DEAD_PROXY=http://127.0.0.1:9
+# ^ invariant a full install runs before the stalled move; the helper waits 900 ticks of GU_POLL_INTERVAL and the stand-in outlives the wait
+SG_STALL_WAIT_TICKS=900
+SG_MV_STALL_SECONDS=180
 
 # ^ invariant sg_make_app DIR VERSION GITVER LFSVER builds a bundle with Info.plist and a bundled git and git-lfs answering --version and version
 sg_make_app() {
@@ -30,11 +33,14 @@ sg_make_prefs() {
     chmod 600 "$dest" || return 1
 }
 
-# ^ invariant pgrep answers 0 (running) only if $SANDBOX/smartgit.running exists; flatpak ps lists the app under the same condition; both log their calls
+# ^ invariant pgrep answers 0 (running) if smartgit.running exists or its call count passes smartgit.running.after; flatpak ps follows the file only
 # ^ invariant flatpak knobs = flatpak.installed (info answers), flatpak.overrides (override --show prints it;
 # ^ invariant override --system --talk-name=N appends N=talk; --reset removes it)
 sg_standins() {
-    gm_stub "$SANDBOX/pathbin/pgrep" 'd="$(cd "${0%/*}/.." && pwd -P)"; printf "%s\n" "pgrep $*" >>"$d/smartgit.log"; [ -f "$d/smartgit.running" ]' || return 1
+    gm_stub "$SANDBOX/pathbin/pgrep" 'd="$(cd "${0%/*}/.." && pwd -P)"; printf "%s\n" "pgrep $*" >>"$d/smartgit.log"
+n=0; if [ -f "$d/pgrep.count" ]; then n="$(cat "$d/pgrep.count")"; fi; n=$((n + 1)); echo "$n" >"$d/pgrep.count"
+if [ -f "$d/smartgit.running.after" ] && [ "$n" -gt "$(cat "$d/smartgit.running.after")" ]; then exit 0; fi
+[ -f "$d/smartgit.running" ]' || return 1
     gm_stub "$SANDBOX/pathbin/flatpak" 'd="$(cd "${0%/*}/.." && pwd -P)"; printf "%s\n" "flatpak $*" >>"$d/smartgit.log"
 case "$1" in
     info) [ -f "$d/flatpak.installed" ] || { echo "error: com.syntevo.SmartGit not installed" >&2; exit 1; }
@@ -67,13 +73,45 @@ if grep -q "install -y git-lfs" "$d/gitup.log" 2>/dev/null; then
     esac
 fi
 echo "git-lfs is not installed" >&2; exit 1' || return 1
+    # ^ invariant the mv stand-in stalls once on a move whose arguments hold the text in mv.stall, after mv.stallskip such moves pass; else the real mv
+    local mv_stall_seconds="$SG_MV_STALL_SECONDS"
+    # ^ invariant the sandbox path holds no quote, dollar or backtick (mktemp under ~/.tmp); it is embedded in the stand-in as written
+    local mv_body real_mv gnubin_mv="$GM_PREFIX/opt/coreutils/libexec/gnubin/mv"
+    real_mv="$(command -v mv)" || return 1
+    mv_body="d=\"$SANDBOX\"
+if [ -f \"\$d/mv.stall\" ]; then
+    case \" \$* \" in
+        *\"\$(cat \"\$d/mv.stall\")\"*)
+            skip=0
+            if [ -f \"\$d/mv.stallskip\" ]; then skip=\"\$(cat \"\$d/mv.stallskip\")\"; fi
+            if [ \"\$skip\" -gt 0 ]; then
+                echo \$((skip - 1)) >\"\$d/mv.stallskip\"
+            else
+                rm -f \"\$d/mv.stall\" \"\$d/mv.stallskip\"
+                : >\"\$d/mv.stalled\"
+                exec sleep $mv_stall_seconds
+            fi
+            ;;
+    esac
+fi
+exec $real_mv \"\$@\""
+    gm_stub "$SANDBOX/pathbin/mv" "$mv_body" || return 1
+    if [ "$TEST_OS" != Darwin ] || [ -z "$GM_PREFIX" ]; then return 0; fi
+    if [ ! -L "$gnubin_mv" ]; then
+        printf 'the mv stand-in: %s is missing from the fake prefix\n' "$gnubin_mv" >&2
+        return 1
+    fi
+    rm -f -- "$gnubin_mv" || return 1
+    gm_stub "$gnubin_mv" "$mv_body"
 }
 
 # ^ invariant sg_setup [GITVER] = a Mac with git GITVER first on PATH, SmartGit 26.1.056 (bundled git 2.53.0, git-lfs 3.7.1)
 # ^ invariant and its settings dir on the bundled git
 sg_setup() {
-    rm -f -- "$SANDBOX/smartgit.running" "$SANDBOX/smartgit.log" "$SANDBOX/flatpak.installed" "$SANDBOX/flatpak.overrides" || return 1
+    rm -f -- "$SANDBOX/smartgit.running" "$SANDBOX/smartgit.log" "$SANDBOX/flatpak.installed" "$SANDBOX/flatpak.overrides" \
+        "$SANDBOX/pgrep.count" "$SANDBOX/smartgit.running.after" "$SANDBOX/mv.stall" "$SANDBOX/mv.stallskip" "$SANDBOX/mv.stalled" || return 1
     gm_setup "${1:-2.54.0}" || return 1
+    set_env GSG_SMARTGIT_LAUNCH_PATH="$GM_PREFIX/bin:$SANDBOX/pathbin"
     SG_APPS="$SANDBOX/apps"
     SG_APP="$SG_APPS/SmartGit.app"
     SG_SETTINGS="$LC_HOME/Library/Preferences/SmartGit/26.1"
@@ -130,5 +168,36 @@ sg_git_value() {
         g && index($0, "  " key ": ") == 1 { print substr($0, length(key) + 5); found = 1; exit }
         END { exit !found }' "$2"
 }
+# ^ invariant sg_interrupt_run PATTERN SKIP SIGNAL CMD... stops CMD at the move with PATTERN in its arguments (after SKIP such moves) with SIGNAL
+sg_interrupt_run() {
+    local pattern="$1" skip="$2" sig="$3" pid
+    shift 3
+    if ! printf '%s' "$pattern" >"$SANDBOX/mv.stall" || ! printf '%s' "$skip" >"$SANDBOX/mv.stallskip"; then
+        fail "could not arm the mv stall knob"
+        return 1
+    fi
+    rm -f -- "$SANDBOX/mv.stalled"
+    (${TEST_SETSID:-setsid} env --default-signal=INT env -i "${LC_ENV[@]}" "${EXTRA_ENV[@]}" "$@" >"$SANDBOX/int.out" 2>&1 </dev/null & echo $! >"$SANDBOX/int.pid")
+    pid="$(<"$SANDBOX/int.pid")"
+    if [ -z "$pid" ]; then
+        fail "no pid for the started command"
+        return 1
+    fi
+    gu_poll "$SG_STALL_WAIT_TICKS" test -e "$SANDBOX/mv.stalled" || {
+        kill -KILL -- "-$pid" 2>/dev/null
+        local said=""
+        if [ -f "$SANDBOX/int.out" ]; then said="$(<"$SANDBOX/int.out")"; fi
+        fail "the command never reached the stalled move [$pattern]; it said: ${said:0:${GSG_TEST_DETAIL:-300}}"
+        return 1
+    }
+    kill "-$sig" -- "-$pid" 2>/dev/null
+    if ! gu_poll "$GU_EXIT_WAIT_TICKS" gu_pid_gone "$pid"; then
+        kill -KILL -- "-$pid" 2>/dev/null
+        fail "the command did not end after SIG$sig"
+        return 1
+    fi
+    OUT="$(<"$SANDBOX/int.out")"
+}
+
 # ^ invariant prints every line of a preferences file except the two the edit may change; a test can compare the rest byte for byte
 sg_others() { grep -v -E '^  executable(\.absolute)?: ' "$1"; }

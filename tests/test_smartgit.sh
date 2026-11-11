@@ -347,106 +347,266 @@ test_a_filter_that_existed_before_is_never_removed_by_the_undo() {
     assert_eq "$(gitx config --global --get filter.lfs.required)" true "the user's own filter stays"
 }
 
-# ^ invariant sg_flatpak_setup [ID [ID_LIKE]] = a Linux machine (git 2.56.0 first on PATH, os-release ID=ID default fedora)
-# ^ invariant with the Flatpak SmartGit 26.1 on its bundled git
-# ^ invariant the host git is the wrapper from gu_old_git; the system override, wrapper and vmoptions live in the sandbox, nothing under the real home
-sg_flatpak_setup() {
-    local base
+# ^ invariant sg_linux_setup [ID [ID_LIKE]] = a Linux machine (git 2.56.0 first on PATH, os-release ID default fedora) with the Flatpak SmartGit 26.1
+# ^ invariant the host git is the wrapper from gu_old_git; every path is in the sandbox, nothing under the real home
+sg_linux_setup() {
     rm -f -- "$SANDBOX/smartgit.running" "$SANDBOX/smartgit.log" "$SANDBOX/flatpak.overrides" || return 1
     lc_begin && lc_make_fixtures && lc_use_fixtures || return 1
     gu_old_git 2.56.0 || return 1
     if [ -n "${2:-}" ]; then gu_os_release "ID=${1:-fedora}" "ID_LIKE=\"$2\"" || return 1; else gu_os_release "ID=${1:-fedora}" || return 1; fi
     sg_standins || return 1
     : >"$SANDBOX/flatpak.installed" || return 1
-    base="$LC_HOME/.var/app/com.syntevo.SmartGit/config/smartgit"
-    SG_SETTINGS="$base/26.1"
+    SG_SETTINGS="$LC_HOME/.var/app/com.syntevo.SmartGit/config/smartgit/26.1"
     SG_PREFS="$SG_SETTINGS/preferences.yml"
     SG_BACKUPS="$LC_STATE/smartgit"
-    SG_WRAPPER="$LC_HOME/.local/share/smartgit/host-bin/git"
-    SG_VMOPTS="$base/smartgit.vmoptions"
     sg_make_prefs "$SG_PREFS" /app || return 1
-    printf -- '-Xmx1g\n' >"$SG_VMOPTS" || return 1
-    cp -- "$SG_PREFS" "$SANDBOX/prefs.orig" || return 1
     mkdir -p -- "$SANDBOX/root" || return 1
     set_env GSG_GITUP_ROOT="$SANDBOX/root"
     set_env PATH="$SANDBOX/pathbin:$SANDBOX/lfsmissing:$TEST_BASE_PATH"
 }
 
-test_the_flatpak_setup_needs_its_own_consent_for_the_sandbox_and_changes_nothing_without_it() {
+test_the_flatpak_setup_is_refused_by_design_and_prints_the_four_manual_steps() {
     local h
-    sg_flatpak_setup || return 1
+    sg_linux_setup || return 1
     h="$(sg_hash "$SG_PREFS")"
     gsg install --configure-smartgit </dev/null
-    assert_rc 1 "--configure-smartgit alone does not remove the sandbox"
-    assert_contains "$OUT" "1. the sandbox of SmartGit is removed" "the plan names the step"
-    assert_contains "$OUT" "as root: $SANDBOX/pathbin/flatpak override --system --talk-name=org.freedesktop.Flatpak com.syntevo.SmartGit" "with the full path of the root command"
-    assert_contains "$ERR" "there was no consent to remove the sandbox" "says why nothing was done"
+    assert_rc 1 "the Flatpak is refused"
+    assert_contains "$ERR" "the Flatpak settings are not edited by this tool" "says so"
+    assert_contains "$ERR" "1. sudo flatpak override --system --talk-name=org.freedesktop.Flatpak com.syntevo.SmartGit" "step 1 by hand"
+    assert_contains "$ERR" "2. create the wrapper" "step 2 by hand"
+    assert_contains "$ERR" "3. add -Djava.io.tmpdir=" "step 3 by hand"
+    assert_contains "$ERR" "4. in SmartGit choose Other Git Executable" "step 4 by hand"
     assert_eq "$(sg_hash "$SG_PREFS")" "$h" "the preferences are byte-identical"
-    assert_no_file "$LC_HOME/.local/share/smartgit/host-bin/git" "no wrapper"
-    assert_not_contains "$(sg_log)" "override --system --talk-name" "flatpak override did not run"
+    assert_no_file "$SG_BACKUPS" "no backup or manifest"
+    assert_no_file "$LC_HOME/.local/share/smartgit" "no wrapper directory"
+    assert_not_contains "$(sg_log)" "override --system" "flatpak override did not run"
+    assert_not_contains "$(gu_log)" "install -y" "no package was installed"
+    gsg status
+    assert_contains "$OUT" "flatpak com.syntevo.SmartGit (SmartGit 26.1.056)" "status still lists the Flatpak install"
 }
 
-test_the_four_flatpak_steps_run_as_one_unit_with_the_separate_flag() {
-    local wrapper vm
-    sg_flatpak_setup || return 1
-    wrapper="$SG_WRAPPER" vm="$SG_VMOPTS"
-    sg_real_tools || return 1
-    gsg install --configure-smartgit --allow-smartgit-sandbox-removal </dev/null
-    assert_rc 0 "the Flatpak setup"
-    assert_contains "$(<"$SANDBOX/flatpak.overrides")" "org.freedesktop.Flatpak=talk" "step 1: the override is in place"
-    assert_contains "$(sed -n 2p "$wrapper")" "git-secret-guard: written by install" "step 2: the wrapper carries our marker"
-    assert_eq "$(stat -c %a "$wrapper")" 755 "and is executable"
-    assert_eq "$(grep -c 'java.io.tmpdir' "$vm")" 1 "step 3: one tmpdir line"
-    assert_contains "$(<"$vm")" "-Xmx1g" "the other vmoptions line is kept"
-    assert_eq "$(sg_git_value executable "$SG_PREFS")" "$wrapper" "step 4: the Git Executable is the wrapper"
-    assert_contains "$(gu_log)" "install -y git-lfs" "git-lfs came from dnf on the host"
-    assert_contains "$(gu_log)" "sudo -- $SANDBOX/pathbin/flatpak override --system" "the override ran through sudo"
+# ^ invariant sg_lfs_plan_run [install] runs smartgit_lfs_plan (and smartgit_lfs_install_pkg with the argument) in the gu_run shell on the sandbox git
+# shellcheck disable=SC2016
+sg_lfs_plan_run() {
+    gu_run 'for l in smartgit smartgit_report smartgit_offer smartgit_lfs smartgit_apply; do source "$GSG_ROOT/lib/$l.sh" || exit 9; done
+paths_init || exit 9
+GSG_GIT="$1"; INSTALL_TIMEOUT_BIN="$(type -P timeout)"; gitup_select || exit 8
+smartgit_lfs_plan || exit 1
+if [ "$2" = install ]; then smartgit_lfs_install_pkg || exit 1; fi' "$SANDBOX/pathbin/git" "${1:-plan}"
 }
 
-test_restore_smartgit_undoes_every_flatpak_step_and_keeps_the_other_vmoptions_lines() {
-    local vm
-    sg_flatpak_setup || return 1
-    vm="$SG_VMOPTS"
-    sg_real_tools || return 1
-    gsg install --configure-smartgit --allow-smartgit-sandbox-removal </dev/null
-    assert_rc 0 "the Flatpak setup"
-    gsg restore-smartgit
-    assert_rc 0 "restore-smartgit"
-    assert_no_file "$SANDBOX/flatpak.overrides" "the override is gone"
-    assert_no_file "$SG_WRAPPER" "the wrapper is gone"
-    assert_eq "$(<"$vm")" "-Xmx1g" "only our vmoptions line was removed"
-    assert_eq "$(sg_hash "$SG_PREFS")" "$(sg_hash "$SANDBOX/prefs.orig")" "the Git Executable is the original"
-    assert_no_file "$SG_BACKUPS" "no record is left"
+test_dnf_plans_and_runs_the_install_when_a_repository_offers_git_lfs() {
+    sg_linux_setup rocky "rhel centos fedora" || return 1
+    printf '3.4.1\n' >"$SANDBOX/dnf.candidate" || return 1
+    sg_lfs_plan_run install
+    assert_rc 0 "a repository offers git-lfs"
+    assert_contains "$OUT" "as root: $SANDBOX/pathbin/dnf install -y git-lfs" "the plan names the root command with its full path"
+    assert_contains "$(gu_log)" "repoquery" "dnf was asked"
+    assert_contains "$(gu_log)" "sudo -- $SANDBOX/pathbin/dnf install -y git-lfs" "the install ran through sudo"
 }
 
-test_a_wrapper_that_is_not_ours_is_refused_and_left_alone() {
-    local wrapper
-    sg_flatpak_setup || return 1
-    wrapper="$SG_WRAPPER"
-    sg_real_tools || return 1
-    mkdir -p -- "${wrapper%/*}" && printf '#!/bin/sh\necho mine\n' >"$wrapper" || return 1
-    gsg install --configure-smartgit --allow-smartgit-sandbox-removal </dev/null
-    assert_rc 1 "a foreign wrapper"
-    assert_contains "$ERR" "is not a wrapper this tool wrote" "says so"
-    assert_contains "$(<"$wrapper")" "echo mine" "the file is untouched"
-}
-
-test_dnf_on_a_rhel_compatible_system_refuses_without_epel_and_never_enables_a_repository() {
-    sg_flatpak_setup rocky "rhel centos fedora" || return 1
-    gsg install --configure-smartgit --allow-smartgit-sandbox-removal </dev/null
-    assert_rc 1 "EPEL is not enabled"
-    assert_contains "$ERR" "git-lfs is in EPEL" "says why"
-    assert_contains "$ERR" "this tool does not enable a repository" "and that nothing was enabled"
+test_dnf_refuses_naming_epel_as_a_likely_source_and_enables_no_repository_when_none_offers_git_lfs() {
+    sg_linux_setup rocky "rhel centos fedora" || return 1
+    sg_lfs_plan_run
+    assert_rc 1 "no repository offers git-lfs"
+    assert_contains "$ERR" "no enabled dnf repository offers git-lfs" "says so"
+    assert_contains "$ERR" "EPEL" "names EPEL as a likely source"
+    assert_contains "$ERR" "enables no repository" "and that nothing is enabled"
     assert_not_contains "$(gu_log)" "install -y" "no package install ran"
     assert_not_contains "$(gu_log)" "enablerepo" "no repository was enabled"
 }
 
+test_a_failing_dnf_repoquery_is_its_own_refusal_not_an_answer_of_none() {
+    sg_linux_setup rocky "rhel centos fedora" || return 1
+    printf 'repoquery' >"$SANDBOX/dnf.fail" || return 1
+    sg_lfs_plan_run
+    assert_rc 1 "the query failed"
+    assert_contains "$ERR" "the dnf repoquery for git-lfs failed" "says the query failed"
+    assert_not_contains "$ERR" "no enabled dnf repository" "and does not claim none offers it"
+}
+
 test_apt_installs_git_lfs_non_interactively_on_ubuntu() {
-    sg_flatpak_setup ubuntu || return 1
+    sg_linux_setup ubuntu || return 1
+    sg_lfs_plan_run install
+    assert_rc 0 "apt installs git-lfs"
+    assert_contains "$(gu_log)" "install -y git-lfs | ppa-files=0 ppa-keys=0 frontend=noninteractive" "with -y and the non-interactive frontend"
+}
+
+test_git_lfs_only_outside_the_path_smartgit_gives_git_is_refused_with_the_instruction() {
+    local h
+    sg_setup || return 1
     sg_real_tools || return 1
-    gsg install --configure-smartgit --allow-smartgit-sandbox-removal </dev/null
-    assert_rc 0 "the Flatpak setup on Ubuntu"
-    assert_contains "$(gu_log)" "install -y git-lfs | ppa-files=0 ppa-keys=0 frontend=noninteractive" "git-lfs is installed with -y and the non-interactive frontend"
+    h="$(sg_hash "$SG_PREFS")"
+    set_env GSG_SMARTGIT_LAUNCH_PATH="$SANDBOX/pathbin"
+    gsg install --configure-smartgit </dev/null
+    assert_rc 1 "git-lfs is installed where SmartGit's git cannot see it"
+    assert_contains "$(gm_calls)" "install git-lfs" "brew installed it"
+    assert_contains "$ERR" "in the environment SmartGit gives git" "says whose environment was checked"
+    assert_contains "$ERR" "absolute paths in the filter.lfs.* settings" "gives SmartGit's own advice"
+    assert_eq "$(sg_hash "$SG_PREFS")" "$h" "the preferences are byte-identical"
+    assert_eq "$(sg_count_in "$SG_BACKUPS" manifest)" 0 "no manifest"
+}
+
+test_smartgit_started_after_the_plan_is_refused_right_before_the_edit() {
+    local h
+    sg_setup || return 1
+    sg_real_tools || return 1
+    sg_lfs_present || return 1
+    h="$(sg_hash "$SG_PREFS")"
+    printf '2' >"$SANDBOX/smartgit.running.after" || return 1
+    gsg install --configure-smartgit </dev/null
+    assert_rc 1 "SmartGit started meanwhile"
+    assert_contains "$ERR" "started meanwhile" "says so"
+    assert_contains "$ERR" "nothing was restored" "no file of SmartGit had been changed"
+    assert_eq "$(sg_hash "$SG_PREFS")" "$h" "the preferences are byte-identical"
+    assert_eq "$(sg_count_in "$SG_BACKUPS" 'manifest|preferences')" 0 "the pending manifest and the backup were dropped"
+}
+
+test_a_symlinked_settings_directory_is_refused() {
+    local h
+    sg_setup || return 1
+    mv -- "$SG_SETTINGS" "$SANDBOX/real-26.1" && ln -s "$SANDBOX/real-26.1" "$SG_SETTINGS" || return 1
+    h="$(sg_hash "$SANDBOX/real-26.1/preferences.yml")"
+    gsg install --configure-smartgit </dev/null
+    assert_rc 1 "the settings directory is a symbolic link"
+    assert_contains "$ERR" "is a symbolic link" "says so"
+    assert_eq "$(sg_hash "$SANDBOX/real-26.1/preferences.yml")" "$h" "the real preferences are untouched"
+    assert_no_file "$SG_BACKUPS" "nothing was written"
+}
+
+test_a_kept_backup_is_not_overwritten_by_the_next_run() {
+    local bk kept h_bk
+    sg_configure || return 1
+    assert_rc 0 "configure"
+    printf '%s\n' "$(sed 's|^  executable: .*|  executable: /usr/bin/git|' "$SG_PREFS")" >"$SANDBOX/prefs.user" || return 1
+    cp -- "$SANDBOX/prefs.user" "$SG_PREFS" || return 1
+    gsg restore-smartgit
+    assert_rc 0 "restore-smartgit leaves the user's value"
+    bk="$(echo "$SG_BACKUPS"/*.preferences.yml)"
+    h_bk="$(sg_hash "$bk")"
+    printf '%s\n' "$(sed 's|maxCount: 3|maxCount: 4|' "$SANDBOX/prefs.orig")" >"$SG_PREFS" || return 1
+    gsg install --configure-smartgit </dev/null
+    assert_rc 0 "configure again"
+    assert_contains "$OUT" "the earlier backup was kept as" "says where the old backup went"
+    kept="$(echo "$SG_BACKUPS"/*.kept-*)"
+    assert_eq "$(sg_hash "$kept")" "$h_bk" "the kept backup is byte-identical to what it was"
+}
+
+test_template_hooks_cannot_break_the_verify_commits() {
+    sg_setup || return 1
+    sg_real_tools || return 1
+    mkdir -p -- "$SANDBOX/tpl/hooks" && printf '#!/bin/sh\nexit 1\n' >"$SANDBOX/tpl/hooks/pre-commit" && chmod 755 "$SANDBOX/tpl/hooks/pre-commit" || return 1
+    gitx config --global init.templateDir "$SANDBOX/tpl" || return 1
+    gsg install --configure-smartgit </dev/null
+    assert_rc 0 "a failing template hook does not reach the scratch repository"
+}
+
+# shellcheck disable=SC2016
+test_smartgit_bounded_uses_the_doctor_time_bound_only_when_it_is_set() {
+    sg_setup || return 1
+    gm_stub "$SANDBOX/timeoutlog" 'printf "%s\n" "$*" >>"${0%/*}/timeout.log"; shift 3; exec "$@"' || return 1
+    gu_run 'source "$GSG_ROOT/lib/smartgit.sh" || exit 9; DR_LIMIT=7; TIMEOUT_BIN="$1"; smartgit_bounded echo bounded' "$SANDBOX/timeoutlog"
+    assert_rc 0 "bounded run"
+    assert_contains "$OUT" "bounded" "the command ran"
+    assert_contains "$(<"$SANDBOX/timeout.log")" "-k 5 7 echo bounded" "through timeout with the doctor limit"
+    rm -f -- "$SANDBOX/timeout.log" || return 1
+    gu_run 'source "$GSG_ROOT/lib/smartgit.sh" || exit 9; TIMEOUT_BIN="$1"; smartgit_bounded echo plain' "$SANDBOX/timeoutlog"
+    assert_contains "$OUT" "plain" "without the limit the command still runs"
+    assert_no_file "$SANDBOX/timeout.log" "and no timeout is used"
+}
+
+test_uninstall_stops_before_changing_anything_while_smartgit_runs() {
+    sg_configure || return 1
+    assert_rc 0 "configure"
+    sg_running || return 1
+    gsg uninstall
+    assert_rc 1 "SmartGit is running"
+    assert_contains "$ERR" "uninstall stopped before removing anything else" "says nothing else was removed"
+    assert_contains "$ERR" "SmartGit is running" "and why"
+    assert_eq "$(gitx config --global --get hook.git-secret-guard.event)" pre-commit "the hook config is still there"
+    assert_file "$LC_STATE/state" "the state is still there"
+    assert_file "$LC_BIN/git-secret-guard" "and so is the CLI link, to run again"
+    rm -f -- "$SANDBOX/smartgit.running" || return 1
+    gsg uninstall
+    assert_rc 0 "uninstall once SmartGit is closed"
+    assert_eq "$(sg_hash "$SG_PREFS")" "$(sg_hash "$SANDBOX/prefs.orig")" "SmartGit is back on its original setting"
+}
+
+# ^ invariant SG_STOP_FIRST stops sg_interrupt_run at the first move whose arguments match; SG_STOP_SECOND lets one such move pass and stops at the next
+SG_STOP_FIRST=0
+SG_STOP_SECOND=1
+
+# ^ invariant sg_interrupt_setup = a Mac with SmartGit on its bundled git, the real scanners, a working git-lfs and the original preferences copied
+sg_interrupt_setup() {
+    sg_setup || return 1
+    sg_real_tools || return 1
+    sg_lfs_present || return 1
+    cp -- "$SG_PREFS" "$SANDBOX/prefs.orig" || return 1
+}
+
+# ^ invariant sg_count_in DIR REGEX = how many names in DIR match REGEX; 0 when DIR does not exist
+sg_count_in() { { ls -A "$1" 2>/dev/null || true; } | grep -c -E "$2" || true; }
+
+# ^ invariant sg_rerun_ok = the plain install --configure-smartgit again, without a terminal, and it must succeed
+sg_rerun_ok() {
+    gsg install --configure-smartgit </dev/null
+    assert_rc 0 "the rerun completes"
+}
+
+# ^ invariant sg_restore_ok = restore-smartgit, and it must succeed
+sg_restore_ok() {
+    gsg restore-smartgit
+    assert_rc 0 "restore-smartgit"
+}
+
+# ^ invariant sg_assert_edit_in_place = the preferences name the sandbox git as the Git Executable
+sg_assert_edit_in_place() {
+    assert_eq "$(sg_git_value executable "$SG_PREFS")" "$SANDBOX/pathbin/git" "the edit is in place"
+}
+
+test_an_interrupt_before_the_pending_manifest_leaves_the_preferences_untouched_and_a_rerun_completes() {
+    sg_interrupt_setup || return 1
+    sg_interrupt_run .manifest "$SG_STOP_FIRST" TERM "$GSG_PROJECT/bin/git-secret-guard" install --configure-smartgit || return 1
+    assert_eq "$(sg_hash "$SG_PREFS")" "$(sg_hash "$SANDBOX/prefs.orig")" "the preferences were not touched"
+    assert_eq "$(sg_count_in "$SG_BACKUPS" '\.manifest$')" 0 "no manifest claims an edit"
+    sg_rerun_ok
+    sg_assert_edit_in_place
+    assert_eq "$(sg_count_in "$SG_BACKUPS" '\.manifest$')" 1 "one final manifest"
+    assert_eq "$(sg_count_in "$SG_BACKUPS" '^manifest\.')" 0 "the temp file of the stopped run is gone"
+}
+
+test_an_interrupt_before_the_preferences_rename_is_undone_by_restore_and_completed_by_a_rerun() {
+    local temp_re='^\.preferences\.yml\.gsg\.'
+    sg_interrupt_setup || return 1
+    sg_interrupt_run preferences.yml "$SG_STOP_FIRST" TERM "$GSG_PROJECT/bin/git-secret-guard" install --configure-smartgit || return 1
+    assert_eq "$(sg_hash "$SG_PREFS")" "$(sg_hash "$SANDBOX/prefs.orig")" "the preferences are still the original"
+    assert_contains "$(cat "$SG_BACKUPS"/*.manifest)" "status=pending" "the manifest says the change is pending"
+    assert_eq "$(sg_count_in "$SG_SETTINGS" "$temp_re")" 1 "the temp file of the edit was left"
+    sg_restore_ok
+    assert_contains "$OUT$ERR" "already the original" "it sees nothing to undo"
+    sg_rerun_ok
+    sg_assert_edit_in_place
+    assert_eq "$(sg_count_in "$SG_SETTINGS" "$temp_re")" 0 "the temp file is gone"
+}
+
+test_an_interrupt_before_the_final_manifest_is_undone_by_restore_and_completed_by_a_rerun() {
+    sg_interrupt_setup || return 1
+    sg_interrupt_run .manifest "$SG_STOP_SECOND" TERM "$GSG_PROJECT/bin/git-secret-guard" install --configure-smartgit || return 1
+    sg_assert_edit_in_place
+    assert_contains "$(cat "$SG_BACKUPS"/*.manifest)" "status=pending" "the manifest still says pending"
+    sg_restore_ok
+    assert_eq "$(sg_hash "$SG_PREFS")" "$(sg_hash "$SANDBOX/prefs.orig")" "the preferences are the original again"
+    sg_rerun_ok
+    assert_contains "$(cat "$SG_BACKUPS"/*.manifest)" "status=final" "the manifest is final"
+}
+
+test_an_interrupted_git_lfs_record_leaves_a_temp_file_and_no_filter_and_restore_smartgit_clears_it() {
+    sg_interrupt_setup || return 1
+    sg_interrupt_run lfs.record "$SG_STOP_FIRST" TERM "$GSG_PROJECT/bin/git-secret-guard" install --configure-smartgit || return 1
+    assert_eq "$(sg_count_in "$SG_BACKUPS" '^lfs-tmp\.')" 1 "the temp file of the record was left"
+    assert_eq "$(gitx config --global --get-regexp '^filter\.lfs\.' | wc -l | tr -d ' ')" 0 "no filter was written yet"
+    sg_restore_ok
+    assert_no_file "$SG_BACKUPS" "the temp file and the state directory are gone"
 }
 
 run_file_tests

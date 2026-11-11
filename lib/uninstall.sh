@@ -369,6 +369,11 @@ uninstall_gitup_handoff() {
 
 uninstall_steps() {
     local remove_tools="$1"
+    # ^ order the SmartGit restore runs before everything else; a refusal (SmartGit running) leaves the installed CLI in place to run again
+    smartgit_restore_all || {
+        printf '%s: uninstall stopped before removing anything else; fix what is said above and run %s uninstall again\n' "$GSG_NAME" "$GSG_NAME" >&2
+        return 1
+    }
     # ^ order uninstall_restore_hooks_path before uninstall_hook_section => a failed restore leaves the hook config scanning, never a machine with neither
     uninstall_restore_hooks_path || return 1
     uninstall_hook_section || return 1
@@ -378,8 +383,6 @@ uninstall_steps() {
     uninstall_read_placed || return 1
     uninstall_restore_replaced || return 1
     if [ "$remove_tools" -eq 1 ]; then uninstall_tools || return 1; fi
-    # ^ order the SmartGit restore runs before the hand-off cleanup and before the state goes; its manifests and backups live in the state directory
-    smartgit_restore_all || return 1
     uninstall_gitup_handoff || return 1
     uninstall_state || return 1
     if [ "$GSG_UNINSTALL_ACTIONS" -eq 0 ]; then

@@ -1,7 +1,36 @@
 # shellcheck shell=bash disable=SC2153
 # ^ coupled Git LFS half of the SmartGit support; the plan per route and the apply follow in the chunks below
 
-smartgit_lfs_present() { "$1" lfs version >/dev/null 2>&1; }
+# ^ external a SmartGit started from the Dock gave git this PATH (measured on 26.1.056, docs/smartgit.md); the git directory is first, followed by this suffix
+# ^ coupled Intel Homebrew lives in /usr/local/bin, absent from the measured PATH; a git-lfs installed there is refused with the instruction, never assumed seen
+SMARTGIT_LAUNCHD_PATH_SUFFIX=/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin
+
+# ^ invariant prints the PATH git-lfs is looked up on for target $1, an absolute path (rc 1 otherwise); GSG_SMARTGIT_LAUNCH_PATH replaces the PATH only
+smartgit_lfs_launch_path() {
+    case "$1" in
+        /?*/*) ;;
+        *)
+            printf '%s: the git %s is not an absolute path, so the PATH SmartGit gives it cannot be built\n' "$GSG_NAME" "$1" >&2
+            return 1
+            ;;
+    esac
+    if [ -n "${GSG_SMARTGIT_LAUNCH_PATH:-}" ]; then
+        printf '%s' "$GSG_SMARTGIT_LAUNCH_PATH"
+        return 0
+    fi
+    printf '%s:%s' "${1%/*}" "$SMARTGIT_LAUNCHD_PATH_SUFFIX"
+}
+
+# ^ invariant on macOS the check runs under env -i with HOME and the PATH SmartGit gives git; a git-lfs only your shell can see does not count as present
+smartgit_lfs_present() {
+    local p
+    if brew_is_macos; then
+        p="$(smartgit_lfs_launch_path "$1")" || return 1
+        env -i HOME="$HOME" PATH="$p" "$1" lfs version >/dev/null 2>&1
+    else
+        "$1" lfs version >/dev/null 2>&1
+    fi
+}
 
 # ^ invariant true when any scope used outside a repository (system, global) sets a filter.lfs.* key
 smartgit_lfs_filter_set() { "$GSG_GIT" -C / config --get-regexp '^filter\.lfs\.' >/dev/null 2>&1; }
@@ -33,32 +62,34 @@ smartgit_lfs_require_bin() {
     return 1
 }
 
-# ^ invariant on a RHEL-compatible system git-lfs comes from EPEL; without it enabled the plan is refused with the instruction, no repository is enabled here
-# ^ security the repository query is bounded and answers no to every prompt;
-# ^ security a missing timeout binary and a failed query are their own refusals, never read as "EPEL is off"
+SG_LFS_STDERR_EXCERPT_BYTES=300
+
+# ^ invariant dnf is asked whether an enabled repository offers git-lfs; an answer plans the install, an empty answer refuses naming EPEL as a likely source
+# ^ security the query is bounded and answers no to every prompt; a missing timeout binary and a failed query are own refusals, never read as "not offered"
+# ^ invariant the answer is read from stdout only; stderr goes to a temp file shown on failure, and a warning never counts as an offer
 smartgit_lfs_plan_dnf() {
-    local dnf id repos="" qrc
+    local dnf offered qrc errf why
     smartgit_lfs_require_bin dnf || return 1
     dnf="$REPLY"
-    install_os_release_field "${GSG_OS_RELEASE:-/etc/os-release}" ID
-    id="$REPLY"
-    if [ "$id" != fedora ]; then
-        if [ -z "${INSTALL_TIMEOUT_BIN:-}" ]; then
-            printf '%s: no timeout binary is known, so the repository query that checks for EPEL cannot run safely; SmartGit was not changed\n' "$GSG_NAME" >&2
-            return 1
-        fi
-        repos="$(LC_ALL=C "$INSTALL_TIMEOUT_BIN" -k "$SG_LFS_KILL_GRACE_SECONDS" "$GITUP_QUERY_TIMEOUT" "$dnf" --assumeno -q repolist --enabled </dev/null 2>&1)"
-        qrc=$?
-        if [ "$qrc" -ne 0 ]; then
-            printf '%s: the repository query failed (exit %s: %s), so EPEL could not be checked; SmartGit was not changed\n' "$GSG_NAME" "$qrc" "${repos//[[:cntrl:]]/ }" >&2
-            return 1
-        fi
-        if [[ ${repos,,} != *epel* ]]; then
-            printf '%s: git-lfs is in EPEL on %s and the repository list shows no enabled EPEL; enable it yourself (sudo dnf install epel-release) and run the command again; this tool does not enable a repository; SmartGit was not changed\n' \
-                "$GSG_NAME" "${id:-this system}" >&2
-            return 1
-        fi
-        gitup_plan_note "git-lfs comes from EPEL, which is enabled on this system"
+    if [ -z "${INSTALL_TIMEOUT_BIN:-}" ]; then
+        printf '%s: no timeout binary is known, so the dnf repoquery for git-lfs cannot run safely; SmartGit was not changed\n' "$GSG_NAME" >&2
+        return 1
+    fi
+    errf="$(mktemp)" || {
+        printf '%s: cannot create a temporary file for the dnf repoquery; SmartGit was not changed\n' "$GSG_NAME" >&2
+        return 1
+    }
+    offered="$(LC_ALL=C "$INSTALL_TIMEOUT_BIN" -k "$SG_LFS_KILL_GRACE_SECONDS" "$GITUP_QUERY_TIMEOUT" "$dnf" --assumeno -q repoquery --latest-limit=1 --queryformat '%{version}\n' git-lfs </dev/null 2>"$errf")"
+    qrc=$?
+    why="$(head -c "$SG_LFS_STDERR_EXCERPT_BYTES" "$errf")"
+    smartgit_discard_tmp "$errf"
+    if [ "$qrc" -ne 0 ]; then
+        printf '%s: the dnf repoquery for git-lfs failed (exit %s: %s); SmartGit was not changed\n' "$GSG_NAME" "$qrc" "${why//[[:cntrl:]]/ }" >&2
+        return 1
+    fi
+    if [[ ! ${offered%%$'\n'*} =~ ^[0-9]+(\.[0-9]+)*$ ]]; then
+        printf '%s: no enabled dnf repository offers git-lfs; on RHEL-compatible systems it often comes from EPEL, which you would enable yourself (this tool enables no repository); SmartGit was not changed\n' "$GSG_NAME" >&2
+        return 1
     fi
     SG_LFS_ROUTE=dnf
     SG_LFS_CMD=("$dnf" install -y git-lfs)
@@ -148,43 +179,52 @@ smartgit_lfs_install_pkg() {
     esac
     hash -r
     if ! smartgit_lfs_present "$GSG_GIT"; then
-        printf '%s: git lfs version still fails through %s after the install; SmartGit was not changed\n' "$GSG_NAME" "$GSG_GIT" >&2
+        local lp
+        lp="$(smartgit_lfs_launch_path "$GSG_GIT")" || lp=unknown
+        printf '%s: git lfs version still fails through %s in the environment SmartGit gives git (PATH %s); if git-lfs is installed elsewhere, set absolute paths in the filter.lfs.* settings as SmartGit documents, this tool does not write them; SmartGit was not changed\n' \
+            "$GSG_NAME" "$GSG_GIT" "$lp" >&2
         return 1
     fi
 }
 
-# ^ invariant the record is written only after the filter was seen to appear; an undo never removes a section this tool did not add
-smartgit_lfs_configure() {
-    local dir tmp
-    if smartgit_lfs_filter_set; then return 0; fi
-    printf '%s: running %s lfs install --skip-repo\n' "$GSG_NAME" "$GSG_GIT"
-    "$GSG_GIT" -C / lfs install --skip-repo || {
-        printf '%s: git lfs install failed; the filter.lfs.* settings were not written\n' "$GSG_NAME" >&2
-        return 1
-    }
-    if ! smartgit_lfs_filter_set; then
-        printf '%s: git lfs install finished but no filter.lfs.* setting is visible; nothing is recorded\n' "$GSG_NAME" >&2
-        return 1
-    fi
-    dir="$GSG_STATE_DIR/smartgit"
+# ^ invariant the record is written before any change; the undo removes the filter section only when this record says the tool added it
+smartgit_lfs_record_write() {
+    local dir="$GSG_STATE_DIR/smartgit" tmp
     (umask 077 && mkdir -p -- "$dir") || {
-        printf '%s: could not create %s; the filter.lfs.* settings were written but are not recorded, so an undo will not remove them\n' "$GSG_NAME" "$dir" >&2
+        printf '%s: could not create %s for the Git LFS record; nothing was changed\n' "$GSG_NAME" "$dir" >&2
         return 1
     }
-    tmp="$(umask 077 && mktemp "$dir/lfs.XXXXXX")" || {
-        printf '%s: could not create a file in %s; the filter.lfs.* settings were written but are not recorded\n' "$GSG_NAME" "$dir" >&2
+    tmp="$(umask 077 && mktemp "$dir/lfs-tmp.XXXXXX")" || {
+        printf '%s: could not create a file in %s for the Git LFS record; nothing was changed\n' "$GSG_NAME" "$dir" >&2
         return 1
     }
     printf 'filter_added=yes\n' >"$tmp" || {
-        rm -f -- "$tmp" || printf '%s: could not remove the temporary file %s\n' "$GSG_NAME" "$tmp" >&2
-        printf '%s: could not write the record in %s; the filter.lfs.* settings are not recorded\n' "$GSG_NAME" "$dir" >&2
+        smartgit_discard_tmp "$tmp"
+        printf '%s: could not write the Git LFS record in %s; nothing was changed\n' "$GSG_NAME" "$dir" >&2
         return 1
     }
     mv -f -- "$tmp" "$dir/lfs.record" || {
-        rm -f -- "$tmp" || printf '%s: could not remove the temporary file %s\n' "$GSG_NAME" "$tmp" >&2
-        printf '%s: could not write %s/lfs.record; the filter.lfs.* settings are not recorded\n' "$GSG_NAME" "$dir" >&2
+        smartgit_discard_tmp "$tmp"
+        printf '%s: could not write %s/lfs.record; nothing was changed\n' "$GSG_NAME" "$dir" >&2
         return 1
     }
+}
+
+# ^ order the record is written before git lfs install runs; a stop in between leaves a record the undo understands (no section = it only drops the record)
+smartgit_lfs_configure() {
+    if smartgit_lfs_filter_set; then return 0; fi
+    smartgit_lfs_record_write || return 1
+    printf '%s: running %s lfs install --skip-repo\n' "$GSG_NAME" "$GSG_GIT"
+    "$GSG_GIT" -C / lfs install --skip-repo || {
+        printf '%s: git lfs install failed; taking back what it may have written\n' "$GSG_NAME" >&2
+        smartgit_lfs_undo
+        return 1
+    }
+    if ! smartgit_lfs_filter_set; then
+        printf '%s: git lfs install finished but no filter.lfs.* setting is visible; the record was dropped\n' "$GSG_NAME" >&2
+        smartgit_lfs_undo
+        return 1
+    fi
 }
 
 # ^ invariant only a recorded filter section is removed, from the global config; the git-lfs package itself is never removed, other tools may use it

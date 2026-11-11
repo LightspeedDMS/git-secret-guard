@@ -499,22 +499,25 @@ slow_date() {
 }
 
 test_concurrent_runs_over_different_roots_keep_both_sets() {
-    local i rc bad=0 name
-    local -a pids=()
+    local i rc bad=0 name outs=""
+    local -a pids=() files=()
     dr_begin && slow_date || return 1
     for name in dev/a1 dev/a2 work/b1 work/b2; do dr_repo "$name" && dr_disable "$name" || return 1; done
     for i in $(seq 1 "$CONCURRENT_PAIRS"); do
         gsg_bg "$SANDBOX/dev.$i" --roots "$DR_ROOTS/dev"
-        pids+=("$BG_PID")
+        pids+=("$BG_PID") files+=("$SANDBOX/dev.$i")
         gsg_bg "$SANDBOX/work.$i" --roots "$DR_ROOTS/work"
-        pids+=("$BG_PID")
+        pids+=("$BG_PID") files+=("$SANDBOX/work.$i")
     done
-    for i in "${pids[@]}"; do
-        wait "$i"
+    for i in "${!pids[@]}"; do
+        wait "${pids[$i]}"
         rc=$?
-        if [ "$rc" -ne 1 ]; then bad=$((bad + 1)); fi
+        if [ "$rc" -ne 1 ]; then
+            bad=$((bad + 1))
+            outs+=" [status $rc: $(tail -n 3 -- "${files[$i]}" | tr '\n' '|')]"
+        fi
     done
-    assert_eq "$bad" 0 "every run finished with status 1"
+    assert_eq "$bad" 0 "every run finished with status 1;$outs"
     assert_valid_record "after the racing runs"
     assert_eq "$(rec_body)" "$(repo_line dev/a1)
 $(repo_line dev/a2)

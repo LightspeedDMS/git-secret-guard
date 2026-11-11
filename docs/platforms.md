@@ -911,6 +911,7 @@ The `windows` job runs on `windows-2025` (Windows Server 2025, build 26100, elev
 
 ## Maintainer notes
 
+- **SmartGit (`lib/smartgit*.sh`, [smartgit.md](smartgit.md)).** What was measured: macOS only (SmartGit 26.1.056 on a real Mac: the `git:` block of `preferences.yml`, a plain absolute path accepted, edits while closed and while running, bundled git 2.53.0 and git-lfs 3.7.1). Not measured, so refused by design: Linux tarball, .deb, .rpm, Snap, Windows (detection only), any other major version, and the Flatpak `preferences.yml` (edited only when it has the macOS shape; the four Flatpak steps are the hand-verified ones). The recorded set is `SMARTGIT_RECORDED_MAJOR` plus the kinds in `smartgit_check_dir`; recording a new platform means adding its spike here first. Files: `smartgit.sh` (detection, shape), `smartgit_report.sh` (status, doctor), `smartgit_offer.sh` (refusals, plan, consent), `smartgit_lfs.sh`, `smartgit_apply.sh` (backup, manifest, edit, verify, restore), `smartgit_flatpak.sh`.
 - **Bumping the Ubuntu image digest.** `IMAGE` in `tests/platform/ubuntu.sh` is the manifest-list digest. Look it up without skopeo: an anonymous
   token from `auth.docker.io/token?service=registry.docker.io&scope=repository:library/ubuntu:pull`, then
   `curl -I -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json'

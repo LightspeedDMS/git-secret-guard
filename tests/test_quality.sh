@@ -388,20 +388,20 @@ test_the_hook_never_looks_tools_up_on_PATH() {
     local -a files=(bin/git-secret-guard lib/scanners/*.sh)
     local f rc
     for f in hooks/secret-scan lib/*.sh; do
-        if [ "$f" != lib/install.sh ] && [ "$f" != lib/brew.sh ]; then files+=("$f"); fi
+        if [ "$f" != lib/install.sh ] && [ "$f" != lib/brew.sh ] && [ "$f" != lib/smartgit.sh ]; then files+=("$f"); fi
     done
     grep -nE '(^|[;&|(`]|\$\()[[:space:]]*(command -v|which |type -P)' "${files[@]}"
     rc=$?
-    assert_eq "$rc" 1 "no PATH lookup of a tool outside lib/install.sh and lib/brew.sh (grep exit 1 = no match; 0 = found one, 2 = grep failed)"
+    assert_eq "$rc" 1 "no PATH lookup of a tool outside lib/install.sh, lib/brew.sh and lib/smartgit.sh (grep exit 1 = no match; 0 = found one, 2 = grep failed)"
 }
 
 # ^ invariant the pattern of the hook guard; the guard and the test of its coverage share this one definition
-GSG_LIFECYCLE_RE='(install[a-z_]*|uninstall|status|state|tools|hookspath|brew|wsl|gitup[a-z_]*)\.sh|usage\.md'
+GSG_LIFECYCLE_RE='(install[a-z_]*|uninstall|status|state|tools|hookspath|brew|wsl|gitup[a-z_]*|smartgit[a-z_]*)\.sh|usage\.md'
 
 test_the_hook_guard_pattern_names_every_install_time_library() {
     cd -- "$GSG_PROJECT" || return 1
     local f
-    for f in lib/install*.sh lib/uninstall.sh lib/gitup*.sh; do
+    for f in lib/install*.sh lib/uninstall.sh lib/gitup*.sh lib/smartgit*.sh; do
         grep -qE "$GSG_LIFECYCLE_RE" <<<"source \"\$GSG_ROOT/$f\"" || fail "the hook guard does not name $f"
     done
 }

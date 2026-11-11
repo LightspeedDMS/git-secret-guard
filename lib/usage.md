@@ -4,6 +4,13 @@ Machine-wide pre-commit secret scanning (trufflehog + betterleaks) through a git
 
 commands:
   install [--replace-hooks-path] [--with-timer] [--upgrade-git] [--take-over-system-git]
+          [--configure-smartgit [--allow-smartgit-sandbox-removal]]
+        --configure-smartgit points SmartGit's Git Executable at the git in use (>= 2.54) and installs Git LFS for it when
+        missing: macOS (SmartGit 26.1) and the Linux Flatpak. Offered at a terminal when SmartGit is found, otherwise a
+        hint is printed. Prints the plan, asks once (default No), backs up preferences.yml with a manifest, edits only the
+        executable lines, then checks a fake-token commit is blocked; any failure restores the backup. Refuses while
+        SmartGit runs and for any SmartGit version or platform not recorded (the manual steps are printed instead).
+        On the Flatpak it also removes the SmartGit sandbox; that needs --allow-smartgit-sandbox-removal or its own yes.
         --upgrade-git lets install upgrade or rebuild git where its module can (RHEL, Rocky, Fedora, Ubuntu, Debian, Windows; macOS
         through Homebrew, as your user): it prints the plan with each privileged command, then runs it. In a terminal install
         asks first (default No); without a terminal the flag is the only way to say yes. Exit 3 = a module hands the
@@ -28,6 +35,10 @@ commands:
   restore-system-git
         Undo a system git takeover: puts the saved RPM files back (hash checked), removes the dnf excludepkgs entry and the backup
         directory. Needs no network. Says "nothing to restore" and exits 0 when there is no takeover.
+  restore-smartgit
+        Undo what install --configure-smartgit did: the Git Executable lines from the backup (only while they are still
+        the ones this tool wrote), the Flatpak override, wrapper and vmoptions line, and the filter.lfs.* settings that
+        git lfs install added. Git LFS packages are kept. Says "nothing to restore" when SmartGit was never changed.
   status
         Show the installed version, hook command, the git in use, tool versions and the recorded core.hooksPath.
         Exit 0 only when installed, the global config matches, git runs the hook (git hook list pre-commit), the first git on PATH

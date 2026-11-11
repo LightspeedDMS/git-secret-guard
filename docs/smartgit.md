@@ -13,6 +13,28 @@ SmartGit says some of its features may not work correctly without the bundled gi
 
 Install git-secret-guard first ([install.md](install.md)), then follow the section for your platform. `git-secret-guard status` must say that commits can be scanned.
 
+## The automatic way: `install --configure-smartgit`
+
+`git-secret-guard install` looks for SmartGit (macOS app, Linux tarball or package, Flatpak, Snap, Windows install directories) and its settings directories, one per major version. `status` and `doctor` report each one with the git it is set to and its version; a SmartGit on a git older than 2.54 is a PROBLEM in `doctor` with the command to run. Without `--configure-smartgit`, `install` only prints a hint, or at a terminal asks (default No) after printing the plan.
+
+```bash
+git-secret-guard install --configure-smartgit        # plan, one question (or the flag), then the change
+git-secret-guard restore-smartgit                    # undo; uninstall does the same
+```
+
+What it does, in order, and what it refuses:
+
+- **Plan first.** Every file it will write and every command it will run (privileged ones with their full path) is printed before anything runs.
+- **Edits only two lines.** In `preferences.yml` of the settings directory it replaces the `executable:` line (and `executable.absolute:` when the file has one) inside the `git:` block, by a line edit through a temporary file in the same directory. Every other byte stays; the YAML is never re-serialised. The original is copied first to `~/.local/state/git-secret-guard/smartgit/` with a manifest (hash, old and new values).
+- **Refuses, changing nothing,** while SmartGit is running (it rewrites its settings while it runs; exit with *Repository, Exit*), when the target git is older than 2.54 or does not run, when `preferences.yml` is a symbolic link, not yours or not of the recorded shape, and for any SmartGit settings directory that was not recorded (only **26.1 on macOS and in the Flatpak** were). Then it prints the manual steps below instead.
+- **Git LFS** is installed for the target git only when `git lfs version` fails through it: `brew install git-lfs` as you on macOS, `dnf install -y git-lfs` (on RHEL-compatible systems only when EPEL is already enabled; no repository is ever enabled) or `apt-get install -y git-lfs` through the same privileged machinery as the git upgrade. On Windows nothing is installed (Git for Windows includes LFS). Then `git lfs install --skip-repo` runs only when no `filter.lfs.*` is set.
+- **Verifies.** The configured git must run and be 2.54 or newer, `git lfs version` must work, a commit of a fake token (made up at run time, never printed) in a scratch repository must be blocked, and a clean commit must print the summary line. Any failure restores the backup.
+- **Flatpak.** The four verified steps below run as one unit. Step 1 removes the SmartGit sandbox, so it needs its own consent: `--allow-smartgit-sandbox-removal`, or a yes at its own question; `--configure-smartgit` alone is not enough.
+- **Undo.** `restore-smartgit` puts the two lines back only while they are still the ones this tool wrote; a value you changed since is left alone and reported. A backup that does not match the manifest stops the restore and prints the by-hand step. Git LFS packages are never removed; the `filter.lfs.*` settings only when this tool added them. For the Flatpak: the system override is reset only when there was none before, the wrapper only while it carries our marker, and only our `vmoptions` line is removed.
+- **After a SmartGit update** a new major version has a new settings directory: `status` and `doctor` show it as not configured, with the command to rerun.
+
+The manual steps below remain the fallback for everything this refuses. See [what was and was not checked](#what-was-and-was-not-checked) and the [maintainer notes](#maintainer-notes-the-macos-spike-smartgit-261).
+
 ## How to tell that SmartGit's commits are scanned
 
 A scanned commit prints the summary line of [the README](../README.md#use) in SmartGit's command output (the log pane or the commit error dialog):
@@ -93,7 +115,7 @@ No sandbox is involved. In Preferences, Commands, choose *Other Git Executable* 
 
 ## macOS
 
-**Not run on a Mac by the author. These steps follow SmartGit's documentation and the platform notes of this package; check them on your machine.**
+**The setting itself was checked on a real Mac (SmartGit 26.1.056, macOS 26, arm64; see the [maintainer notes](#maintainer-notes-the-macos-spike-smartgit-261)); the Homebrew path below was not run through SmartGit's GUI.** `install --configure-smartgit` does this for you.
 
 The standard SmartGit disk image includes a bundled git (the download page also lists "without Git" images for special setups, which are not needed here). Use a git from Homebrew, which git-secret-guard needs on macOS anyway:
 
@@ -125,9 +147,33 @@ After an upgrade of Git for Windows the path normally stays the same. After a re
 |---|---|
 | Linux, Flatpak SmartGit 26.1 on Fedora, host git 2.55.0 through the wrapper | **Checked.** The wrapper ran `git --version` and `git lfs version` from inside the sandbox, SmartGit accepted the path, and a SmartGit commit printed the git-secret-guard summary line (the output in [How to tell that SmartGit's commits are scanned](#how-to-tell-that-smartgits-commits-are-scanned) is from that run). An authenticated push through the rewritten credential helper was **not** tested; a GitHub remote that uses `gh auth git-credential` from your `~/.gitconfig` does not need it. |
 | The bundled git in the Flatpak is older than 2.54 | Checked on that machine (2.53.0). Commits made with it are not scanned: that is the premise of this page, and git-secret-guard's own measurement for another client is in [GitHub Desktop's bundled git](platforms.md#github-desktops-bundled-git). |
-| Linux tarball or distribution package of SmartGit | Not run. |
-| macOS | Not run. The bundled-git statement comes from SmartGit's download page; the path names are Homebrew's defaults. |
-| Windows | Not run. The bundled-git statement comes from SmartGit's download page; the path is Git for Windows' default. |
+| Linux tarball or distribution package of SmartGit | Not run. `install --configure-smartgit` detects it and refuses to edit (no settings key recorded); the manual steps apply. |
+| macOS, SmartGit 26.1.056 on a real Mac | **Checked** (spike, see the maintainer notes): where the Git Executable is stored, that SmartGit accepts a `preferences.yml` edited while it is closed and runs that git, and that an edit made while it runs survives a clean quit. **Not checked:** a commit made through the SmartGit GUI, SmartGit older or newer than 26.1, an Intel Mac, whether SmartGit finds a Homebrew `git-lfs` when started from the Dock. The automated flow is covered by tests against stand-ins and a fixture of the real file. |
+| Linux Flatpak automation | The four steps are the ones verified by hand; the automation itself ran only against stand-ins (no real Flatpak, sudo or SmartGit). The Flatpak `preferences.yml` key was not recorded: the automation edits it only when it has the same shape as the macOS file, else the step-4 instruction applies. |
+| Windows | Not run. Detection paths are implemented, nothing is edited (no settings key recorded); the manual steps apply. |
 | Whether any SmartGit feature misbehaves with an external git | Not tested beyond commit and the checks above. |
+
+## Maintainer notes: the macOS spike (SmartGit 26.1)
+
+Measured on a real Mac (macOS 26.7.1, arm64) with SmartGit 26.1.056 from `brew install --cask smartgit`; nothing below is inferred from the manual.
+
+- **Bundle.** `/Applications/SmartGit.app`, `Contents/Info.plist`: `CFBundleShortVersionString` 26.1.056, `CFBundleVersion` 261056, `CFBundleIdentifier` com.syntevo.smartgit, launcher `Contents/MacOS/SmartGit`. The bundle holds a git at `Contents/Resources/git/bin/git` (**2.53.0**, older than 2.54: not scanned) and a `git-lfs` beside it (**3.7.1**, so the macOS bundle does include LFS).
+- **Settings directory.** `~/Library/Preferences/SmartGit/<major>.<minor>` (here `26.1`), next to `smartgit.vmoptions` one level up. Files: `preferences.yml` (mode 0600), `smartgit.properties`, `logs/log.txt.0`, and secret files (`credentials.yml`, `passwords`, `evaluation`) that this tool never reads. The fixture `tests/fixtures/smartgit/macos-26.1/preferences.yml` is the real file with identifying values scrubbed.
+- **The Git Executable.** Block `git:` of `preferences.yml` (2-space indent, flow-style lists elsewhere). *Bundled Git* after the setup wizard:
+
+```
+git:
+  maxCount: 3
+  alternatives: [/usr/bin/git, '${smartgit.install}/git/bin/git']
+  executable: ${smartgit.install}/git/bin/git
+  executable.absolute: /Applications/SmartGit.app/Contents/Resources/git/bin/git
+  useOwnCredentialHelper: true
+```
+
+- **A plain absolute path works** in `executable:` (checked with `/usr/bin/git`, Apple Git 2.54.0, and with a symlink to it outside `alternatives:`): SmartGit logged `Git version is 'git version 2.54.0 ...'` and ran `<path> --version`, then used that git and read `~/.gitconfig` (including `hook.git-secret-guard.*`). `executable.absolute:` may equal the path or be absent (checked): SmartGit did not add it back.
+- **Edited while closed:** accepted at the next start, and SmartGit rewrote the file during the run only in `vcsRecords.lastGitUsage` (a timestamp); `alternatives:` was not rewritten.
+- **Edited while running:** the edit survived a clean quit (`osascript -e 'tell application "SmartGit" to quit'`) in this one run. SmartGit does rewrite the file while it runs, so a pending in-memory change could still overwrite an outside edit; hence the refusal while it runs.
+- **"Other Git Executable"** was not clicked in the GUI; the written form above was run and accepted instead. Whether the wizard writes anything else (for example to `alternatives:`) for that choice is unknown.
+- **Not measured:** SmartGit on Linux (non-Flatpak), Windows, Snap, the Flatpak `preferences.yml` (assumed to have this shape and checked at run time), other major versions, and a commit through the GUI.
 
 Sources: SmartGit's manual, [Preferences, Commands](https://docs.smartgit.dev/24.1/Manual/GUI/Preferences/Commands) (the *Git Executable* settings, the LFS and version indicators, the warning about not using the bundled git), and its [download page](https://www.smartgit.dev/download/) (the "without Git" builds for Windows and macOS).

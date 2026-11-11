@@ -378,6 +378,8 @@ uninstall_steps() {
     uninstall_read_placed || return 1
     uninstall_restore_replaced || return 1
     if [ "$remove_tools" -eq 1 ]; then uninstall_tools || return 1; fi
+    # ^ order the SmartGit restore runs before the hand-off cleanup and before the state goes; its manifests and backups live in the state directory
+    smartgit_restore_all || return 1
     uninstall_gitup_handoff || return 1
     uninstall_state || return 1
     if [ "$GSG_UNINSTALL_ACTIONS" -eq 0 ]; then

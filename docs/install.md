@@ -111,6 +111,12 @@ with no git at all they run right after it.
   something else undid, which leaves commits through `/usr/bin/git` unscanned.
 - The install warning about another old git now also names the git in use, and (where the takeover exists) that cron jobs and scripts calling it by full path are not scanned.
 
+## SmartGit: `--configure-smartgit` and `restore-smartgit`
+
+SmartGit commits with its own git, so a bundled git older than 2.54 leaves its commits unscanned. After a successful install, `install` looks for SmartGit (see [smartgit.md](smartgit.md) for the full behaviour). Without a flag it prints a hint (no terminal) or the plan and one question (terminal, default No). `install --configure-smartgit` makes the question's answer yes. Order: refusals and the whole plan first, one consent, then Git LFS (if `git lfs version` fails through the git in use), a backup with manifest, the two-line edit of `preferences.yml`, and a verify step; any failure restores the backup. The flag exits 1 when it refuses (the install itself is already done); a SmartGit settings directory of a version or platform not recorded gets the manual steps instead of an edit.
+
+`--allow-smartgit-sandbox-removal` is a separate consent for the Linux Flatpak setup, which removes the SmartGit sandbox. `restore-smartgit` and `uninstall` undo the change from the manifests in `<state dir>/smartgit/`; uninstall stops if SmartGit cannot be restored (for example while it runs). Test seams, all announced as `TEST OVERRIDE`: `GSG_SMARTGIT_INSTALL_DIRS`, `GSG_SMARTGIT_TOOL_DIR`, `GSG_SMARTGIT_SETTINGS_BASE`, `GSG_SMARTGIT_FLATPAK_BASE`.
+
 ## An existing global `core.hooksPath`
 
 A global `core.hooksPath` is what this package replaces, so `install` **refuses** when one is set (it prints the value

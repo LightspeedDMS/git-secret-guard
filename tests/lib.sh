@@ -127,6 +127,8 @@ sandbox_create() {
         GSG_WSL_OSRELEASE="$SANDBOX/wsl-kernel"
         GSG_WSL_INTEROP="$SANDBOX/wsl-no-interop"
         GSG_WSL_SYSTEMD_DIR="$SANDBOX/wsl-no-systemd"
+        GSG_SMARTGIT_INSTALL_DIRS="$SANDBOX/smartgit-no-installs"
+        GSG_SMARTGIT_TOOL_DIR="$SANDBOX/pathbin"
     )
     if [ "$TEST_IS_WINDOWS" -eq 1 ]; then
         TEST_SANDBOX_MIXED="$(cygpath -m "$SANDBOX")" || exit 2

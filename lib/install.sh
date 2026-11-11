@@ -937,7 +937,7 @@ install_precheck_timer() {
 # ^ order the git offers run after every refusable check a git can run; a missing git, or one too old for --show-scope, runs them after the offers
 # ^ invariant install_run returns 3 when a git upgrade module hands off to finish outside this process
 install_run() {
-    local replace="$1" timer="$2" upgrade="${3:-0}" takeover="${4:-0}" early=0 ver
+    local replace="$1" timer="$2" upgrade="${3:-0}" takeover="${4:-0}" smartgit="${5:-0}" early=0 ver
     # ^ invariant the flags of this run besides --upgrade-git, as text for the next step a module prints; the new git makes --upgrade-git unnecessary
     GSG_INSTALL_FLAGS=""
     if [ "$replace" -eq 1 ]; then GSG_INSTALL_FLAGS+=" --replace-hooks-path"; fi
@@ -985,4 +985,5 @@ install_run() {
     install_summary
     install_wsl_notice
     install_enable_timer
+    smartgit_install_step "$smartgit"
 }

@@ -452,6 +452,7 @@ doctor_machine_checks() {
     doctor_check_timer
     doctor_check_hooks_path || return 1
     doctor_check_system_git
+    smartgit_doctor_lines
     doctor_check_unfinished_copy
     if [ "$DR_RECHECK" -ne 1 ]; then doctor_check_git; fi
 }

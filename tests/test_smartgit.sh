@@ -619,7 +619,8 @@ test_restore_smartgit_refuses_on_a_bad_lfs_record_before_restoring_the_preferenc
 test_a_finished_configure_records_that_it_added_the_filter() {
     sg_interrupt_setup || return 1
     sg_rerun_ok
-    assert_eq "$(<"$SG_BACKUPS/lfs.record")" filter_added=yes "the record names the filter as added by this tool"
+    assert_eq "$(<"$SANDBOX/lfs.record.during")" filter_added=pending "the record was pending while git lfs install ran"
+    assert_eq "$(<"$SG_BACKUPS/lfs.record")" filter_added=yes "the record names the filter as added by this tool afterwards"
 }
 
 test_a_record_still_pending_when_the_run_stopped_leaves_the_filter_alone_on_restore() {
@@ -628,7 +629,7 @@ test_a_record_still_pending_when_the_run_stopped_leaves_the_filter_alone_on_rest
     assert_eq "$(gitx config --global --get filter.lfs.required)" true "git lfs install had run"
     assert_eq "$(<"$SG_BACKUPS/lfs.record")" filter_added=pending "the record was not yet confirmed"
     sg_restore_ok
-    assert_contains "$OUT$ERR" "filter.lfs" "the restore says what it did with the filter"
+    assert_contains "$OUT$ERR" "git config --global --remove-section filter.lfs" "the restore names the command for a section the user did not make"
     assert_eq "$(gitx config --global --get filter.lfs.required)" true "the filter section stays, it may be the user's"
     assert_no_file "$SG_BACKUPS/lfs.record" "the unconfirmed record is dropped"
 }
@@ -643,6 +644,37 @@ test_uninstall_counts_the_smartgit_restore_as_an_action_so_it_never_says_nothing
     assert_rc 0 "uninstall of a machine with only SmartGit records"
     assert_contains "$OUT" "restored the Git Executable" "the restore is reported"
     assert_not_contains "$OUT$ERR" "nothing to do" "no closing line that denies it"
+}
+
+# shellcheck disable=SC2016
+test_the_launch_path_without_the_override_is_the_git_directory_then_the_measured_dock_list() {
+    sg_setup || return 1
+    gu_run 'source "$GSG_ROOT/lib/smartgit_lfs.sh" || exit 9; unset GSG_SMARTGIT_LAUNCH_PATH; smartgit_lfs_launch_path /opt/x/bin/git'
+    assert_rc 0 "an absolute git path"
+    assert_eq "$OUT" "/opt/x/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin" "the git directory first, then the measured list"
+    gu_run 'source "$GSG_ROOT/lib/smartgit_lfs.sh" || exit 9; GSG_NAME=t; unset GSG_SMARTGIT_LAUNCH_PATH; smartgit_lfs_launch_path git'
+    assert_rc 1 "a relative git path has no directory to put first"
+}
+
+test_a_git_lfs_install_that_fails_is_worded_as_a_failure_and_leaves_nothing() {
+    sg_interrupt_setup || return 1
+    : >"$SANDBOX/lfs.install.fail" || return 1
+    gsg install --configure-smartgit </dev/null
+    assert_rc 1 "git lfs install fails"
+    assert_contains "$ERR" "git lfs install failed (exit 1)" "says that it failed, with the status"
+    assert_not_contains "$ERR" "a run stopped" "does not claim a stopped run"
+    assert_no_file "$SG_BACKUPS/lfs.record" "no record is left"
+    assert_eq "$(sg_count_in "$SG_BACKUPS" '\.manifest$')" 0 "no manifest is left"
+    assert_eq "$(gitx config --global --get-regexp '^filter\.lfs\.' | wc -l | tr -d ' ')" 0 "no filter was written"
+    assert_eq "$(sg_hash "$SG_PREFS")" "$(sg_hash "$SANDBOX/prefs.orig")" "the preferences are byte-identical"
+}
+
+test_a_rerun_after_a_stopped_run_resolves_the_pending_record_to_yes() {
+    sg_interrupt_setup || return 1
+    sg_interrupt_run lfs.record "$SG_STOP_SECOND" TERM "$GSG_PROJECT/bin/git-secret-guard" install --configure-smartgit || return 1
+    assert_eq "$(<"$SG_BACKUPS/lfs.record")" filter_added=pending "the stopped run left the record pending"
+    sg_rerun_ok
+    assert_eq "$(<"$SG_BACKUPS/lfs.record")" filter_added=yes "the rerun saw the filter and confirmed the record"
 }
 
 run_file_tests

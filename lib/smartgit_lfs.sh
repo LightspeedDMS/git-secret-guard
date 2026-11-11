@@ -121,10 +121,35 @@ smartgit_lfs_record_write() {
     }
 }
 
-# ^ order pending is written before git lfs install runs, yes after its settings are seen; a stop in between leaves pending, and the undo only drops it
+# ^ invariant true only when lfs.record holds exactly filter_added=pending
+smartgit_lfs_is_pending() {
+    local rec="$GSG_STATE_DIR/smartgit/lfs.record"
+    [ -f "$rec" ] && [ "$(<"$rec")" = filter_added=pending ]
+}
+
+# ^ invariant a pending record is dropped (no filter.lfs.* key was visible); any other state goes through the undo
+smartgit_lfs_take_back() {
+    local rec="$GSG_STATE_DIR/smartgit/lfs.record"
+    if smartgit_lfs_is_pending; then
+        rm -f -- "$rec" || {
+            printf '%s: could not remove %s; run %s restore-smartgit\n' "$GSG_NAME" "$rec" "$GSG_NAME" >&2
+            return 1
+        }
+        return 0
+    fi
+    smartgit_lfs_undo || {
+        printf '%s: the undo did not finish; run %s restore-smartgit\n' "$GSG_NAME" "$GSG_NAME" >&2
+        return 1
+    }
+}
+
+# ^ order pending is written before git lfs install runs, yes after its settings are seen; a stop in between leaves pending, and a rerun makes it yes
 smartgit_lfs_configure() {
     local irc=0
-    if smartgit_lfs_filter_set; then return 0; fi
+    if smartgit_lfs_filter_set; then
+        if smartgit_lfs_is_pending; then smartgit_lfs_record_write yes || return 1; fi
+        return 0
+    fi
     smartgit_lfs_record_write pending || return 1
     printf '%s: running %s lfs install --skip-repo\n' "$GSG_NAME" "$GSG_GIT"
     "$GSG_GIT" -C / lfs install --skip-repo || irc=$?
@@ -134,9 +159,14 @@ smartgit_lfs_configure() {
             return 1
         }
     fi
-    if [ "$irc" -ne 0 ] || ! smartgit_lfs_filter_set; then
-        printf '%s: git lfs install failed or left no filter.lfs.* setting (exit %s); taking back what it wrote\n' "$GSG_NAME" "$irc" >&2
-        smartgit_lfs_undo || printf '%s: the undo did not finish; run %s restore-smartgit\n' "$GSG_NAME" "$GSG_NAME" >&2
+    if [ "$irc" -ne 0 ]; then
+        printf '%s: git lfs install failed (exit %s); taking back what it wrote\n' "$GSG_NAME" "$irc" >&2
+        smartgit_lfs_take_back
+        return 1
+    fi
+    if ! smartgit_lfs_filter_set; then
+        printf '%s: git lfs install exited 0 but no filter.lfs.* setting is visible; taking back its record\n' "$GSG_NAME" >&2
+        smartgit_lfs_take_back
         return 1
     fi
 }
@@ -182,7 +212,7 @@ smartgit_lfs_undo() {
     case "$REPLY" in
         none) return 0 ;;
         pending)
-            printf '%s: the Git LFS record was never confirmed (a run stopped around git lfs install); the filter.lfs.* settings were left alone\n' "$GSG_NAME"
+            printf '%s: the Git LFS record was never confirmed (a run stopped around git lfs install); the filter.lfs.* settings were left alone; if you did not add them yourself, remove them with: git config --global --remove-section filter.lfs\n' "$GSG_NAME"
             ;;
         yes)
             smartgit_lfs_global_filter || rc=$?

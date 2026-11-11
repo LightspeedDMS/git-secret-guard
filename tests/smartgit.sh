@@ -109,7 +109,8 @@ exec $real_mv \"\$@\""
 # ^ invariant and its settings dir on the bundled git
 sg_setup() {
     rm -f -- "$SANDBOX/smartgit.running" "$SANDBOX/smartgit.log" "$SANDBOX/flatpak.installed" "$SANDBOX/flatpak.overrides" \
-        "$SANDBOX/pgrep.count" "$SANDBOX/smartgit.running.after" "$SANDBOX/mv.stall" "$SANDBOX/mv.stallskip" "$SANDBOX/mv.stalled" || return 1
+        "$SANDBOX/pgrep.count" "$SANDBOX/smartgit.running.after" "$SANDBOX/mv.stall" "$SANDBOX/mv.stallskip" "$SANDBOX/mv.stalled" \
+        "$SANDBOX/lfs.install.fail" "$SANDBOX/lfs.record.during" || return 1
     gm_setup "${1:-2.54.0}" || return 1
     set_env GSG_SMARTGIT_LAUNCH_PATH="$GM_PREFIX/bin:$SANDBOX/pathbin:$TEST_BASE_PATH"
     SG_APPS="$SANDBOX/apps"
@@ -128,11 +129,14 @@ sg_setup() {
 }
 
 # ^ invariant sg_lfs_standin FILE VERSION writes a git-lfs answering version;
-# ^ invariant its install writes the filter.lfs.* settings to the global config, like the real one
+# ^ invariant its install writes the filter.lfs.* settings to the global config, like the real one; lfs.install.fail makes it exit 1 first
+# ^ invariant its install copies lfs.record to lfs.record.during in the sandbox, the record as it stood during the command
 sg_lfs_standin() {
     gm_stub "$1" "case \"\$1\" in
     version) echo \"git-lfs/$2 (test stand-in)\" ;;
     install)
+        if [ -f \"$SANDBOX/lfs.install.fail\" ]; then echo 'git-lfs stand-in: install fails on request' >&2; exit 1; fi
+        if [ -f \"$LC_STATE/smartgit/lfs.record\" ]; then cp -- \"$LC_STATE/smartgit/lfs.record\" \"$SANDBOX/lfs.record.during\" || exit 1; fi
         git config --global filter.lfs.clean 'git-lfs clean -- %f' || exit 1
         git config --global filter.lfs.smudge 'git-lfs smudge -- %f' || exit 1
         git config --global filter.lfs.required true || exit 1

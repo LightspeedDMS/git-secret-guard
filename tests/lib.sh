@@ -353,7 +353,7 @@ git_enabled_sections() {
     case "$listing" in
         *event-disabled*) printf 'pre-commit\n' ;;
         *probe*)
-            # ^ invariant only Linux must honour the key; git is built from source there, and a silent drop of the event halves would go unseen
+            # ^ invariant only Linux must honour the key (CI git from ppa:git-core/ppa); a silent drop of the event halves would go unseen
             if [ "$TEST_OS" = Linux ]; then
                 fail "the git under test lists the probe hook without event-disabled: $listing"
                 return 1

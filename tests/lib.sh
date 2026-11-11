@@ -127,6 +127,8 @@ sandbox_create() {
         GSG_WSL_OSRELEASE="$SANDBOX/wsl-kernel"
         GSG_WSL_INTEROP="$SANDBOX/wsl-no-interop"
         GSG_WSL_SYSTEMD_DIR="$SANDBOX/wsl-no-systemd"
+        GSG_SMARTGIT_INSTALL_DIRS="$SANDBOX/smartgit-no-installs"
+        GSG_SMARTGIT_TOOL_DIR="$SANDBOX/pathbin"
     )
     if [ "$TEST_IS_WINDOWS" -eq 1 ]; then
         TEST_SANDBOX_MIXED="$(cygpath -m "$SANDBOX")" || exit 2
@@ -351,7 +353,7 @@ git_enabled_sections() {
     case "$listing" in
         *event-disabled*) printf 'pre-commit\n' ;;
         *probe*)
-            # ^ invariant only Linux must honour the key; git is built from source there, and a silent drop of the event halves would go unseen
+            # ^ invariant only Linux must honour the key (CI git from ppa:git-core/ppa); a silent drop of the event halves would go unseen
             if [ "$TEST_OS" = Linux ]; then
                 fail "the git under test lists the probe hook without event-disabled: $listing"
                 return 1

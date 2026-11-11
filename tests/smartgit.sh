@@ -105,14 +105,18 @@ exec $real_mv \"\$@\""
     gm_stub "$gnubin_mv" "$mv_body"
 }
 
+# ^ invariant sg_launch_path = the PATH the tests give SmartGit's git; sandbox directories and the system ones, nothing of the real Homebrew
+SG_SYSTEM_PATH=/usr/bin:/bin:/usr/sbin:/sbin
+sg_launch_path() { printf '%s' "$GM_PREFIX/bin:$SANDBOX/pathbin:$SG_SYSTEM_PATH"; }
+
 # ^ invariant sg_setup [GITVER] = a Mac with git GITVER first on PATH, SmartGit 26.1.056 (bundled git 2.53.0, git-lfs 3.7.1)
 # ^ invariant and its settings dir on the bundled git
 sg_setup() {
     rm -f -- "$SANDBOX/smartgit.running" "$SANDBOX/smartgit.log" "$SANDBOX/flatpak.installed" "$SANDBOX/flatpak.overrides" \
         "$SANDBOX/pgrep.count" "$SANDBOX/smartgit.running.after" "$SANDBOX/mv.stall" "$SANDBOX/mv.stallskip" "$SANDBOX/mv.stalled" \
-        "$SANDBOX/lfs.install.fail" "$SANDBOX/lfs.record.during" || return 1
+        "$SANDBOX/lfs.install.fail" "$SANDBOX/lfs.record.during" "$SANDBOX/lfs.install.env" || return 1
     gm_setup "${1:-2.54.0}" || return 1
-    set_env GSG_SMARTGIT_LAUNCH_PATH="$GM_PREFIX/bin:$SANDBOX/pathbin:$TEST_BASE_PATH"
+    set_env GSG_SMARTGIT_LAUNCH_PATH="$(sg_launch_path)"
     SG_APPS="$SANDBOX/apps"
     SG_APP="$SG_APPS/SmartGit.app"
     SG_SETTINGS="$LC_HOME/Library/Preferences/SmartGit/26.1"
@@ -130,11 +134,12 @@ sg_setup() {
 
 # ^ invariant sg_lfs_standin FILE VERSION writes a git-lfs answering version;
 # ^ invariant its install writes the filter.lfs.* settings to the global config, like the real one; lfs.install.fail makes it exit 1 first
-# ^ invariant its install copies lfs.record to lfs.record.during in the sandbox, the record as it stood during the command
+# ^ invariant its install copies lfs.record to lfs.record.during (the record during the command) and logs PATH and VERIFY_LEAK to lfs.install.env
 sg_lfs_standin() {
     gm_stub "$1" "case \"\$1\" in
     version) echo \"git-lfs/$2 (test stand-in)\" ;;
     install)
+        printf 'PATH=%s leak=%s\n' \"\$PATH\" \"\${VERIFY_LEAK:-none}\" >>\"$SANDBOX/lfs.install.env\" || exit 1
         if [ -f \"$SANDBOX/lfs.install.fail\" ]; then echo 'git-lfs stand-in: install fails on request' >&2; exit 1; fi
         if [ -f \"$LC_STATE/smartgit/lfs.record\" ]; then cp -- \"$LC_STATE/smartgit/lfs.record\" \"$SANDBOX/lfs.record.during\" || exit 1; fi
         git config --global filter.lfs.clean 'git-lfs clean -- %f' || exit 1

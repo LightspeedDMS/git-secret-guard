@@ -45,6 +45,11 @@ smartgit_what() {
     fi
 }
 
+# ^ invariant the one wording status and doctor use for a settings directory this tool cannot judge; it never changes an exit status by itself
+smartgit_unjudged_text() {
+    printf "cannot tell whether SmartGit's commits are scanned; check by hand: Preferences, Commands, Git Executable must be a git %s or newer" "$(smartgit_min_git)"
+}
+
 smartgit_settings_text() {
     local i="$1" head tail
     head="${SG_SET_DIR[$i]} (${SG_SET_MAJOR[$i]})"
@@ -53,7 +58,7 @@ smartgit_settings_text() {
         return 0
     fi
     if [ "${SG_SET_STATE[$i]}" != ok ]; then
-        printf '%s: preferences.yml cannot be read as SmartGit writes it (%s); not judged' "$head" "${SG_SET_WHY[$i]}"
+        printf '%s: preferences.yml cannot be read as SmartGit writes it (%s); %s' "$head" "${SG_SET_WHY[$i]}" "$(smartgit_unjudged_text)"
         return 0
     fi
     case "$(smartgit_scan_word "$i")" in
@@ -82,7 +87,7 @@ smartgit_doctor_lines() {
         if [ "${SG_SET_STATE[$i]}" = missing ]; then continue; fi
         head="SmartGit ${SG_SET_MAJOR[$i]} (${SG_SET_DIR[$i]})"
         if [ "${SG_SET_STATE[$i]}" != ok ]; then
-            doctor_machine_line WARNING "$head: preferences.yml cannot be read as SmartGit writes it (${SG_SET_WHY[$i]}); not judged"
+            doctor_machine_line WARNING "$head: preferences.yml cannot be read as SmartGit writes it (${SG_SET_WHY[$i]}); $(smartgit_unjudged_text)"
             continue
         fi
         case "$(smartgit_scan_word "$i")" in

@@ -21,6 +21,16 @@ smartgit_lfs_launch_path() {
     printf '%s:%s' "${1%/*}" "$SMARTGIT_LAUNCHD_PATH_SUFFIX"
 }
 
+# ^ security env -i keeps the installer's variables away; only the global config location, when set, is passed on to read the config install wrote
+smartgit_launch_git() {
+    local p
+    local -a keep=()
+    p="$(smartgit_lfs_launch_path "$GSG_GIT")" || return 1
+    if [ -n "${GIT_CONFIG_GLOBAL:-}" ]; then keep+=(GIT_CONFIG_GLOBAL="$GIT_CONFIG_GLOBAL"); fi
+    if [ -n "${GIT_CONFIG_NOSYSTEM:-}" ]; then keep+=(GIT_CONFIG_NOSYSTEM="$GIT_CONFIG_NOSYSTEM"); fi
+    env -i HOME="$HOME" PATH="$p" "${keep[@]}" "$GSG_GIT" "$@"
+}
+
 # ^ invariant on macOS the check runs under env -i with HOME and the PATH SmartGit gives git; a git-lfs only your shell can see does not count as present
 smartgit_lfs_present() {
     local p
@@ -29,7 +39,7 @@ smartgit_lfs_present() {
 }
 
 # ^ invariant true when any scope used outside a repository (system, global) sets a filter.lfs.* key
-smartgit_lfs_filter_set() { "$GSG_GIT" -C / config --get-regexp '^filter\.lfs\.' >/dev/null 2>&1; }
+smartgit_lfs_filter_set() { smartgit_launch_git -C / config --get-regexp '^filter\.lfs\.' >/dev/null 2>&1; }
 
 # ^ invariant none = git lfs works already, brew = the command in SG_LFS_CMD installs it; set by the plan, used by the apply
 SG_LFS_ROUTE=none
@@ -143,16 +153,19 @@ smartgit_lfs_take_back() {
     }
 }
 
-# ^ order pending is written before git lfs install runs, yes after its settings are seen; a stop in between leaves pending, and a rerun makes it yes
+# ^ order pending is written before git lfs install runs, yes after its settings are seen; a stop in between leaves pending, and a rerun only drops it
 smartgit_lfs_configure() {
     local irc=0
     if smartgit_lfs_filter_set; then
-        if smartgit_lfs_is_pending; then smartgit_lfs_record_write yes || return 1; fi
+        if smartgit_lfs_is_pending; then
+            smartgit_lfs_take_back || return 1
+            printf '%s: the filter.lfs.* settings in your global git config are kept, as this tool cannot prove it added them; if you did not add them yourself, remove them with: git config --global --remove-section filter.lfs\n' "$GSG_NAME"
+        fi
         return 0
     fi
     smartgit_lfs_record_write pending || return 1
     printf '%s: running %s lfs install --skip-repo\n' "$GSG_NAME" "$GSG_GIT"
-    "$GSG_GIT" -C / lfs install --skip-repo || irc=$?
+    smartgit_launch_git -C / lfs install --skip-repo || irc=$?
     if smartgit_lfs_filter_set; then
         smartgit_lfs_record_write yes || {
             printf '%s: the filter.lfs.* settings stay in your global git config; remove them by hand to undo\n' "$GSG_NAME" >&2

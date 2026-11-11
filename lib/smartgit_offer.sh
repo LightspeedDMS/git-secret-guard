@@ -56,7 +56,7 @@ smartgit_check_dir() {
     case "${SG_SET_STATE[$i]}" in
         ok) ;;
         symlink | owner | big)
-            smartgit_refuse "$i" "${SG_SET_WHY[$i]}"
+            smartgit_refuse "$i" "${SG_SET_WHY[$i]}" 1
             return 1
             ;;
         *)

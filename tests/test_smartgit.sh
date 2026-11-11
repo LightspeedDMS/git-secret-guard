@@ -154,6 +154,7 @@ test_a_symlinked_preferences_file_is_refused() {
     gsg install --configure-smartgit </dev/null
     assert_rc 1 "a symlink"
     assert_contains "$ERR" "is a symbolic link" "says so"
+    assert_contains "$ERR" "by hand: in SmartGit open Preferences, Commands" "and prints the manual steps"
     assert_eq "$(sg_hash "$SANDBOX/real-prefs.yml")" "$h" "the target is untouched"
     assert_no_file "$SG_BACKUPS" "nothing written"
 }
@@ -330,6 +331,7 @@ test_uninstall_restores_smartgit_and_removes_only_the_filter_this_tool_added() {
     assert_rc 0 "configure"
     gsg uninstall
     assert_rc 0 "uninstall"
+    assert_not_contains "$OUT$ERR" "uninstall again" "a clean uninstall finishes in one run"
     assert_eq "$(sg_hash "$SG_PREFS")" "$(sg_hash "$SANDBOX/prefs.orig")" "SmartGit is back on its original setting"
     assert_eq "$(gitx config --global --get-regexp '^filter\.lfs\.' | wc -l | tr -d ' ')" 0 "the filter that git lfs install added is gone"
     assert_no_file "$SG_BACKUPS" "no manifest or backup is left"
@@ -423,6 +425,7 @@ test_a_symlinked_settings_directory_is_refused() {
     gsg install --configure-smartgit </dev/null
     assert_rc 1 "the settings directory is a symbolic link"
     assert_contains "$ERR" "is a symbolic link" "says so"
+    assert_contains "$ERR" "by hand: in SmartGit open Preferences, Commands" "and prints the manual steps"
     assert_eq "$(sg_hash "$SANDBOX/real-26.1/preferences.yml")" "$h" "the real preferences are untouched"
     assert_no_file "$SG_BACKUPS" "nothing was written"
 }
@@ -581,7 +584,7 @@ test_the_verify_commits_run_under_the_environment_smartgit_gives_git() {
     assert_file "$SANDBOX/verify.paths" "the verify commits went through the target git"
     while IFS= read -r line; do
         n=$((n + 1))
-        assert_eq "$line" "PATH=$GM_PREFIX/bin:$SANDBOX/pathbin:$TEST_BASE_PATH leak=none" "verify call $n runs under the launch path alone"
+        assert_eq "$line" "PATH=$(sg_launch_path) leak=none" "verify call $n runs under the launch path alone"
     done <"$SANDBOX/verify.paths"
     assert_eq "$([ "$n" -ge 2 ] && echo many)" many "at least the fake-token and the clean commit were logged"
 }
@@ -669,12 +672,75 @@ test_a_git_lfs_install_that_fails_is_worded_as_a_failure_and_leaves_nothing() {
     assert_eq "$(sg_hash "$SG_PREFS")" "$(sg_hash "$SANDBOX/prefs.orig")" "the preferences are byte-identical"
 }
 
-test_a_rerun_after_a_stopped_run_resolves_the_pending_record_to_yes() {
+test_a_rerun_after_a_stopped_run_drops_the_pending_record_and_keeps_the_section() {
     sg_interrupt_setup || return 1
     sg_interrupt_run lfs.record "$SG_STOP_SECOND" TERM "$GSG_PROJECT/bin/git-secret-guard" install --configure-smartgit || return 1
     assert_eq "$(<"$SG_BACKUPS/lfs.record")" filter_added=pending "the stopped run left the record pending"
     sg_rerun_ok
-    assert_eq "$(<"$SG_BACKUPS/lfs.record")" filter_added=yes "the rerun saw the filter and confirmed the record"
+    assert_no_file "$SG_BACKUPS/lfs.record" "the rerun cannot prove the section is its own, so no record stays"
+    assert_contains "$OUT$ERR" "git config --global --remove-section filter.lfs" "the rerun gives the by-hand command"
+    sg_restore_ok
+    assert_eq "$(gitx config --global --get filter.lfs.required)" true "a restore never removes a section the tool cannot prove it added"
+}
+
+# ^ invariant sg_fake_brew_run DIR = a git-lfs in DIR in front of TEST_BASE_PATH, as in a real Homebrew prefix; TEST_BASE_PATH is restored on every path
+sg_fake_brew_run() {
+    local saved="$TEST_BASE_PATH" rc=0
+    sg_lfs_standin "$1/git-lfs" 9.9.9 || return 1
+    TEST_BASE_PATH="$1:$TEST_BASE_PATH"
+    sg_setup || rc=$?
+    TEST_BASE_PATH="$saved"
+    if [ "$rc" -ne 0 ]; then return "$rc"; fi
+    sg_real_tools || return 1
+    gsg install --configure-smartgit </dev/null
+    assert_rc 0 "configure with a git-lfs in the brew position of the installer PATH"
+    assert_contains "$(gm_calls)" "install git-lfs" "brew installed git-lfs, so the one in the brew position was not the one checked"
+}
+
+test_the_launch_path_of_the_tests_ignores_a_git_lfs_in_the_real_homebrew_position() {
+    local fake rc=0
+    fake="$(mktemp -d "${TMPDIR:-/tmp}/gsg-fakebrew.XXXXXX")" || return 1
+    sg_fake_brew_run "$fake" || rc=$?
+    rm -rf -- "$fake"
+    return "$rc"
+}
+
+test_git_lfs_install_runs_under_the_launch_path_alone_like_the_check() {
+    local line n=0
+    sg_interrupt_setup || return 1
+    set_env VERIFY_LEAK=installer-only
+    sg_rerun_ok
+    assert_file "$SANDBOX/lfs.install.env" "git lfs install ran"
+    while IFS= read -r line; do
+        n=$((n + 1))
+        assert_contains "$line" "$(sg_launch_path) leak=none" "git lfs install call $n sees the launch path and not the installer's variables"
+    done <"$SANDBOX/lfs.install.env"
+    assert_eq "$n" 1 "git lfs install ran once"
+}
+
+# ^ invariant sg_installed_with_symlinked_settings = a plain install, followed by the SmartGit settings directory replaced by a link to its copy
+sg_installed_with_symlinked_settings() {
+    sg_installed || return 1
+    rm -rf -- "$SANDBOX/real-26.1" || return 1
+    mv -- "$SG_SETTINGS" "$SANDBOX/real-26.1" && ln -s "$SANDBOX/real-26.1" "$SG_SETTINGS"
+}
+
+test_status_says_plainly_that_it_cannot_tell_for_a_settings_directory_it_cannot_judge() {
+    local line
+    sg_installed_with_symlinked_settings || return 1
+    gsg status
+    line="$(printf '%s\n' "$OUT" | grep -F 'SmartGit settings')"
+    assert_contains "$line" "cannot tell whether SmartGit's commits are scanned" "says plainly that it cannot tell"
+    assert_contains "$line" "Preferences, Commands, Git Executable must be a git 2.54 or newer" "gives the check by hand"
+    assert_not_contains "$line" "MISMATCH" "the unjudged directory never changes the exit status"
+}
+
+test_doctor_warns_that_it_cannot_tell_for_a_settings_directory_it_cannot_judge() {
+    sg_installed_with_symlinked_settings || return 1
+    sg_doctor
+    assert_contains "$OUT" "WARNING  SmartGit 26.1 ($SG_SETTINGS)" "a WARNING, not a PROBLEM"
+    assert_contains "$OUT" "cannot tell whether SmartGit's commits are scanned" "says plainly that it cannot tell"
+    assert_contains "$OUT" "Preferences, Commands, Git Executable must be a git 2.54 or newer" "gives the check by hand"
 }
 
 run_file_tests

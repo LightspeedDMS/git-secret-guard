@@ -198,27 +198,18 @@ smartgit_edit_prefs() {
 smartgit_verify_commits() {
     local work="$1" key out
     local -a gc=(-c user.name=gsg-verify -c user.email=gsg-verify@example.invalid -c commit.gpgsign=false)
-    SG_VERIFY_PATH="$(smartgit_lfs_launch_path "$GSG_GIT")" || return 2
     key="$(printf '%s%s%s' 'AKI' 'A' 'Q7XK2MWB4HZ5NR3T')"
-    smartgit_verify_git init -q --template= "$work" || return 2
+    smartgit_launch_git init -q --template= "$work" || return 2
     printf 'aws_access_key_id = %s\n' "$key" >"$work/leak.txt" || return 2
-    smartgit_verify_git -C "$work" add leak.txt || return 2
-    if out="$(smartgit_verify_git "${gc[@]}" -C "$work" commit -q -m verify-secret 2>&1)"; then return 3; fi
-    if smartgit_verify_git -C "$work" rev-parse -q --verify HEAD >/dev/null 2>&1; then return 3; fi
+    smartgit_launch_git -C "$work" add leak.txt || return 2
+    if out="$(smartgit_launch_git "${gc[@]}" -C "$work" commit -q -m verify-secret 2>&1)"; then return 3; fi
+    if smartgit_launch_git -C "$work" rev-parse -q --verify HEAD >/dev/null 2>&1; then return 3; fi
     if [[ $out != *"potential secret(s)"* ]]; then return 6; fi
-    smartgit_verify_git -C "$work" rm -q -f --cached leak.txt || return 2
+    smartgit_launch_git -C "$work" rm -q -f --cached leak.txt || return 2
     printf 'hello\n' >"$work/ok.txt" || return 2
-    smartgit_verify_git -C "$work" add ok.txt || return 2
-    out="$(smartgit_verify_git "${gc[@]}" -C "$work" commit -q -m verify-clean 2>&1)" || return 4
+    smartgit_launch_git -C "$work" add ok.txt || return 2
+    out="$(smartgit_launch_git "${gc[@]}" -C "$work" commit -q -m verify-clean 2>&1)" || return 4
     if [[ $out != *"$GSG_NAME: scanned"* ]]; then return 5; fi
-}
-
-# ^ security env -i keeps the installer's variables away; only the global config location, when set, is passed on to read the config install wrote
-smartgit_verify_git() {
-    local -a keep=()
-    if [ -n "${GIT_CONFIG_GLOBAL:-}" ]; then keep+=(GIT_CONFIG_GLOBAL="$GIT_CONFIG_GLOBAL"); fi
-    if [ -n "${GIT_CONFIG_NOSYSTEM:-}" ]; then keep+=(GIT_CONFIG_NOSYSTEM="$GIT_CONFIG_NOSYSTEM"); fi
-    env -i HOME="$HOME" PATH="$SG_VERIFY_PATH" "${keep[@]}" "$GSG_GIT" "$@"
 }
 
 # ^ invariant the scratch repository is removed on every path; any failing check says what failed and returns 1

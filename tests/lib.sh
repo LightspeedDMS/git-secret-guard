@@ -338,10 +338,24 @@ skip_test() { printf '%s\n' "$1" >"$SANDBOX/.skip"; exit 0; }
 git_enabled_sections() {
     local cfg="$SANDBOX/event-probe.config" listing
     printf '[hook "probe"]\n\tevent = pre-commit\n\tcommand = true\n[hook "pre-commit"]\n\tenabled = false\n' >"$cfg" || return 1
-    listing="$(set_env "GIT_CONFIG_GLOBAL=$(git_path "$cfg")" && gitx hook list pre-commit 2>/dev/null)"
+    listing="$(set_env "GIT_CONFIG_GLOBAL=$(git_path "$cfg")" && gitx hook list pre-commit 2>&1)" || {
+        fail "the hook list probe failed: $listing"
+        return 1
+    }
     printf 'git-secret-guard\n'
     case "$listing" in
         *event-disabled*) printf 'pre-commit\n' ;;
+        *probe*)
+            # ^ invariant only Linux must honour the key; git is built from source there, and a silent drop of the event halves would go unseen
+            if [ "$TEST_OS" = Linux ]; then
+                fail "the git under test lists the probe hook without event-disabled: $listing"
+                return 1
+            fi
+            ;;
+        *)
+            fail "the hook list probe did not list the probe hook: $listing"
+            return 1
+            ;;
     esac
 }
 

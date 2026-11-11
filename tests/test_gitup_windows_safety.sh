@@ -61,6 +61,23 @@ test_the_certificate_lock_admits_one_holder_and_clears_a_dead_holders_lock() {
     assert_no_file "$WU_CERT_LOCK" "taken over and released"
 }
 
+lock_owner_is_this_shell() { [ "$(cat -- "$WU_CERT_LOCK/pid")" = "$BASHPID" ]; }
+
+test_the_certificate_lock_names_the_subshell_releases_on_exit_and_clears_a_pidless_lock() {
+    local rc
+    WU_CERT_LOCK="$SANDBOX/cert-lock"
+    wu_with_cert_lock lock_owner_is_this_shell || fail "the owner is the subshell of the test (BASHPID), not the file shell" || return 1
+    (wu_with_cert_lock exit 3)
+    rc=$?
+    assert_eq "$rc" 3 "a command that ends the subshell passes its status on"
+    assert_no_file "$WU_CERT_LOCK" "and the lock is released by the exit trap"
+    mkdir -- "$WU_CERT_LOCK" || return 1
+    if WU_CERT_LOCK_WAIT=1 wu_with_cert_lock true; then fail "a young lock without a pid file was taken over"; return 1; fi
+    touch -t 201001010000 -- "$WU_CERT_LOCK" || return 1
+    wu_with_cert_lock true || fail "an old lock without a pid file was not taken over" || return 1
+    assert_no_file "$WU_CERT_LOCK" "taken over and released"
+}
+
 test_the_certificate_sweep_removes_what_an_aborted_build_leaves() {
     if [ "$TEST_IS_WINDOWS" -ne 1 ]; then skip_test "uses the Windows certificate stores"; fi
     wu_with_cert_lock sweep_check
@@ -68,16 +85,26 @@ test_the_certificate_sweep_removes_what_an_aborted_build_leaves() {
 
 # ^ invariant runs under wu_with_cert_lock; a build in another test file would show as a certificate or key in the first count
 sweep_check() {
-    local before planted after
-    before="$(wu_store_counts)"
-    wu_plant_signer_cert
-    planted="$(wu_store_counts)"
-    wu_sweep_signer_certs
-    after="$(wu_store_counts)"
+    local before="" planted="" after="" key="" key_path="" planted_key_files="" after_key_files="" rc=0
+    before="$(wu_store_counts)" || rc=1
+    key_path="$(cygpath -w "$SANDBOX/planted.key")" || rc=1
+    if [ "$rc" -eq 0 ]; then wu_plant_signer_cert "$key_path" || rc=1; fi
+    if [ "$rc" -eq 0 ]; then key="$(<"$SANDBOX/planted.key")" || rc=1; fi
+    planted="$(wu_store_counts)" || rc=1
+    if [ -n "$key" ]; then planted_key_files="$(wu_key_files_named "$key")" || rc=1; fi
+    wu_sweep_signer_certs || rc=1
+    after="$(wu_store_counts)" || rc=1
+    if [ -n "$key" ]; then after_key_files="$(wu_key_files_named "$key")" || rc=1; fi
     "$TEST_SYSTEM32/WindowsPowerShell/v1.0/powershell.exe" -NoProfile -Command '
-        foreach ($st in "My", "CA") { foreach ($x in @(Get-ChildItem "Cert:\CurrentUser\$st" | Where-Object { $_.Subject -eq "CN=GSG Test Signer" })) { Remove-Item -LiteralPath ("Cert:\CurrentUser\$st\" + $x.Thumbprint) -DeleteKey -Force } }'
+        foreach ($st in "My", "CA") { foreach ($x in @(Get-ChildItem "Cert:\CurrentUser\$st" | Where-Object { $_.Subject -eq "CN=GSG Test Signer" })) { Remove-Item -LiteralPath ("Cert:\CurrentUser\$st\" + $x.Thumbprint) -DeleteKey -Force } }' || rc=1
+    if [ "$rc" -ne 0 ] || [ -z "$key" ] || [ -z "$before" ] || [ -z "$planted" ] || [ -z "$after" ]; then
+        fail "a step of the sweep check failed or left an empty result (rc $rc, key [$key])"
+        return 1
+    fi
     assert_not_contains "$planted" "certs=0" "the planted certificate is in the stores"
-    assert_eq "$after" "$before" "the sweep removed the planted certificates and the key file"
+    assert_eq "$planted_key_files" 1 "the planted key file is in the key directory before the sweep"
+    assert_eq "$after_key_files" 0 "the sweep removed the planted key file"
+    assert_eq "${after%% keys=*}" "${before%% keys=*}" "the sweep removed the planted certificates; the Keys directory is not counted as a whole"
 }
 
 test_the_tools_cache_check_wants_the_installer_named_by_the_lock_not_any_installer() {

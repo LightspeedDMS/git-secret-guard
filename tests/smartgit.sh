@@ -106,8 +106,9 @@ exec $real_mv \"\$@\""
 }
 
 # ^ invariant sg_launch_path = the PATH the tests give SmartGit's git; sandbox directories and the system ones, nothing of the real Homebrew
+# ^ why lfsmissing before the system dirs, not after; a Linux host may ship /usr/bin/git-lfs and a Mac never does
 SG_SYSTEM_PATH=/usr/bin:/bin:/usr/sbin:/sbin
-sg_launch_path() { printf '%s' "$GM_PREFIX/bin:$SANDBOX/pathbin:$SG_SYSTEM_PATH"; }
+sg_launch_path() { printf '%s' "$GM_PREFIX/bin:$SANDBOX/pathbin:$SANDBOX/lfsmissing:$SG_SYSTEM_PATH"; }
 
 # ^ invariant sg_setup [GITVER] = a Mac with git GITVER first on PATH, SmartGit 26.1.056 (bundled git 2.53.0, git-lfs 3.7.1)
 # ^ invariant and its settings dir on the bundled git

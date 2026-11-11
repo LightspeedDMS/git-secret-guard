@@ -217,7 +217,59 @@ wu_standin_cache() {
 # ^ external the certificate is self-signed, valid ten years, made in the user store My for signing only; its key and its copy in store CA go on every path
 # ^ security the sweep removes only certificates whose subject and issuer both equal the test subject, never anything else in a store
 WU_SIGNER="CN=GSG Test Signer"
-wu_build_standin() {
+WU_CERT_LOCK_WAIT_DEFAULT=900
+WU_CERT_LOCK_POLL_SECONDS=0.2
+WU_CERT_LOCK_POLLS_PER_SECOND=5
+# ^ hazard test files run in parallel on Windows and share the user's certificate store and key directory; a count or a sweep races with another file's build
+# ^ hazard breaking a dead owner's lock can remove a lock another waiter took in the same instant; it needs a crashed owner, and the wait is bounded either way
+# ^ invariant wu_with_cert_lock CMD... runs CMD under the lock, always releases it and returns the status of CMD; the lock directory holds the owner pid
+wu_with_cert_lock() {
+    # ^ coupled WU_CERT_LOCK is a test seam, it moves the lock directory into a sandbox; WU_CERT_LOCK_WAIT is the wait in seconds
+    local lock="${WU_CERT_LOCK:-$TEST_TOOLS_CACHE/.cert-lock}" wait_s="${WU_CERT_LOCK_WAIT:-$WU_CERT_LOCK_WAIT_DEFAULT}" i owner="" rc got=0 bound
+    case "$wait_s" in
+        '' | *[!0-9]* | 0)
+            printf 'WU_CERT_LOCK_WAIT must be a positive integer, got [%s]\n' "$wait_s" >&2
+            return 1
+            ;;
+    esac
+    bound=$((wait_s * WU_CERT_LOCK_POLLS_PER_SECOND))
+    mkdir -p -- "$(dirname -- "$lock")" || return 1
+    for ((i = 0; i < bound; i++)); do
+        if mkdir -- "$lock" 2>/dev/null; then
+            got=1
+            break
+        fi
+        owner="$(cat -- "$lock/pid" 2>/dev/null)" || owner=""
+        if [ -n "$owner" ] && ! kill -0 "$owner" 2>/dev/null; then
+            if ! rm -f -- "$lock/pid" || ! rmdir -- "$lock" 2>/dev/null; then
+                printf 'could not clear the lock %s of the dead owner %s\n' "$lock" "$owner" >&2
+                return 1
+            fi
+            continue
+        fi
+        sleep "$WU_CERT_LOCK_POLL_SECONDS"
+    done
+    if [ "$got" -ne 1 ]; then
+        printf 'the certificate lock %s stayed taken (owner %s)\n' "$lock" "${owner:-unknown}" >&2
+        return 1
+    fi
+    printf '%s\n' "$$" >"$lock/pid" || {
+        rmdir -- "$lock" 2>/dev/null || printf 'could not remove the certificate lock %s\n' "$lock" >&2
+        return 1
+    }
+    "$@"
+    rc=$?
+    rm -f -- "$lock/pid" || printf 'could not remove the owner file in %s\n' "$lock" >&2
+    rmdir -- "$lock" 2>/dev/null || {
+        printf 'could not remove the certificate lock %s\n' "$lock" >&2
+        rc=1
+    }
+    return "$rc"
+}
+
+wu_build_standin() { wu_with_cert_lock wu_build_standin_unlocked; }
+
+wu_build_standin_unlocked() {
     local cache out="$SANDBOX/standin" ps="$TEST_SYSTEM32/WindowsPowerShell/v1.0/powershell.exe"
     cache="$(wu_standin_cache)" || return 1
     mkdir -p -- "$out" "$cache" || return 1

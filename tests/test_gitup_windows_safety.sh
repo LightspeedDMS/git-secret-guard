@@ -19,14 +19,19 @@ wu_store_counts() {
 }
 
 test_building_the_signed_stand_in_leaves_no_certificate_and_no_key_behind() {
-    local cache before after key
     wu_need_windows_runner
+    wu_with_cert_lock stand_in_build_check
+}
+
+# ^ invariant runs under wu_with_cert_lock; no other test file writes the certificate store or the key directory during the counts and the cache move
+stand_in_build_check() {
+    local cache before after key
     cache="$(wu_standin_cache)" || return 1
-    wu_build_standin || return 1
+    wu_build_standin_unlocked || return 1
     before="$(wu_store_counts)"
     mv -- "$cache" "$cache.aside" || return 1
     rm -f -- "$SANDBOX/standin/key.name" || return 1
-    wu_build_standin
+    wu_build_standin_unlocked
     after="$(wu_store_counts)"
     rm -f -- "$cache.aside"/standin.exe "$cache.aside"/standin-unsigned.exe
     rmdir -- "$cache.aside"
@@ -38,9 +43,32 @@ test_building_the_signed_stand_in_leaves_no_certificate_and_no_key_behind() {
     assert_contains "$before" "certs=0" "and none of ours"
 }
 
+test_the_certificate_lock_admits_one_holder_and_clears_a_dead_holders_lock() {
+    local dead
+    WU_CERT_LOCK="$SANDBOX/cert-lock"
+    wu_with_cert_lock test -d "$WU_CERT_LOCK" || fail "the lock directory exists while the command runs" || return 1
+    assert_no_file "$WU_CERT_LOCK" "the lock is released when the command ends"
+    if wu_with_cert_lock false; then fail "the status of the command is passed on"; return 1; fi
+    assert_no_file "$WU_CERT_LOCK" "and released when the command fails"
+    mkdir -- "$WU_CERT_LOCK" && printf '%s\n' "$$" >"$WU_CERT_LOCK/pid" || return 1
+    if WU_CERT_LOCK_WAIT=1 wu_with_cert_lock true; then fail "a live holder's lock was taken over"; return 1; fi
+    assert_file "$WU_CERT_LOCK/pid" "a refused run leaves the live holder's lock alone"
+    true &
+    dead=$!
+    wait "$dead"
+    printf '%s\n' "$dead" >"$WU_CERT_LOCK/pid" || return 1
+    wu_with_cert_lock true || fail "a dead holder's lock was not taken over" || return 1
+    assert_no_file "$WU_CERT_LOCK" "taken over and released"
+}
+
 test_the_certificate_sweep_removes_what_an_aborted_build_leaves() {
-    local before planted after
     if [ "$TEST_IS_WINDOWS" -ne 1 ]; then skip_test "uses the Windows certificate stores"; fi
+    wu_with_cert_lock sweep_check
+}
+
+# ^ invariant runs under wu_with_cert_lock; a build in another test file would show as a certificate or key in the first count
+sweep_check() {
+    local before planted after
     before="$(wu_store_counts)"
     wu_plant_signer_cert
     planted="$(wu_store_counts)"

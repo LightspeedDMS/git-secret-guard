@@ -96,10 +96,14 @@ test_the_machine_section_judges_enabled_by_gits_own_parser_and_names_a_valueless
         assert_contains "$OUT" "hook.git-secret-guard.enabled=$v in the global config" "[$v] named"
     done
     gitx config --global hook.git-secret-guard.enabled true || return 1
-    gitx config --global hook.pre-commit.enabled 0k || return 1
-    doctor
-    assert_contains "$OUT" "hook.pre-commit.enabled=0k in the global config" "the event key too"
-    gitx config --global --unset hook.pre-commit.enabled || return 1
+    case "$(git_enabled_sections)" in
+        *pre-commit*)
+            gitx config --global hook.pre-commit.enabled 0k || return 1
+            doctor
+            assert_contains "$OUT" "hook.pre-commit.enabled=0k in the global config" "the event key too"
+            gitx config --global --unset hook.pre-commit.enabled || return 1
+            ;;
+    esac
     printf '[hook "git-secret-guard"]\n\tenabled\n' >>"$SANDBOX/gitconfig" || return 1
     doctor
     assert_rc 1 "a key without a value"

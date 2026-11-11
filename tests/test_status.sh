@@ -165,7 +165,7 @@ test_status_names_the_git_in_use_and_its_version() {
     gsg status
     assert_rc 0 "a git that can run config hooks"
     assert_contains "$OUT" "git in use: " "the line exists on every run"
-    assert_contains "$OUT" "(git $("$GIT" --version | sed -e 's/^git version //' -e 's/.windows.*//' -e 's/.vfs.*//'))" "with the version"
+    assert_contains "$OUT" "(git $("$GIT" --version | sed -e 's/^git version //' -e 's/ (Apple Git-[0-9]*)//' -e 's/.windows.*//' -e 's/.vfs.*//'))" "with the version"
 }
 
 test_status_exits_1_when_the_git_in_use_is_older_than_2_54() {
@@ -277,7 +277,7 @@ st_native_sandbox() { if [ "$TEST_IS_WINDOWS" -eq 1 ]; then printf '%s' "$TEST_S
 test_status_exits_1_for_every_enabled_value_git_reads_as_off() {
     local section v
     st_install_for_hook_cases || return 1
-    for section in git-secret-guard pre-commit; do
+    for section in $(git_enabled_sections); do
         for v in false no off 0 00 0k 0x0 -0 '' '""'; do
             st_hook_case "$section" 1 "enabled = $v"
             assert_contains "$OUT" "hook enabled: MISMATCH (git hook list pre-commit shows git-secret-guard as" "reported by what git says [$v]"
@@ -316,7 +316,7 @@ test_status_says_why_a_value_less_enabled_key_blocks_every_commit() {
 test_status_names_the_key_scope_file_and_advice_and_prints_no_configured_command_value() {
     local line section
     st_install_for_hook_cases || return 1
-    for section in git-secret-guard pre-commit; do
+    for section in $(git_enabled_sections); do
         st_hook_case "$section" 1 "enabled = false"
         line="$(printf '%s\n' "$OUT" | grep '^hook enabled: ')"
         assert_contains "$line" "hook.$section.enabled=false in the global config" "key, value and scope [$section]"
@@ -345,7 +345,7 @@ test_status_reads_a_disable_in_the_system_config() {
     st_install_for_hook_cases || return 1
     sys="$(st_native_sandbox)/sysconfig"
     set_env GIT_CONFIG_NOSYSTEM=0 "GIT_CONFIG_SYSTEM=$sys"
-    for section in git-secret-guard pre-commit; do
+    for section in $(git_enabled_sections); do
         printf '[hook "%s"]\n\tenabled = false\n' "$section" >"$SANDBOX/sysconfig" || return 1
         gsg status
         assert_rc 1 "a system-wide disable of hook.$section.enabled"
@@ -370,6 +370,7 @@ test_status_sees_a_disable_given_through_the_environment() {
     assert_contains "$OUT" "hook.git-secret-guard.enabled=false in the command config" "names key and scope"
     assert_contains "$OUT" "unset the setting in the environment" "and says where to remove it"
 
+    case "$(git_enabled_sections)" in *pre-commit*) ;; *) return 0 ;; esac
     fresh_install
     set_env "GIT_CONFIG_PARAMETERS='hook.pre-commit.enabled'='false'"
     gsg status

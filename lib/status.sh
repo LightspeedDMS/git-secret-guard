@@ -366,6 +366,7 @@ status_run() {
     status_line "originals moved aside" "${asides:-none}"
     status_tools || return 1
     status_system_git
+    smartgit_status_lines
     status_unfinished_copy
     [ "$STATUS_PROBLEMS" -eq 0 ]
 }

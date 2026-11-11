@@ -984,6 +984,9 @@ install_run() {
     install_retire_legacy_tools || return 1
     install_summary
     install_wsl_notice
-    install_enable_timer
-    smartgit_install_step "$smartgit"
+    # ^ invariant both steps run and either failure is install's status 1; a failed timer load is never hidden by the SmartGit step, nor skips it
+    local rc=0
+    install_enable_timer || rc=1
+    smartgit_install_step "$smartgit" || rc=1
+    return "$rc"
 }

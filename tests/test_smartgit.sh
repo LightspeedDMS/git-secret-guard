@@ -105,6 +105,18 @@ test_install_asks_at_a_terminal_and_a_no_changes_nothing() {
     sg_untouched "$h" "answer no"
 }
 
+test_a_failed_timer_load_does_not_skip_the_smartgit_step_and_install_still_exits_1() {
+    local h
+    sg_setup || return 1
+    h="$(sg_hash "$SG_PREFS")"
+    printf 'bootstrap' >"$SANDBOX/launchctl.fail" || return 1
+    gsg install --with-timer </dev/null
+    assert_rc 1 "the failed timer load is install's status"
+    assert_contains "$ERR" "could not load" "the timer failure is reported"
+    assert_contains "$OUT" "run: git-secret-guard install --configure-smartgit" "the SmartGit step still ran"
+    sg_untouched "$h" "hint only"
+}
+
 test_a_running_smartgit_refuses_before_any_change() {
     local h
     sg_installed || return 1

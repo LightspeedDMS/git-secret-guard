@@ -11,11 +11,12 @@ commands:
         edits only the executable lines, then checks a fake-token commit is blocked; any failure restores the
         backup. Refuses while SmartGit runs and for any version or platform not recorded, the Linux Flatpak
         included (automation deferred); the manual steps are printed instead.
-        --upgrade-git lets install upgrade or rebuild git where its module can (RHEL, Rocky, Fedora, Ubuntu, Debian, Windows; macOS
-        through Homebrew, as your user): it prints the plan with each privileged command, then runs it. In a terminal install
-        asks first (default No); without a terminal the flag is the only way to say yes. Exit 3 = a module hands the
-        upgrade off to finish outside install; nothing else changed. On Windows git-secret-guard.cmd runs
-        the hand-off itself and then runs the command again; from Git Bash the printed PowerShell command does.
+        --upgrade-git lets install upgrade or rebuild git where its module can (RHEL, Rocky, Fedora, Ubuntu, Debian,
+        Windows; macOS through Homebrew, as your user): it prints the plan with each privileged command, then runs
+        it. In a terminal install asks first (default No); without a terminal the flag is the only way to say yes.
+        Exit 3 = a module hands the upgrade off to finish outside install; nothing else changed. On Windows
+        git-secret-guard.cmd runs the hand-off itself and then runs the command again; from Git Bash the printed
+        PowerShell command does.
         --take-over-system-git (RPM systems) points the old package /usr/bin/git and its siblings at the new
         /usr/local build, keeps the originals, and makes dnf skip the git packages; undo with restore-system-git.
         On macOS it only reports that /usr/bin/git cannot be replaced (SIP), changes nothing, and install goes on.
@@ -31,18 +32,19 @@ commands:
   uninstall [--remove-tools] [--keep-system-git]
         Remove what install added and restore the recorded core.hooksPath.
         --remove-tools also removes the scanners that install itself downloaded.
-        Stops, changing nothing, while a system git takeover is active; --keep-system-git lets it finish and prints the undo by hand.
+        Stops, changing nothing, while a system git takeover is active; --keep-system-git lets it finish and
+        prints the undo by hand.
   restore-system-git
-        Undo a system git takeover: puts the saved RPM files back (hash checked), removes the dnf excludepkgs entry and the backup
-        directory. Needs no network. Says "nothing to restore" and exits 0 when there is no takeover.
+        Undo a system git takeover: puts the saved RPM files back (hash checked), removes the dnf excludepkgs entry
+        and the backup directory. Needs no network. Says "nothing to restore" and exits 0 when there is no takeover.
   restore-smartgit
         Undo what install --configure-smartgit did: the Git Executable lines from the backup (only while they are
         still the ones this tool wrote) and the filter.lfs.* settings that git lfs install added. Git LFS packages
         are kept. Says "nothing to restore" when SmartGit was never changed.
   status
         Show the installed version, hook command, the git in use, tool versions and the recorded core.hooksPath.
-        Exit 0 only when installed, the global config matches, git runs the hook (git hook list pre-commit), the first git on PATH
-        is >= 2.54 and no tool line says MISMATCH or MISSING.
+        Exit 0 only when installed, the global config matches, git runs the hook (git hook list pre-commit), the
+        first git on PATH is >= 2.54 and no tool line says MISMATCH or MISSING.
   doctor [--roots DIR...]
         Coverage report: the machine (install, hook config, tools, core.hooksPath, old git)
         and every repository under the roots (default: your home directory, on macOS without ~/Library and ~/.Trash;

@@ -196,23 +196,29 @@ smartgit_edit_prefs() {
 # ^ invariant runs in a subshell of smartgit_verify_run; rc 0 = the fake-token commit was blocked with findings text, a clean commit printed the summary line
 # ^ invariant 2 = scratch setup failed, 3 = fake-token commit not blocked, 4 = clean commit failed, 5 = no summary line, 6 = fake-token commit failed otherwise
 smartgit_verify_commits() {
-    local work="$1" key out env_names
+    local work="$1" key out
     local -a gc=(-c user.name=gsg-verify -c user.email=gsg-verify@example.invalid -c commit.gpgsign=false)
-    env_names="$("$GSG_GIT" rev-parse --local-env-vars)" || return 2
-    # shellcheck disable=SC2086
-    unset $env_names
+    SG_VERIFY_PATH="$(smartgit_lfs_launch_path "$GSG_GIT")" || return 2
     key="$(printf '%s%s%s' 'AKI' 'A' 'Q7XK2MWB4HZ5NR3T')"
-    "$GSG_GIT" init -q --template= "$work" || return 2
+    smartgit_verify_git init -q --template= "$work" || return 2
     printf 'aws_access_key_id = %s\n' "$key" >"$work/leak.txt" || return 2
-    "$GSG_GIT" -C "$work" add leak.txt || return 2
-    if out="$("$GSG_GIT" "${gc[@]}" -C "$work" commit -q -m verify-secret 2>&1)"; then return 3; fi
-    if "$GSG_GIT" -C "$work" rev-parse -q --verify HEAD >/dev/null 2>&1; then return 3; fi
+    smartgit_verify_git -C "$work" add leak.txt || return 2
+    if out="$(smartgit_verify_git "${gc[@]}" -C "$work" commit -q -m verify-secret 2>&1)"; then return 3; fi
+    if smartgit_verify_git -C "$work" rev-parse -q --verify HEAD >/dev/null 2>&1; then return 3; fi
     if [[ $out != *"potential secret(s)"* ]]; then return 6; fi
-    "$GSG_GIT" -C "$work" rm -q -f --cached leak.txt || return 2
+    smartgit_verify_git -C "$work" rm -q -f --cached leak.txt || return 2
     printf 'hello\n' >"$work/ok.txt" || return 2
-    "$GSG_GIT" -C "$work" add ok.txt || return 2
-    out="$("$GSG_GIT" "${gc[@]}" -C "$work" commit -q -m verify-clean 2>&1)" || return 4
+    smartgit_verify_git -C "$work" add ok.txt || return 2
+    out="$(smartgit_verify_git "${gc[@]}" -C "$work" commit -q -m verify-clean 2>&1)" || return 4
     if [[ $out != *"$GSG_NAME: scanned"* ]]; then return 5; fi
+}
+
+# ^ security env -i keeps the installer's variables away; only the global config location, when set, is passed on to read the config install wrote
+smartgit_verify_git() {
+    local -a keep=()
+    if [ -n "${GIT_CONFIG_GLOBAL:-}" ]; then keep+=(GIT_CONFIG_GLOBAL="$GIT_CONFIG_GLOBAL"); fi
+    if [ -n "${GIT_CONFIG_NOSYSTEM:-}" ]; then keep+=(GIT_CONFIG_NOSYSTEM="$GIT_CONFIG_NOSYSTEM"); fi
+    env -i HOME="$HOME" PATH="$SG_VERIFY_PATH" "${keep[@]}" "$GSG_GIT" "$@"
 }
 
 # ^ invariant the scratch repository is removed on every path; any failing check says what failed and returns 1
@@ -260,11 +266,10 @@ smartgit_drop_manifest() {
     }
 }
 
-# ^ invariant informational outcomes (restored, already original, file gone, changed since) print to stdout and return 0; errors print to stderr and return 1
-# ^ invariant restores only when the executable lines are still those this tool wrote; a value changed since is left alone, manifest dropped, backup kept
-# ^ invariant an invalid manifest, or a missing backup or one not hashing like the manifest says, stops the restore and prints the by-hand step
-smartgit_restore_one() {
-    local mf="$1" kind=macos want got
+# ^ invariant changes nothing; rc 0 = can restore, 1 = refused (said), 2 = the settings file is gone; sets SGM_* and SGP_*
+# ^ invariant an invalid manifest, or a missing backup or one not hashing like the manifest says, is refused with the by-hand step
+smartgit_restore_check() {
+    local mf="$1" got
     smartgit_manifest_read "$mf" || {
         printf '%s: restore by hand: in SmartGit open Preferences, Commands and choose the Git Executable you used before\n' "$GSG_NAME" >&2
         return 1
@@ -274,12 +279,8 @@ smartgit_restore_one() {
             "$GSG_NAME" "$SGM_BACKUP" "$mf" "$SGM_ORIG_EXEC" >&2
         return 1
     fi
-    if [ ! -f "$SGM_SETTINGS" ]; then
-        printf '%s: %s is gone; nothing to restore there\n' "$GSG_NAME" "$SGM_SETTINGS"
-        smartgit_drop_manifest "$mf" "$SGM_BACKUP"
-        return
-    fi
-    smartgit_kind_running "$kind"
+    if [ ! -f "$SGM_SETTINGS" ]; then return 2; fi
+    smartgit_kind_running macos
     case $? in
         0)
             printf '%s: SmartGit is running; exit it with Repository, Exit and run the restore again; nothing was changed\n' "$GSG_NAME" >&2
@@ -295,6 +296,19 @@ smartgit_restore_one() {
         printf '%s: %s cannot be edited (%s); restore by hand: set the Git Executable back to %s; the backup is %s\n' "$GSG_NAME" "$SGM_SETTINGS" "$SGP_WHY" "$SGM_ORIG_EXEC" "$SGM_BACKUP" >&2
         return 1
     }
+}
+
+# ^ invariant informational outcomes (restored, already original, file gone, changed since) print to stdout and return 0; errors print to stderr and return 1
+# ^ invariant restores only when the executable lines are still those this tool wrote; a value changed since is left alone, manifest dropped, backup kept
+smartgit_restore_one() {
+    local mf="$1" want rc=0
+    smartgit_restore_check "$mf" || rc=$?
+    if [ "$rc" -eq 1 ]; then return 1; fi
+    if [ "$rc" -eq 2 ]; then
+        printf '%s: %s is gone; nothing to restore there\n' "$GSG_NAME" "$SGM_SETTINGS"
+        smartgit_drop_manifest "$mf" "$SGM_BACKUP"
+        return
+    fi
     want="$SGM_NEW_ABS"
     if [ "$SGP_EXEC" = "$SGM_NEW_EXEC" ] && { { [ "$want" = - ] && [ "$SGP_ABS_IDX" -lt 0 ]; } || [ "$SGP_ABS" = "$want" ]; }; then
         smartgit_edit_prefs "$SGM_SETTINGS" "$SGM_ORIG_EXEC" "$SGM_ORIG_ABS" || return 1
@@ -449,18 +463,32 @@ smartgit_clean_tmp() {
     return "$rc"
 }
 
-# ^ invariant the manifest loop is bounded; every manifest is tried even after a failure, and the directory goes only when everything worked
-smartgit_restore_all() {
-    local mf n=0 rc=0
-    smartgit_clean_tmp || rc=1
+# ^ invariant changes nothing; every refusal of the restore (each manifest, followed by the Git LFS record) is decided here; the cap bounds the restore loop
+smartgit_restore_precheck() {
+    local mf n=0 rc=0 crc
     for mf in "$GSG_STATE_DIR"/smartgit/*.manifest; do
         if [ ! -e "$mf" ]; then continue; fi
         n=$((n + 1))
         if ! smartgit_under_cap "$n"; then
-            printf '%s: more than %s manifests in %s/smartgit; the rest were not restored\n' "$GSG_NAME" "$SMARTGIT_MAX_ENTRIES" "$GSG_STATE_DIR" >&2
+            printf '%s: more than %s manifests in %s/smartgit; nothing was restored\n' "$GSG_NAME" "$SMARTGIT_MAX_ENTRIES" "$GSG_STATE_DIR" >&2
             rc=1
             break
         fi
+        crc=0
+        smartgit_restore_check "$mf" || crc=$?
+        if [ "$crc" -eq 1 ]; then rc=1; fi
+    done
+    smartgit_lfs_undo_check || rc=1
+    return "$rc"
+}
+
+# ^ invariant the refusals come first (precheck, with the loop cap); every manifest is tried even after a failure; the directory goes only when all worked
+smartgit_restore_all() {
+    local mf rc=0
+    smartgit_restore_precheck || return 1
+    smartgit_clean_tmp || rc=1
+    for mf in "$GSG_STATE_DIR"/smartgit/*.manifest; do
+        if [ ! -e "$mf" ]; then continue; fi
         smartgit_restore_one "$mf" || rc=1
     done
     smartgit_lfs_undo || rc=1

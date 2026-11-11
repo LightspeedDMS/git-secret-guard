@@ -111,7 +111,7 @@ sg_setup() {
     rm -f -- "$SANDBOX/smartgit.running" "$SANDBOX/smartgit.log" "$SANDBOX/flatpak.installed" "$SANDBOX/flatpak.overrides" \
         "$SANDBOX/pgrep.count" "$SANDBOX/smartgit.running.after" "$SANDBOX/mv.stall" "$SANDBOX/mv.stallskip" "$SANDBOX/mv.stalled" || return 1
     gm_setup "${1:-2.54.0}" || return 1
-    set_env GSG_SMARTGIT_LAUNCH_PATH="$GM_PREFIX/bin:$SANDBOX/pathbin"
+    set_env GSG_SMARTGIT_LAUNCH_PATH="$GM_PREFIX/bin:$SANDBOX/pathbin:$TEST_BASE_PATH"
     SG_APPS="$SANDBOX/apps"
     SG_APP="$SG_APPS/SmartGit.app"
     SG_SETTINGS="$LC_HOME/Library/Preferences/SmartGit/26.1"

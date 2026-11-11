@@ -368,12 +368,14 @@ uninstall_gitup_handoff() {
 }
 
 uninstall_steps() {
-    local remove_tools="$1"
+    local remove_tools="$1" had_records=0
+    if smartgit_has_records; then had_records=1; fi
     # ^ order the SmartGit restore runs before everything else; a refusal (SmartGit running) leaves the installed CLI in place to run again
     smartgit_restore_all || {
         printf '%s: uninstall stopped before removing anything else; fix what is said above and run %s uninstall again\n' "$GSG_NAME" "$GSG_NAME" >&2
         return 1
     }
+    if [ "$had_records" -eq 1 ]; then uninstall_say "SmartGit was restored from the records of install --configure-smartgit (details above)"; fi
     # ^ order uninstall_restore_hooks_path before uninstall_hook_section => a failed restore leaves the hook config scanning, never a machine with neither
     uninstall_restore_hooks_path || return 1
     uninstall_hook_section || return 1

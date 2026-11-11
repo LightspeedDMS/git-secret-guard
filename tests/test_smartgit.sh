@@ -385,53 +385,6 @@ test_the_flatpak_setup_is_refused_by_design_and_prints_the_four_manual_steps() {
     assert_contains "$OUT" "flatpak com.syntevo.SmartGit (SmartGit 26.1.056)" "status still lists the Flatpak install"
 }
 
-# ^ invariant sg_lfs_plan_run [install] runs smartgit_lfs_plan (and smartgit_lfs_install_pkg with the argument) in the gu_run shell on the sandbox git
-# shellcheck disable=SC2016
-sg_lfs_plan_run() {
-    gu_run 'for l in smartgit smartgit_report smartgit_offer smartgit_lfs smartgit_apply; do source "$GSG_ROOT/lib/$l.sh" || exit 9; done
-paths_init || exit 9
-GSG_GIT="$1"; INSTALL_TIMEOUT_BIN="$(type -P timeout)"; gitup_select || exit 8
-smartgit_lfs_plan || exit 1
-if [ "$2" = install ]; then smartgit_lfs_install_pkg || exit 1; fi' "$SANDBOX/pathbin/git" "${1:-plan}"
-}
-
-test_dnf_plans_and_runs_the_install_when_a_repository_offers_git_lfs() {
-    sg_linux_setup rocky "rhel centos fedora" || return 1
-    printf '3.4.1\n' >"$SANDBOX/dnf.candidate" || return 1
-    sg_lfs_plan_run install
-    assert_rc 0 "a repository offers git-lfs"
-    assert_contains "$OUT" "as root: $SANDBOX/pathbin/dnf install -y git-lfs" "the plan names the root command with its full path"
-    assert_contains "$(gu_log)" "repoquery" "dnf was asked"
-    assert_contains "$(gu_log)" "sudo -- $SANDBOX/pathbin/dnf install -y git-lfs" "the install ran through sudo"
-}
-
-test_dnf_refuses_naming_epel_as_a_likely_source_and_enables_no_repository_when_none_offers_git_lfs() {
-    sg_linux_setup rocky "rhel centos fedora" || return 1
-    sg_lfs_plan_run
-    assert_rc 1 "no repository offers git-lfs"
-    assert_contains "$ERR" "no enabled dnf repository offers git-lfs" "says so"
-    assert_contains "$ERR" "EPEL" "names EPEL as a likely source"
-    assert_contains "$ERR" "enables no repository" "and that nothing is enabled"
-    assert_not_contains "$(gu_log)" "install -y" "no package install ran"
-    assert_not_contains "$(gu_log)" "enablerepo" "no repository was enabled"
-}
-
-test_a_failing_dnf_repoquery_is_its_own_refusal_not_an_answer_of_none() {
-    sg_linux_setup rocky "rhel centos fedora" || return 1
-    printf 'repoquery' >"$SANDBOX/dnf.fail" || return 1
-    sg_lfs_plan_run
-    assert_rc 1 "the query failed"
-    assert_contains "$ERR" "the dnf repoquery for git-lfs failed" "says the query failed"
-    assert_not_contains "$ERR" "no enabled dnf repository" "and does not claim none offers it"
-}
-
-test_apt_installs_git_lfs_non_interactively_on_ubuntu() {
-    sg_linux_setup ubuntu || return 1
-    sg_lfs_plan_run install
-    assert_rc 0 "apt installs git-lfs"
-    assert_contains "$(gu_log)" "install -y git-lfs | ppa-files=0 ppa-keys=0 frontend=noninteractive" "with -y and the non-interactive frontend"
-}
-
 test_git_lfs_only_outside_the_path_smartgit_gives_git_is_refused_with_the_instruction() {
     local h
     sg_setup || return 1
@@ -607,6 +560,89 @@ test_an_interrupted_git_lfs_record_leaves_a_temp_file_and_no_filter_and_restore_
     assert_eq "$(gitx config --global --get-regexp '^filter\.lfs\.' | wc -l | tr -d ' ')" 0 "no filter was written yet"
     sg_restore_ok
     assert_no_file "$SG_BACKUPS" "the temp file and the state directory are gone"
+}
+
+# ^ invariant sg_log_verify_git = the target git logs PATH and VERIFY_LEAK of each call with the user name gsg-verify to $SANDBOX/verify.paths
+sg_log_verify_git() {
+    mv -- "$SANDBOX/pathbin/git" "$SANDBOX/pathbin/git.real" || return 1
+    gm_stub "$SANDBOX/pathbin/git" "case \" \$* \" in
+    *gsg-verify*) printf 'PATH=%s leak=%s\n' \"\$PATH\" \"\${VERIFY_LEAK:-none}\" >>\"$SANDBOX/verify.paths\" ;;
+esac
+exec \"$SANDBOX/pathbin/git.real\" \"\$@\""
+}
+
+test_the_verify_commits_run_under_the_environment_smartgit_gives_git() {
+    local line n=0
+    sg_interrupt_setup || return 1
+    sg_log_verify_git || return 1
+    set_env VERIFY_LEAK=installer-only
+    gsg install --configure-smartgit </dev/null
+    assert_rc 0 "configure with the logging git"
+    assert_file "$SANDBOX/verify.paths" "the verify commits went through the target git"
+    while IFS= read -r line; do
+        n=$((n + 1))
+        assert_eq "$line" "PATH=$GM_PREFIX/bin:$SANDBOX/pathbin:$TEST_BASE_PATH leak=none" "verify call $n runs under the launch path alone"
+    done <"$SANDBOX/verify.paths"
+    assert_eq "$([ "$n" -ge 2 ] && echo many)" many "at least the fake-token and the clean commit were logged"
+}
+
+# ^ invariant sg_configured_with_bad_lfs_record = a finished configure, followed by lfs.record replaced by text this tool never writes; its undo must refuse
+sg_configured_with_bad_lfs_record() {
+    sg_interrupt_setup || return 1
+    sg_rerun_ok
+    printf 'not-a-record\n' >"$SG_BACKUPS/lfs.record" || return 1
+}
+
+# ^ invariant sg_assert_nothing_restored = the refusal changed nothing; preferences still edited, manifest, state and hook config still there
+sg_assert_nothing_restored() {
+    assert_contains "$ERR" "not a record this tool wrote" "the record is what refused"
+    sg_assert_edit_in_place
+    assert_eq "$(sg_count_in "$SG_BACKUPS" '\.manifest$')" 1 "the manifest is still there"
+    assert_file "$LC_STATE/state" "the state is still there"
+    assert_contains "$(gitx config --global --get hook.git-secret-guard.command)" git-secret-guard "the hook config is still there"
+}
+
+test_uninstall_refuses_on_a_bad_lfs_record_before_restoring_anything() {
+    sg_configured_with_bad_lfs_record || return 1
+    gsg uninstall
+    assert_rc 1 "uninstall refuses"
+    sg_assert_nothing_restored
+}
+
+test_restore_smartgit_refuses_on_a_bad_lfs_record_before_restoring_the_preferences() {
+    sg_configured_with_bad_lfs_record || return 1
+    gsg restore-smartgit
+    assert_rc 1 "restore-smartgit refuses"
+    sg_assert_nothing_restored
+}
+
+test_a_finished_configure_records_that_it_added_the_filter() {
+    sg_interrupt_setup || return 1
+    sg_rerun_ok
+    assert_eq "$(<"$SG_BACKUPS/lfs.record")" filter_added=yes "the record names the filter as added by this tool"
+}
+
+test_a_record_still_pending_when_the_run_stopped_leaves_the_filter_alone_on_restore() {
+    sg_interrupt_setup || return 1
+    sg_interrupt_run lfs.record "$SG_STOP_SECOND" TERM "$GSG_PROJECT/bin/git-secret-guard" install --configure-smartgit || return 1
+    assert_eq "$(gitx config --global --get filter.lfs.required)" true "git lfs install had run"
+    assert_eq "$(<"$SG_BACKUPS/lfs.record")" filter_added=pending "the record was not yet confirmed"
+    sg_restore_ok
+    assert_contains "$OUT$ERR" "filter.lfs" "the restore says what it did with the filter"
+    assert_eq "$(gitx config --global --get filter.lfs.required)" true "the filter section stays, it may be the user's"
+    assert_no_file "$SG_BACKUPS/lfs.record" "the unconfirmed record is dropped"
+}
+
+test_uninstall_counts_the_smartgit_restore_as_an_action_so_it_never_says_nothing_to_do() {
+    sg_interrupt_setup || return 1
+    sg_rerun_ok
+    rm -f -- "$LC_STATE/state" "$LC_HOME/.local/bin/git-secret-guard" || return 1
+    rm -rf -- "$LC_DATA" || return 1
+    gitx config --global --remove-section hook.git-secret-guard || return 1
+    gsg uninstall
+    assert_rc 0 "uninstall of a machine with only SmartGit records"
+    assert_contains "$OUT" "restored the Git Executable" "the restore is reported"
+    assert_not_contains "$OUT$ERR" "nothing to do" "no closing line that denies it"
 }
 
 run_file_tests

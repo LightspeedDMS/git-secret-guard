@@ -353,7 +353,10 @@ bin/git-secret-guard install        # lists what is missing, installs it with br
   `~/.cache/git-secret-guard-test-tools`, never into `~/.local/bin`. The brew steps are tested with a recording `brew` stand-in and a
   fake prefix (never a real `brew install`); the Linux-behaviour lifecycle suites run on a Mac under a fake Linux `uname`. Explained
   skips: the podman suite (`test_platform.sh`: Linux only), systemd tests (no `systemctl`), `hook.<event>.enabled` (Apple Git has no
-  such key), the gawk and mawk cases when those awks are not installed.
+  such key), the gawk and mawk cases when those awks are not installed. The `hook.pre-commit.enabled` halves of `test_status` and
+  `test_doctor` run only when `git_enabled_sections` (`tests/lib.sh`) finds that the git under test lists the hook as `event-disabled`
+  (a probe of behaviour, not of the version); the `hook.git-secret-guard.enabled` halves always run. A Mac whose only git is Apple Git
+  2.54.0 passes both files this way (#76). `test_status_names_the_git_in_use_and_its_version` strips the ` (Apple Git-N)` suffix, as `install_git_version` does.
 
 ### CI on a hosted Mac
 

@@ -196,6 +196,16 @@ wu_plant_signer_cert() {
         'New-SelfSignedCertificate -Type CodeSigningCert -Subject $env:GSG_SUBJECT -CertStoreLocation Cert:\CurrentUser\My -NotAfter (Get-Date).AddYears(10) | Out-Null'
 }
 
+# ^ invariant wu_key_files_named NAME prints how many files called NAME the user's CNG key directory holds; NAME comes from wu_build_standin
+wu_key_files_named() {
+    local count
+    [ -n "${1:-}" ] || return 1
+    count="$(GSG_KEY="$1" "$TEST_SYSTEM32/WindowsPowerShell/v1.0/powershell.exe" -NoProfile -Command '
+        $ErrorActionPreference = "Stop"
+        @(Get-ChildItem "$env:APPDATA\Microsoft\Crypto\Keys" -Force | Where-Object { $_.Name -eq $env:GSG_KEY }).Count')" || return 1
+    printf '%s\n' "${count//$'\r'/}"
+}
+
 # ^ invariant the cache directory is named after a hash of the stand-in source => a changed source never uses an old binary
 wu_standin_cache() {
     local h
@@ -223,10 +233,16 @@ wu_build_standin() {
             cat "$out/build.log" >&2
             return 1
         }
-        GSG_OUT="$(cygpath -w "$out/standin.exe")" GSG_SUBJECT="$WU_SIGNER" "$ps" -NoProfile -Command '
+        # ^ why the key file name is recorded, not the files of the Keys directory counted; every process of the user writes there
+        GSG_KEYLOG="$(cygpath -w "$out/key.name")" GSG_OUT="$(cygpath -w "$out/standin.exe")" GSG_SUBJECT="$WU_SIGNER" "$ps" -NoProfile -Command '
             $s = $env:GSG_SUBJECT
             $c = New-SelfSignedCertificate -Type CodeSigningCert -Subject $s -CertStoreLocation Cert:\CurrentUser\My -NotAfter (Get-Date).AddYears(10)
-            try { Set-AuthenticodeSignature -FilePath $env:GSG_OUT -Certificate $c | Out-Null }
+            try {
+                $k = [System.Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPrivateKey($c)
+                if ($null -eq $k.Key) { throw "the test signer key is not a CNG key" }
+                [IO.File]::WriteAllText($env:GSG_KEYLOG, [string]$k.Key.UniqueName)
+                Set-AuthenticodeSignature -FilePath $env:GSG_OUT -Certificate $c | Out-Null
+            }
             finally {
                 foreach ($st in "My", "CA") { $p = "Cert:\CurrentUser\$st\$($c.Thumbprint)"; if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -DeleteKey -Force } }
             }' >>"$out/build.log" 2>&1 || {

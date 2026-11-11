@@ -19,18 +19,22 @@ wu_store_counts() {
 }
 
 test_building_the_signed_stand_in_leaves_no_certificate_and_no_key_behind() {
-    local cache before after
+    local cache before after key
     wu_need_windows_runner
     cache="$(wu_standin_cache)" || return 1
     wu_build_standin || return 1
     before="$(wu_store_counts)"
     mv -- "$cache" "$cache.aside" || return 1
+    rm -f -- "$SANDBOX/standin/key.name" || return 1
     wu_build_standin
     after="$(wu_store_counts)"
     rm -f -- "$cache.aside"/standin.exe "$cache.aside"/standin-unsigned.exe
     rmdir -- "$cache.aside"
     assert_file "$cache/standin.exe" "the stand-in was built again"
-    assert_eq "$after" "$before" "the user's stores hold the same certificates and key files as before"
+    key="$(<"$SANDBOX/standin/key.name")" || return 1
+    [ -n "$key" ] || fail "the build recorded no file name for its own key" || return 1
+    assert_eq "$(wu_key_files_named "$key")" 0 "the key file of the stand-in is gone; the Keys directory is shared with other processes, so it is not counted as a whole"
+    assert_eq "${after%% keys=*}" "${before%% keys=*}" "the user's stores hold the same certificates as before"
     assert_contains "$before" "certs=0" "and none of ours"
 }
 

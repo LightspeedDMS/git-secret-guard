@@ -332,6 +332,19 @@ assert_no_file() { [ ! -e "$1" ] || fail "${2:-assert_no_file}: unexpected $1"; 
 
 skip_test() { printf '%s\n' "$1" >"$SANDBOX/.skip"; exit 0; }
 
+# ^ external Apple Git 2.54.0 has no hook.<event>.enabled; its hook list never says event-disabled and the hook still runs
+# ^ why probe the behaviour, not the version; git reports event-disabled only where it reads the key (docs/install.md#maintainer-notes)
+# ^ invariant git_enabled_sections prints the hook.<section>.enabled sections the git under test honours, one per line; git-secret-guard always
+git_enabled_sections() {
+    local cfg="$SANDBOX/event-probe.config" listing
+    printf '[hook "probe"]\n\tevent = pre-commit\n\tcommand = true\n[hook "pre-commit"]\n\tenabled = false\n' >"$cfg" || return 1
+    listing="$(set_env "GIT_CONFIG_GLOBAL=$(git_path "$cfg")" && gitx hook list pre-commit 2>/dev/null)"
+    printf 'git-secret-guard\n'
+    case "$listing" in
+        *event-disabled*) printf 'pre-commit\n' ;;
+    esac
+}
+
 # ^ external measured on WSL 1 (build 20348); without systemd, systemd-analyze --user verify complains of a device monitor and a system bus, and exits 0
 # ^ invariant analyze_blocked_reason [BIN] prints why BIN cannot verify anything here, nothing when it can; it verifies a good unit => a bad unit is no reason
 analyze_blocked_reason() {

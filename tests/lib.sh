@@ -336,9 +336,14 @@ skip_test() { printf '%s\n' "$1" >"$SANDBOX/.skip"; exit 0; }
 # ^ why probe the behaviour, not the version; git reports event-disabled only where it reads the key (docs/install.md#maintainer-notes)
 # ^ invariant git_enabled_sections prints the hook.<section>.enabled sections the git under test honours, one per line; git-secret-guard always
 git_enabled_sections() {
-    local cfg="$SANDBOX/event-probe.config" listing
+    local cfg="$SANDBOX/event-probe.config" repo="$SANDBOX/event-probe.git" listing
     printf '[hook "probe"]\n\tevent = pre-commit\n\tcommand = true\n[hook "pre-commit"]\n\tenabled = false\n' >"$cfg" || return 1
-    listing="$(set_env "GIT_CONFIG_GLOBAL=$(git_path "$cfg")" && gitx hook list pre-commit 2>&1)" || {
+    # ^ external outside a repository git hook list does not report a disabled event; the probe runs in a bare repository (docs/install.md#maintainer-notes)
+    listing="$(gitx init -q --bare "$(git_path "$repo")" 2>&1)" || {
+        fail "the hook list probe could not make its repository: $listing"
+        return 1
+    }
+    listing="$(set_env "GIT_CONFIG_GLOBAL=$(git_path "$cfg")" && gitx -C "$(git_path "$repo")" hook list pre-commit 2>&1)" || {
         fail "the hook list probe failed: $listing"
         return 1
     }

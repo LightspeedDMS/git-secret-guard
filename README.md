@@ -1,5 +1,7 @@
 # git-secret-guard
 
+[![tests](https://github.com/LightspeedDMS/git-secret-guard/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/LightspeedDMS/git-secret-guard/actions/workflows/tests.yml?query=branch%3Amain)
+
 Scans each commit made on this machine (with git 2.54 or newer) for secrets before it is made. The lines a
 commit adds are checked by **trufflehog** and **betterleaks** in parallel, and any finding blocks the commit. It is a
 git config-based hook, so it runs alongside whatever hooks a repository brings (husky, the pre-commit framework,

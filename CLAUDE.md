@@ -81,6 +81,10 @@ Bash tooling (no Python/Node): a git config hook (`hook.git-secret-guard.*`) run
 - **Class `wsl` = WSL signal + an rpm/ubuntu/debian family**; `lib/gitup_wsl.sh` delegates to the inner module (`GITUP_INNER_CLASS`, read through `gitup_inner_class`; the apt module must not read `GITUP_CLASS` for the Ubuntu/Debian choice). Detection reads kernel files as data (`lib/wsl.sh`, seams `GSG_WSL_*`, announced); `tests/test_wsl.sh` fakes `uname` and runs on Windows too.
 - **`--with-timer` is judged by systemd running, never by `systemctl` on PATH** (WSL 1 has the binary and no systemd). `install_pins_running_script` (Windows, WSL 1) is measured, not guessed (run 42237326449): renaming the directory of a running script fails on WSL 1 (4.4.0-20348-Microsoft, rc 1) and works on WSL 2 (6.18.54.1-microsoft-standard-WSL2), so the pin is WSL 1 only; WSL 1 build 20348 ran the rename without a crash, which does not clear the 17763 host.
 
+## Versions (rule: CONTRIBUTING.md#versions)
+
+- `VERSION` (`x.y.z`, checked by `bin/git-secret-guard`) is bumped in the PR that changes what a user gets: feature or behaviour change = minor, fix = patch, docs/tests/CI only = none. Tests read the file, never a literal. After the merge, tag the merge commit `v<VERSION>` (annotated) and push it; never move or replace a tag (next version instead). First tagged version: 0.2.0.
+
 ## When to run which tests (every agent, every story)
 
 - **While developing: targeted tests only.** After a change, run only the test files that cover it: `tests/run.sh tests/test_x.sh [tests/test_y.sh ...]` (Windows: `tests\run.cmd tests/test_x.sh`). A change to a shared helper (`lib/common.sh`, `tests/lib.sh`, `tests/lifecycle.sh`) means the files that use it, not the suite.

@@ -175,6 +175,18 @@ Run it yourself with `.github/scripts/check-dco.sh origin/main HEAD`.
    in `tests/macos-only.list` (the tests that skip anywhere else) shows as PASS; add a test that can only run on a Mac to that list (the `macos-list-complete` job fails when one is missing).
 5. Link the issue in the PR description.
 
+## Versions
+
+The version is the one line of `VERSION` (`x.y.z`; `git-secret-guard version` prints it, `install` records it in the state file
+and `status` shows it). It follows [Semantic Versioning](https://semver.org/); while it is `0.y.z`:
+
+- **A pull request that changes what a user gets** (the hook, the CLI, install, `status`, `doctor`, a pinned tool in `tools.lock`)
+  bumps `VERSION` in that pull request: a new feature or a changed behaviour raises `y` and resets `z`, a fix raises `z`.
+- **Docs, tests and CI only** keep the version.
+- **After the merge** the merge commit on `main` is tagged `v<VERSION>` (annotated, `git tag -a v0.2.0 -m "v0.2.0"`) and the tag is pushed.
+  A tag is never moved, replaced or deleted and re-created: a mistake gets the next version.
+- Two open pull requests that both bump: the one merged second takes the next number when it is brought up to date with `main`.
+
 ## License
 
 By contributing you agree that your contributions are licensed under the [MIT License](LICENSE) of this project.

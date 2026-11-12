@@ -100,7 +100,7 @@ parent is judged on its own). Bare repositories have no `.git` entry and are not
 
 ```
 machine:
-  ok       installed: version 0.1.0 (state /home/me/.local/state/git-secret-guard/state)
+  ok       installed: version 0.2.0 (state /home/me/.local/state/git-secret-guard/state)
   ok       state records: 2 placed hash(es), 0 original(s) moved aside
   ok       hook: hook.git-secret-guard.event=pre-commit, command=/home/me/.local/share/git-secret-guard/hooks/secret-scan (executable)
   ok       trufflehog: /home/me/.local/bin/trufflehog 3.99.2 (pinned 3.99.2)

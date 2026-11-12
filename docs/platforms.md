@@ -59,7 +59,7 @@ group and others cannot write, and the plan prints its full path (`as root: /usr
    first; the downloads come first because a tampered tarball then changes nothing.)
 3. As root: `dnf install -y` with the names among `gcc make perl-interpreter xz tar openssl-devel zlib-devel libcurl-devel expat-devel pcre2-devel perl-ExtUtils-MakeMaker` that `rpm -q` does not know (none installed means no such step). `perl-interpreter`, not the `perl` metapackage, which pulled 141 packages on a host where the build only needs the interpreter and the modules named. A host with only `perl-interpreter` may lack the Perl modules that `git send-email` and similar scripts load at run time (the build itself passed without them); this is a behaviour change from `perl`, and `dnf install perl` adds them. **`dnf install -y` can still upgrade installed packages** when a missing name needs a newer build of one, and it cannot always be undone (an older build may no longer be in the repositories). The plan says so, with the counts of `dnf --assumeno install` of the missing names (no `-q`: dnf 4 hides its table under it). dnf 4 refuses that dry run to a user who is not root, and the plan then names that as the reason it did not count; a timeout is named as a timeout. The plan is computed once; the root commands that run are the ones it printed.
 4. As the invoking user, in a `mktemp` directory, under `env -i PATH=/usr/bin:/bin` with a scratch `HOME` and `TMPDIR`:
-   `make prefix=/usr/local NO_RUST=1 NO_TCLTK=1 NO_GETTEXT=1 USE_LIBPCRE2=1 INSTALL_SYMLINKS=1 all`, then the same with `DESTDIR=<stage> install` (INSTALL_SYMLINKS=1 makes git install its siblings as symlinks, see [CI on real platforms](#rocky-vm-selinux-enforcing)); the man pages
+   `make prefix=/usr/local NO_RUST=1 NO_TCLTK=1 NO_GETTEXT=1 USE_LIBPCRE2=1 sysconfdir=/etc INSTALL_SYMLINKS=1 all`, then the same with `DESTDIR=<stage> install` (INSTALL_SYMLINKS=1 makes git install its siblings as symlinks, see [CI on real platforms](#rocky-vm-selinux-enforcing); `sysconfdir=/etc` makes the new git read `/etc/gitconfig`, as the distribution's git does, see [a build made before 0.2.2](#a-source-build-made-before-022); the plan prints these words); the man pages
    are unpacked into `<stage>/usr/local/share/man`. Homebrew's tools and libraries on the caller's `PATH` cannot reach the build (a Homebrew
    `PATH` made the linker fail on the reference host). `NO_RUST=1` is needed: without it git 2.56 wants cargo.
 5. Every built binary is checked with `ldd`: a Homebrew path or a missing library refuses.
@@ -72,6 +72,23 @@ group and others cannot write, and the plan prints its full path (`as root: /usr
    partial file; it counts as ours for the foreign-file check and as unfinished for the plan, so `install --upgrade-git` again finishes the copy (it is offered as a
    rebuild even when `git` itself already landed). Files an earlier MANIFEST listed and the new one does not are removed. A relative `TMPDIR` is refused.
 8. The build directory is removed on every exit path, an interrupt included. The old git keeps working until `/usr/local/bin/git` is in place.
+
+#### A source build made before 0.2.2
+
+Builds made by git-secret-guard before 0.2.2 got no `sysconfdir`, and git's default is `$(prefix)/etc`, so that `/usr/local/bin/git` reads
+`/usr/local/etc/gitconfig` and silently ignores `/etc/gitconfig` (measured on Debian 13: the `filter.lfs.*` settings the git-lfs package keeps there
+were invisible to it; [#90](https://github.com/LightspeedDMS/git-secret-guard/issues/90)). With the RPM takeover that build is also `/usr/bin/git`.
+A rerun of `install` does not rebuild a git already at the pinned version; the next pinned git is built with `sysconfdir=/etc`. Until then, point the
+old build at the distribution's file (this writes nothing when `/usr/local/etc/gitconfig` already exists):
+
+```bash
+sudo mkdir -p /usr/local/etc && sudo test ! -e /usr/local/etc/gitconfig \
+  && printf '[include]\n\tpath = /etc/gitconfig\n' | sudo tee /usr/local/etc/gitconfig >/dev/null
+/usr/local/bin/git config --system --includes --list    # shows the settings of /etc/gitconfig
+```
+
+Normal git commands follow the include; `git config --system` alone does not, hence `--includes` in the check. Delete the file once a rebuild with
+`sysconfdir=/etc` has happened (`/usr/local/bin/git var GIT_CONFIG_SYSTEM` then prints `/etc/gitconfig`).
 
 The package-owned git in `/usr/bin` is **not touched** by any of this: `rpm -q git-core` reports the same version and `rpm -V git-core`
 reports nothing. `/usr/local/bin/git` comes first on `PATH` in a login shell, under `sudo` and in the systemd manager, **not** in cron
@@ -251,8 +268,8 @@ sudo apt install build-essential libcurl4-openssl-dev libssl-dev libexpat1-dev z
 curl -fsSLO https://www.kernel.org/pub/software/scm/git/git-2.56.0.tar.xz \
   && echo '26c56c296b38c0695b26fa95f475f1d01704d2d38e73465ca30b0b2f5dc789d3  git-2.56.0.tar.xz' | sha256sum -c - \
   && tar -xf git-2.56.0.tar.xz && cd git-2.56.0 \
-  && make -j"$(nproc)" prefix=/usr/local NO_RUST=1 NO_TCLTK=1 NO_GETTEXT=1 all \
-  && sudo make prefix=/usr/local NO_RUST=1 NO_TCLTK=1 NO_GETTEXT=1 install     # /usr/local/bin must come before /usr/bin on PATH
+  && make -j"$(nproc)" prefix=/usr/local sysconfdir=/etc NO_RUST=1 NO_TCLTK=1 NO_GETTEXT=1 all \
+  && sudo make prefix=/usr/local sysconfdir=/etc NO_RUST=1 NO_TCLTK=1 NO_GETTEXT=1 install     # /usr/local/bin must come before /usr/bin on PATH
 ```
 
 Then `git clone <this repository> && cd git-secret-guard && bin/git-secret-guard install` works as on RHEL. `install` names the missing

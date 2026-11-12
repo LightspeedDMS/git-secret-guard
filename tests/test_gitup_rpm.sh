@@ -29,6 +29,8 @@ test_a_rocky_machine_with_an_old_git_builds_the_pinned_source_when_the_user_acce
     assert_contains "$(gu_log)" "prefix=$GU_ROOT/usr/local NO_RUST=1 NO_TCLTK=1 NO_GETTEXT=1 USE_LIBPCRE2=1" "with the proven flags and the prefix"
     assert_contains "$(gu_log)" "INSTALL_SYMLINKS=1" "git installs its siblings as symlinks, so no hard link ties bin/git to libexec"
     assert_contains "$(gu_log)" "DESTDIR=" "into a stage directory"
+    assert_eq "$(grep '^make ' <<<"$(gu_log)" | grep -cF " sysconfdir=$GU_ROOT/etc INSTALL_SYMLINKS=1 ")" 2 "the compile and the install both read the system config from /etc, as the distribution's git does (#90)"
+    assert_contains "$OUT" "make prefix=$GU_ROOT/usr/local NO_RUST=1 NO_TCLTK=1 NO_GETTEXT=1 USE_LIBPCRE2=1 sysconfdir=$GU_ROOT/etc INSTALL_SYMLINKS=1" "and the plan prints the make words it runs"
     assert_eq "$("$GU_ROOT/usr/local/bin/git" --version)" "git version 2.56.0" "git is built into /usr/local"
     assert_file "$LC_STATE/state" "install ran to the end"
     assert_eq "$(find "$SANDBOX/tmp" -maxdepth 1 -name 'gsg-git-build.*' | wc -l)" 0 "the build directory is gone"
@@ -449,6 +451,19 @@ test_a_rebuild_replaces_a_symlink_of_the_old_build_and_never_writes_through_it()
     if [ -L "$b/git-shell" ]; then fail "git-shell is still a symlink"; fi
     assert_eq "$(<"$b/git-shell.victim")" "$victim_before" "the file the old link pointed at was not written"
     assert_eq "$("$b/git" --version)" "git version 2.56.0" "the new build is in place"
+}
+
+# ^ invariant rc 1 of the refresh plan = nothing stale, install goes on; an unbuildable plan is rc 2, and --upgrade-git refuses
+# shellcheck disable=SC2016
+test_a_stale_build_whose_make_words_are_refused_gives_rc_2_not_nothing_stale() {
+    gu_rpm_setup || return 1
+    gu_old_build 2.55.0 || return 1
+    gu_run 'source "$GSG_ROOT/lib/gitup_rpm.sh" || exit 9; gitup_paths || exit 9; GITUP_CLASS=rpm; INSTALL_TIMEOUT_BIN="$(type -P timeout)"
+        GSG_GIT="$GITUP_PREFIX/bin/git"
+        gitup_source_takeover_blocks() { GITUP_SYSCONFDIR=""; return 1; }
+        gitup_source_plan_refresh gitup_rpm_prepare >/dev/null; exit $?'
+    assert_rc 2 "a stale build whose plan cannot be built is stale but not doable, never nothing to do"
+    assert_contains "$ERR" "GITUP_SYSCONFDIR is empty" "and the reason is on stderr"
 }
 
 test_declining_a_pin_bump_changes_nothing_and_install_continues() {

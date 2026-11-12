@@ -85,6 +85,7 @@ test_a_failing_apt_install_from_the_ppa_disables_it_and_reports_the_partial_chan
     assert_contains "$ERR" "apt-get install git was started and failed" "and said to have maybe changed packages"
     assert_contains "$ERR" "the git-core PPA files this run added were removed again" "and the add and removal are reported"
     assert_contains "$ERR" "the build dependencies were installed" "and so is the dependency install of the fallback"
+    assert_contains "$OUT" "sysconfdir=$GU_ROOT/etc" "and the fallback plan carries the same make words as every source build (#90)"
     assert_not_contains "$ERR" "nothing was changed" "no refusal claims that nothing changed"
 }
 

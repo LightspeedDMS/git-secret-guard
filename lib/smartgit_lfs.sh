@@ -21,6 +21,10 @@ smartgit_lfs_launch_path() {
         return 0
     fi
     smartgit_platform
+    if [ "$REPLY" = windows ]; then
+        smartgit_lfs_windows_path "$1"
+        return
+    fi
     if [ "$REPLY" = linux ]; then
         printf '%s:%s' "${1%/*}" "$SMARTGIT_LINUX_PATH_SUFFIX"
     else
@@ -28,21 +32,35 @@ smartgit_lfs_launch_path() {
     fi
 }
 
+# ^ external SmartGit gives git its own directory first and the Windows system directories after it; git.exe adds its own directories itself
+# ^ external HOME and PATH are enough across env -i; msys adds SYSTEMROOT for a native program (measured with the real cmd\git.exe)
+# ^ coupled the system directories come from SYSTEMROOT of the CLI itself, always set in Git Bash; the list is POSIX and converted at exec
+smartgit_lfs_windows_path() {
+    local sys
+    if [ -z "${SYSTEMROOT:-}" ]; then
+        printf '%s: SYSTEMROOT is not set, so the PATH SmartGit gives git cannot be built\n' "$GSG_NAME" >&2
+        return 1
+    fi
+    sys="$(gsg_posix_path "$SYSTEMROOT")" || return 1
+    printf '%s:%s/System32:%s' "${1%/*}" "$sys" "$sys"
+}
+
 # ^ invariant 1 only during the Flatpak check of smartgit_verify_run; git runs through the wrapper inside the SmartGit sandbox
 SGF_VIA_SANDBOX=0
 
 # ^ security env -i keeps the installer's variables away; only the global config location, when set, is passed on to read the config install wrote
+# ^ invariant runs SMARTGIT_WIN_GIT on Windows (the cmd\git.exe written), GSG_GIT elsewhere
 smartgit_launch_git() {
-    local p
+    local p run="${SMARTGIT_WIN_GIT:-$GSG_GIT}"
     local -a keep=()
     if [ "$SGF_VIA_SANDBOX" -eq 1 ]; then
         smartgit_flatpak_git "$@"
         return
     fi
-    p="$(smartgit_lfs_launch_path "$GSG_GIT")" || return 1
+    p="$(smartgit_lfs_launch_path "$run")" || return 1
     if [ -n "${GIT_CONFIG_GLOBAL:-}" ]; then keep+=(GIT_CONFIG_GLOBAL="$GIT_CONFIG_GLOBAL"); fi
     if [ -n "${GIT_CONFIG_NOSYSTEM:-}" ]; then keep+=(GIT_CONFIG_NOSYSTEM="$GIT_CONFIG_NOSYSTEM"); fi
-    env -i HOME="$HOME" PATH="$p" "${keep[@]}" "$GSG_GIT" "$@"
+    env -i HOME="$HOME" PATH="$p" "${keep[@]}" "$run" "$@"
 }
 
 # ^ invariant on macOS the check runs under env -i with HOME and the PATH SmartGit gives git; a git-lfs only your shell can see does not count as present
@@ -140,6 +158,11 @@ smartgit_lfs_plan_apt() {
 
 # ^ invariant brew on macOS, dnf on the rpm family, apt on ubuntu and debian (a WSL distribution by its own os-release); anything else is refused
 smartgit_lfs_plan_route() {
+    # ^ why repair advice on Windows, not an install; Git for Windows ships Git LFS and a git without it is a broken install
+    if tools_is_windows; then
+        printf '%s: git lfs version fails through %s; repair Git for Windows (it ships Git LFS) and run the command again; SmartGit was not changed\n' "$GSG_NAME" "${SMARTGIT_WIN_TARGET:-$GSG_GIT}" >&2
+        return 1
+    fi
     if brew_is_macos; then
         smartgit_lfs_plan_brew
         return
@@ -164,15 +187,15 @@ smartgit_lfs_plan() {
     SG_LFS_CMD=()
     if [ "${1:-0}" -eq 1 ]; then where=", the git the wrapper runs; it is checked again through the wrapper inside the SmartGit sandbox"; fi
     gitup_select || return 1
-    if smartgit_lfs_present "$GSG_GIT"; then
-        printf '  Git LFS: git lfs version works through %s%s; nothing is installed\n' "$GSG_GIT" "$where"
+    if smartgit_lfs_present "${SMARTGIT_WIN_GIT:-$GSG_GIT}"; then
+        printf '  Git LFS: git lfs version works through %s%s; nothing is installed\n' "${SMARTGIT_WIN_TARGET:-$GSG_GIT}" "$where"
     else
         smartgit_lfs_plan_route || return 1
     fi
     if smartgit_lfs_filter_set; then
         printf '  Git LFS settings: filter.lfs.* is already set; git lfs install is not run\n'
     else
-        printf '  [only when no filter.lfs.* is set after that] runs: %s lfs install --skip-repo (writes the filter.lfs.* settings to your ~/.gitconfig)\n' "$GSG_GIT"
+        printf '  [only when no filter.lfs.* is set after that] runs: %s lfs install --skip-repo (writes the filter.lfs.* settings to your ~/.gitconfig)\n' "${SMARTGIT_WIN_TARGET:-$GSG_GIT}"
     fi
 }
 
@@ -204,9 +227,9 @@ smartgit_lfs_install_pkg() {
             ;;
     esac
     hash -r
-    if ! smartgit_lfs_present "$GSG_GIT"; then
+    if ! smartgit_lfs_present "${SMARTGIT_WIN_GIT:-$GSG_GIT}"; then
         local lp
-        lp="$(smartgit_lfs_launch_path "$GSG_GIT")" || lp=unknown
+        lp="$(smartgit_lfs_launch_path "${SMARTGIT_WIN_GIT:-$GSG_GIT}")" || lp=unknown
         printf '%s: git lfs version still fails through %s in the environment SmartGit gives git (PATH %s); if git-lfs is installed elsewhere, set absolute paths in the filter.lfs.* settings as SmartGit documents, this tool does not write them; SmartGit was not changed\n' \
             "$GSG_NAME" "$GSG_GIT" "$lp" >&2
         return 1
@@ -277,7 +300,7 @@ smartgit_lfs_configure() {
         return 0
     fi
     smartgit_lfs_record_write pending || return 1
-    printf '%s: running %s lfs install --skip-repo\n' "$GSG_NAME" "$GSG_GIT"
+    printf '%s: running %s lfs install --skip-repo\n' "$GSG_NAME" "${SMARTGIT_WIN_TARGET:-$GSG_GIT}"
     smartgit_launch_git -C / lfs install --skip-repo || irc=$?
     if smartgit_lfs_filter_set; then
         smartgit_lfs_record_write yes || {

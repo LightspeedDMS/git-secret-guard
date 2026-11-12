@@ -13,6 +13,9 @@ SMARTGIT_MAX_DESKTOP_FILES=50
 SMARTGIT_DIR_ID_LEN=12
 SMARTGIT_ANNOUNCED=0
 SG_FOUND=0
+# ^ invariant Windows only, set by smartgit_win_target during an offer; the target written into preferences.yml and the POSIX git path run for the checks
+# ^ invariant both stay empty elsewhere, and the expansion "${SMARTGIT_WIN_TARGET:-$GSG_GIT}" names GSG_GIT
+SMARTGIT_WIN_TARGET="" SMARTGIT_WIN_GIT=""
 
 # ^ invariant parallel arrays, one entry per install (kind macos, tarball, flatpak, snap, windows) and per settings directory; reset only here
 smartgit_reset_results() {
@@ -299,10 +302,39 @@ smartgit_install_for() {
     return 1
 }
 
+# ^ invariant kind windows reads ${smartgit.install}\... (backslash only) as bundled, its git from executable.absolute, else below the only install found
+# ^ invariant a drive path (C:\... or C:/...) is another git; executable wins over a stale executable.absolute (measured, SmartGit 26.1 on Windows)
+# ^ invariant SGP_GITPATH is the POSIX spelling, as the version probe needs it; a path cannot be converted = the git stays unknown
+smartgit_classify_windows() {
+    local v rest bs=$'\\'
+    # shellcheck disable=SC2016
+    local pfx='${smartgit.install}'
+    v="$(smartgit_unquote "$SGP_EXEC")"
+    case "$v" in
+        "$pfx$bs"?*)
+            SGP_CHOICE=bundled
+            rest="${v#"$pfx$bs"}"
+            if [ -n "$SGP_ABS" ]; then
+                SGP_GITPATH="$(gsg_posix_path "$(smartgit_unquote "$SGP_ABS")")" || SGP_GITPATH=""
+            elif [ "${#SG_INST_PATH[@]}" -eq 1 ]; then
+                SGP_GITPATH="${SG_INST_PATH[0]}/${rest//\\//}"
+            fi
+            ;;
+        [A-Za-z]:[\\/]?*)
+            SGP_CHOICE=other
+            SGP_GITPATH="$(gsg_posix_path "$v")" || SGP_GITPATH=""
+            ;;
+    esac
+}
+
 # ^ invariant sets SGP_CHOICE (bundled, other, unknown) and SGP_GITPATH; a macOS bundled git is read via executable.absolute, else the matching install's bundle
 smartgit_classify() {
     local kind="$1" major="$2" v rest
     SGP_CHOICE=unknown SGP_GITPATH=""
+    if [ "$kind" = windows ]; then
+        smartgit_classify_windows
+        return 0
+    fi
     v="$(smartgit_unquote "$SGP_EXEC")"
     # shellcheck disable=SC2016
     case "$v" in
@@ -373,6 +405,8 @@ smartgit_find_settings() {
         macos) smartgit_scan_base "${GSG_SMARTGIT_SETTINGS_BASE:-$HOME/Library/Preferences/SmartGit}" macos ;;
         windows)
             if [ -n "${APPDATA:-}" ]; then appdata="$(gsg_posix_path "$APPDATA")/syntevo/SmartGit"; fi
+            # ^ why return on an empty base, not scan it; an empty base would make the glob "/*" and look for settings directories at the file system root
+            if [ -z "${GSG_SMARTGIT_SETTINGS_BASE:-$appdata}" ]; then return 0; fi
             smartgit_scan_base "${GSG_SMARTGIT_SETTINGS_BASE:-$appdata}" windows
             ;;
         *)

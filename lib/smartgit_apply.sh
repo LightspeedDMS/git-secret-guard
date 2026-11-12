@@ -87,7 +87,7 @@ smartgit_manifest_read() {
             new_absolute) SGM_NEW_ABS="$val" ;;
             kind)
                 SGM_KIND="$val"
-                case "$val" in macos | linux | flatpak) ;; *) bad="unknown kind [$val]" ;; esac
+                case "$val" in macos | linux | flatpak | windows) ;; *) bad="unknown kind [$val]" ;; esac
                 ;;
             *) bad="unknown key [$key]" ;;
         esac
@@ -205,14 +205,16 @@ smartgit_verify_commits() {
     local -a gc=(-c user.name=gsg-verify -c user.email=gsg-verify@example.invalid -c commit.gpgsign=false)
     key="$(printf '%s%s%s' 'AKI' 'A' 'Q7XK2MWB4HZ5NR3T')"
     smartgit_launch_git init -q --template= "$work" || return 2
-    printf 'aws_access_key_id = %s\n' "$key" >"$work/leak.txt" || return 2
-    smartgit_launch_git -C "$work" add leak.txt || return 2
+    # ^ external Git for Windows sets core.autocrlf=true in its system config and warns about LF on every add; the scratch repository says false
+    smartgit_launch_git -C "$work" config core.autocrlf false || return 2
+    printf 'aws_access_key_id = %s\n' "$key" >"$work/gsg-check-a.txt" || return 2
+    smartgit_launch_git -C "$work" add gsg-check-a.txt || return 2
     if out="$(smartgit_launch_git "${gc[@]}" -C "$work" commit -q -m verify-secret 2>&1)"; then return 3; fi
     if smartgit_launch_git -C "$work" rev-parse -q --verify HEAD >/dev/null 2>&1; then return 3; fi
     if [[ $out != *"potential secret(s)"* ]]; then return 6; fi
-    smartgit_launch_git -C "$work" rm -q -f --cached leak.txt || return 2
-    printf 'hello\n' >"$work/ok.txt" || return 2
-    smartgit_launch_git -C "$work" add ok.txt || return 2
+    smartgit_launch_git -C "$work" rm -q -f --cached gsg-check-a.txt || return 2
+    printf 'hello\n' >"$work/gsg-check-b.txt" || return 2
+    smartgit_launch_git -C "$work" add gsg-check-b.txt || return 2
     out="$(smartgit_launch_git "${gc[@]}" -C "$work" commit -q -m verify-clean 2>&1)" || return 4
     if [[ $out != *"$GSG_NAME: scanned"* ]]; then return 5; fi
 }
@@ -220,16 +222,16 @@ smartgit_verify_commits() {
 # ^ invariant the scratch repository is removed on every path; any failing check says what failed and returns 1
 # ^ invariant mode sandbox ($1) checks a Flatpak through its wrapper inside the sandbox, the scratch repository under SGF_TMPDIR (the sandbox has its own /tmp)
 smartgit_verify_run() {
-    local mode="${1:-host}" work rc label="$GSG_GIT" parent="${TMPDIR:-/tmp}" via=0
+    local mode="${1:-host}" work rc label="${SMARTGIT_WIN_TARGET:-$GSG_GIT}" parent="${TMPDIR:-/tmp}" via=0
     case "$mode" in
         sandbox)
             smartgit_flatpak_verify_pre || return 1
             label="the wrapper $SGF_WRAPPER inside the SmartGit sandbox" parent="$SGF_TMPDIR" via=1
             ;;
         host)
-            if ! smartgit_check_target "$GSG_GIT"; then return 1; fi
-            if ! smartgit_lfs_present "$GSG_GIT"; then
-                printf '%s: git lfs version fails through %s\n' "$GSG_NAME" "$GSG_GIT" >&2
+            if ! smartgit_check_target "${SMARTGIT_WIN_GIT:-$GSG_GIT}"; then return 1; fi
+            if ! smartgit_lfs_present "${SMARTGIT_WIN_GIT:-$GSG_GIT}"; then
+                printf '%s: git lfs version fails through %s\n' "$GSG_NAME" "$label" >&2
                 return 1
             fi
             ;;
@@ -261,7 +263,27 @@ smartgit_verify_run() {
 smartgit_running_who() {
     REPLY=SmartGit
     if [ "$1" = linux ]; then REPLY="SmartGit (or another Syntevo app) of this user"; fi
+    # ^ external ps -W lists the processes of every logged-on user, and a SmartGit of another user counts too
+    if [ "$1" = windows ]; then REPLY="SmartGit (of any user on this machine)"; fi
     return 0
+}
+
+# ^ invariant rc 0 = ps -W lists smartgit.exe or smartgitc.exe (any case), 1 = none, 2 = it cannot be told (no ps, ps failed, empty or huge listing)
+# ^ external one exe4j launcher process, the JVM inside it, no java.exe (measured, SmartGit 26.1.057); a ps -W line ends in the image path
+smartgit_windows_running() {
+    local out line name n=0
+    smartgit_tool ps || return 2
+    out="$("$REPLY" -W 2>/dev/null)" || return 2
+    if [ -z "$out" ]; then return 2; fi
+    while IFS= read -r line; do
+        n=$((n + 1))
+        if [ "$n" -gt "$SMARTGIT_MAX_LINES" ]; then return 2; fi
+        line="${line%$'\r'}"
+        name="${line##*[\\/]}"
+        name="${name,,}"
+        if [ "$name" = smartgit.exe ] || [ "$name" = smartgitc.exe ]; then return 0; fi
+    done <<<"$out"
+    return 1
 }
 
 # ^ invariant rc 0 = running, 1 = not running, 2 = it cannot be told; macOS by its launcher path, Linux by the java of your user running lib/bootloader.jar
@@ -271,6 +293,10 @@ smartgit_kind_running() {
     case "$1" in
         flatpak)
             smartgit_flatpak_running
+            return
+            ;;
+        windows)
+            smartgit_windows_running
             return
             ;;
         macos)
@@ -348,6 +374,14 @@ smartgit_restore_one() {
     elif [ "$SGP_EXEC" = "$SGM_ORIG_EXEC" ]; then
         printf '%s: the Git Executable of %s is already the original; nothing to restore\n' "$GSG_NAME" "$SGM_SETTINGS"
         smartgit_drop_manifest "$mf" "$SGM_BACKUP"
+    elif [ "$SGP_EXEC" = "$SGM_NEW_EXEC" ]; then
+        # ^ external SmartGit drops executable.absolute after a real change of the Git Executable in Preferences and a change back (measured on Windows)
+        printf '%s: SmartGit rewrote its Git Executable setting of %s after this tool set it (same git, the executable.absolute line differs or is gone, so it was set again in SmartGit); it was left alone; the original preferences are kept at %s\n' \
+            "$GSG_NAME" "$SGM_SETTINGS" "$SGM_BACKUP"
+        rm -f -- "$mf" || {
+            printf '%s: could not remove %s\n' "$GSG_NAME" "$mf" >&2
+            return 1
+        }
     else
         printf '%s: the Git Executable of %s was changed after this tool set it (now %s); it was left alone; the original preferences are kept at %s\n' "$GSG_NAME" "$SGM_SETTINGS" "$SGP_EXEC" "$SGM_BACKUP"
         rm -f -- "$mf" || {
@@ -392,6 +426,7 @@ smartgit_apply_one() {
     dir="${SG_SET_DIR[$i]}"
     f="$dir/preferences.yml"
     SGA_KIND="${SG_SET_KIND[$i]}"
+    if [ "$SGA_KIND" = windows ]; then target="$SMARTGIT_WIN_TARGET"; fi
     smartgit_paths "$dir" || return 1
     (umask "$SMARTGIT_UMASK" && mkdir -p -- "$SGA_DIR") || {
         printf '%s: cannot create %s\n' "$GSG_NAME" "$SGA_DIR" >&2
@@ -496,7 +531,7 @@ smartgit_apply() {
     for i in "${applied[@]}"; do
         via=""
         if [ "${SG_SET_KIND[$i]}" = flatpak ]; then via=" through the wrapper $SGF_WRAPPER"; fi
-        printf '%s: SmartGit %s now commits with %s%s; start SmartGit again to use it (backup and manifest in %s/smartgit)\n' "$GSG_NAME" "${SG_SET_MAJOR[$i]}" "$GSG_GIT" "$via" "$GSG_STATE_DIR"
+        printf '%s: SmartGit %s now commits with %s%s; start SmartGit again to use it (backup and manifest in %s/smartgit)\n' "$GSG_NAME" "${SG_SET_MAJOR[$i]}" "${SMARTGIT_WIN_TARGET:-$GSG_GIT}" "$via" "$GSG_STATE_DIR"
     done
 }
 

@@ -6,14 +6,15 @@ commands:
   install [--replace-hooks-path] [--with-timer] [--upgrade-git] [--take-over-system-git]
           [--configure-smartgit [--allow-smartgit-sandbox-removal]]
         --configure-smartgit points SmartGit's Git Executable at the git in use (>= 2.54) and installs Git LFS
-        for it when missing (SmartGit 26.1: macOS, Linux tarball or package, Linux Flatpak). Offered at a terminal
+        for it when missing (not on Windows, which refuses with repair advice; SmartGit 26.1: macOS, Linux
+        tarball or package, Linux Flatpak, Windows). Offered at a terminal
         when SmartGit is found, otherwise a hint is printed. Prints the plan, asks once (default No), backs up
         preferences.yml with a manifest, edits only the executable lines, then checks a fake-token commit is
         blocked; any failure restores the backup. For the Flatpak it also adds a --user flatpak override, a
         wrapper running the host git and a smartgit.vmoptions line, each recorded first and undone exactly.
         That override removes the SmartGit sandbox, so it needs its own yes: a second question at a terminal,
         or --allow-smartgit-sandbox-removal (only together with --configure-smartgit). Refuses while SmartGit
-        runs and for any version or platform not recorded (Snap, Windows); the manual steps are printed instead.
+        runs and for any version or platform not recorded (Snap); the manual steps are printed instead.
         --upgrade-git lets install upgrade or rebuild git where its module can (RHEL, Rocky, Fedora, Ubuntu, Debian,
         Windows; macOS through Homebrew, as your user): it prints the plan with each privileged command, then runs
         it. In a terminal install asks first (default No); without a terminal the flag is the only way to say yes.

@@ -501,7 +501,7 @@ smartgit_flatpak_undone() {
 # ^ invariant undoes what the record says, each part tried even after a failure; the record goes only when every part worked
 # ^ invariant SGF_UNDONE names only what an undo really removed, never what the record merely marks as done
 smartgit_flatpak_undo() {
-    local rc=0 can_override=1
+    local rc=0 can_override=1 vm_failed=0
     SGF_UNDONE=""
     smartgit_flatpak_paths
     if [ ! -e "$SGF_RECORD" ]; then return 0; fi
@@ -517,8 +517,11 @@ smartgit_flatpak_undo() {
     fi
     if [ "$can_override" -eq 1 ]; then smartgit_flatpak_override_undo || rc=1; fi
     smartgit_flatpak_wrapper_undo || rc=1
-    smartgit_flatpak_vm_undo || rc=1
-    if [ "$SGR_tmpdir" = yes ] && [ -d "$SGF_TMPDIR" ]; then
+    smartgit_flatpak_vm_undo || { rc=1; vm_failed=1; }
+    # ^ order the directory goes only after its smartgit.vmoptions line; a kept line would name a missing java.io.tmpdir
+    if [ "$SGR_tmpdir" = yes ] && [ -d "$SGF_TMPDIR" ] && [ "$vm_failed" -eq 1 ]; then
+        printf '%s: %s was kept: the smartgit.vmoptions line still points at it\n' "$GSG_NAME" "$SGF_TMPDIR" >&2
+    elif [ "$SGR_tmpdir" = yes ] && [ -d "$SGF_TMPDIR" ]; then
         if [ -n "$(ls -A -- "$SGF_TMPDIR")" ]; then
             printf '%s: %s is not empty and was kept\n' "$GSG_NAME" "$SGF_TMPDIR"
         elif rmdir -- "$SGF_TMPDIR"; then

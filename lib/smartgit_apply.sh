@@ -567,6 +567,7 @@ smartgit_restore_all() {
     done
     smartgit_lfs_undo || rc=1
     smartgit_flatpak_undo || rc=1
+    if [ -n "${SGF_UNDONE:-}" ]; then printf '%s: removed what this tool added for the SmartGit Flatpak: %s\n' "$GSG_NAME" "$SGF_UNDONE"; fi
     if [ "$rc" -eq 0 ]; then rmdir -- "$GSG_STATE_DIR/smartgit" 2>/dev/null || true; fi
     return "$rc"
 }

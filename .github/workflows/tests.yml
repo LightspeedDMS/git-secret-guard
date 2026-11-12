@@ -127,7 +127,22 @@ jobs:
           set -o pipefail
           # The install step puts betterleaks in ~/.local/bin; without this the real-betterleaks tests look under linuxbrew and skip.
           export GSG_TEST_BETTERLEAKS="$HOME/.local/bin/betterleaks"
+          # tests/test_bypass_catalog.sh appends one row per catalog scenario (docs/bypass-detection-scenarios.md) here
+          export GSG_CATALOG_REPORT="$RUNNER_TEMP/catalog-$TARGET.tsv"
           tests/run.sh 2>&1 | tee "$RUNNER_TEMP/$TARGET.log" || true
+
+      - name: Catalog results table
+        if: always() && matrix.target == 'head'
+        run: |
+          f="$RUNNER_TEMP/catalog-$TARGET.tsv"
+          [ -s "$f" ] || { echo "no catalog report (scanners missing?)" >>"$GITHUB_STEP_SUMMARY"; exit 0; }
+          {
+            echo "### Bypass catalog"
+            echo
+            echo "| ID | Expected | Actual | Verdict | UTC |"
+            echo "|---|---|---|---|---|"
+            tail -n +2 "$f" | awk -F'\t' '{ printf "| %s | %s | %s | %s | %s |\n", $1, $2, $3, $4, $5 }'
+          } >>"$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
         if: always()
@@ -135,6 +150,13 @@ jobs:
           name: log-${{ matrix.target }}
           path: ${{ runner.temp }}/${{ matrix.target }}.log
           if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: catalog-${{ matrix.target }}
+          path: ${{ runner.temp }}/catalog-${{ matrix.target }}.tsv
+          if-no-files-found: ignore
 
   compare:
     needs: [plan, suite]

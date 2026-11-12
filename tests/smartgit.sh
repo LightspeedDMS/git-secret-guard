@@ -34,29 +34,54 @@ sg_make_prefs() {
 }
 
 # ^ invariant pgrep answers 0 (running) if smartgit.running exists or its call count passes smartgit.running.after; flatpak ps follows the file only
-# ^ invariant flatpak knobs = flatpak.installed (info answers), flatpak.overrides (override --show prints it;
-# ^ invariant override --system --talk-name=N appends N=talk; --reset removes it)
+# ^ invariant flatpak knobs = flatpak.installed, flatpak.version (info), flatpak.ps (listed instances), flatpak.override.user and .system (override),
+# ^ invariant flatpak.override.fail, flatpak.run.fail, flatpak.nospawn (no flatpak-spawn inside the sandbox), flatpak.nostale (a run leaves no stale instance)
 sg_standins() {
     gm_stub "$SANDBOX/pathbin/pgrep" 'd="$(cd "${0%/*}/.." && pwd -P)"; printf "%s\n" "pgrep $*" >>"$d/smartgit.log"
 n=0; if [ -f "$d/pgrep.count" ]; then n="$(cat "$d/pgrep.count")"; fi; n=$((n + 1)); echo "$n" >"$d/pgrep.count"
 if [ -f "$d/smartgit.running.after" ] && [ "$n" -gt "$(cat "$d/smartgit.running.after")" ]; then exit 0; fi
 [ -f "$d/smartgit.running" ]' || return 1
     gm_stub "$SANDBOX/pathbin/flatpak" 'd="$(cd "${0%/*}/.." && pwd -P)"; printf "%s\n" "flatpak $*" >>"$d/smartgit.log"
+# a run leaves a listed instance whose pid is already gone, as the real flatpak does for about ten seconds
+stale() { if [ ! -f "$d/flatpak.nostale" ]; then printf "%s\t%s\n" "$(sh -c "echo \$\$")" com.syntevo.SmartGit >>"$d/flatpak.ps"; fi; }
+# the stall knob of the mv stand-in also stops an override call whose arguments hold its text
+stall() {
+    if [ -f "$d/mv.stall" ]; then
+        case " $* " in
+            *"$(cat "$d/mv.stall")"*) : >"$d/mv.stalled"; exec sleep 180 ;;
+        esac
+    fi
+}
 case "$1" in
     info) [ -f "$d/flatpak.installed" ] || { echo "error: com.syntevo.SmartGit not installed" >&2; exit 1; }
-          printf "SmartGit - Git client\n\n          ID: com.syntevo.SmartGit\n     Version: 26.1.056\n" ;;
-    ps) if [ -f "$d/smartgit.running" ]; then echo com.syntevo.SmartGit; fi ;;
-    run) if [ "$2" = --command=sh ] && [ "$4" = -c ]; then exec sh -c "$5"; fi; echo "error: the flatpak stand-in does not know the run call [$*]" >&2; exit 1 ;;
+          v=26_1_057; if [ -f "$d/flatpak.version" ]; then v="$(cat "$d/flatpak.version")"; fi
+          printf "SmartGit - Use Git the Smart Way\n\n            ID: com.syntevo.SmartGit\n       Version: %s\n   Installation: system\n" "$v" ;;
+    ps) if [ -f "$d/flatpak.ps" ]; then cat "$d/flatpak.ps"; fi; exit 0 ;;
+    run)
+        [ ! -f "$d/flatpak.run.fail" ] || { echo "error: flatpak run fails on request" >&2; exit 1; }
+        cwd=""
+        case "$2" in --cwd=*) cwd="${2#--cwd=}"; shift ;; esac
+        cmd="${2#--command=}"; shift 3; stale
+        if [ -n "$cwd" ]; then cd "$cwd" || { echo "error: --cwd $cwd does not exist" >&2; exit 1; }; fi
+        if [ "$cmd" = sh ] && [ "$1" = -c ]; then
+            case "$2" in *flatpak-spawn*) [ ! -f "$d/flatpak.nospawn" ] || exit 1 ;; esac
+            exec sh -c "$2"
+        fi
+        if [ "$cmd" = /app/git/bin/git ] && [ "$1" = --version ]; then echo "git version 2.53.0.dirty"; exit 0; fi
+        exec "$cmd" "$@" ;;
     override)
-        system=0 talk=""
+        scope="" talk="" mode=set
         for a in "$@"; do
-            case "$a" in --system) system=1 ;; --talk-name=*) talk="${a#--talk-name=}" ;; esac
+            case "$a" in --user) scope=user ;; --system) scope=system ;; --talk-name=*) talk="${a#--talk-name=}" ;; --show) mode=show ;; --reset) mode=reset ;; esac
         done
-        case " $* " in
-            *" --show "*) if [ -f "$d/flatpak.overrides" ]; then cat "$d/flatpak.overrides"; fi ;;
-            *" --reset "*) [ "$system" -eq 1 ] || exit 1; rm -f "$d/flatpak.overrides" ;;
-            *" --talk-name="*) [ "$system" -eq 1 ] || exit 1; printf "[Session Bus Policy]\n%s=talk\n" "$talk" >>"$d/flatpak.overrides" ;;
-            *) echo "error: the flatpak stand-in does not know the override call [$*]" >&2; exit 1 ;;
+        f="$d/flatpak.override.$scope"
+        [ -n "$scope" ] || { echo "error: the flatpak stand-in wants an explicit scope [$*]" >&2; exit 1; }
+        case "$mode" in
+            show) if [ -f "$f" ]; then cat "$f"; fi ;;
+            reset) stall "$@"; [ "$scope" = user ] || exit 1; rm -f "$f" ;;
+            set) stall "$@"; [ "$scope" = user ] || exit 1; [ ! -f "$d/flatpak.override.fail" ] || exit 1
+                 if [ ! -s "$f" ]; then echo "[Session Bus Policy]" >"$f"; fi
+                 printf "%s=talk\n" "$talk" >>"$f" ;;
         esac ;;
     *) echo "error: the flatpak stand-in does not know the call [$*]" >&2; exit 1 ;;
 esac' || return 1
@@ -106,13 +131,14 @@ exec $real_mv \"\$@\""
 }
 
 # ^ invariant sg_launch_path = the PATH the tests give SmartGit's git; sandbox directories and the system ones, nothing of the real Homebrew
+# ^ invariant lfsmissing comes before the system dirs => a real /usr/bin/git-lfs of the host never answers the Git LFS check
 SG_SYSTEM_PATH=/usr/bin:/bin:/usr/sbin:/sbin
-sg_launch_path() { printf '%s' "$GM_PREFIX/bin:$SANDBOX/pathbin:$SG_SYSTEM_PATH"; }
+sg_launch_path() { printf '%s' "$GM_PREFIX/bin:$SANDBOX/pathbin:$SANDBOX/lfsmissing:$SG_SYSTEM_PATH"; }
 
 # ^ invariant sg_setup [GITVER] = a Mac with git GITVER first on PATH, SmartGit 26.1.056 (bundled git 2.53.0, git-lfs 3.7.1)
 # ^ invariant and its settings dir on the bundled git
 sg_setup() {
-    rm -f -- "$SANDBOX/smartgit.running" "$SANDBOX/smartgit.log" "$SANDBOX/flatpak.installed" "$SANDBOX/flatpak.overrides" \
+    rm -f -- "$SANDBOX/smartgit.running" "$SANDBOX/smartgit.log" "$SANDBOX/flatpak.installed" "$SANDBOX/flatpak.override.user" "$SANDBOX/flatpak.override.system" "$SANDBOX/flatpak.ps" "$SANDBOX/flatpak.version" \
         "$SANDBOX/pgrep.count" "$SANDBOX/smartgit.running.after" "$SANDBOX/mv.stall" "$SANDBOX/mv.stallskip" "$SANDBOX/mv.stalled" \
         "$SANDBOX/lfs.install.fail" "$SANDBOX/lfs.record.during" "$SANDBOX/lfs.install.env" || return 1
     gm_setup "${1:-2.54.0}" || return 1

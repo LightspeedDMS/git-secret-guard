@@ -4,6 +4,8 @@
 # ^ external a SmartGit started from the Dock gave git this PATH (measured on 26.1.056, docs/smartgit.md); the git directory is first, followed by this suffix
 # ^ coupled Intel Homebrew lives in /usr/local/bin, absent from the measured PATH; a git-lfs installed there is refused with the instruction, never assumed seen
 SMARTGIT_LAUNCHD_PATH_SUFFIX=/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin
+# ^ todo not measured; the Linux launcher passes the desktop session PATH on, and this is the part every session has (docs/smartgit.md)
+SMARTGIT_LINUX_PATH_SUFFIX=/usr/local/bin:/usr/bin:/bin
 
 # ^ invariant prints the PATH git-lfs is looked up on for target $1, an absolute path (rc 1 otherwise); GSG_SMARTGIT_LAUNCH_PATH replaces the PATH only
 smartgit_lfs_launch_path() {
@@ -18,13 +20,25 @@ smartgit_lfs_launch_path() {
         printf '%s' "$GSG_SMARTGIT_LAUNCH_PATH"
         return 0
     fi
-    printf '%s:%s' "${1%/*}" "$SMARTGIT_LAUNCHD_PATH_SUFFIX"
+    smartgit_platform
+    if [ "$REPLY" = linux ]; then
+        printf '%s:%s' "${1%/*}" "$SMARTGIT_LINUX_PATH_SUFFIX"
+    else
+        printf '%s:%s' "${1%/*}" "$SMARTGIT_LAUNCHD_PATH_SUFFIX"
+    fi
 }
+
+# ^ invariant 1 only during the Flatpak check of smartgit_verify_run; git runs through the wrapper inside the SmartGit sandbox
+SGF_VIA_SANDBOX=0
 
 # ^ security env -i keeps the installer's variables away; only the global config location, when set, is passed on to read the config install wrote
 smartgit_launch_git() {
     local p
     local -a keep=()
+    if [ "$SGF_VIA_SANDBOX" -eq 1 ]; then
+        smartgit_flatpak_git "$@"
+        return
+    fi
     p="$(smartgit_lfs_launch_path "$GSG_GIT")" || return 1
     if [ -n "${GIT_CONFIG_GLOBAL:-}" ]; then keep+=(GIT_CONFIG_GLOBAL="$GIT_CONFIG_GLOBAL"); fi
     if [ -n "${GIT_CONFIG_NOSYSTEM:-}" ]; then keep+=(GIT_CONFIG_NOSYSTEM="$GIT_CONFIG_NOSYSTEM"); fi
@@ -58,16 +72,102 @@ smartgit_lfs_plan_brew() {
     printf '  git lfs version fails through %s, so Git LFS is installed; runs as your user: %s install git-lfs (no sudo; Homebrew may update its own formulae first)\n' "$GSG_GIT" "$BREW_BIN"
 }
 
-# ^ invariant nothing is installed when git lfs version works through the target; otherwise brew is the one route, as only macOS reaches the plan
+# ^ security a tool root runs is looked up only in the fixed system path and must be root-owned; sets REPLY, rc 1 prints the one shared refusal
+smartgit_lfs_require_bin() {
+    if gitup_system_bin "$1"; then return 0; fi
+    printf '%s: %s was not found in the system path (%s) or is not root-owned, so git-lfs cannot be installed here; install git-lfs by hand; SmartGit was not changed\n' \
+        "$GSG_NAME" "$1" "$GITUP_SYSTEM_PATH" >&2
+    return 1
+}
+
+SG_LFS_KILL_GRACE_SECONDS=5
+
+# ^ security the query is bounded, reads no terminal and answers no to every prompt => an unimported repository key fails it instead of asking
+# ^ invariant a failed query and an empty answer are two refusals; neither names a repository this tool did not see, and none is ever enabled
+# ^ why the answer stays in a variable, not a file; dnf output is never written to disk (CLAUDE.md), stderr is dropped and the exit status reported
+smartgit_lfs_plan_dnf() {
+    local dnf offered qrc=0
+    smartgit_lfs_require_bin dnf || return 1
+    dnf="$REPLY"
+    if [ -z "${INSTALL_TIMEOUT_BIN:-}" ]; then
+        printf '%s: no timeout binary is known, so the dnf repoquery for git-lfs cannot run bounded; SmartGit was not changed\n' "$GSG_NAME" >&2
+        return 1
+    fi
+    offered="$(LC_ALL=C "$INSTALL_TIMEOUT_BIN" -k "$SG_LFS_KILL_GRACE_SECONDS" "$GITUP_QUERY_TIMEOUT" \
+        "$dnf" --assumeno -q repoquery --available --latest-limit=1 --queryformat '%{version}\n' git-lfs </dev/null 2>/dev/null)" || qrc=$?
+    if [ "$qrc" -ne 0 ]; then
+        printf '%s: the dnf repoquery for git-lfs failed (exit %s; dnf repoquery git-lfs shows why); SmartGit was not changed\n' "$GSG_NAME" "$qrc" >&2
+        return 1
+    fi
+    if [[ ! ${offered%%$'\n'*} =~ ^[0-9]+(\.[0-9]+)*$ ]]; then
+        printf '%s: no enabled dnf repository offers git-lfs, and this tool enables none; install git-lfs from a repository you trust and run the command again; SmartGit was not changed\n' "$GSG_NAME" >&2
+        return 1
+    fi
+    SG_LFS_ROUTE=dnf
+    SG_LFS_CMD=("$dnf" install -y git-lfs)
+    printf '  dnf install -y answers yes to every prompt, a repository signing key import included: a key pending for the repository offering git-lfs would be imported; the read-only query above imported none\n'
+    gitup_plan_priv "${SG_LFS_CMD[*]}"
+}
+
+# ^ security apt-get and env are the root-owned ones of the system path (gitup_apt_init); env carries the answers apt asks for, as sudo drops variables
+# ^ coupled the words come from gitup_apt_get_cmd of lib/gitup_apt.sh => the plan prints exactly what gitup_elevate runs
+# ^ invariant a candidate is probed first, as dnf does; a failed query and no candidate are two refusals, and no repository is ever enabled
+smartgit_lfs_plan_apt() {
+    if ! declare -F gitup_apt_init >/dev/null; then gitup_load_module apt || return 1; fi
+    gitup_apt_init || return 1
+    if [ -z "${INSTALL_TIMEOUT_BIN:-}" ]; then
+        printf '%s: no timeout binary is known, so the apt-cache query for git-lfs cannot run bounded; SmartGit was not changed\n' "$GSG_NAME" >&2
+        return 1
+    fi
+    if ! gitup_apt_candidate git-lfs; then
+        printf '%s: the apt-cache policy query for git-lfs failed (apt-cache policy git-lfs shows why); SmartGit was not changed\n' "$GSG_NAME" >&2
+        return 1
+    fi
+    if [ -z "$GITUP_APT_CANDIDATE" ] && [ -n "$GITUP_APT_CANDIDATE_RAW" ]; then
+        printf '%s: apt offers git-lfs %s, which is not a release version this tool installs (a pre-release or an unreadable version); install git-lfs by hand if you want it; SmartGit was not changed\n' \
+            "$GSG_NAME" "$GITUP_APT_CANDIDATE_RAW" >&2
+        return 1
+    fi
+    if [ -z "$GITUP_APT_CANDIDATE" ]; then
+        printf '%s: no apt repository offers git-lfs, and this tool enables none; install git-lfs from a repository you trust and run the command again; SmartGit was not changed\n' "$GSG_NAME" >&2
+        return 1
+    fi
+    gitup_apt_get_cmd install -y git-lfs
+    SG_LFS_ROUTE=apt
+    SG_LFS_CMD=("${GITUP_APT_CMD[@]}")
+    gitup_plan_priv "${SG_LFS_CMD[*]}"
+}
+
+# ^ invariant brew on macOS, dnf on the rpm family, apt on ubuntu and debian (a WSL distribution by its own os-release); anything else is refused
+smartgit_lfs_plan_route() {
+    if brew_is_macos; then
+        smartgit_lfs_plan_brew
+        return
+    fi
+    install_os_family
+    case "$REPLY" in
+        rpm) smartgit_lfs_plan_dnf ;;
+        ubuntu | debian) smartgit_lfs_plan_apt ;;
+        *)
+            printf '%s: git lfs version fails through %s and this system has no known way to install it; install git-lfs with your package manager; SmartGit was not changed\n' "$GSG_NAME" "$GSG_GIT" >&2
+            return 1
+            ;;
+    esac
+}
+
+# ^ invariant nothing is installed when git lfs version works through the target; otherwise the route of this system plans the install
 # ^ invariant the git lfs install line is conditional on the state after the package install; a package may write the system-wide filter itself
+# ^ invariant FLATPAK ($1) = 1 when a Flatpak SmartGit is in the run; its line adds the repeat of the check through the wrapper in the sandbox
 smartgit_lfs_plan() {
+    local where=""
     SG_LFS_ROUTE=none
     SG_LFS_CMD=()
+    if [ "${1:-0}" -eq 1 ]; then where=", the git the wrapper runs; it is checked again through the wrapper inside the SmartGit sandbox"; fi
     gitup_select || return 1
     if smartgit_lfs_present "$GSG_GIT"; then
-        printf '  Git LFS: git lfs version works through %s; nothing is installed\n' "$GSG_GIT"
+        printf '  Git LFS: git lfs version works through %s%s; nothing is installed\n' "$GSG_GIT" "$where"
     else
-        smartgit_lfs_plan_brew || return 1
+        smartgit_lfs_plan_route || return 1
     fi
     if smartgit_lfs_filter_set; then
         printf '  Git LFS settings: filter.lfs.* is already set; git lfs install is not run\n'
@@ -76,7 +176,7 @@ smartgit_lfs_plan() {
     fi
 }
 
-# ^ invariant runs the command the plan chose; brew is named in BREW_INSTALLED; a later refusal says what changed
+# ^ invariant runs the command the plan chose; brew is named in BREW_INSTALLED and the root routes in GITUP_CHANGED; a later refusal says what changed
 # ^ invariant success means git lfs version works through the target afterwards; anything else is a failure and leaves the package as the manager left it
 smartgit_lfs_install_pkg() {
     case "$SG_LFS_ROUTE" in
@@ -88,6 +188,19 @@ smartgit_lfs_install_pkg() {
                 return 1
             }
             BREW_INSTALLED="${BREW_INSTALLED:+$BREW_INSTALLED }git-lfs"
+            ;;
+        dnf | apt)
+            printf '%s: installing Git LFS with %s as root\n' "$GSG_NAME" "$SG_LFS_ROUTE"
+            gitup_elevate "${SG_LFS_CMD[@]}" || {
+                gitup_changed_add "the $SG_LFS_ROUTE install of git-lfs was started and failed, so the package manager may have changed packages"
+                printf '%s: the %s install of git-lfs failed; SmartGit was not changed\n' "$GSG_NAME" "$SG_LFS_ROUTE" >&2
+                return 1
+            }
+            gitup_changed_add "$SG_LFS_ROUTE installed git-lfs"
+            ;;
+        *)
+            printf '%s: internal error: unknown Git LFS install route [%s]; nothing was run; SmartGit was not changed\n' "$GSG_NAME" "$SG_LFS_ROUTE" >&2
+            return 1
             ;;
     esac
     hash -r

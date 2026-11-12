@@ -80,16 +80,17 @@ gitup_apt_upstream() {
 }
 
 # ^ security stdin is /dev/null, the call is bounded, the locale is fixed (the label is translated otherwise), and apt-cache takes no lock and writes nothing
+# ^ invariant [PKG] = the package asked about, git by default (the Git LFS route of SmartGit asks for git-lfs)
 gitup_apt_query() {
-    LC_ALL=C LANG=C LANGUAGE=C "$INSTALL_TIMEOUT_BIN" -k 5 "$GITUP_QUERY_TIMEOUT" "$GITUP_APT_APTCACHE" policy git </dev/null
+    LC_ALL=C LANG=C LANGUAGE=C "$INSTALL_TIMEOUT_BIN" -k 5 "$GITUP_QUERY_TIMEOUT" "$GITUP_APT_APTCACHE" policy "${1:-git}" </dev/null
 }
 
-# ^ invariant sets GITUP_APT_CANDIDATE (upstream version), the raw string and the first source of its table entry; rc 1 = the query failed
+# ^ invariant [PKG] as gitup_apt_query; sets GITUP_APT_CANDIDATE (upstream version), the raw string and the first source of its entry; rc 1 = query failed
 # ^ why a here-string loop with break, not a pipe into sed q; under pipefail the writer gets SIGPIPE and a good candidate is lost
 gitup_apt_candidate() {
     local out line rc=0 captured=0
     GITUP_APT_CANDIDATE="" GITUP_APT_CANDIDATE_RAW="" GITUP_APT_CANDIDATE_ORIGIN=""
-    out="$(gitup_apt_query)" || rc=$?
+    out="$(gitup_apt_query "${1:-git}")" || rc=$?
     if [ "$rc" -ne 0 ]; then return 1; fi
     while IFS= read -r line; do
         if [ -z "$GITUP_APT_CANDIDATE_RAW" ]; then

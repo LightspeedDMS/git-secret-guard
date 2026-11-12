@@ -2,23 +2,11 @@
 
 Scenario catalog for validating the `LightspeedDMS/git-secret-guard` rollout: hook coverage, bypass resistance, detection/alerting, and the server-side gate.
 
-## Instructions for Cowork
+## How to run the scenarios
 
-You are testing the `LightspeedDMS/git-secret-guard` repo.
+**Before you start**, know what the hook does: which hook events it registers and how (`README.md`, `docs/install.md`), which scanners and rules it runs and whether it fails closed (`docs/scan.md`), and how exemptions work (`docs/exemptions.md`). Mark a scenario **N/A** if it does not apply, and add one for any behaviour this catalog misses.
 
-**Step 1 — Map the repo first.** Before running anything, read the repo and document what it actually does:
-
-- Which hooks it installs (pre-commit, pre-push, commit-msg).
-- How it installs them (`core.hooksPath`, template dir, or per-repo `.git/hooks`).
-- Which scanner and rule set it uses.
-- Allowlist / suppression mechanisms (inline comments, ignore files, fingerprints).
-- Any environment-variable kill switches.
-- Whether it fails open or closed when the scanner errors, times out, or is missing.
-- Whether it emits telemetry/heartbeats, and where to.
-
-Mark each scenario below **N/A** if it doesn't apply, and **add scenarios** for anything in the code not covered here.
-
-**Step 2 — Run the scenarios** under these rules:
+**Rules:**
 
 - Use **only fake secrets**: AWS documentation example keys, fake `glpat-` / `ghp_` tokens, and a freshly generated throwaway PEM key.
 - Work only in **local sandbox repos**, plus **one throwaway GitLab project** for push tests. Never push to real repos.
@@ -26,7 +14,7 @@ Mark each scenario below **N/A** if it doesn't apply, and **add scenarios** for 
 - Back up `~/.gitconfig` before each test and restore it afterwards.
 - Log for every test: exact command, UTC timestamp, host, OS, result (Blocked / Allowed / Error), and hook output. Timestamps are needed so Security/IT can correlate alerts (Section G).
 
-**Step 3 — Output:**
+**Output:**
 
 1. A results table: `ID | Expected | Actual | Pass/Fail | Notes`.
 2. A gap list ordered by severity.
@@ -116,7 +104,7 @@ Mark each scenario below **N/A** if it doesn't apply, and **add scenarios** for 
 
 ## E. Elevated bypass — MANUAL, test VM only, run by IT via EPM
 
-Cowork must not run these. IT runs them in a dedicated test VM with an EPM elevation request.
+Testers without admin rights must not run these. IT runs them in a dedicated test VM with an EPM elevation request.
 
 | ID | Scenario | Expected |
 |---|---|---|
@@ -146,7 +134,7 @@ Run sections A–D on each environment where they apply.
 
 ## G. Server side and alert validation
 
-Requires Security and IT to confirm results from their consoles, using Cowork's timestamps.
+Requires Security and IT to confirm results from their consoles, using the UTC timestamps logged by the tester.
 
 | ID | Scenario | Expected |
 |---|---|---|

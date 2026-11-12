@@ -155,11 +155,24 @@ smartgit_git_version() {
     local out
     if brew_git_shim_unusable "$1"; then return 1; fi
     out="$(GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null smartgit_bounded "$1" --version 2>/dev/null)" || return 1
-    if [[ $out =~ ^git\ version\ ([0-9]+)\.([0-9]+)(\.[0-9]+)? ]]; then
+    smartgit_parse_git_version "$out"
+}
+
+# ^ invariant prints X.Y[.Z] of a "git version X.Y.Z..." answer (a suffix such as .dirty is dropped); rc 1 = another answer
+smartgit_parse_git_version() {
+    if [[ $1 =~ ^git\ version\ ([0-9]+)\.([0-9]+)(\.[0-9]+)? ]]; then
         printf '%s.%s%s\n' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}"
         return 0
     fi
     return 1
+}
+
+# ^ invariant prints the version of git $1 as the SmartGit Flatpak runs it, inside its sandbox (/app paths do not exist on the host), under the doctor bound
+smartgit_flatpak_git_version() {
+    local out
+    smartgit_tool flatpak || return 1
+    out="$(smartgit_bounded "$REPLY" run --command="$1" "$SMARTGIT_FLATPAK_ID" --version </dev/null 2>/dev/null)" || return 1
+    smartgit_parse_git_version "$out"
 }
 
 # ^ invariant flatpak info answers for both the user and the system installation; its Version line is the SmartGit version
@@ -167,7 +180,8 @@ smartgit_find_flatpak() {
     local out ver=""
     smartgit_tool flatpak || return 0
     out="$(smartgit_bounded "$REPLY" info "$SMARTGIT_FLATPAK_ID" 2>/dev/null)" || return 0
-    if [[ $out =~ (^|$'\n')[[:space:]]*Version:[[:space:]]*([0-9][0-9.]*) ]]; then ver="${BASH_REMATCH[2]}"; fi
+    # ^ why Version accepts digits joined by dot or underscore, not dots only; flatpak prints 26_1_057 for 26.1.057
+    if [[ $out =~ (^|$'\n')[[:space:]]*Version:[[:space:]]*([0-9][0-9._]*) ]]; then ver="${BASH_REMATCH[2]//_/.}"; fi
     smartgit_add_install flatpak "flatpak $SMARTGIT_FLATPAK_ID" "$ver"
 }
 
@@ -305,6 +319,12 @@ smartgit_classify() {
             SGP_CHOICE=other
             SGP_GITPATH="$v"
             ;;
+        # ^ external SmartGit stores a typed home path as ~/... with the expanded path in executable.absolute (measured on the Linux Flatpak 26.1)
+        [~]/*)
+            SGP_CHOICE=other
+            SGP_GITPATH="$HOME/${v#'~/'}"
+            if [[ $(smartgit_unquote "$SGP_ABS") == /* ]]; then SGP_GITPATH="$(smartgit_unquote "$SGP_ABS")"; fi
+            ;;
     esac
 }
 
@@ -319,7 +339,11 @@ smartgit_add_settings() {
     elif smartgit_prefs_analyze "$dir/preferences.yml"; then
         smartgit_classify "$kind" "$major"
     fi
-    if [ -n "$SGP_GITPATH" ] && [ -x "$SGP_GITPATH" ]; then ver="$(smartgit_git_version "$SGP_GITPATH")" || ver=""; fi
+    if [ -n "$SGP_GITPATH" ] && [ "$kind" = flatpak ]; then
+        ver="$(smartgit_flatpak_git_version "$SGP_GITPATH")" || ver=""
+    elif [ -n "$SGP_GITPATH" ] && [ -x "$SGP_GITPATH" ]; then
+        ver="$(smartgit_git_version "$SGP_GITPATH")" || ver=""
+    fi
     SG_SET_DIR+=("$dir")
     SG_SET_MAJOR+=("$major")
     SG_SET_KIND+=("$kind")

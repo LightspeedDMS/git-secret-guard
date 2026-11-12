@@ -364,7 +364,7 @@ test_a_filter_that_existed_before_is_never_removed_by_the_undo() {
 # ^ invariant sg_linux_setup [ID [ID_LIKE]] = a Linux machine (git 2.56.0 first on PATH, os-release ID default fedora) with the Flatpak SmartGit 26.1
 # ^ invariant the host git is the wrapper from gu_old_git; every path is in the sandbox, nothing under the real home
 sg_linux_setup() {
-    rm -f -- "$SANDBOX/smartgit.running" "$SANDBOX/smartgit.log" "$SANDBOX/flatpak.overrides" || return 1
+    rm -f -- "$SANDBOX/smartgit.running" "$SANDBOX/smartgit.log" "$SANDBOX/flatpak.override.user" "$SANDBOX/flatpak.override.system" || return 1
     lc_begin && lc_make_fixtures && lc_use_fixtures || return 1
     gu_old_git 2.56.0 || return 1
     if [ -n "${2:-}" ]; then gu_os_release "ID=${1:-fedora}" "ID_LIKE=\"$2\"" || return 1; else gu_os_release "ID=${1:-fedora}" || return 1; fi
@@ -374,29 +374,33 @@ sg_linux_setup() {
     SG_PREFS="$SG_SETTINGS/preferences.yml"
     SG_BACKUPS="$LC_STATE/smartgit"
     sg_make_prefs "$SG_PREFS" /app || return 1
+    : >"$SG_SETTINGS/startup" || return 1
     mkdir -p -- "$SANDBOX/root" || return 1
     set_env GSG_GITUP_ROOT="$SANDBOX/root"
     set_env PATH="$SANDBOX/pathbin:$SANDBOX/lfsmissing:$TEST_BASE_PATH"
 }
 
-test_the_flatpak_setup_is_refused_by_design_and_prints_the_four_manual_steps() {
+test_a_flatpak_without_the_sandbox_consent_is_refused_and_prints_the_four_manual_steps() {
     local h
     sg_linux_setup || return 1
     h="$(sg_hash "$SG_PREFS")"
     gsg install --configure-smartgit </dev/null
     assert_rc 1 "the Flatpak is refused"
-    assert_contains "$ERR" "the Flatpak settings are not edited by this tool" "says so"
-    assert_contains "$ERR" "1. sudo flatpak override --system --talk-name=org.freedesktop.Flatpak com.syntevo.SmartGit" "step 1 by hand"
+    assert_contains "$ERR" "step 1 removes the SmartGit sandbox and needs its own yes" "says why"
+    assert_contains "$ERR" "1. flatpak override --user --talk-name=org.freedesktop.Flatpak com.syntevo.SmartGit" "step 1 by hand, no root"
+    assert_not_contains "$ERR" "sudo flatpak" "no sudo in the steps"
     assert_contains "$ERR" "2. create the wrapper" "step 2 by hand"
     assert_contains "$ERR" "3. add -Djava.io.tmpdir=" "step 3 by hand"
     assert_contains "$ERR" "4. in SmartGit choose Other Git Executable" "step 4 by hand"
     assert_eq "$(sg_hash "$SG_PREFS")" "$h" "the preferences are byte-identical"
     assert_no_file "$SG_BACKUPS" "no backup or manifest"
     assert_no_file "$LC_HOME/.local/share/smartgit" "no wrapper directory"
-    assert_not_contains "$(sg_log)" "override --system" "flatpak override did not run"
+    assert_not_contains "$(sg_log)" "override --user" "flatpak override did not run"
+    assert_no_file "$SANDBOX/flatpak.override.user" "no user override was written"
+    assert_no_file "$SANDBOX/flatpak.override.system" "no system override was written"
     assert_not_contains "$(gu_log)" "install -y" "no package was installed"
     gsg status
-    assert_contains "$OUT" "flatpak com.syntevo.SmartGit (SmartGit 26.1.056)" "status still lists the Flatpak install"
+    assert_contains "$OUT" "flatpak com.syntevo.SmartGit (SmartGit 26.1.057)" "status still lists the Flatpak install, its Version 26_1_057 read with dots"
 }
 
 test_git_lfs_only_outside_the_path_smartgit_gives_git_is_refused_with_the_instruction() {
@@ -664,10 +668,12 @@ test_uninstall_counts_the_smartgit_restore_as_an_action_so_it_never_says_nothing
 # shellcheck disable=SC2016
 test_the_launch_path_without_the_override_is_the_git_directory_then_the_measured_dock_list() {
     sg_setup || return 1
-    gu_run 'source "$GSG_ROOT/lib/smartgit_lfs.sh" || exit 9; unset GSG_SMARTGIT_LAUNCH_PATH; smartgit_lfs_launch_path /opt/x/bin/git'
+    gu_run 'source "$GSG_ROOT/lib/smartgit.sh" && source "$GSG_ROOT/lib/smartgit_lfs.sh" || exit 9; smartgit_platform() { REPLY=macos; }
+unset GSG_SMARTGIT_LAUNCH_PATH; smartgit_lfs_launch_path /opt/x/bin/git'
     assert_rc 0 "an absolute git path"
     assert_eq "$OUT" "/opt/x/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin" "the git directory first, then the measured list"
-    gu_run 'source "$GSG_ROOT/lib/smartgit_lfs.sh" || exit 9; GSG_NAME=t; unset GSG_SMARTGIT_LAUNCH_PATH; smartgit_lfs_launch_path git'
+    gu_run 'source "$GSG_ROOT/lib/smartgit.sh" && source "$GSG_ROOT/lib/smartgit_lfs.sh" || exit 9; smartgit_platform() { REPLY=macos; }
+GSG_NAME=t; unset GSG_SMARTGIT_LAUNCH_PATH; smartgit_lfs_launch_path git'
     assert_rc 1 "a relative git path has no directory to put first"
 }
 

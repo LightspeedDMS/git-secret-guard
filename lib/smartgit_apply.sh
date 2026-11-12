@@ -47,7 +47,7 @@ smartgit_manifest_write() {
     {
         printf 'version=%s\nstatus=%s\nsettings=%s\nbackup=%s\n' "$SMARTGIT_MANIFEST_VERSION" "$1" "$2" "$SGA_BACKUP"
         printf 'orig_hash=%s\norig_executable=%s\norig_absolute=%s\n' "$3" "$4" "$5"
-        printf 'new_executable=%s\nnew_absolute=%s\n' "$6" "$7"
+        printf 'new_executable=%s\nnew_absolute=%s\nkind=%s\n' "$6" "$7" "$SGA_KIND"
     } >"$tmp" || {
         printf '%s: cannot write the manifest %s\n' "$GSG_NAME" "$SGA_MANIFEST" >&2
         smartgit_discard_tmp "$tmp"
@@ -64,7 +64,8 @@ smartgit_manifest_write() {
 smartgit_manifest_read() {
     local f="$1" line key val seen=" " bad="" hex_re="^[0-9a-f]{$SMARTGIT_SHA256_HEX_LEN}$"
     local -a lines=()
-    SGM_STATUS="" SGM_SETTINGS="" SGM_BACKUP="" SGM_ORIG_HASH="" SGM_ORIG_EXEC="" SGM_ORIG_ABS="" SGM_NEW_EXEC="" SGM_NEW_ABS=""
+    # ^ invariant kind is optional; a manifest older than the Linux support has none and was written on macOS
+    SGM_STATUS="" SGM_SETTINGS="" SGM_BACKUP="" SGM_ORIG_HASH="" SGM_ORIG_EXEC="" SGM_ORIG_ABS="" SGM_NEW_EXEC="" SGM_NEW_ABS="" SGM_KIND=macos
     { mapfile -t -n "$((SMARTGIT_MANIFEST_MAX_LINES + 1))" lines <"$f"; } 2>/dev/null || bad="it cannot be read"
     if [ -z "$bad" ] && [ "${#lines[@]}" -gt "$SMARTGIT_MANIFEST_MAX_LINES" ]; then bad="it is too long"; fi
     for line in "${lines[@]}"; do
@@ -84,6 +85,10 @@ smartgit_manifest_read() {
             orig_absolute) SGM_ORIG_ABS="$val" ;;
             new_executable) SGM_NEW_EXEC="$val" ;;
             new_absolute) SGM_NEW_ABS="$val" ;;
+            kind)
+                SGM_KIND="$val"
+                case "$val" in macos | linux | flatpak) ;; *) bad="unknown kind [$val]" ;; esac
+                ;;
             *) bad="unknown key [$key]" ;;
         esac
         seen+="$key "
@@ -213,37 +218,71 @@ smartgit_verify_commits() {
 }
 
 # ^ invariant the scratch repository is removed on every path; any failing check says what failed and returns 1
+# ^ invariant mode sandbox ($1) checks a Flatpak through its wrapper inside the sandbox, the scratch repository under SGF_TMPDIR (the sandbox has its own /tmp)
 smartgit_verify_run() {
-    local work rc
-    if ! smartgit_check_target "$GSG_GIT"; then return 1; fi
-    if ! smartgit_lfs_present "$GSG_GIT"; then
-        printf '%s: git lfs version fails through %s\n' "$GSG_NAME" "$GSG_GIT" >&2
-        return 1
-    fi
-    work="$(mktemp -d "${TMPDIR:-/tmp}/gsg-smartgit-verify.XXXXXX")" || {
+    local mode="${1:-host}" work rc label="$GSG_GIT" parent="${TMPDIR:-/tmp}" via=0
+    case "$mode" in
+        sandbox)
+            smartgit_flatpak_verify_pre || return 1
+            label="the wrapper $SGF_WRAPPER inside the SmartGit sandbox" parent="$SGF_TMPDIR" via=1
+            ;;
+        host)
+            if ! smartgit_check_target "$GSG_GIT"; then return 1; fi
+            if ! smartgit_lfs_present "$GSG_GIT"; then
+                printf '%s: git lfs version fails through %s\n' "$GSG_NAME" "$GSG_GIT" >&2
+                return 1
+            fi
+            ;;
+        *)
+            printf '%s: internal error: unknown verify mode %s (expected host or sandbox)\n' "$GSG_NAME" "$mode" >&2
+            return 1
+            ;;
+    esac
+    work="$(mktemp -d "$parent/gsg-smartgit-verify.XXXXXX")" || {
         printf '%s: cannot create a scratch directory for the check\n' "$GSG_NAME" >&2
         return 1
     }
-    (smartgit_verify_commits "$work")
+    (SGF_VIA_SANDBOX="$via" && smartgit_verify_commits "$work")
     rc=$?
     if [ -n "$work" ] && [ -d "$work" ]; then rm -rf -- "$work" || printf '%s: could not remove the scratch directory %s\n' "$GSG_NAME" "$work" >&2; fi
     case "$rc" in
-        0) printf '%s: checked through %s: git lfs works, a fake-token commit was blocked and a clean commit printed the summary line\n' "$GSG_NAME" "$GSG_GIT" ;;
-        3) printf '%s: a commit of a fake token through %s was NOT blocked, so it does not run the hook\n' "$GSG_NAME" "$GSG_GIT" >&2 ;;
-        4) printf '%s: a clean commit through %s failed\n' "$GSG_NAME" "$GSG_GIT" >&2 ;;
-        5) printf '%s: a clean commit through %s printed no %s summary line\n' "$GSG_NAME" "$GSG_GIT" "$GSG_NAME" >&2 ;;
-        6) printf '%s: the commit of a fake token through %s failed, but not with the findings text of the hook\n' "$GSG_NAME" "$GSG_GIT" >&2 ;;
+        0) printf '%s: checked through %s: git lfs works, a fake-token commit was blocked and a clean commit printed the summary line\n' "$GSG_NAME" "$label" ;;
+        3) printf '%s: a commit of a fake token through %s was NOT blocked, so it does not run the hook\n' "$GSG_NAME" "$label" >&2 ;;
+        4) printf '%s: a clean commit through %s failed\n' "$GSG_NAME" "$label" >&2 ;;
+        5) printf '%s: a clean commit through %s printed no %s summary line\n' "$GSG_NAME" "$label" "$GSG_NAME" >&2 ;;
+        6) printf '%s: the commit of a fake token through %s failed, but not with the findings text of the hook\n' "$GSG_NAME" "$label" >&2 ;;
         *) printf '%s: the scratch repository check could not be set up (status %s)\n' "$GSG_NAME" "$rc" >&2 ;;
     esac
     [ "$rc" -eq 0 ]
 }
 
-# ^ invariant rc 0 = running, 1 = not running, 2 = it cannot be told; only the macOS app is edited, hence only it is looked for, by its launcher path
+# ^ invariant sets REPLY = who a running check of KIND ($1) may have found, for the refusal text
+# ^ why conservative, not anchored on the install path; the lib/bootloader.jar match also catches other Syntevo java apps, the text says so
+smartgit_running_who() {
+    REPLY=SmartGit
+    if [ "$1" = linux ]; then REPLY="SmartGit (or another Syntevo app) of this user"; fi
+    return 0
+}
+
+# ^ invariant rc 0 = running, 1 = not running, 2 = it cannot be told; macOS by its launcher path, Linux by the java of your user running lib/bootloader.jar
+# ^ external the tarball launcher ends in java -jar <install>/lib/bootloader.jar (measured, SmartGit 26.1 on Fedora); the Flatpak by flatpak ps, live pids only
 smartgit_kind_running() {
     local rc
-    if [ "$1" != macos ]; then return 2; fi
-    smartgit_tool pgrep || return 2
-    "$REPLY" -f 'Contents/MacOS/SmartGit' >/dev/null 2>&1
+    case "$1" in
+        flatpak)
+            smartgit_flatpak_running
+            return
+            ;;
+        macos)
+            smartgit_tool pgrep || return 2
+            "$REPLY" -f 'Contents/MacOS/SmartGit' >/dev/null 2>&1
+            ;;
+        linux)
+            smartgit_tool pgrep || return 2
+            "$REPLY" -u "$(id -u)" -f 'lib/bootloader\.jar' >/dev/null 2>&1
+            ;;
+        *) return 2 ;;
+    esac
     rc=$?
     if [ "$rc" -eq 0 ] || [ "$rc" -eq 1 ]; then return "$rc"; fi
     return 2
@@ -271,10 +310,11 @@ smartgit_restore_check() {
         return 1
     fi
     if [ ! -f "$SGM_SETTINGS" ]; then return 2; fi
-    smartgit_kind_running macos
+    smartgit_kind_running "$SGM_KIND"
     case $? in
         0)
-            printf '%s: SmartGit is running; exit it with Repository, Exit and run the restore again; nothing was changed\n' "$GSG_NAME" >&2
+            smartgit_running_who "$SGM_KIND"
+            printf '%s: %s is running; exit it with Repository, Exit and run the restore again; nothing was changed\n' "$GSG_NAME" "$REPLY" >&2
             return 1
             ;;
         1) ;;
@@ -346,10 +386,12 @@ smartgit_backup_aside() {
 
 # ^ invariant an earlier manifest of the same directory is finished or undone first (restore); an interrupted run never leaves two backups in play
 # ^ order backup, pending manifest, edit, final manifest; the original file is not touched before the backup hashes right and the pending manifest is written
+# ^ invariant $2 = the target written (GSG_GIT when absent); a Flatpak passes its wrapper, plain like GSG_GIT (smartgit_flatpak_check)
 smartgit_apply_one() {
-    local i="$1" dir f orig_exec orig_abs new_abs=- stale target="$GSG_GIT"
+    local i="$1" dir f orig_exec orig_abs new_abs=- stale target="${2:-$GSG_GIT}"
     dir="${SG_SET_DIR[$i]}"
     f="$dir/preferences.yml"
+    SGA_KIND="${SG_SET_KIND[$i]}"
     smartgit_paths "$dir" || return 1
     (umask "$SMARTGIT_UMASK" && mkdir -p -- "$SGA_DIR") || {
         printf '%s: cannot create %s\n' "$GSG_NAME" "$SGA_DIR" >&2
@@ -387,9 +429,22 @@ smartgit_apply_one() {
     smartgit_manifest_write final "$f" "$SGA_ORIG_HASH" "$orig_exec" "$orig_abs" "$target" "$new_abs"
 }
 
-# ^ invariant args = indexes of the settings directories touched; each restored from its manifest; "restored" is claimed only if a restore ran and none failed
+# ^ invariant args = FP and the indexes of the settings directories touched; each restored from its manifest; "restored" only if a restore ran and none failed
+# ^ invariant FP 1 = a Flatpak directory was in the run; its steps are undone after this => the summary never says nothing was changed
 smartgit_rollback() {
-    local i failed=0 restored=0
+    local i failed=0 restored=0 fp="${1:-}" tail none="no SmartGit file had been changed, so nothing was restored"
+    case "$fp" in
+        0 | 1) shift ;;
+        *)
+            printf '%s: internal error: smartgit_rollback needs FP 0 or 1, got [%s]\n' "$GSG_NAME" "$fp" >&2
+            return 1
+            ;;
+    esac
+    tail="$(brew_unchanged_text)"
+    if [ "$fp" -eq 1 ]; then
+        tail="the Flatpak steps are undone next"
+        none="no preferences.yml had been changed, so none was restored"
+    fi
     for i in "$@"; do
         smartgit_paths "${SG_SET_DIR[$i]}" || {
             printf '%s: %s could not be checked for a restore\n' "$GSG_NAME" "${SG_SET_DIR[$i]}" >&2
@@ -405,50 +460,75 @@ smartgit_rollback() {
         fi
     done
     if [ "$failed" -ne 0 ]; then
-        printf '%s: SmartGit was NOT fully restored (see above); %s\n' "$GSG_NAME" "$(brew_unchanged_text)" >&2
+        printf '%s: SmartGit was NOT fully restored (see above); %s\n' "$GSG_NAME" "$tail" >&2
     elif [ "$restored" -gt 0 ]; then
-        printf '%s: SmartGit was restored from its backup; %s\n' "$GSG_NAME" "$(brew_unchanged_text)" >&2
+        printf '%s: SmartGit was restored from its backup; %s\n' "$GSG_NAME" "$tail" >&2
     else
-        printf '%s: no SmartGit file had been changed, so nothing was restored; %s\n' "$GSG_NAME" "$(brew_unchanged_text)" >&2
+        printf '%s: %s; %s\n' "$GSG_NAME" "$none" "$tail" >&2
     fi
 }
 
 # ^ order Git LFS first (package, and after it its filter), the settings last; a failure before the first edit leaves every preferences file untouched
 # ^ invariant any failure after the first edit rolls every directory of this run back; the Git LFS package and filter stay, and the message says so
 smartgit_apply() {
-    local i
+    local i fp=0 host=0 via step
     local -a applied=()
     smartgit_lfs_install_pkg || return 1
     smartgit_lfs_configure || return 1
     for i in "$@"; do
-        smartgit_apply_one "$i" || {
-            smartgit_rollback "$i" "${applied[@]}"
+        step=smartgit_apply_one
+        if [ "${SG_SET_KIND[$i]}" = flatpak ]; then
+            fp=1
+            step=smartgit_flatpak_apply
+        else
+            host=1
+        fi
+        "$step" "$i" || {
+            smartgit_apply_undo "$fp" "$i" "${applied[@]}"
             return 1
         }
         applied+=("$i")
     done
-    if ! smartgit_verify_run; then
-        smartgit_rollback "${applied[@]}"
+    if { [ "$host" -eq 1 ] && ! smartgit_verify_run host; } || { [ "$fp" -eq 1 ] && ! smartgit_verify_run sandbox; }; then
+        smartgit_apply_undo "$fp" "${applied[@]}"
         return 1
     fi
     for i in "${applied[@]}"; do
-        printf '%s: SmartGit %s now commits with %s; start SmartGit again to use it (backup and manifest in %s/smartgit)\n' "$GSG_NAME" "${SG_SET_MAJOR[$i]}" "$GSG_GIT" "$GSG_STATE_DIR"
+        via=""
+        if [ "${SG_SET_KIND[$i]}" = flatpak ]; then via=" through the wrapper $SGF_WRAPPER"; fi
+        printf '%s: SmartGit %s now commits with %s%s; start SmartGit again to use it (backup and manifest in %s/smartgit)\n' "$GSG_NAME" "${SG_SET_MAJOR[$i]}" "$GSG_GIT" "$via" "$GSG_STATE_DIR"
     done
+}
+
+# ^ invariant FP ($1) = 1 when a Flatpak directory was in the run; the preferences are restored first, the Flatpak steps undone after them from their record
+smartgit_apply_undo() {
+    local fp="$1"
+    shift
+    smartgit_rollback "$fp" "$@"
+    if [ "$fp" -ne 1 ]; then return 0; fi
+    if ! smartgit_flatpak_undo; then
+        printf '%s: the Flatpak steps were NOT fully undone (see above); run %s restore-smartgit\n' "$GSG_NAME" "$GSG_NAME" >&2
+    elif [ -n "$SGF_UNDONE" ]; then
+        printf '%s: undid the Flatpak changes of this run (%s); apart from them, %s\n' "$GSG_NAME" "$SGF_UNDONE" "$(brew_unchanged_text)" >&2
+    else
+        printf '%s: no Flatpak change was left to undo; %s\n' "$GSG_NAME" "$(brew_unchanged_text)" >&2
+    fi
 }
 
 # ^ invariant true when this tool left a manifest, a record or a temp file of an interrupted run under <state dir>/smartgit
 smartgit_has_records() {
     local f
-    for f in "$GSG_STATE_DIR"/smartgit/*.manifest "$GSG_STATE_DIR"/smartgit/lfs.record "$GSG_STATE_DIR"/smartgit/manifest.?????? "$GSG_STATE_DIR"/smartgit/lfs-tmp.??????; do
+    local d="$GSG_STATE_DIR/smartgit"
+    for f in "$d"/*.manifest "$d"/lfs.record "$d"/flatpak.record "$d"/manifest.?????? "$d"/lfs-tmp.?????? "$d"/flatpak-tmp.??????; do
         if [ -e "$f" ]; then return 0; fi
     done
     return 1
 }
 
-# ^ invariant removes only the temp files this tool names (manifest.XXXXXX, lfs-tmp.XXXXXX) left in the smartgit state directory by an interrupted run
+# ^ invariant removes only the temp files this tool names (manifest, lfs-tmp, flatpak-tmp .XXXXXX) left in the smartgit state directory by an interrupted run
 smartgit_clean_tmp() {
     local f rc=0
-    for f in "$GSG_STATE_DIR"/smartgit/manifest.?????? "$GSG_STATE_DIR"/smartgit/lfs-tmp.??????; do
+    for f in "$GSG_STATE_DIR"/smartgit/manifest.?????? "$GSG_STATE_DIR"/smartgit/lfs-tmp.?????? "$GSG_STATE_DIR"/smartgit/flatpak-tmp.??????; do
         if [ -f "$f" ]; then smartgit_discard_tmp "$f" || rc=1; fi
     done
     return "$rc"
@@ -470,10 +550,13 @@ smartgit_restore_precheck() {
         if [ "$crc" -eq 1 ]; then rc=1; fi
     done
     smartgit_lfs_undo_check || rc=1
+    # ^ invariant the Flatpak record too (readable, flatpak present for a recorded override, smartgit.vmoptions safe to edit)
+    smartgit_flatpak_undo_check || rc=1
     return "$rc"
 }
 
 # ^ invariant the refusals come first (precheck, with the loop cap); every manifest is tried even after a failure; the directory goes only when all worked
+# ^ order preferences before Git LFS before the Flatpak steps; SmartGit points at the wrapper until its preferences are restored
 smartgit_restore_all() {
     local mf rc=0
     smartgit_restore_precheck || return 1
@@ -483,6 +566,7 @@ smartgit_restore_all() {
         smartgit_restore_one "$mf" || rc=1
     done
     smartgit_lfs_undo || rc=1
+    smartgit_flatpak_undo || rc=1
     if [ "$rc" -eq 0 ]; then rmdir -- "$GSG_STATE_DIR/smartgit" 2>/dev/null || true; fi
     return "$rc"
 }

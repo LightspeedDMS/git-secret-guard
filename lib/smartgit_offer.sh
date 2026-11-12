@@ -25,14 +25,14 @@ smartgit_refuse() {
     return 1
 }
 
-# ^ invariant rc 0 = running, 1 = not running, 2 = it cannot be told; only a macOS app is looked for, by its launcher path
+# ^ invariant rc 0 = running, 1 = not running, 2 = it cannot be told; macOS and Linux by pgrep, the Flatpak by flatpak ps entries with a live pid
 smartgit_is_running() { smartgit_kind_running "${SG_SET_KIND[$1]}"; }
 
-# ^ invariant the four steps verified by hand on Fedora with SmartGit 26.1 (docs/smartgit.md), printed for a Flatpak directory; this tool runs none of them
+# ^ invariant the four steps of docs/smartgit.md (Fedora, SmartGit 26.1); lib/smartgit_flatpak.sh runs them when allowed, a refusal prints them
 smartgit_flatpak_manual_steps() {
     printf '%s: by hand for the Flatpak (verified on Fedora with SmartGit 26.1, details and the wrapper script in docs/smartgit.md):\n' "$GSG_NAME" >&2
-    printf '  1. sudo flatpak override --system --talk-name=org.freedesktop.Flatpak %s   (this removes the sandbox for SmartGit)\n' "$SMARTGIT_FLATPAK_ID" >&2
-    printf '  2. create the wrapper ~/.local/share/smartgit/host-bin/git (chmod 755) that runs: flatpak-spawn --host git "$@"\n' >&2
+    printf '  1. flatpak override --user --talk-name=org.freedesktop.Flatpak %s   (no root; this removes the sandbox for SmartGit)\n' "$SMARTGIT_FLATPAK_ID" >&2
+    printf '  2. create the wrapper ~/.local/share/smartgit/host-bin/git (chmod 755) that runs: flatpak-spawn --host %s "$@"\n' "${GSG_GIT:-<the git that status reports>}" >&2
     printf '  3. add -Djava.io.tmpdir=<your home>/.cache/smartgit-tmp to ~/.var/app/%s/config/smartgit/smartgit.vmoptions\n' "$SMARTGIT_FLATPAK_ID" >&2
     printf '  4. in SmartGit choose Other Git Executable and type the wrapper path\n' >&2
 }
@@ -44,13 +44,8 @@ smartgit_check_dir() {
         smartgit_refuse "$i" "SmartGit $major was not recorded: this tool has only seen SmartGit $SMARTGIT_RECORDED_MAJOR, and edits nothing it has not seen" 1
         return 1
     fi
-    if [ "$kind" = flatpak ]; then
-        smartgit_refuse "$i" "the Flatpak settings are not edited by this tool (automation is deferred until a Linux spike)" 0
-        smartgit_flatpak_manual_steps
-        return 1
-    fi
-    if [ "$kind" != macos ]; then
-        smartgit_refuse "$i" "a $kind settings directory is not one this tool edits (only macOS was recorded)" 1
+    if [ "$kind" != macos ] && [ "$kind" != linux ] && [ "$kind" != flatpak ]; then
+        smartgit_refuse "$i" "a $kind settings directory is not one this tool edits (macOS, Linux and the Flatpak were recorded)" 1
         return 1
     fi
     case "${SG_SET_STATE[$i]}" in
@@ -64,10 +59,19 @@ smartgit_check_dir() {
             return 1
             ;;
     esac
+    # ^ external on Linux the setup wizard writes "startup" only when it reaches Finish, and shows again on every start before it (measured, 26.1)
+    if [ "$kind" != macos ] && [ ! -f "${SG_SET_DIR[$i]}/startup" ]; then
+        smartgit_refuse "$i" "SmartGit is not set up yet here (no startup file); start SmartGit once, finish its setup wizard, exit it and run the command again"
+        return 1
+    fi
+    if [ "$kind" = flatpak ]; then
+        smartgit_flatpak_check "$i" || return 1
+    fi
     smartgit_is_running "$i"
     rc=$?
     if [ "$rc" -eq 0 ]; then
-        smartgit_refuse "$i" "SmartGit is running and rewrites its settings while it runs; exit it with Repository, Exit and run the command again"
+        smartgit_running_who "$kind"
+        smartgit_refuse "$i" "$REPLY is running and rewrites its settings while it runs; exit it with Repository, Exit and run the command again"
         return 1
     fi
     if [ "$rc" -ne 1 ]; then
@@ -117,10 +121,13 @@ smartgit_plan_dir() {
         printf '%s: SmartGit: cannot compute the backup id of %s (cksum failed); SmartGit was not changed\n' "$GSG_NAME" "${SG_SET_DIR[$i]}" >&2
         return 1
     }
+    local target="$GSG_GIT"
+    if [ "${SG_SET_KIND[$i]}" = flatpak ]; then target="$SGF_WRAPPER"; fi
     printf '  SmartGit %s, settings %s\n' "${SG_SET_MAJOR[$i]}" "${SG_SET_DIR[$i]}"
-    printf '    Git Executable: %s -> %s (git %s)\n' "$(smartgit_choice_text "$i")" "$GSG_GIT" "$SMARTGIT_TARGET_VER"
+    printf '    Git Executable: %s -> %s (git %s)\n' "$(smartgit_choice_text "$i")" "$target" "$SMARTGIT_TARGET_VER"
     printf '    writes: %s/preferences.yml (only the executable: and executable.absolute: lines of its git: block; every other byte stays)\n' "${SG_SET_DIR[$i]}"
     printf '    backup and manifest: %s/smartgit/%s.*\n' "$GSG_STATE_DIR" "$id"
+    if [ "${SG_SET_KIND[$i]}" = flatpak ]; then smartgit_flatpak_plan; fi
 }
 
 # ^ invariant prints why nothing was done for an explicit flag and nothing at all without it; rc 1 only for the flag
@@ -176,6 +183,7 @@ smartgit_install_step() {
 }
 
 # ^ invariant the answer is no only without the flag (the flag is the yes); a decline returns 0; every refusal before the plan returns the flag value
+# ^ security a Flatpak directory also needs the sandbox yes (smartgit_flatpak_keep) after the general one; a No there leaves the Flatpak untouched
 smartgit_offer() {
     local flag="$1" i rc=0
     local -a elig=()
@@ -192,13 +200,24 @@ smartgit_offer() {
     GITUP_PRIV_CMDS=()
     printf '%s: SmartGit plan (nothing has been changed yet):\n' "$GSG_NAME"
     for i in "${elig[@]}"; do smartgit_plan_dir "$i" || return "$flag"; done
-    smartgit_lfs_plan || return "$flag"
-    printf '  then: git --version and git lfs version through %s, and a fake-token commit in a scratch repository must be blocked; any failure restores the backup\n' "$GSG_GIT"
+    local host_run=0 fp_run=0
+    for i in "${elig[@]}"; do
+        if [ "${SG_SET_KIND[$i]}" = flatpak ]; then fp_run=1; else host_run=1; fi
+    done
+    smartgit_lfs_plan "$fp_run" || return "$flag"
+    if [ "$host_run" -eq 1 ]; then
+        printf '  then: git --version and git lfs version through %s, and a fake-token commit in a scratch repository must be blocked; any failure restores the backup\n' "$GSG_GIT"
+    fi
+    if [ "$fp_run" -eq 1 ]; then
+        printf '  then (Flatpak): the same checks run through the wrapper %s inside the SmartGit sandbox (flatpak run, in your own session; the scratch repository under %s); any failure also undoes the Flatpak steps\n' "$SGF_WRAPPER" "$SGF_TMPDIR"
+    fi
     gitup_need_elevation || return "$flag"
     if ! gitup_consent "$flag" "Point SmartGit at $GSG_GIT?"; then
         printf '%s: SmartGit was not changed\n' "$GSG_NAME"
         return 0
     fi
-    smartgit_apply "${elig[@]}" || return 1
+    smartgit_flatpak_keep "${elig[@]}"
+    if [ "${#SGF_KEEP[@]}" -eq 0 ]; then return 0; fi
+    smartgit_apply "${SGF_KEEP[@]}" || return 1
     return "$((flag * rc))"
 }

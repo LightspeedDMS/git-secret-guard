@@ -80,6 +80,14 @@ if [ -t 0 ]; then printf 'query-stdin-is-a-terminal\n' >>"$d/gitup.log"; fi
 if [ -f "$d/apt.hang" ]; then exec sleep 60; fi
 if [ -f "$d/apt.cache.fail" ]; then printf 'E: injected apt-cache failure\n' >&2; exit 100; fi
 if [ -f "$d/apt.cache.failafter" ] && [ -f "$d/apt.ppa.listed" ]; then printf 'E: injected apt-cache failure after the update\n' >&2; exit 100; fi
+if [ "$*" = "policy git-lfs" ]; then
+    c="3.4.1-1"
+    if [ -f "$d/apt.lfs.candidate" ]; then c="$(cat "$d/apt.lfs.candidate")"; fi
+    label="Candidate:"
+    if [ "${LC_ALL:-}" != C ]; then label="Kandidat:"; fi
+    printf 'git-lfs:\n  Installed: (none)\n  %s %s\n  Version table:\n     %s 500\n        500 http://archive.ubuntu.com/ubuntu noble/universe amd64 Packages\n' "$label" "$c" "$c"
+    exit 0
+fi
 if [ "$*" != "policy git" ]; then printf 'E: the apt-cache stand-in does not know the call [%s]\n' "$*" >&2; exit 1; fi
 c="(none)"
 if [ -f "$d/apt.candidate" ]; then c="$(cat "$d/apt.candidate")"; fi

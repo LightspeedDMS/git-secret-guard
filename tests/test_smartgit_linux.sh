@@ -403,10 +403,9 @@ test_a_rerun_carries_the_earlier_record_forward() {
 }
 
 test_a_terminal_no_to_the_sandbox_removal_changes_nothing() {
-    if ! command -v script >/dev/null 2>&1; then skip_test "script (util-linux) is not installed; the terminal decline of the sandbox removal is not tested here"; fi
     sl_flatpak_ready || return 1
-    OUT="$(printf 'y\nn\n' | env -i "${LC_ENV[@]}" "${EXTRA_ENV[@]}" script -qec "$GSG_PROJECT/bin/git-secret-guard install --configure-smartgit" /dev/null 2>&1)"
-    RC=$?
+    # ^ invariant --configure-smartgit is the yes to pointing SmartGit at git => the sandbox question is the only prompt and gets the n
+    gsg_pty $'n\n' install --configure-smartgit
     assert_rc 0 "a decline is not a failure"
     assert_contains "$OUT" "Step 1 removes the SmartGit sandbox" "the second question was asked"
     assert_contains "$OUT" "the sandbox removal was declined" "the No is said"

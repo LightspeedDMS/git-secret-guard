@@ -6,6 +6,8 @@
 SL_FIX="$GSG_PROJECT/tests/fixtures/smartgit"
 SL_APP_ID=com.syntevo.SmartGit
 SL_SYSTEM_PATH=/usr/bin:/bin
+# ^ why brew bash and gnubin first on a Mac, not the system dirs alone; the faked Linux install sets no BASH_BIN or GNUBIN_DIR, /bin/bash 3.2 fails the hook
+if [ "$TEST_OS" = Darwin ]; then SL_SYSTEM_PATH="${TEST_BASH%/*}:$TEST_GNUBIN:$SL_SYSTEM_PATH"; fi
 SL_WRAPPER="" SL_VMOPTS="" SL_TMPDIR="" SL_INSTALL="" SL_FLATPAK_RECORD="" SL_HOME=""
 SL_WRAPPER_MARKER='# git-secret-guard: written by install --configure-smartgit; undone by restore-smartgit'
 

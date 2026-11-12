@@ -100,6 +100,7 @@ test_restore_of_a_tarball_checks_the_linux_process_and_puts_the_original_back_by
     assert_rc 0 "restore once SmartGit is closed"
     assert_eq "$(sg_hash "$SG_PREFS")" "$(sg_hash "$SANDBOX/prefs.orig")" "the preferences are the original byte for byte"
     assert_no_file "$SG_BACKUPS" "no manifest or backup is left"
+    assert_not_contains "$OUT" "removed what this tool added" "a restore with no Flatpak record names no Flatpak step"
 }
 
 # ^ invariant sl_tarball_refused TEXT = install --configure-smartgit was refused with TEXT and nothing of SmartGit changed
@@ -275,6 +276,8 @@ test_restore_after_the_flatpak_setup_undoes_every_step_byte_for_byte() {
     assert_rc 0 "configure first"
     gsg restore-smartgit </dev/null
     assert_rc 0 "restore-smartgit"
+    assert_contains "$OUT" "removed what this tool added for the SmartGit Flatpak: the --user override, the wrapper, the smartgit.vmoptions line, the temp directory" \
+        "the restore names every Flatpak step it undid"
     assert_no_file "$SANDBOX/flatpak.override.user" "1. the --user override that held only our line was reset"
     assert_no_file "$SL_WRAPPER" "2. the wrapper is gone"
     assert_no_file "${SL_WRAPPER%/*}" "with the directory made for it"
@@ -282,6 +285,38 @@ test_restore_after_the_flatpak_setup_undoes_every_step_byte_for_byte() {
     assert_eq "$(stat -c %a "$SL_VMOPTS")" 640 "with its mode"
     assert_no_file "$SL_TMPDIR" "the temp directory is gone"
     assert_eq "$(sg_hash "$SG_PREFS")" "$(sg_hash "$SANDBOX/prefs.orig")" "4. preferences.yml is byte for byte the original"
+    assert_no_file "$SL_FLATPAK_RECORD" "the record is gone"
+}
+
+# ^ why a read-only config directory, not a symlink; the precheck passes it (the file is safe), only the rewrite in the undo fails
+test_a_partial_flatpak_undo_names_only_the_steps_really_removed_and_keeps_the_record() {
+    local d h
+    if [ "$(id -u)" -eq 0 ]; then skip_test "root writes into a read-only directory"; fi
+    sl_flatpak_configure || return 1
+    assert_rc 0 "configure first"
+    d="${SL_VMOPTS%/*}"
+    chmod 500 -- "$d" || return 1
+    gsg restore-smartgit </dev/null
+    chmod 700 -- "$d" || return 1
+    assert_rc 1 "a failed vmoptions rewrite fails the restore"
+    assert_contains "$OUT" "removed what this tool added for the SmartGit Flatpak: the --user override, the wrapper" \
+        "the summary names the steps that were removed even though the restore failed"
+    assert_not_contains "$OUT" "the smartgit.vmoptions line" "the line still in place is not claimed as removed"
+    assert_contains "$ERR" "cannot remove the temp directory line from $SL_VMOPTS" "the failed step says what to do by hand"
+    assert_no_file "$SL_WRAPPER" "the wrapper that did go stays gone"
+    assert_file "$SL_FLATPAK_RECORD" "the record is kept for a rerun"
+    h="$(grep -c -x -- "-Djava.io.tmpdir=$SL_TMPDIR" "$SL_VMOPTS")"
+    assert_eq "$h" 1 "the vmoptions line is still there"
+}
+
+test_uninstall_after_the_flatpak_setup_names_every_flatpak_step_it_undid() {
+    sl_flatpak_configure || return 1
+    assert_rc 0 "configure first"
+    gsg uninstall </dev/null
+    assert_rc 0 "uninstall"
+    assert_contains "$OUT" "removed what this tool added for the SmartGit Flatpak: the --user override, the wrapper, the smartgit.vmoptions line, the temp directory" \
+        "the uninstall names every Flatpak step it undid"
+    assert_no_file "$SL_WRAPPER" "the wrapper is gone"
     assert_no_file "$SL_FLATPAK_RECORD" "the record is gone"
 }
 

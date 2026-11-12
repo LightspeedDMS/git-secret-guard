@@ -150,6 +150,7 @@ debian_source() {
     check "every privileged command in the plan starts with an absolute path" all_plan_lines_absolute
     check "/usr/local/bin/git is new enough" ver_ge_254 /usr/local/bin/git
     check "it comes first on PATH" test "$(command -v git)" = /usr/local/bin/git
+    check "the built git reads the system config from /etc (#90)" test "$(/usr/local/bin/git var GIT_CONFIG_SYSTEM)" = /etc/gitconfig
     check "the distribution package is untouched" test "$(git_pkg_version)" = "$git_pkg_version_before"
     check "no build directory is left in /tmp" test -z "$(find /tmp -maxdepth 1 -name 'gsg-git-build.*' | head -n 1)"
     check "a commit with a fake key is blocked and a clean one passes" blocked_commit git

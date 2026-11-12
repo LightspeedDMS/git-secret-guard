@@ -221,6 +221,7 @@ rocky_upgrade() {
     show "perl metapackage afterwards: $(rpm -q perl 2>&1 | head -n 1)"
     show "$(/usr/local/bin/git --version); PATH git: $(command -v git)"
     check "it comes first on PATH" test "$(command -v git)" = /usr/local/bin/git
+    check "the built git reads the system config from /etc (#90)" test "$(/usr/local/bin/git var GIT_CONFIG_SYSTEM)" = /etc/gitconfig
     check "the RPM git-core is the same version" test "$(rpm -q git-core)" = "$PKG_BEFORE"
     check "rpm -V git-core reports nothing" rpm_clean
     check "/usr/bin is untouched" test "$(usrbin_sums)" = "$SUMS_BEFORE"

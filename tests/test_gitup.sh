@@ -299,4 +299,19 @@ test_elevation_runs_directly_as_root_and_through_sudo_otherwise() {
     assert_contains "$(<"$SANDBOX/gitup.log")" "sudo -- $SANDBOX/pathbin/touch $SANDBOX/as-user" "through sudo, by the full path of the system touch"
 }
 
+# shellcheck disable=SC2016
+test_the_make_words_refuse_an_empty_sysconfdir_or_prefix() {
+    lc_begin || return 1
+    set_env GSG_GITUP_ROOT="$SANDBOX/root"
+    gu_run 'gitup_paths || exit 9; GITUP_SYSCONFDIR=""; gitup_source_make_words'
+    assert_rc 1 "an empty sysconfdir is refused, not left to an unbound variable"
+    assert_contains "$ERR" "GITUP_SYSCONFDIR" "and the message names it"
+    gu_run 'gitup_paths || exit 9; GITUP_PREFIX=""; gitup_source_make_words'
+    assert_rc 1 "an empty prefix is refused"
+    assert_contains "$ERR" "GITUP_PREFIX" "and the message names it"
+    gu_run 'gitup_paths || exit 9; gitup_source_make_words && printf "%s" "${GITUP_MAKE_WORDS[*]}"'
+    assert_rc 0 "paths that are set give the words"
+    assert_contains "$OUT" "sysconfdir=$SANDBOX/root/etc" "with the sysconfdir below the sandbox root"
+}
+
 run_file_tests

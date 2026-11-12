@@ -252,7 +252,7 @@ gitup_rpm_plan_upgrade() {
     if [ "$GITUP_RPM_INCOMPLETE" -eq 1 ]; then reason="the check of the repositories was incomplete, so the package route is not trusted"; fi
     if [ "$qrc" -ne 0 ] && [ "$GITUP_RPM_INCOMPLETE" -eq 0 ]; then reason="the repositories that could be read offer ${GITUP_RPM_CANDIDATE:-no git-core}, not 2.54 or newer"; fi
     gitup_source_pins || return 1
-    gitup_source_print_plan "$reason"
+    gitup_source_print_plan "$reason" || return 1
     gitup_rpm_deps_note
     gitup_plan_note "$(gitup_rpm_keynote source)"
 }

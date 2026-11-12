@@ -617,7 +617,7 @@ gitup_apt_plan_upgrade() {
     gitup_source_pins || return 1
     gitup_apt_prepare || return 1
     if [ "$class" = debian ]; then reason="$reason; Debian has no PPA"; fi
-    gitup_source_print_plan "$reason"
+    gitup_source_print_plan "$reason" || return 1
     gitup_plan_note "$GITUP_APT_UPGRADE_NOTE"
 }
 

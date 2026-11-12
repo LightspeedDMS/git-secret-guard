@@ -102,6 +102,7 @@ gitup_paths() {
     fi
     GITUP_ROOT="${GITUP_ROOT%/}"
     GITUP_PREFIX="$GITUP_ROOT/usr/local"
+    GITUP_SYSCONFDIR="$GITUP_ROOT/etc"
     GITUP_USRBIN="$GITUP_ROOT/usr/bin"
     GITUP_VARLIB="$GITUP_ROOT/var/lib/git-secret-guard"
     GITUP_DNFCONF="$GITUP_ROOT/etc/dnf/dnf.conf"

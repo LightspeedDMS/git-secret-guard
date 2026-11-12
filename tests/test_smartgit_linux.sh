@@ -302,11 +302,20 @@ test_a_partial_flatpak_undo_names_only_the_steps_really_removed_and_keeps_the_re
     assert_contains "$OUT" "removed what this tool added for the SmartGit Flatpak: the --user override, the wrapper" \
         "the summary names the steps that were removed even though the restore failed"
     assert_not_contains "$OUT" "the smartgit.vmoptions line" "the line still in place is not claimed as removed"
+    assert_not_contains "$OUT" "the temp directory" "the kept temp directory is not claimed as removed"
     assert_contains "$ERR" "cannot remove the temp directory line from $SL_VMOPTS" "the failed step says what to do by hand"
+    assert_contains "$ERR" "$SL_TMPDIR was kept: the smartgit.vmoptions line still points at it" "the output says why the directory stays"
     assert_no_file "$SL_WRAPPER" "the wrapper that did go stays gone"
     assert_file "$SL_FLATPAK_RECORD" "the record is kept for a rerun"
+    assert_file "$SL_TMPDIR" "the temp directory stays while the line points at it"
     h="$(grep -c -x -- "-Djava.io.tmpdir=$SL_TMPDIR" "$SL_VMOPTS")"
     assert_eq "$h" 1 "the vmoptions line is still there"
+    gsg restore-smartgit </dev/null
+    assert_rc 0 "a rerun after the permission is back finishes"
+    assert_no_file "$SL_TMPDIR" "the rerun removes the temp directory"
+    assert_no_file "$SL_FLATPAK_RECORD" "the rerun removes the record"
+    h="$(grep -c -x -- "-Djava.io.tmpdir=$SL_TMPDIR" "$SL_VMOPTS" || true)"
+    assert_eq "$h" 0 "the rerun removes the vmoptions line"
 }
 
 test_uninstall_after_the_flatpak_setup_names_every_flatpak_step_it_undid() {

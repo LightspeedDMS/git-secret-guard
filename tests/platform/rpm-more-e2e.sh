@@ -112,7 +112,10 @@ mode_bump() {
     # ^ why a first build without the flag, not the current code; it stands for a build made before INSTALL_SYMLINKS=1, whose files are hard links
     cp "$CK/lib/gitup_source.sh" "$HOME/gitup_source.sh.current" || { bad "gitup_source.sh cannot be copied"; return 1; }
     sed -i 's/ INSTALL_SYMLINKS=1//g' "$CK/lib/gitup_source.sh"
-    check "the first build is made without INSTALL_SYMLINKS=1" test -z "$(grep -c INSTALL_SYMLINKS=1 "$CK/lib/gitup_source.sh" | grep -v "^0$")"
+    check "the first build is made without INSTALL_SYMLINKS=1: none left in gitup_source.sh" test "$(grep -c INSTALL_SYMLINKS=1 "$CK/lib/gitup_source.sh")" = 0
+    # shellcheck disable=SC2016
+    check "and the make words still carry sysconfdir, so only the flag is gone" grep -q 'GITUP_MAKE_WORDS=(.*"sysconfdir=\$GITUP_SYSCONFDIR")$' "$CK/lib/gitup_source.sh"
+    check "and the edited library still parses" bash -n "$CK/lib/gitup_source.sh"
     run "$GSG" install --upgrade-git </dev/null
     show "$(printf '%s' "$OUT" | grep -E 'route:|download git|installed git-secret-guard' | head -n 4 | cut -c1-140)"
     check "install at the older pin exits 0" rc_is 0
@@ -137,6 +140,7 @@ mode_bump() {
     check "the rebuild at the current pin exits 0" rc_is 0
     check "git $cur is in /usr/local" test "$(git_ver /usr/local/bin/git)" = "$cur"
     check "its MANIFEST is there" test -f "$docs/git-$cur-local/MANIFEST"
+    check "the rebuilt git reads the system config from /etc (#90)" test "$(/usr/local/bin/git var GIT_CONFIG_SYSTEM)" = /etc/gitconfig
     check "the directory of the older build is gone" test ! -e "$docs/git-$BUMP_OLD_VERSION-local"
     check "the rebuild turned the hard links into symlinks: git has one name" test "$(stat -c %h /usr/local/bin/git)" = 1
     check "and the libexec entry git-merge is a symlink" test -L /usr/local/libexec/git-core/git-merge

@@ -120,15 +120,29 @@ gitup_source_make() {
         "$GITUP_MAKE" -C "$dir" "$@" >>"$GITUP_BUILD_DIR/make.log" 2>&1
 }
 
+# ^ why sysconfdir=/etc, not git's default $(prefix)/etc; the new git reads the /etc/gitconfig of the distribution's git (#90)
+# ^ why INSTALL_SYMLINKS=1, not git's hard links; one inode under bin and libexec gets one SELinux label from two policy rules, and restorecon flips it
+# ^ invariant rc 0 sets GITUP_MAKE_WORDS for both make runs and the plan; rc 1 with a message when GITUP_PREFIX or GITUP_SYSCONFDIR is empty
+gitup_source_make_words() {
+    local name
+    for name in GITUP_PREFIX GITUP_SYSCONFDIR; do
+        if [ -z "${!name:-}" ]; then
+            printf '%s: %s is empty, so the make words cannot be built; this is a bug, nothing was built\n' "$GSG_NAME" "$name" >&2
+            return 1
+        fi
+    done
+    GITUP_MAKE_WORDS=("prefix=$GITUP_PREFIX" "${GITUP_SRC_FLAGS[@]}" "sysconfdir=$GITUP_SYSCONFDIR" INSTALL_SYMLINKS=1)
+}
+
 gitup_source_build() {
     local jobs kept
     jobs="$(nproc 2>/dev/null)" || jobs=2
     if [[ ! $jobs =~ ^[0-9]+$ ]] || [ "$jobs" -lt 1 ]; then jobs=2; fi
     if [ "$jobs" -gt 8 ]; then jobs=8; fi
     printf '%s: building git %s (about %s MB of disk, several minutes; the make output is kept only if the build fails)\n' "$GSG_NAME" "$GITUP_PIN_VER" "$GITUP_BUILD_NEED_MB"
-    # ^ why INSTALL_SYMLINKS=1, not git's hard links; one inode under bin and libexec gets one SELinux label from two policy rules, and restorecon flips it
-    if gitup_source_make "$GITUP_SRC_DIR" "-j$jobs" "prefix=$GITUP_PREFIX" "${GITUP_SRC_FLAGS[@]}" INSTALL_SYMLINKS=1 all &&
-        gitup_source_make "$GITUP_SRC_DIR" "prefix=$GITUP_PREFIX" "${GITUP_SRC_FLAGS[@]}" INSTALL_SYMLINKS=1 "DESTDIR=$GITUP_STAGE" install; then
+    gitup_source_make_words || return 1
+    if gitup_source_make "$GITUP_SRC_DIR" "-j$jobs" "${GITUP_MAKE_WORDS[@]}" all &&
+        gitup_source_make "$GITUP_SRC_DIR" "${GITUP_MAKE_WORDS[@]}" "DESTDIR=$GITUP_STAGE" install; then
         return 0
     fi
     tail -n 25 "$GITUP_BUILD_DIR/make.log" | sed 's/^/        | /' >&2
@@ -344,6 +358,8 @@ gitup_source_print_plan() {
     printf '  route: source (%s)\n' "$1"
     printf '  download git %s and its man pages from %s, each checked against the SHA-256 in tools.lock\n' "$GITUP_PIN_VER" "$(tools_release_url git "$GITUP_PIN_VER" source)"
     printf '  build as %s in a temporary directory under env -i with PATH=%s (about %s MB of disk, several minutes)\n' "$(id -un)" "$GITUP_BUILD_PATH" "$GITUP_BUILD_NEED_MB"
+    gitup_source_make_words || return 1
+    printf '  the build runs: make %s all, then the same with DESTDIR=<build dir>/stage install\n' "${GITUP_MAKE_WORDS[*]}"
     local docdir
     docdir="$(gitup_source_docdir)"
     if [ "${#GITUP_SRC_PRE[@]}" -gt 0 ]; then gitup_plan_priv "${GITUP_SRC_PRE[*]}"; fi
@@ -385,5 +401,5 @@ gitup_source_plan_refresh() {
         return 2
     fi
     printf '%s: %s; the rebuild plan:\n' "$GSG_NAME" "$why"
-    gitup_source_print_plan "$why"
+    gitup_source_print_plan "$why" || return 2
 }

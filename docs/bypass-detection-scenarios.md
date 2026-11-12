@@ -102,20 +102,20 @@ Scenario catalog for validating the `LightspeedDMS/git-secret-guard` rollout: ho
 | D24 | JetBrains IDE with "Run Git hooks" unchecked | Detect |
 | D25 | libgit2- or JGit-based client (e.g. Eclipse EGit) that may not run hooks | Record → Server |
 
-## E. Elevated bypass — MANUAL, test VM only, run by IT via EPM
+## E. Elevated bypass — MANUAL, test VM only, run by IT
 
-Testers without admin rights must not run these. IT runs them in a dedicated test VM with an EPM elevation request.
+Testers without admin rights must not run these. IT runs them in a dedicated test VM, through the organisation's elevation process.
 
 | ID | Scenario | Expected |
 |---|---|---|
-| E01 | Elevate PowerShell via EPM with a business justification; record what the EPM log captures | EPM log has user, app, justification |
-| E02 | Elevated: edit the system gitconfig to remove `hooksPath` | Detect (MDE alert + compliance → noncompliant) |
+| E01 | Elevate PowerShell through the elevation tool with a business justification; record what its log captures | Log has user, app, justification |
+| E02 | Elevated: edit the system gitconfig to remove `hooksPath` | Detect (endpoint detection alert + device marked noncompliant) |
 | E03 | Elevated: delete or replace the hook binary under Program Files | Detect + remediation reinstalls |
 | E04 | Elevated: uninstall git-secret-guard via Apps & Features | Detect + reinstall |
-| E05 | Elevated: stop/disable the Intune Management Extension service or delete its scheduled tasks | Detect |
-| E06 | Elevated: add a Defender exclusion for the hook path | Blocked by Tamper Protection + alert |
+| E05 | Elevated: stop/disable the device-management agent service or delete its scheduled tasks | Detect |
+| E06 | Elevated: add an endpoint-protection exclusion for the hook path | Blocked by tamper protection + alert |
 | E07 | Elevated: install a second git system-wide | Detect |
-| E08 | Policy check: is generic PowerShell/Terminal elevation user-confirmed or support-approved? | Should be support-approved |
+| E08 | Is generic PowerShell/Terminal elevation confirmed by the user alone, or approved by support? | Record |
 
 ## F. Platforms and environments
 
@@ -124,8 +124,8 @@ Run sections A–D on each environment where they apply.
 | ID | Environment | Notes |
 |---|---|---|
 | F01 | Windows, standard user | Primary target |
-| F02 | macOS, non-admin and admin user | No Intune custom compliance on macOS — validate the drift-reporting route |
-| F03 | Ubuntu workstation | Intune custom compliance supported |
+| F02 | macOS, non-admin and admin user | Validate how configuration drift is reported |
+| F03 | Ubuntu workstation | Validate how configuration drift is reported |
 | F04 | Managed Windows VM and Linux VM | Confirm hook is baked into the golden image |
 | F05 | WSL distro on a managed laptop (Linux git) | Expected Gap → Detect / Server |
 | F06 | Dev container / Docker with git inside | Expected Gap → Server |
@@ -139,7 +139,7 @@ Requires Security and IT to confirm results from their consoles, using the UTC t
 | ID | Scenario | Expected |
 |---|---|---|
 | G01 | Push a commit with a secret to the throwaway GitLab project | Server blocks (secret push protection) |
-| G02 | `git push -o secret_push_protection.skip_all` | Allowed + audit event + alert to ELT/SEC |
+| G02 | `git push -o secret_push_protection.skip_all` | Allowed + audit event + alert to the security team |
 | G03 | `[skip secret push protection]` in the commit message | Allowed + audit event + alert |
 | G04 | Secret in a file >1 MiB, a binary, or the initial push that creates the repo | Missed by push protection → caught by pipeline secret detection |
 | G05 | Secret in a path excluded from push protection | Pipeline detection catches it |
@@ -147,8 +147,8 @@ Requires Security and IT to confirm results from their consoles, using the UTC t
 | G07 | Commit via GitLab REST API (commits endpoint) | Record whether push protection applies |
 | G08 | Push to a GitHub public repo | Record coverage (still to be confirmed) |
 | G09 | Heartbeat correlation: pushed commit with no matching hook scan event (from D01, D14, F05) | Bypass alert fires |
-| G10 | For every **Detect** row: which detector fired (MDE rule, Remediation, compliance, heartbeat, audit event), latency, and whether the alert reached ELT and SEC | Record |
-| G11 | Device marked noncompliant: is GitLab SSO blocked via Conditional Access? | Access blocked |
+| G10 | For every **Detect** row: which detector fired (endpoint detection rule, remediation script, device compliance, heartbeat, audit event), latency, and whether the alert reached the security team | Record |
+| G11 | Device marked noncompliant: is its access to GitLab blocked? | Access blocked |
 | G12 | Time for remediation to restore the hook after D04, D05, D10 | Record vs. target SLA |
 
 ---

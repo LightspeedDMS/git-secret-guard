@@ -448,6 +448,9 @@ that run a git 2.54 or newer, because the hook lives in the global git config.
   it. The test is the hash alone: a byte-identical copy of the pinned jq that you put there yourself counts as ours and is removed by
   `--remove-tools`. A file at that path with any other hash is never recorded or removed; when no `jq` is on `PATH` and it is not at the
   pinned version, it is moved aside and `uninstall` puts it back, as for the scanners (bug [#97](https://github.com/LightspeedDMS/git-secret-guard/issues/97)).
+  The scanners follow the same hash rule since [#101](https://github.com/LightspeedDMS/git-secret-guard/issues/101), with the SHA-256 of the extracted
+  `trufflehog.exe` or `betterleaks.exe` taken from the fifth column of their `tools.lock` rows, and without the `PATH` condition
+  ([install.md](install.md#uninstall)).
 - **`git` in PowerShell.** The Git for Windows installer normally puts `git` on `PATH`. If `git` is not found there, re-run
   it and choose "Git from the command line", or add `C:\Program Files\Git\cmd` to `PATH`. `git-secret-guard.cmd` finds Git
   for Windows either way, next to `git.exe` or in its default locations, and never uses the WSL `bash.exe` in `System32`.

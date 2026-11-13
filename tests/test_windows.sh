@@ -182,6 +182,40 @@ install_manage_jq; echo "[${GSG_TOOL_NAMES[*]}] [$ST_PLACED]"' "$bin" "$other" "
     assert_eq "$OUT" "[trufflehog betterleaks] []" "a link is not adopted"
 }
 
+# ^ why a lock of its own, not the product's; the real scanner binaries are downloads, a test file cannot have their hashes
+scanner_adopt_lock() {
+    local file="$1" sha="$2"
+    grep -v -e '^trufflehog .* windows_amd64 ' "$GSG_PROJECT/tools.lock" >"$file" || return 1
+    printf 'trufflehog 3.99.2 windows_amd64 %s %s\n' "$(printf '0%.0s' {1..64})" "$sha" >>"$file"
+}
+
+SCANNER_ADOPT_ENV='GSG_OS=MINGW64_NT-10.0-26200 GSG_ARCH=x86_64 GSG_NAME=git-secret-guard ST_TOOLS="" ST_PLACED=""'
+
+test_a_scanner_exe_kept_by_an_earlier_install_is_adopted_through_the_windows_names() {
+    local bin="$SANDBOX/sc" sha
+    mkdir -p "$bin" && printf 'binary\n' >"$bin/trufflehog.exe" && printf 'other\n' >"$bin/betterleaks.exe" || return 1
+    sha="$(sha_of "$bin/trufflehog.exe")"
+    scanner_adopt_lock "$SANDBOX/lock-sc" "$sha" || return 1
+    win "$SCANNER_ADOPT_ENV"' GSG_TOOLS_LOCK="$2" GSG_BIN_DIR="$1"
+install_adopt_scanners; echo "tools=[$ST_TOOLS] placed=[$ST_PLACED]"' "$bin" "$SANDBOX/lock-sc"
+    assert_eq "$OUT" "tools=[trufflehog] placed=[trufflehog:$sha]" "the .exe is adopted; betterleaks holds other bytes than its row names stays unrecorded"
+}
+
+test_a_scanner_exe_with_another_hash_or_a_recorded_hash_is_left_alone_on_windows() {
+    local bin="$SANDBOX/sc2" sha
+    mkdir -p "$bin" && printf 'binary\n' >"$bin/trufflehog.exe" || return 1
+    sha="$(printf 'not this\n' | sha256sum | cut -d' ' -f1)"
+    scanner_adopt_lock "$SANDBOX/lock-sc2" "$sha" || return 1
+    win "$SCANNER_ADOPT_ENV"' GSG_TOOLS_LOCK="$2" GSG_BIN_DIR="$1"
+install_adopt_scanners; echo "tools=[$ST_TOOLS] placed=[$ST_PLACED]"' "$bin" "$SANDBOX/lock-sc2"
+    assert_eq "$OUT" "tools=[] placed=[]" "another hash: the user's"
+    sha="$(sha_of "$bin/trufflehog.exe")"
+    scanner_adopt_lock "$SANDBOX/lock-sc3" "$sha" || return 1
+    win "$SCANNER_ADOPT_ENV"' GSG_TOOLS_LOCK="$2" GSG_BIN_DIR="$1"
+ST_PLACED="trufflehog:abc"; install_adopt_scanners; echo "tools=[$ST_TOOLS] placed=[$ST_PLACED]"' "$bin" "$SANDBOX/lock-sc3"
+    assert_eq "$OUT" "tools=[] placed=[trufflehog:abc]" "a hash already in the state is not second-guessed"
+}
+
 test_a_managed_jq_writes_no_version_key_to_the_settings() {
     win 'GSG_BIN_DIR=/b GSG_TOOL_NAMES+=(jq) GSG_TOOL_VER=(1 2 3) INSTALL_JQ_BIN=/b/jq.exe INSTALL_JQ_WRAPPER=/s/jq
 INSTALL_TIMEOUT_BIN=/t INSTALL_BASH_BIN="" INSTALL_GNUBIN_DIR="" INSTALL_TIMER_BIN=""

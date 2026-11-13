@@ -7,6 +7,21 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/lifecycle.sh"
 
 DEAD_PROXY=(HTTPS_PROXY=http://127.0.0.1:9 HTTP_PROXY=http://127.0.0.1:9 https_proxy=http://127.0.0.1:9 http_proxy=http://127.0.0.1:9)
 
+# ^ why an oracle, not a fixed answer; Windows seeds copies of the pinned binaries and install adopts those (#101), Linux seeds links, never adopted
+# ^ invariant prints the seeded scanners, regular files only, whose SHA-256 is the lock's binary hash, space separated
+seeded_pinned_scanners() {
+    local scn plat want got seeded=""
+    for scn in trufflehog betterleaks; do
+        plat="$(lc_platform "$scn")" || return 1
+        want="$(lc_lock_binary_sha "$scn" "$plat")" || return 1
+        if [ -f "$LC_BIN/$scn$LC_EXE" ] && [ ! -L "$LC_BIN/$scn$LC_EXE" ]; then
+            got="$(sha256sum -- "$LC_BIN/$scn$LC_EXE" | cut -d' ' -f1)" || return 1
+            if [ -n "$want" ] && [ "$got" = "$want" ]; then seeded+="${seeded:+ }$scn"; fi
+        fi
+    done
+    printf '%s\n' "$seeded"
+}
+
 commit_secret() {
     new_repo "$1" || return 1
     stage_file src/leak.txt one "token = \"$(fake_github_token)\"" || return 1
@@ -29,6 +44,8 @@ test_install_block_upgrade_uninstall_and_uninstall_again_with_the_real_scanners(
     [ -x "$REAL_TRUFFLEHOG" ] || skip_test "trufflehog not found at $REAL_TRUFFLEHOG"
     [ -x "$REAL_BETTERLEAKS" ] || skip_test "betterleaks not found at $REAL_BETTERLEAKS"
     lc_begin && lc_seed_real_tools || return 1
+    local adopted
+    adopted="$(seeded_pinned_scanners)" || return 1
     set_env "${DEAD_PROXY[@]}"
 
     commit_secret before
@@ -36,7 +53,7 @@ test_install_block_upgrade_uninstall_and_uninstall_again_with_the_real_scanners(
 
     gsg install
     assert_rc 0 "install with the real scanners"
-    assert_eq "$(state_value tools_installed_by_us)" "" "both tools were already at the pin, nothing was downloaded"
+    assert_eq "$(state_value tools_installed_by_us)" "$adopted" "both tools were already at the pin, nothing was downloaded; only a copy of the pinned binary is adopted as ours"
     commit_secret installed
     assert_blocked_by_both_scanners "after install"
 

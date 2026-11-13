@@ -436,11 +436,20 @@ lc_platform() {
     )
 }
 
+# ^ invariant prints the fifth column of the product lock for a tool and platform key, "" when the row has none
+lc_lock_binary_sha() {
+    (
+        source "$GSG_PROJECT/lib/common.sh" && source "$GSG_PROJECT/lib/tools.sh" \
+            && tools_lock_binary_sha "$GSG_PROJECT/tools.lock" "$1" "$2"
+    )
+}
+
 lc_asset_name() { (source "$GSG_PROJECT/lib/common.sh" && source "$GSG_PROJECT/lib/tools.sh" && tools_tarball_name "$@"); }
 
 # ^ security the fakes print the version and nothing else => a passing test never needed the real tool
+# ^ invariant LC_BINSHA=1 adds the SHA-256 of the fake binary as the fifth lock column (#101); without it the rows have four fields, as before
 lc_make_fixtures() {
-    local tv="${1:-3.99.2}" gv="${2:-1.9.0}" tool ver plat dir tar sha bin
+    local tv="${1:-3.99.2}" gv="${2:-1.9.0}" tool ver plat dir tar sha bin bsha
     mkdir -p -- "$LC_FIX/src" || return 1
     : >"$LC_FIX/fixture.lock" || return 1
     for tool in trufflehog betterleaks; do
@@ -467,7 +476,9 @@ lc_make_fixtures() {
             tar -czf "$tar" -C "$dir" "$bin" LICENSE README.md || return 1
         fi
         sha="$(sha256sum -- "$tar" | cut -d' ' -f1)" || return 1
-        printf '%s %s %s %s\n' "$tool" "$ver" "$plat" "$sha" >>"$LC_FIX/fixture.lock" || return 1
+        bsha=""
+        if [ "${LC_BINSHA:-0}" -eq 1 ]; then bsha=" $(sha256sum -- "$dir/$bin" | cut -d' ' -f1)" || return 1; fi
+        printf '%s %s %s %s%s\n' "$tool" "$ver" "$plat" "$sha" "$bsha" >>"$LC_FIX/fixture.lock" || return 1
     done
 }
 

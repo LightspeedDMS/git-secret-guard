@@ -10,7 +10,7 @@ ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)" || exit 2
 # shellcheck disable=SC2034
 GSG_ROOT="$ROOT"
 # shellcheck source=/dev/null
-source "$ROOT/lib/common.sh" && source "$ROOT/lib/tools.sh" || exit 2
+source "$ROOT/lib/common.sh" && source "$ROOT/lib/tools.sh" && source "$ROOT/lib/install_tools.sh" || exit 2
 
 check=0
 if [ "${1:-}" = --check ]; then
@@ -55,6 +55,9 @@ for tool in "${tools[@]}"; do
     tarball="$(tools_fetch_verified "$tool" "$ver" "$plat" "${row##* }" "$stage")" || exit 1
     mkdir -p -- "$stage/out" || exit 1
     tools_extract_binary "$tarball" "$tool" "$stage/out" || exit 1
+    # ^ security the product check, not a copy; a wrong fifth column fails here on every CI host before the file reaches the cache
+    bsha="$(tools_lock_binary_sha "$(tools_lock_path)" "$tool" "$plat")" || exit 1
+    install_check_binary_sha "$tool" "$stage/out/$bin" "$bsha" || exit 1
     mv -f -- "$stage/out/$bin" "$dest/$bin" || exit 1
     printf '%s %s fetched into %s\n' "$tool" "$ver" "$dest"
 done

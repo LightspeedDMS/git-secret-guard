@@ -182,6 +182,9 @@ and `status` shows it). It follows [Semantic Versioning](https://semver.org/); w
 
 - **A pull request that changes what a user gets** (the hook, the CLI, install, `status`, `doctor`, a pinned tool in `tools.lock`)
   bumps `VERSION` in that pull request: a new feature or a changed behaviour raises `y` and resets `z`, a fix raises `z`.
+- **Bumping a scanner pin** in `tools.lock` also needs the SHA-256 of the binary inside each archive, as the fifth column of its row
+  (`<tool> <version> <platform> <archive sha256> <binary sha256>`): download the archive, check the fourth column, extract the binary, `sha256sum` it.
+  Install refuses an extracted binary that differs, and a kept scanner with that hash is adopted as install's own; a test fails on a scanner row without it.
 - **Docs, tests and CI only** keep the version.
 - **After the merge** the merge commit on `main` is tagged `v<VERSION>` (annotated, `git tag -a v0.2.0 -m "v0.2.0"`) and the tag is pushed.
   A tag is never moved, replaced or deleted and re-created: a mistake gets the next version.

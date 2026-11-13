@@ -504,6 +504,36 @@ test_uninstall_stops_before_changing_anything_while_smartgit_runs() {
     assert_eq "$(sg_hash "$SG_PREFS")" "$(sg_hash "$SANDBOX/prefs.orig")" "SmartGit is back on its original setting"
 }
 
+test_a_refusal_during_uninstall_names_uninstall_and_one_during_restore_smartgit_names_the_restore() {
+    sg_configure || return 1
+    assert_rc 0 "configure"
+    sg_running || return 1
+    gsg uninstall
+    assert_rc 1 "SmartGit is running"
+    assert_contains "$ERR" "exit it with Repository, Exit and run git-secret-guard uninstall again; nothing was changed" "the command to run again is uninstall"
+    assert_not_contains "$ERR" "run the restore again" "never the restore the user did not run"
+    gsg restore-smartgit
+    assert_rc 1 "SmartGit is still running"
+    assert_contains "$ERR" "Repository, Exit and run the restore again; nothing was changed" "restore-smartgit keeps naming itself"
+}
+
+test_on_a_mac_an_older_major_is_left_over_unless_its_own_app_is_installed() {
+    local old
+    sg_installed || return 1
+    old="$LC_HOME/Library/Preferences/SmartGit/25.1"
+    sg_point_at_git "$SG_PREFS" "$SANDBOX/pathbin/git" || return 1
+    sg_make_prefs "$old/preferences.yml" "$SG_APP" || return 1
+    gsg status
+    assert_rc 0 "only the 26.1 app is installed: 25.1 is left over"
+    assert_contains "$OUT" "SmartGit settings: $old (25.1): left over, SmartGit uses the newer 26.1 here; this directory is not edited or counted and can be deleted once SmartGit 25.1 is no longer used" "the info line"
+    sg_make_app "$SG_APPS/SmartGit25.app" 25.1.100 2.53.0 3.7.1 || return 1
+    gsg status
+    assert_rc 1 "a SmartGit 25.1 app is installed: its directory is live and on the old bundled git"
+    assert_contains "$OUT" "SmartGit settings: $old (25.1): bundled git, git 2.53.0; commits are NOT scanned MISMATCH: by hand:" "the by-hand step"
+    assert_not_contains "$OUT" "run: git-secret-guard install --configure-smartgit" "status never names the refused command"
+    rm -rf -- "$SG_APPS/SmartGit25.app" || return 1
+}
+
 # ^ invariant SG_STOP_FIRST stops sg_interrupt_run at the first move whose arguments match; SG_STOP_SECOND lets one such move pass and stops at the next
 SG_STOP_FIRST=0
 SG_STOP_SECOND=1

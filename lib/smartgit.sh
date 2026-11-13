@@ -12,6 +12,8 @@ SMARTGIT_MAX_ENTRIES=64
 SMARTGIT_MAX_DESKTOP_FILES=50
 SMARTGIT_DIR_ID_LEN=12
 SMARTGIT_ANNOUNCED=0
+# ^ invariant what a restore refusal tells the user to run again; the restore names itself, uninstall sets its own command before it calls the restore
+SMARTGIT_AGAIN="the restore"
 SG_FOUND=0
 # ^ invariant Windows only, set by smartgit_win_target during an offer; the target written into preferences.yml and the POSIX git path run for the checks
 # ^ invariant both stay empty elsewhere, and the expansion "${SMARTGIT_WIN_TARGET:-$GSG_GIT}" names GSG_GIT
@@ -21,6 +23,7 @@ SMARTGIT_WIN_TARGET="" SMARTGIT_WIN_GIT=""
 smartgit_reset_results() {
     SG_INST_KIND=() SG_INST_PATH=() SG_INST_VER=()
     SG_SET_DIR=() SG_SET_MAJOR=() SG_SET_KIND=() SG_SET_STATE=() SG_SET_WHY=() SG_SET_CHOICE=() SG_SET_GIT=() SG_SET_VER=()
+    SG_SET_LEFT=() SG_SET_NEWER=()
 }
 smartgit_reset_results
 
@@ -290,10 +293,12 @@ smartgit_unquote() {
 
 # ^ invariant the install of version MAJOR.MINOR or MAJOR.MINOR.x is the one a settings directory MAJOR.MINOR belongs to; sets REPLY = its index, rc 1 = none
 # ^ invariant 26.10 does not match 26.1; only the whole version or a dot after the prefix does
+# ^ invariant an optional second argument limits the match to installs of one kind (a macOS app never owns a Flatpak directory)
 smartgit_install_for() {
-    local major="$1" i
+    local major="$1" kind="${2:-}" i
     REPLY=""
     for i in "${!SG_INST_PATH[@]}"; do
+        if [ -n "$kind" ] && [ "${SG_INST_KIND[$i]}" != "$kind" ]; then continue; fi
         if [[ ${SG_INST_VER[$i]} == "$major" || ${SG_INST_VER[$i]} == "$major".* ]]; then
             REPLY="$i"
             return 0
@@ -391,7 +396,8 @@ smartgit_scan_base() {
     for d in "$base"/*; do
         if [ ! -d "$d" ]; then continue; fi
         name="${d##*/}"
-        if [[ ! $name =~ ^[0-9]+\.[0-9]+$ ]]; then continue; fi
+        # ^ why at most 9 digits a part, not any length; smartgit_major_newer compares them as shell integers
+        if [[ ! $name =~ ^[0-9]{1,9}\.[0-9]{1,9}$ ]]; then continue; fi
         n=$((n + 1))
         if ! smartgit_under_cap "$n"; then return 0; fi
         smartgit_add_settings "$d" "$kind" "$name"
@@ -416,6 +422,41 @@ smartgit_find_settings() {
     esac
 }
 
+# ^ invariant true when major $1 (MAJOR.MINOR, digits only as smartgit_scan_base admits) is newer than major $2
+smartgit_major_newer() {
+    local hi_a="${1%%.*}" lo_a="${1#*.}" hi_b="${2%%.*}" lo_b="${2#*.}"
+    if [ "$hi_a" -ne "$hi_b" ]; then [ "$hi_a" -gt "$hi_b" ]; else [ "$lo_a" -gt "$lo_b" ]; fi
+}
+
+# ^ invariant a directory SmartGit has set up is judged (not missing, a link or foreign) and, off macOS, holds the startup file its wizard writes at Finish
+# ^ invariant only such a directory can be the newest of its root; one SmartGit never set up demotes nothing and is never left over itself
+smartgit_set_ready() {
+    case "${SG_SET_STATE[$1]}" in missing | symlink | owner) return 1 ;; esac
+    [ "${SG_SET_KIND[$1]}" = macos ] || [ -f "${SG_SET_DIR[$1]}/startup" ]
+}
+
+# ^ invariant within one settings root (the directory holding the MAJOR.MINOR subdirectories) the newest major set up is live
+# ^ invariant an older major is live only when an install of its kind has exactly its major (read on macOS and for the Flatpak only), else it is left over
+# ^ invariant sets SG_SET_LEFT (1 = left over) and SG_SET_NEWER (newest major of its root) per directory; a left-over one is reported, never edited
+smartgit_mark_left_over() {
+    local i j newest
+    SG_SET_LEFT=() SG_SET_NEWER=()
+    for i in "${!SG_SET_DIR[@]}"; do
+        newest="${SG_SET_MAJOR[$i]}"
+        if smartgit_set_ready "$i"; then
+            for j in "${!SG_SET_DIR[@]}"; do
+                if [ "${SG_SET_DIR[$j]%/*}" = "${SG_SET_DIR[$i]%/*}" ] && smartgit_set_ready "$j" && smartgit_major_newer "${SG_SET_MAJOR[$j]}" "$newest"; then newest="${SG_SET_MAJOR[$j]}"; fi
+            done
+        fi
+        SG_SET_NEWER+=("$newest")
+        if [ "$newest" != "${SG_SET_MAJOR[$i]}" ] && ! smartgit_install_for "${SG_SET_MAJOR[$i]}" "${SG_SET_KIND[$i]}"; then
+            SG_SET_LEFT+=(1)
+        else
+            SG_SET_LEFT+=(0)
+        fi
+    done
+}
+
 # ^ invariant fills the SG_INST_* and SG_SET_* arrays and SG_FOUND (installs plus settings directories); nothing found prints nothing
 # ^ why the override is announced only when something was found or the flag was given, not on every run; a suite-wide seam would add a line to every stderr
 smartgit_collect() {
@@ -433,6 +474,7 @@ smartgit_collect() {
             ;;
     esac
     smartgit_find_settings
+    smartgit_mark_left_over
     SG_FOUND=$((${#SG_INST_PATH[@]} + ${#SG_SET_DIR[@]}))
     if [ "$SG_FOUND" -gt 0 ]; then smartgit_announce_overrides; fi
 }

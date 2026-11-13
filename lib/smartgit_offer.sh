@@ -15,8 +15,7 @@ smartgit_check_target() {
 }
 
 smartgit_manual_steps() {
-    printf '%s: by hand: in SmartGit open Preferences, Commands, choose "Other Git Executable" and enter %s, then check that git --version through it says %s or newer; every step is in docs/smartgit.md\n' \
-        "$GSG_NAME" "${SMARTGIT_WIN_TARGET:-${GSG_GIT:-the git that status reports}}" "$(smartgit_min_git)" >&2
+    printf '%s: %s\n' "$GSG_NAME" "$(smartgit_manual_text)" >&2
 }
 
 smartgit_refuse() {
@@ -35,6 +34,37 @@ smartgit_flatpak_manual_steps() {
     printf '  2. create the wrapper ~/.local/share/smartgit/host-bin/git (chmod 755) that runs: flatpak-spawn --host %s "$@"\n' "${GSG_GIT:-<the git that status reports>}" >&2
     printf '  3. add -Djava.io.tmpdir=<your home>/.cache/smartgit-tmp to ~/.var/app/%s/config/smartgit/smartgit.vmoptions\n' "$SMARTGIT_FLATPAK_ID" >&2
     printf '  4. in SmartGit choose Other Git Executable and type the wrapper path\n' >&2
+}
+
+# ^ invariant the parenthesis of a refusal when it cannot be told whether SmartGit runs, naming the tool the check of kind $1 needs
+smartgit_untellable_why() {
+    if [ "$1" = windows ]; then printf '(ps -W is missing or failed)'; else printf '(pgrep or flatpak ps is missing or failed)'; fi
+}
+
+# ^ invariant the repair advice for kind $1 when it cannot be told whether SmartGit runs, empty on Windows; both such refusals use it
+smartgit_untellable_advice() {
+    case "$1" in
+        windows) ;;
+        flatpak) printf 'check that flatpak ps works' ;;
+        *) printf 'install pgrep' ;;
+    esac
+}
+
+# ^ invariant refuses settings directory $1 with no startup file; a running SmartGit (its wizard is open) is named first, with the way to exit it
+# ^ invariant a running check with no answer is named as well, the refusal lists every reason it has
+smartgit_refuse_no_startup() {
+    local i="$1" kind="${SG_SET_KIND[$1]}" rc advice
+    advice="$(smartgit_untellable_advice "$kind")"
+    smartgit_is_running "$i"
+    rc=$?
+    case "$rc" in
+        0)
+            smartgit_running_who "$kind"
+            smartgit_refuse "$i" "$REPLY is running and its setup wizard is not finished here (no startup file); finish the wizard, exit SmartGit with Repository, Exit and run the command again"
+            ;;
+        1) smartgit_refuse "$i" "SmartGit is not set up yet here (no startup file); start SmartGit once, finish its setup wizard, exit it and run the command again" ;;
+        *) smartgit_refuse "$i" "it cannot be told whether SmartGit is running $(smartgit_untellable_why "$kind"), and it is not set up yet here (no startup file); finish its setup wizard if it is open, exit SmartGit with Repository, Exit and run the command again${advice:+; $advice}" ;;
+    esac
 }
 
 # ^ invariant rc 0 = settings directory $1 may be edited; every refusal prints why, says SmartGit was not changed and, where it helps, the manual steps
@@ -61,7 +91,7 @@ smartgit_check_dir() {
     esac
     # ^ external on Linux the setup wizard writes "startup" only when it reaches Finish, and shows again on every start before it (measured, 26.1)
     if [ "$kind" != macos ] && [ ! -f "${SG_SET_DIR[$i]}/startup" ]; then
-        smartgit_refuse "$i" "SmartGit is not set up yet here (no startup file); start SmartGit once, finish its setup wizard, exit it and run the command again"
+        smartgit_refuse_no_startup "$i"
         return 1
     fi
     if [ "$kind" = flatpak ]; then
@@ -76,9 +106,9 @@ smartgit_check_dir() {
     fi
     if [ "$rc" -ne 1 ]; then
         if [ "$kind" = windows ]; then
-            smartgit_refuse "$i" "it cannot be told whether SmartGit is running (ps -W is missing or failed); exit SmartGit with Repository, Exit and run the command again"
+            smartgit_refuse "$i" "it cannot be told whether SmartGit is running $(smartgit_untellable_why "$kind"); exit SmartGit with Repository, Exit and run the command again"
         else
-            smartgit_refuse "$i" "it cannot be told whether SmartGit is running (pgrep or flatpak ps is missing or failed); exit SmartGit and install pgrep"
+            smartgit_refuse "$i" "it cannot be told whether SmartGit is running $(smartgit_untellable_why "$kind"); exit SmartGit and $(smartgit_untellable_advice "$kind")"
         fi
         return 1
     fi
@@ -94,7 +124,7 @@ smartgit_needs_change() {
 smartgit_all_good() {
     local i seen=0
     for i in "${!SG_SET_DIR[@]}"; do
-        if [ "${SG_SET_STATE[$i]}" = missing ]; then continue; fi
+        if [ "${SG_SET_LEFT[$i]}" -eq 1 ] || [ "${SG_SET_STATE[$i]}" = missing ]; then continue; fi
         if [ "${SG_SET_STATE[$i]}" != ok ] || [ "$(smartgit_scan_word "$i")" != yes ]; then return 1; fi
         seen=1
     done
@@ -105,7 +135,7 @@ smartgit_hint() {
     local i="$1" where
     where="${SG_SET_DIR[$i]}"
     if smartgit_install_for "${SG_SET_MAJOR[$i]}"; then where="${SG_INST_PATH[$REPLY]} (SmartGit ${SG_INST_VER[$REPLY]})"; fi
-    printf '%s: SmartGit: found %s; it commits with its %s, so its commits are not scanned; run: %s\n' "$GSG_NAME" "$where" "$(smartgit_what "$i")" "$(smartgit_cmd_text)"
+    printf '%s: SmartGit: found %s; it commits with its %s, so its commits are not scanned; %s\n' "$GSG_NAME" "$where" "$(smartgit_what "$i")" "$(smartgit_fix_text "$i")"
 }
 
 # ^ invariant the target must be an absolute path made of [A-Za-z0-9._/+@%-] only; this makes it a plain YAML scalar the edit can write without quoting
@@ -185,7 +215,9 @@ smartgit_nothing_to_change() {
         printf '%s: SmartGit: no SmartGit settings directory exists yet (start SmartGit once so it creates one); SmartGit was not changed\n' "$GSG_NAME" >&2
         return 1
     fi
-    for i in "${!SG_SET_DIR[@]}"; do printf '%s: SmartGit settings: %s\n' "$GSG_NAME" "$(smartgit_settings_text "$i")" >&2; done
+    for i in "${!SG_SET_DIR[@]}"; do
+        if [ "${SG_SET_LEFT[$i]}" -eq 0 ]; then printf '%s: SmartGit settings: %s\n' "$GSG_NAME" "$(smartgit_settings_text "$i")" >&2; fi
+    done
     printf '%s: SmartGit was not changed: nothing above is a setting this tool can judge and change\n' "$GSG_NAME" >&2
     return 1
 }
@@ -206,7 +238,10 @@ smartgit_install_step() {
         return 0
     fi
     for i in "${!SG_SET_DIR[@]}"; do
-        if smartgit_needs_change "$i" || { [ "${SG_SET_STATE[$i]}" != ok ] && [ "${SG_SET_STATE[$i]}" != missing ]; }; then
+        # ^ why a left-over directory is skipped here, not refused; nothing detected uses it, it is no work for the flag and no error for the exit status
+        if [ "${SG_SET_LEFT[$i]}" -eq 1 ]; then
+            continue
+        elif smartgit_needs_change "$i" || { [ "${SG_SET_STATE[$i]}" != ok ] && [ "${SG_SET_STATE[$i]}" != missing ]; }; then
             todo+=("$i")
         elif [ "$flag" -eq 1 ] && [ "${SG_SET_STATE[$i]}" = ok ] && [ "${SG_SET_KIND[$i]}" != macos ] && [ "$(smartgit_scan_word "$i")" != yes ]; then
             todo+=("$i")

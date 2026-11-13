@@ -30,7 +30,7 @@ sl_common() {
     rm -f -- "$SANDBOX/smartgit.running" "$SANDBOX/smartgit.log" "$SANDBOX/pgrep.count" "$SANDBOX/smartgit.running.after" "$SANDBOX/mv.stall" \
         "$SANDBOX/mv.stallskip" "$SANDBOX/mv.stalled" "$SANDBOX/flatpak.installed" "$SANDBOX/flatpak.ps" "$SANDBOX/flatpak.override.user" \
         "$SANDBOX/flatpak.override.system" "$SANDBOX/flatpak.version" "$SANDBOX/flatpak.nospawn" "$SANDBOX/flatpak.nostale" "$SANDBOX/flatpak.run.fail" \
-        "$SANDBOX/flatpak.override.fail" "$SANDBOX/vmopts.orig" "$SANDBOX/apt.lfs.candidate" || return 1
+        "$SANDBOX/flatpak.override.fail" "$SANDBOX/flatpak.ps.fail" "$SANDBOX/vmopts.orig" "$SANDBOX/apt.lfs.candidate" || return 1
     lc_begin && lc_make_fixtures && lc_use_fixtures || return 1
     gu_old_git 2.56.0 || return 1
     gu_os_release 'ID=fedora' || return 1
@@ -74,6 +74,25 @@ exec '$GIT' \"\$@\"" || return 1
     set_env GSG_SMARTGIT_INSTALL_DIRS="$SL_INSTALL"
     sl_settings "$LC_HOME/.config/smartgit/$SL_MAJOR" linux-tarball-26.1 "$SL_INSTALL"
 }
+
+# ^ invariant sl_extra_major ROOT MAJOR FIXTURE INSTALL = one more settings directory ROOT/MAJOR from a fixture, with its startup file; SG_PREFS stays
+sl_extra_major() {
+    sl_prefs "$3" "$1/$2/preferences.yml" "$4"
+}
+
+# ^ invariant sl_leftover_setup = a tarball SmartGit with 26.1 on a scanned git, plus the 25.1 directory a major update leaves (bundled git 2.53.0)
+# ^ invariant sets SL_OLD to the 25.1 directory and SL_OLD_HASH to the hash of its preferences file
+SL_OLD="" SL_OLD_HASH=""
+sl_leftover_setup() {
+    sl_tarball_setup || return 1
+    sg_point_at_git "$SG_PREFS" "$SANDBOX/pathbin/git" || return 1
+    sl_extra_major "$LC_HOME/.config/smartgit" 25.1 linux-tarball-26.1 "$SL_INSTALL" || return 1
+    SL_OLD="$LC_HOME/.config/smartgit/25.1"
+    SL_OLD_HASH="$(sg_hash "$SL_OLD/preferences.yml")"
+}
+
+# ^ invariant sl_leftover_tail OLD NEWER = the wording of the info line of a left-over directory of major OLD beside the live major NEWER, after its head
+sl_leftover_tail() { printf 'left over, SmartGit uses the newer %s here; this directory is not edited or counted and can be deleted once SmartGit %s is no longer used' "$2" "$1"; }
 
 # ^ invariant sl_hand_wrapper writes the wrapper a user makes by hand after the docs, without our marker, running the host git
 sl_hand_wrapper() {

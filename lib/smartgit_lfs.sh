@@ -102,7 +102,7 @@ SG_LFS_KILL_GRACE_SECONDS=5
 
 # ^ security the query is bounded, reads no terminal and answers no to every prompt => an unimported repository key fails it instead of asking
 # ^ invariant a failed query and an empty answer are two refusals; neither names a repository this tool did not see, and none is ever enabled
-# ^ why the answer stays in a variable, not a file; dnf output is never written to disk (CLAUDE.md), stderr is dropped and the exit status reported
+# ^ why the answer stays in a variable, not a file; dnf output never reaches disk (docs/platforms.md#rhel-rocky-and-fedora-rpm), stderr dropped, rc reported
 smartgit_lfs_plan_dnf() {
     local dnf offered qrc=0
     smartgit_lfs_require_bin dnf || return 1
@@ -368,7 +368,7 @@ smartgit_lfs_undo() {
             if [ "$rc" -eq 2 ]; then return 1; fi
             if [ "$rc" -eq 0 ]; then
                 "$GSG_GIT" -C / config --global --remove-section filter.lfs || {
-                    printf '%s: the filter.lfs section could not be removed from the global git config; run the restore again\n' "$GSG_NAME" >&2
+                    printf '%s: the filter.lfs section could not be removed from the global git config; run %s again\n' "$GSG_NAME" "$SMARTGIT_AGAIN" >&2
                     return 1
                 }
                 printf '%s: removed the filter.lfs.* settings that git lfs install added\n' "$GSG_NAME"

@@ -876,16 +876,16 @@ and not part of `tests.yml`. It runs only by `workflow_dispatch`.
     mode 1777, same error), and the ipc namespace check only compares the launcher's ids. No sound extra check exists: the host's mqueue device number cannot be known from inside the container, and stat
     fields (owner, time) are mapping artefacts. Where the directory is readable, a non-empty host mqueue is still caught.
   Podman 4.9.3 is proven by the `platforms.yml` run, not by a unit test: no raw 4.9.3 table was kept, and the optional-masks test covers the `/sys/dev/block` rule. The podman 6 sample is
-  `tests/fixtures/podman/mountinfo-podman-6.1.3.txt` (host paths scrubbed). The mount list is read to at most `ISOLATION_MAX_MOUNT_LINES` (500) lines and fails closed beyond that: with about 37 other
+  `tests/fixtures/podman/mountinfo-podman-6.1.3.txt` (host paths scrubbed; tests in `tests/test_platform_podman6.sh`). The mount list is read to at most `ISOLATION_MAX_MOUNT_LINES` (500) lines and fails closed beyond that: with about 37 other
   mounts, a host of about 460 CPUs or more aborts the run until the limit is raised.
 - **Debian 13 prepare.** `software-properties-common` does not exist on Debian; the package list is now per distribution (`apt_prerequisites`), the Debian default is the source build (no Launchpad PPA is tried), and the
   stock `git` is installed as on Rocky. This was a real failure of the default phases on Debian (run 42252845651).
 - **Rocky containers need `/etc/shadow` at mode 0400** (`rpm_fix_shadow`). At the image's 000 every `sudo` of a non-root user failed with "PAM account management error" under this runner's rootless podman.
   A setuid `unix_chkpwd` and `rpm --setcaps` did not help; only the mode did (probe job, run 42260761407). A fixture, not a product change.
-- **The Rocky VM guest runs with `/usr/local/bin` first on `PATH`**, as the product tells a user to do; a Rocky 9 login shell lists `/usr/bin` first.
+- **The Rocky VM guest runs with `/usr/local/bin` first on `PATH`** (`bash -l`), as the product tells a user to do; a Rocky 9 login shell lists `/usr/bin` first.
 
 ### Results
-The final full run, dispatched on `626295d` (the commits after it change documentation only): `gh workflow run platforms.yml --ref ci/real-platform-runs`, run 42304848378, all 24 jobs green (`1152 passed, 0 failed, 69 skipped` in each of the three suites). Older run ids below are the first appearance of a result.
+`ubuntu-container.sh` accepts the phases `upgrade-root|password|bump|old|takeover|offline` besides `upgrade`; `rpm-phase.sh` runs them through `rpm-more-e2e.sh MODE`, which sources `rpm-upgrade-e2e.sh`. The final full run, dispatched on `626295d` (the commits after it change documentation only): `gh workflow run platforms.yml --ref ci/real-platform-runs`, run 42304848378, all 24 jobs green (`1152 passed, 0 failed, 69 skipped` in each of the three suites). Older run ids below are the first appearance of a result.
 
 | Item | Result | Run | Real output |
 |---|---|---|---|
@@ -914,7 +914,7 @@ the key is now fixed, built from fragments at run time, and the whole file passe
 ### Rocky VM (SELinux enforcing)
 
 `tests/platform/rocky-vm.sh` boots the dated image `Rocky-9-GenericCloud-Base-9.8-20260525.0.x86_64.qcow2` (SHA-256 in the script, taken from the file's CHECKSUM) under qemu with KVM, cloud-init and an
-ed25519 key; the ssh forward is bound to 127.0.0.1 and the guest has no display. `tests/platform/rocky-vm-e2e.sh` runs inside it: `getenforce` must say `Enforcing`, then the Rocky E2E (source install, takeover,
+ed25519 key; the ssh forward is bound to 127.0.0.1 and the guest has no display (`-display none`: `-nographic` cannot be combined with `-daemonize`); the guest script runs under `bash -l`. `tests/platform/rocky-vm-e2e.sh` runs inside it: `getenforce` must say `Enforcing`, then the Rocky E2E (source install, takeover,
 dnf update control, restore), plus labels (`stat -c %C`, `matchpathcon`, `restorecon -n -v`), `ausearch -m AVC,USER_AVC` from the start of the run, and `sshd` serving a real push and clone over ssh through
 `/usr/bin/git-receive-pack` and `/usr/bin/git-upload-pack` while the takeover is active (the server's `agent=git/2.56.0` shows it is the taken-over git; after the restore it is `agent=git/2.52.0`).
 Without a writable `/dev/kvm` the launcher exits 3 and says that TCG software emulation is roughly 10 to 50 times slower, unless `GSG_VM_ACCEL=tcg` is set. This runner has KVM, so TCG was not run.

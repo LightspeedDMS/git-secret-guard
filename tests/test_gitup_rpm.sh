@@ -395,6 +395,21 @@ test_too_little_free_space_refuses_before_anything_changes() {
     gsg install --upgrade-git </dev/null
     assert_rc 1 "no room to build"
     assert_contains "$ERR" "needs at least 800 MB of free disk space" "says how much"
+    assert_contains "$ERR" "the build needs" "names the build as the subject"
+    assert_contains "$ERR" "TMPDIR moves the build directory" "and the advice that can help"
+    assert_contains "$ERR" "nothing was changed" "and that nothing changed"
+    assert_not_contains "$(gu_log)" "dnf install" "no dependency install"
+}
+
+# ^ why only the prefix short, not the build directory; the message must name the install location, as TMPDIR cannot move /usr/local (#114)
+test_too_little_free_space_in_the_install_prefix_names_the_prefix() {
+    gu_rpm_setup || return 1
+    printf '122880 %s\n10485760 %s\n' "$GU_ROOT/usr/local" "$SANDBOX/tmp" >"$SANDBOX/df.avail.dirs"
+    gsg install --upgrade-git </dev/null
+    assert_rc 1 "no room in the prefix"
+    assert_contains "$ERR" "installing git needs at least 300 MB of free disk space in $GU_ROOT/usr/local and 120 MB is free; free some space there" "names the install location"
+    assert_not_contains "$ERR" "TMPDIR" "TMPDIR cannot move the prefix"
+    assert_not_contains "$ERR" "the build needs" "the build is not the subject"
     assert_contains "$ERR" "nothing was changed" "and that nothing changed"
     assert_not_contains "$(gu_log)" "dnf install" "no dependency install"
 }

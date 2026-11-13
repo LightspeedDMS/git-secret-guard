@@ -185,10 +185,12 @@ ISOLATION_MOUNT_RULES+=" /src=* /sys=sysfs /sys/firmware=tmpfs /sys/fs/cgroup=cg
 # ^ external podman 6.1.3 names /sys/devices/virtual/powercap twice in maskedPaths => a second tmpfs mask sits on the first (parent id = first id)
 ISOLATION_MOUNT_STACKABLE=" /sys/devices/virtual/powercap "
 
+ISOLATION_CPU_MASK_RE='^/sys/devices/system/cpu/cpu(0|[1-9][0-9]*)/thermal_throttle$'
+
 # ^ invariant isolation_mount_want MP = the fstype the allow-list wants at MP ("*" = any), rc 1 when MP is not in the list
 isolation_mount_want() {
     local want
-    if [[ $1 =~ ^/sys/devices/system/cpu/cpu(0|[1-9][0-9]*)/thermal_throttle$ ]]; then
+    if [[ $1 =~ $ISOLATION_CPU_MASK_RE ]]; then
         printf 'tmpfs\n'
         return 0
     fi
@@ -199,17 +201,55 @@ isolation_mount_want() {
 
 ISOLATION_MAX_MOUNT_LINES=500
 
+# ^ invariant isolation_fstype_of REST = the fstype after the " - " of a mountinfo line (REST = fields from the optional ones on), "<none>" without it
+isolation_fstype_of() {
+    local rest=" $1"
+    if [[ $rest != *" - "* ]]; then
+        printf '<none>\n'
+        return 0
+    fi
+    rest="${rest#* - }"
+    printf '%s\n' "${rest%% *}"
+}
+
+# ^ security the podman 6 allowances must be a mask or a host tmpfs volume would pass there => same device and root as the /sys/firmware mask, read-only tmpfs
+# ^ invariant prints "DEVICE ROOT" of the /sys/firmware line when it is a read-only tmpfs, rc 1 otherwise (no reference, no allowance); callers never print it
+isolation_mask_reference() {
+    local _ dev root mp opts rest lines=0
+    while read -r _ _ dev root mp opts rest; do
+        lines=$((lines + 1))
+        if [ "$lines" -gt "$ISOLATION_MAX_MOUNT_LINES" ]; then return 1; fi
+        if [ "$mp" != /sys/firmware ]; then continue; fi
+        if [ "$(isolation_fstype_of "$rest")" = tmpfs ] && [[ ,$opts, == *,ro,* ]]; then
+            printf '%s %s\n' "$dev" "$root"
+            return 0
+        fi
+        return 1
+    done <"$1"
+    return 1
+}
+
+# ^ invariant isolation_mask_gate MODE MP DEV ROOT OPTS FSTYPE REF = rc 0 when MP needs no proof or is the reference mask; else prints MP as not a mask, rc 1
+# ^ invariant MODE first = proof only for a thermal_throttle path, repeat = always (the stacked powercap line); an empty REF is never a mask
+isolation_mask_gate() {
+    if [ "$1" = first ] && [[ ! $2 =~ $ISOLATION_CPU_MASK_RE ]]; then return 0; fi
+    if [ -n "$7" ] && [ "$3 $4" = "$7" ] && [ "$6" = tmpfs ] && [[ ,$5, == *,ro,* ]]; then return 0; fi
+    printf '%s (not the mask podman applies)\n' "$2"
+    return 1
+}
+
 # ^ security containers.conf volumes can bind a host directory anywhere => any mount point outside the table fails the run, no /proc /dev /sys wildcards
 # ^ security the mount point (field 5) and the ids (fields 1, 2) are read; root (field 4) and source (field 10) are host paths and are never printed
 # ^ invariant rc 1 stray mount point, 0 none, 2 table unreadable or no root mount; each point once, bar one STACKABLE repeat (same fstype, parent = first id)
 isolation_stray_mounts() {
-    local id parent mp rest fs want stray=0 root=0 seen=" " mount_lines=0
+    local _ id parent dev mroot mp opts rest fs want ref="" stray=0 root=0 seen=" " mount_lines=0
     local -A first_id=() first_fs=() stacked=()
     if [ ! -r "$1" ] || [ -d "$1" ]; then
         printf 'isolation_stray_mounts: cannot read the mount table\n' >&2
         return 2
     fi
-    while read -r id parent _ _ mp _ rest; do
+    ref="$(isolation_mask_reference "$1")" || ref=""
+    while read -r id parent dev mroot mp opts rest; do
         mount_lines=$((mount_lines + 1))
         if [ "$mount_lines" -gt "$ISOLATION_MAX_MOUNT_LINES" ]; then
             printf '<more than %s mount lines>\n' "$ISOLATION_MAX_MOUNT_LINES"
@@ -217,16 +257,12 @@ isolation_stray_mounts() {
             break
         fi
         if [ "$mp" = / ]; then root=1; fi
-        fs="<none>"
-        rest=" $rest"
-        if [[ $rest == *" - "* ]]; then
-            rest="${rest#* - }"
-            fs="${rest%% *}"
-        fi
+        fs="$(isolation_fstype_of "$rest")"
         if want="$(isolation_mount_want "$mp")"; then
             if [[ $seen == *" $mp "* ]]; then
                 if [[ $ISOLATION_MOUNT_STACKABLE == *" $mp "* && -z ${stacked[$mp]:-} && $parent == "${first_id[$mp]}" && $fs == "${first_fs[$mp]}" && $fs == "$want" ]]; then
                     stacked[$mp]=1
+                    isolation_mask_gate repeat "$mp" "$dev" "$mroot" "$opts" "$fs" "$ref" || stray=1
                     continue
                 fi
                 printf '%s (mounted more than once)\n' "$mp"
@@ -236,7 +272,10 @@ isolation_stray_mounts() {
             seen+="$mp "
             first_id[$mp]="$id"
             first_fs[$mp]="$fs"
-            if [ "$want" = "*" ] || [ "$want" = "$fs" ]; then continue; fi
+            if [ "$want" = "*" ] || [ "$want" = "$fs" ]; then
+                isolation_mask_gate first "$mp" "$dev" "$mroot" "$opts" "$fs" "$ref" || stray=1
+                continue
+            fi
             printf '%s (fstype %s)\n' "$mp" "${fs//[^A-Za-z0-9_.-]/?}"
             stray=1
             continue

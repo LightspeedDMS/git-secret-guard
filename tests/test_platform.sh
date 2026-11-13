@@ -462,13 +462,6 @@ test_the_mount_check_names_a_replaced_mount_point_with_the_fstype_it_shows() {
     no_leak "secret-root"
 }
 
-# ^ external podman 6.1.3 mount tables are tested in tests/test_platform_podman6.sh; this one is the 4.9.3 record kept as a regression guard
-test_the_mount_check_still_accepts_the_mount_table_of_podman_4_9_3() {
-    mountinfo_fixture "$SANDBOX/mi" "${BASELINE_MOUNTS[@]}" /sys/dev/block=tmpfs || return 1
-    container_fn isolation_stray_mounts "$SANDBOX/mi"
-    assert_rc 0 "baseline plus /sys/dev/block, rebuilt from the CI record in docs/platforms.md (no raw 4.9.3 table was kept)"
-}
-
 # ^ external podman 5.6.0 masks these files and the powercap directory on hosts having them (names in its binary); the files devtmpfs by analogy, not probed
 # ^ external podman 4.9.3 on the ubuntu-24.04 hosted runner also masks /sys/dev/block (its config.json maskedPaths); fstype proven by CI
 test_the_mount_check_accepts_the_optional_masked_paths_other_kernels_add() {

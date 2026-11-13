@@ -21,7 +21,7 @@ podman6_with() {
 
 # ^ invariant mi_line ID PARENT MP FSTYPE = a mountinfo line shaped like podman 6's masks (read-only, crun's empty directory as source)
 mi_line() {
-    printf '%s %s 0:3 /scrubbed %s ro,nosuid,nodev,relatime - %s scrubbed rw' "$1" "$2" "$3" "$4"
+    printf '%s %s 0:3 /crun/.empty-directory %s ro,nosuid,nodev,relatime - %s scrubbed rw' "$1" "$2" "$3" "$4"
 }
 
 # ^ invariant p6_mounts = isolation_stray_mounts of tests/platform/ubuntu-container.sh on $SANDBOX/mi, in a clean bash
@@ -102,6 +102,41 @@ test_the_mount_check_accepts_a_powercap_mask_stacked_once_on_the_first_and_nothi
     p6_mounts
     assert_rc 1 "a stray mount next to the podman 6 masks"
     assert_eq "$OUT" "/root/injected" "is the only name printed"
+}
+
+# ^ invariant mi_raw ID PARENT DEV ROOT MP OPTS FSTYPE = a mountinfo line with every field given, to change one field of a mask
+mi_raw() {
+    printf '%s %s %s %s %s %s - %s scrubbed rw' "$1" "$2" "$3" "$4" "$5" "$6" "$7"
+}
+
+# ^ external every podman version masks /sys/firmware => its line is the reference; in the podman 6 sample all 18 masks share 0:3 and /crun/.empty-directory
+test_a_thermal_throttle_or_a_repeated_powercap_mount_that_is_not_the_mask_podman_applies_is_named() {
+    local cpu=/sys/devices/system/cpu/cpu12/thermal_throttle pc=/sys/devices/virtual/powercap v dev root opts
+    for v in "0:77 /run/user/1000 ro,nosuid" "0:3 /run/user/1000 ro,nosuid" "0:77 /crun/.empty-directory ro,nosuid" "0:3 /crun/.empty-directory rw,nosuid" "0:3 /crun/.empty-directory nosuid"; do
+        read -r dev root opts <<<"$v"
+        podman6_with "$(mi_raw 2001 "$P6_SYS" "$dev" "$root" "$cpu" "$opts" tmpfs)" || return 1
+        p6_mounts
+        assert_rc 1 "[$v] on a thermal_throttle path is not the mask"
+        assert_eq "$OUT" "$cpu (not the mask podman applies)" "[$v] named"
+        no_leak "/run/user/1000"
+        podman6_with || return 1
+        sed -i "/^$P6_POWERCAP_STACKED /d" "$SANDBOX/mi" || return 1
+        printf '%s\n' "$(mi_raw "$P6_POWERCAP_STACKED" "$P6_POWERCAP_FIRST" "$dev" "$root" "$pc" "$opts" tmpfs)" >>"$SANDBOX/mi"
+        p6_mounts
+        assert_rc 1 "[$v] as the powercap repeat is not the mask"
+        assert_eq "$OUT" "$pc (not the mask podman applies)" "[$v] named"
+        no_leak "/run/user/1000"
+    done
+    podman6_with || return 1
+    sed -i '/ \/sys\/firmware /d' "$SANDBOX/mi" || return 1
+    p6_mounts
+    assert_rc 1 "without the reference mask line the allowance is refused"
+    assert_contains "$OUT" "cpu0/thermal_throttle (not the mask podman applies)" "every cpu mask is named"
+    podman6_with || return 1
+    sed -i '/ \/sys\/firmware /s/ ro,/ rw,/' "$SANDBOX/mi" || return 1
+    p6_mounts
+    assert_rc 1 "a reference line that is not read-only proves nothing"
+    assert_contains "$OUT" "cpu0/thermal_throttle (not the mask podman applies)" "named"
 }
 
 run_file_tests

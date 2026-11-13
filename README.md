@@ -18,14 +18,14 @@ git config-based hook, so it runs alongside whatever hooks a repository brings (
 **WSL** (Ubuntu, Debian or an RPM distribution inside Windows Subsystem for Linux) takes the Linux row above, with the same git upgrade offer. WSL and Windows are two separate git setups, and installing in one does not cover commits made by the other. Fixture-tested and run for real on hosted WSL 1 and WSL 2 (Ubuntu 22.04 and 24.04; Rocky 9.8 and Fedora 44 on WSL 2 only); other distributions are not run, and WSL 1 on Windows Server 2019 blue-screened the maintainer's host twice (cause not established): see [docs/platforms.md](docs/platforms.md#wsl-windows-subsystem-for-linux).
 
 **git 2.54 or newer has to be first on `PATH`** on every platform: older git ignores config hooks without any message.
-When `install` finds an older or missing git, what happens depends on the platform:
+When `install` finds an older or missing git, what happens depends on the platform (on other platforms `install` refuses and prints how to get a newer git):
 
 - **RHEL, Rocky, AlmaLinux and Fedora:** `install` shows its plan and offers to upgrade git (the default is No; with no terminal, pass `--upgrade-git`). It uses the
   distribution's package when that is new enough, and otherwise builds the pinned source into `/usr/local`. If an old package git stays in `/usr/bin`, `install` also offers
   `--take-over-system-git`, which points it at the new build (undo: `restore-system-git`). See [docs/platforms.md](docs/platforms.md#rhel-rocky-and-fedora-rpm).
 - **Ubuntu and Debian (and derivatives such as Linux Mint):** `install` shows its plan and offers to upgrade git the same way. It uses the distribution's package when that is new enough; on Ubuntu otherwise the git-core PPA (`ppa:git-core/ppa`, signing key checked against a pinned fingerprint), and on Debian, when the PPA lags, or on Linux Mint (its `add-apt-repository` has no `-n`, read from source, not run), the pinned source build. Ubuntu 22.04 ships 2.34 and 24.04 ships 2.43. See [docs/platforms.md](docs/platforms.md#ubuntu-and-debian-apt).
 - **Windows:** `install` offers to upgrade Git for Windows (default No; no terminal: `--upgrade-git`) with winget or the pinned, checked installer: [docs/platforms.md](docs/platforms.md#upgrading-git-for-windows).
-- **Other platforms:** `install` refuses and prints how to get a newer git.
+- **macOS:** `install` shows its plan and offers to upgrade git with Homebrew (default No; no terminal: `--upgrade-git`): `brew upgrade git` for an older Homebrew git, `brew install git` when there is none, run as you, never with `sudo`. A new enough Homebrew git that is not first on `PATH` gets the exact `export PATH=...` line instead (no shell profile is edited). Apple's `/usr/bin/git` cannot be replaced (SIP), so GUI clients that use it are still not scanned. See [docs/platforms.md](docs/platforms.md#macos-homebrew).
 
 ## Install
 

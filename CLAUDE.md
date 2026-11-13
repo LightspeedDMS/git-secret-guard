@@ -59,6 +59,9 @@ new internals there, not here.
 - **Extraction:** added line N stays at line N (never count scan-tree lines); fixed diff flags and `-c` pins (new keys into
   `tests/test_inherited_config.sh`): [scan.md#maintainer-notes](docs/scan.md#maintainer-notes). Pathspecs `:(exclude,top,glob)` with
   two diffs, `GIT_NO_REPLACE_OBJECTS=1`, the `GIT_*_PATHSPECS` unset: [exemptions.md](docs/exemptions.md) (table and maintainer notes).
+- **Git LFS (#98):** the hook never runs git-lfs; a pointer is known by content exactly as git-lfs decodes it, never by `.gitattributes`;
+  the object comes from git config only (never `.lfsconfig`), size and SHA-256 are checked on the scanned copy, and every failure or `ext-`
+  pointer blocks; no git process per file: [scan.md#maintainer-notes](docs/scan.md#maintainer-notes).
 - **Signals:** scanners and the reminder run in their own group (`lib/proc.sh`); `cleanup` kills, waits, then removes the work dir; adapters
   keep `timeout --foreground`, doctor's git shim omits it; a git or find that Ctrl-C must stop never runs inside `< <(...)` (bash 5.3):
   [scan.md#maintainer-notes](docs/scan.md#maintainer-notes), [doctor.md#maintainer-notes](docs/doctor.md#maintainer-notes).

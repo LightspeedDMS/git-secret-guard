@@ -23,7 +23,8 @@
    at its real line number, every other line blank. Nothing added (empty commit, deletions only, binary only) means no
    scan is started and the commit proceeds. The exemptions are loaded before that point, so a repository with a
    `.gitleaks.toml` at HEAD still gets its betterleaks pre-flight ([Exemptions](exemptions.md)), and a config that
-   does not load blocks even a commit with nothing to scan.
+   does not load blocks even a commit with nothing to scan. A staged Git LFS pointer is replaced in that tree by its
+   object's content (or the commit is blocked), see "Files tracked by Git LFS" under Limits.
 4. `trufflehog filesystem` and `betterleaks dir` run in parallel, each through `lib/run-scanner.sh` in its own session
    (`setsid`) and under a timeout. On HUP/INT/TERM the hook signals both process groups, waits for them, and only
    then removes the temp dir, so no scanner outlives the commit. Windows has no process groups: there the hook finds every
@@ -154,14 +155,37 @@ with a reason when it is absent. `tests/fetch-test-tools.sh` downloads the pinne
   contains a NUL byte: a UTF-16LE file holding a credential commits unscanned (the hook says `no added lines to scan`, because git treats the file as binary)
   (`test_real_utf16_and_nul_byte_files_commit_unscanned_a_documented_limit`). Convert such files to UTF-8 first. Pure
   renames and mode changes add no lines.
-- **Files tracked by Git LFS: only the pointer is scanned.** git commits the 3-line pointer of an LFS-tracked file, not
-  its content, so the scan sees only the pointer and a secret in the file is committed and pushed
-  ([#98](https://github.com/LightspeedDMS/git-secret-guard/issues/98), not fixed). Measured on Windows (the CLI, and
-  SmartGit) and on Linux (the SmartGit Flatpak); nothing in the extraction reads LFS objects, so the same is expected on
-  macOS, which was not measured. Reproduced on Windows with the CLI and an installed hook (0.1.0): a plain file holding a
-  fake key was refused; the same key in an LFS-tracked `.dat` landed with `scanned 1 file, 3 added lines: no findings`,
-  whether the file was edited after staging or not (#98 also records one unconfirmed contrary observation, still to be
-  rechecked). SmartGit's Git LFS: [smartgit.md](smartgit.md#git-lfs).
+- **Files tracked by Git LFS: the object is scanned, or the commit is blocked.** git commits the 3-line pointer of an
+  LFS-tracked file; the content sits in the LFS storage and goes to the server on push
+  ([#98](https://github.com/LightspeedDMS/git-secret-guard/issues/98)). The hook never runs `git-lfs`. A staged blob is a
+  pointer when its content (under 1024 bytes, as git-lfs counts) is read **the way git-lfs 3.7.1 reads it**, whatever `.gitattributes`
+  says; anything else is scanned as text. That is wider than the spec text: the blob is trimmed of Unicode white space, split at LF,
+  a trailing CR dropped, empty lines skipped; the lines are `version` (one of `https://git-lfs.github.com/spec/v1`,
+  `https://hawser.github.com/spec/v1`, `http://git-media.io/v/2`), `oid sha256:<64 lowercase hex>` and `size <n>` in that
+  order, with any number of `ext-<digit>-<word character>... sha256:<64 hex>` lines before the size line; the size may carry a `+`
+  or leading zeros (up to int64). Every form in this paragraph was probed with `git lfs pointer --check` and pushes its
+  object; `test_real_the_hook_recognises_exactly_the_pointers_git_lfs_accepts` compares the hook with git-lfs on 46 fixtures.
+  A pointer with an **`ext-` line is recognised and then blocked**: a Git LFS extension (`lfs.extension.<name>.clean`, for
+  example `gzip -nc`) makes git-lfs store the output of a command from the repository's config, so the object is the
+  transformed bytes and not the file (measured with a gzip extension: a binary object holding the key, pushed). The block
+  line is `git-secret-guard: Git LFS file <path>: it uses the Git LFS extension <name>, so its stored object is transformed
+  and cannot be scanned`. The hook never runs the configured command. git-lfs pushes only blobs under 1024 bytes, so a blob
+  of 1024 bytes or more is scanned as text. The object is read from
+  `<storage>/objects/<oid[0:2]>/<oid[2:4]>/<oid>`, where the storage is `<git common dir>/lfs` (so linked worktrees work) or
+  the `lfs.storage` of any git config scope (repository, global, system, `-c`; a relative value is taken from the common
+  dir). A committed `.lfsconfig` is never read. The location decides nothing about safety, because size and SHA-256 are
+  checked on the copy. The object must be a regular file (not a symlink), have the size the pointer says and the SHA-256 the oid says; its copy is then scanned as the added file, with
+  the pointer's path, and the pass line counts its lines instead of the pointer's. A binary object (a NUL in the first 8000
+  bytes) is verified and adds no lines, like any binary file. When the object is missing, unreadable, a symlink, or fails the
+  size or SHA-256 check, the commit is **blocked** (there is no warn-and-pass) with one line per file, e.g.
+  `git-secret-guard: Git LFS file data/big.dat: its object is not in the LFS storage (/repo/.git/lfs)`, then
+  `...could not be scanned..., so nothing was committed; run 'git lfs install', then 'git add' the file again, or commit from the
+  machine that has the content.` When the only problems are extension pointers the advice is `a file stored through a Git LFS
+  extension cannot be scanned: commit it without the extension (remove its lfs.extension setting for this path and 'git add' it
+  again)`, and when both kinds occur both pieces are printed (`lfs_block_text`). There is no size limit on an object: SHA-256 and the copy read the whole file, outside the
+  scanner timeout. A pointer committed earlier without this check is not rescanned (only changed pointers are). Needs
+  `sha256sum` (coreutils; on macOS through `GNUBIN_DIR`, with Git for Windows); a missing or failing one blocks with
+  `the SHA-256 of its object cannot be computed (sha256sum is missing or failed)`. SmartGit's Git LFS: [smartgit.md](smartgit.md#git-lfs).
 - **Attributes: committed and user ones cannot hide text, two machine-local files can.** The diff runs with
   `--attr-source` set to the empty tree, so a `.gitattributes` in the same commit (`* -diff`, `*.txt binary`) has no
   effect, and with `-c core.attributesFile=/dev/null`, so the user's attributes file (and the XDG default) has none
@@ -259,6 +283,45 @@ Why the scan code is shaped this way; each point was probed on the pinned versio
   The awk unquotes C-quoted names, refuses `..`, `.`, empty components and absolute paths (exit 2), and dies on a hunk
   line that is not `+ - space \` or a diff that ends early. Its stderr goes through `_extract_clean_stderr` and its status
   comes from `PIPESTATUS` (`test_an_extraction_write_failure_blocks_with_a_message_about_extraction_and_keeps_the_awk_line`).
+- **Git LFS (#98).** `extract_lfs_objects` (`lib/extract.sh`) runs after `exempt_extract_tree` and starts no git process per
+  file (`test_small_plain_files_cost_no_git_process_per_file` counts runs with `GIT_TRACE`): `_lfs_staged_blobs` takes the
+  regular files of one `diff --cached --raw -z --no-abbrev` (the extraction's flags) that have a scan file, so exclusions
+  are honoured; `_lfs_find_pointers` asks one `git cat-file --batch-check` for the sizes and one `--batch` for the blobs of
+  at most 1023 bytes (`GSG_LFS_POINTER_MAX`), with NUL mapped to 0x01 by `tr` before bash reads them (3000 small plain files: 0.36 s for the whole
+  step, 2 `cat-file` runs; the per-file version measured +29.7 s). Only a blob holding `oid sha256:` is parsed. The blob
+  and not the scan file is read because a changed pointer shows only its changed lines there.
+  `_lfs_parse_pointer` mirrors git-lfs 3.7.1's decoder, read from the tool with `git lfs pointer --check --file`: whole
+  blob `TrimSpace`d (Unicode, `GSG_LFS_SPACE`), LF split, one CR dropped, empty lines skipped, lines are not trimmed, a
+  space-only line is invalid; non-`ext` lines are exactly `version`, `oid`, `size` in that order, `ext-<digit>-<word
+  char>` keys (any bytes after the first name character) may come anywhere before the size line with a `sha256:<64 hex>`
+  value, nothing after the size line; the size is `ParseInt` (a `+`, leading zeros, `-0`, at most int64; `_lfs_parse_size`
+  normalises it before the comparison). An `ext-` line sets `LFS_EXT` (the first extension name) and `extract_lfs_objects`
+  blocks such a pointer before it looks for the object (`test_a_pointer_with_an_extension_line_blocks_even_when_its_object_verifies`,
+  and `test_real_a_git_lfs_gzip_extension_commit_is_blocked` with a real `lfs.extension.gz.clean='gzip -nc'`); recognition
+  itself is unchanged, so the table test still compares the ext fixtures with git-lfs. `git lfs ls-files` and `git lfs push`
+  only consider blobs under 1024 bytes (probed: 1023 is listed and pushed, 1024, 1025 and 1036 are not; `test_only_blobs_under_1024_bytes_are_pointers`),
+  while `git lfs pointer --check` reads the first 1024 bytes only, so it is the wrong oracle above 1023 and a pointer padded
+  past that size passes `--check` but is neither pushed nor followed. **Known bug, [#103](https://github.com/LightspeedDMS/git-secret-guard/issues/103):
+  git reads the work tree file for an LFS path.** `--attr-source` hides `filter=lfs`, so for a stat-clean file git uses the
+  work tree content as the new side of `diff --cached` (a racy-fresh file does not, which made it look random: about one
+  commit in ten). A pure rename of an LFS file then shows its content as added lines. That text is the object's text, so
+  nothing is missed; the pass line counts lines it should not. The rename test sets an old mtime (`touch -d '2 hours ago'`)
+  and asserts that exact current outcome (1 file, 6 lines); after #103 is fixed it must give `no added lines to scan`. `_lfs_storage_dir` takes `git config --type=path --get lfs.storage` (any scope, last wins),
+  `_lfs_fetch_object` copies the object into the work dir and checks size and SHA-256 **on the copy**, then `mv` replaces
+  the pointer's scan file. Counts: the pointer's added lines come from `git diff --numstat -z` (`_lfs_added_lines`), so
+  `GSG_EXTRACT_LINES` stays exact for renames; a binary object removes its file and one from the file count. The hook prints
+  one line per failing file, naming the path (control characters mapped to `?`) and never the content. Tests:
+  `tests/test_lfs.sh` (hand-built pointers and objects; `test_real_*` use the real scanners and the real `git lfs` and skip
+  when absent). The `lfs.storage` tests unset the global key in `begin`: the sandbox's global config is shared by the file.
+  `tests/windows-skips.list` names the three tests that cannot run there (symlink, unreadable and FIFO objects).
+- **Which CI runners have git-lfs.** Read on 2026-11-12 from the runner-images READMEs on `main` (image versions
+  `ubuntu` 20261101.360.1, `macos-26` arm64 20261102.0473.1, `windows-2025` 20261101.318.1): all three list `Git LFS 3.8.1`.
+  Verified: that listing. Assumed: that the tests find it, as `git lfs` through git's exec path on Windows and through
+  `TEST_BASE_PATH` (Homebrew's `bin`) on macOS; where `git lfs version` fails the `test_real_*` LFS tests skip with a reason,
+  the hand-built ones need no git-lfs and the hook itself never runs it.
+- **Doctor has no LFS gap.** It reads no file content and runs no scanner (none of `lib/doctor*.sh` mentions trufflehog,
+  betterleaks, `staged_diff` or `extract_added_lines`); it checks configuration and tool paths, so a pointer cannot be
+  mis-scanned by it.
 - **Config pins.** A command-line `-c` beats repository config, `GIT_CONFIG_PARAMETERS` and `GIT_CONFIG_COUNT`.
   `tests/test_inherited_config.sh` sets its keys in all three forms; add any new one there
   (`test_other_inherited_git_settings_cannot_change_what_is_extracted`). `core.bigFileThreshold` is `100g`, `4095m` on Windows. `replace_head_with_permissive_commit` is the

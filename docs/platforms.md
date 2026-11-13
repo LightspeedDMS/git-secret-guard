@@ -845,6 +845,16 @@ and not part of `tests.yml`. It runs only by `workflow_dispatch`.
 
 - **Isolation checks: one mount rule added, nothing skipped.** Podman 4.9.3 masks `/sys/dev/block` as well (the `maskedPaths` of its `config.json`, read in a probe job). `ISOLATION_MOUNT_RULES`
   gained `/sys/dev/block=tmpfs`; the fstype is checked like every other entry, and the variable, `/dev`, namespace, `/run/secrets` and read-only `/src` checks are unchanged. `ubuntu.sh` still has no way to skip a check.
+- **Isolation checks on podman 6.1.3 (Fedora 45 with SELinux, crun 1.30.1, 12 CPUs; issue #93).** The Debian 13 image aborted the run on three things, all measured in a probe container with the
+  launcher's flags: 12 mounts of `/sys/devices/system/cpu/cpu<N>/thermal_throttle`, `/sys/devices/virtual/powercap` mounted twice, and `find: '/dev/mqueue': Permission denied`. Podman 6's `maskedPaths`
+  names every `thermal_throttle` directory and `powercap` twice. All three hide host paths and nothing widens what the container sees:
+  - Each `thermal_throttle` mount must be a `tmpfs`; the path matches `^/sys/devices/system/cpu/cpu(0|[1-9][0-9]*)/thermal_throttle$` and nothing else (`isolation_mount_want`). Each CPU still counts once.
+  - `powercap` may repeat once, and only as a `tmpfs` mounted on top of the first (the second line's parent id is the first line's mount id; `ISOLATION_MOUNT_STACKABLE`). A third mount, a
+    mount beside the first, another fstype or any other path still fails as "mounted more than once".
+  - `/dev/mqueue` is not listed by `find` any more when it cannot be opened. `isolation_mqueue_check` requires `stat` to say `directory 1777` (the mode the kernel gives the root of an mqueue
+    filesystem), lists it when it can, and accepts an unreadable one only on the exact `find: '<dir>/mqueue': Permission denied` message (`LC_ALL=C`); any other `find` error still stops the run.
+    The mount table still pins its fstype to `mqueue`, and the ipc namespace check still applies.
+  Podman 4.9.3 tables pass unchanged. The sample is `tests/fixtures/podman/mountinfo-podman-6.1.3.txt` (host paths scrubbed); no raw 4.9.3 table was kept, the test rebuilds it from the baseline plus `/sys/dev/block`.
 - **Debian 13 prepare.** `software-properties-common` does not exist on Debian; the package list is now per distribution (`apt_prerequisites`), the Debian default is the source build (no Launchpad PPA is tried), and the
   stock `git` is installed as on Rocky. This was a real failure of the default phases on Debian (run 42252845651).
 - **Rocky containers need `/etc/shadow` at mode 0400** (`rpm_fix_shadow`). At the image's 000 every `sudo` of a non-root user failed with "PAM account management error" under this runner's rootless podman.

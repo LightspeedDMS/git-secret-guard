@@ -181,18 +181,35 @@ ISOLATION_MOUNT_RULES+=" /sys/devices/virtual/powercap=tmpfs"
 ISOLATION_MOUNT_RULES+=" /sys/dev/block=tmpfs"
 ISOLATION_MOUNT_RULES+=" /src=* /sys=sysfs /sys/firmware=tmpfs /sys/fs/cgroup=cgroup2 /sys/fs/selinux=tmpfs "
 
+# ^ external podman 6.1.3 (crun 1.30.1) masks cpu<N>/thermal_throttle of every CPU under /sys/devices/system/cpu with a read-only tmpfs (maskedPaths)
+# ^ external podman 6.1.3 names /sys/devices/virtual/powercap twice in maskedPaths => a second tmpfs mask sits on the first (parent id = first id)
+ISOLATION_MOUNT_STACKABLE=" /sys/devices/virtual/powercap "
+
+# ^ invariant isolation_mount_want MP = the fstype the allow-list wants at MP ("*" = any), rc 1 when MP is not in the list
+isolation_mount_want() {
+    local want
+    if [[ $1 =~ ^/sys/devices/system/cpu/cpu(0|[1-9][0-9]*)/thermal_throttle$ ]]; then
+        printf 'tmpfs\n'
+        return 0
+    fi
+    if [[ $1 == *[!A-Za-z0-9_/.-]* || $ISOLATION_MOUNT_RULES != *" $1="* ]]; then return 1; fi
+    want="${ISOLATION_MOUNT_RULES#*" $1="}"
+    printf '%s\n' "${want%% *}"
+}
+
 ISOLATION_MAX_MOUNT_LINES=500
 
 # ^ security containers.conf volumes can bind a host directory anywhere => any mount point outside the table fails the run, no /proc /dev /sys wildcards
-# ^ security only the mount point (field 5) is read; root (field 4) and source (field 10) are host paths and are never printed
-# ^ invariant rc 1 when a mount point is stray, 0 when none is, 2 when the table cannot be read or has no root mount
+# ^ security the mount point (field 5) and the ids (fields 1, 2) are read; root (field 4) and source (field 10) are host paths and are never printed
+# ^ invariant rc 1 stray mount point, 0 none, 2 table unreadable or no root mount; each point once, bar one STACKABLE repeat (same fstype, parent = first id)
 isolation_stray_mounts() {
-    local mp rest fs want stray=0 root=0 seen=" " mount_lines=0
+    local id parent mp rest fs want stray=0 root=0 seen=" " mount_lines=0
+    local -A first_id=() first_fs=() stacked=()
     if [ ! -r "$1" ] || [ -d "$1" ]; then
         printf 'isolation_stray_mounts: cannot read the mount table\n' >&2
         return 2
     fi
-    while read -r _ _ _ _ mp _ rest; do
+    while read -r id parent _ _ mp _ rest; do
         mount_lines=$((mount_lines + 1))
         if [ "$mount_lines" -gt "$ISOLATION_MAX_MOUNT_LINES" ]; then
             printf '<more than %s mount lines>\n' "$ISOLATION_MAX_MOUNT_LINES"
@@ -206,15 +223,19 @@ isolation_stray_mounts() {
             rest="${rest#* - }"
             fs="${rest%% *}"
         fi
-        if [[ $mp != *[!A-Za-z0-9_/.-]* && $ISOLATION_MOUNT_RULES == *" $mp="* ]]; then
+        if want="$(isolation_mount_want "$mp")"; then
             if [[ $seen == *" $mp "* ]]; then
+                if [[ $ISOLATION_MOUNT_STACKABLE == *" $mp "* && -z ${stacked[$mp]:-} && $parent == "${first_id[$mp]}" && $fs == "${first_fs[$mp]}" && $fs == "$want" ]]; then
+                    stacked[$mp]=1
+                    continue
+                fi
                 printf '%s (mounted more than once)\n' "$mp"
                 stray=1
                 continue
             fi
             seen+="$mp "
-            want="${ISOLATION_MOUNT_RULES#*" $mp="}"
-            want="${want%% *}"
+            first_id[$mp]="$id"
+            first_fs[$mp]="$fs"
             if [ "$want" = "*" ] || [ "$want" = "$fs" ]; then continue; fi
             printf '%s (fstype %s)\n' "$mp" "${fs//[^A-Za-z0-9_.-]/?}"
             stray=1
@@ -235,6 +256,31 @@ isolation_stray_mounts() {
 ISOLATION_ALLOWED_DEV=" core fd full mqueue null ptmx pts pts/ptmx random shm stderr stdin stdout tty urandom zero "
 ISOLATION_MAX_DEV_ENTRIES=500
 ISOLATION_DEV_DEPTH=4
+# ^ external the root of an mqueue filesystem is a directory with mode 1777 (kernel); stat of /dev/mqueue on podman 6.1.3 said directory 1777, uid 0
+ISOLATION_MQUEUE_MODE=1777
+
+# ^ security a host directory over /dev/mqueue shows another type or mode here and another fstype in the mount table; a host mqueue shows its queue names
+# ^ invariant rc 0 = right mode and empty, or not openable with exactly find's permission error; rc 1 = stray (printed); rc 2 = listing failed otherwise
+# ^ external podman 6.1.3 on SELinux gives container root "Permission denied" for find and ls in /dev/mqueue; LC_ALL=C pins the message text and quotes
+isolation_mqueue_check() {
+    local dir="$1/mqueue" state list rc
+    if [ ! -e "$dir" ] && [ ! -L "$dir" ]; then return 0; fi
+    state="$(stat -c '%F %a' -- "$dir" 2>/dev/null)" || state="<unreadable>"
+    if [ "$state" != "directory $ISOLATION_MQUEUE_MODE" ]; then
+        printf 'mqueue (%s)\n' "${state//[^A-Za-z0-9_ .<>-]/?}"
+        return 1
+    fi
+    list="$(LC_ALL=C find "$dir" -mindepth 1 -maxdepth 1 -printf . 2>&1)"
+    rc=$?
+    if [ "$rc" -eq 0 ] && [ -z "$list" ]; then return 0; fi
+    if [ "$rc" -eq 0 ]; then
+        printf 'mqueue/* (count %s)\n' "${#list}"
+        return 1
+    fi
+    if [ "$list" = "find: '$dir': Permission denied" ]; then return 0; fi
+    printf 'isolation_stray_devices: cannot list all of %s\n' "${1//[^A-Za-z0-9_\/.-]/?}" >&2
+    return 2
+}
 
 # ^ security containers.conf devices and volumes add host nodes below /dev (shm, mqueue, pts); the whole tree to depth 4 is compared with a baseline
 # ^ invariant rc 1 when an entry is stray, 0 when none is, 2 when the tree cannot be listed; find follows no symlink, /dev/fd is one entry
@@ -246,7 +292,8 @@ isolation_stray_devices() {
         printf 'isolation_stray_devices: cannot list %s\n' "${1//[^A-Za-z0-9_\/.-]/?}" >&2
         return 2
     fi
-    mapfile -d '' -t -n $((ISOLATION_MAX_DEV_ENTRIES + 1)) entries < <(find "$1" -mindepth 1 -maxdepth "$ISOLATION_DEV_DEPTH" -printf '%P\0' 2>/dev/null)
+    # ^ why prune mqueue and check it by isolation_mqueue_check, not one find over all of it; podman 6 on SELinux makes find fail inside /dev/mqueue
+    mapfile -d '' -t -n $((ISOLATION_MAX_DEV_ENTRIES + 1)) entries < <(find "$1" -mindepth 1 -maxdepth "$ISOLATION_DEV_DEPTH" -path "$1/mqueue" -prune -o -printf '%P\0' 2>/dev/null)
     wait "$!"
     rc=$?
     if [ "${#entries[@]}" -gt "$ISOLATION_MAX_DEV_ENTRIES" ]; then
@@ -260,18 +307,22 @@ isolation_stray_devices() {
     for entry in "${entries[@]}"; do
         if [[ $entry != *[!A-Za-z0-9_/.-]* ]] && { [[ $ISOLATION_ALLOWED_DEV == *" $entry "* ]] || [[ $entry =~ ^pts/[0-9]+$ ]]; }; then continue; fi
         stray=1
-        # ^ security below shm, mqueue and pts the names can be those of host files (a host /dev/shm over this one) => counted per directory, never printed
+        # ^ security below shm and pts the names can be those of host files (a host /dev/shm over this one) => counted per directory, never printed
         case "$entry" in
-            mqueue/* | pts/* | shm/*)
+            pts/* | shm/*)
                 withheld["${entry%%/*}"]=$((${withheld["${entry%%/*}"]:-0} + 1))
                 continue
                 ;;
         esac
         printf '%s\n' "${entry//[^A-Za-z0-9_\/.-]/?}"
     done
-    for entry in mqueue pts shm; do
+    for entry in pts shm; do
         if [ -n "${withheld[$entry]:-}" ]; then printf '%s/* (count %s)\n' "$entry" "${withheld[$entry]}"; fi
     done
+    isolation_mqueue_check "$1"
+    rc=$?
+    if [ "$rc" -eq 2 ]; then return 2; fi
+    if [ "$rc" -ne 0 ]; then stray=1; fi
     [ "$stray" -eq 0 ]
 }
 

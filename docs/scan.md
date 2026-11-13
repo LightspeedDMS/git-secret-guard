@@ -141,6 +141,10 @@ with a reason when it is absent. `tests/fetch-test-tools.sh` downloads the pinne
   with `git commit` (after resolving conflicts, or after `git merge --no-commit`) fires `pre-commit` and is scanned. Probed on the real install (git 2.56): a fake key
   committed on a branch with `--no-verify` reached `main` through `cherry-pick` and through `rebase` with exit 0 and no
   scan. Scan before a branch is shared; `--no-verify` there is the hole, not the replay.
+- **Only the lines a commit adds to files.** A commit message, an annotated tag message and `git notes` are not
+  scanned. A token only in the commit message commits with `no findings`
+  (`test_real_catalog_a14_a_token_in_the_commit_message_is_not_scanned_a_documented_gap`); `git tag -a` and
+  `git notes add` fire no `pre-commit` at all.
 - **About 2 seconds per commit.** Both scanners start on every commit that adds lines (measured 2.0 to 2.2 s per commit
   on this machine). Commits that add nothing (deletions only, empty) start no scan (only the betterleaks
   pre-flight, when there is a `.gitleaks.toml` at HEAD).
@@ -155,7 +159,10 @@ with a reason when it is absent. `tests/fetch-test-tools.sh` downloads the pinne
   it. That includes **UTF-16 text** (with or without a BOM, e.g. a file saved by Windows tools) and any file that
   contains a NUL byte: a UTF-16LE file holding a credential commits unscanned (the hook says `no added lines to scan`, because git treats the file as binary)
   (`test_real_utf16_and_nul_byte_files_commit_unscanned_a_documented_limit`). Convert such files to UTF-8 first. Pure
-  renames and mode changes add no lines.
+  renames and mode changes add no lines. A symlink's blob is its target path, scanned as a one-line file, so a token
+  written as a link target is blocked. A submodule is its own repository: commits made in it run this hook there
+  (`test_real_catalog_d18_d19_d20_worktrees_submodules_and_new_repositories_are_covered`), and in the superproject the
+  gitlink adds one line, `Subproject commit <id>`.
 - **Files tracked by Git LFS: the object is scanned, or the commit is blocked.** git commits the 3-line pointer of an
   LFS-tracked file; the content sits in the LFS storage and goes to the server on push
   ([#98](https://github.com/LightspeedDMS/git-secret-guard/issues/98)). The hook never runs `git-lfs`. A staged blob is a
@@ -198,7 +205,10 @@ with a reason when it is absent. `tests/fetch-test-tools.sh` downloads the pinne
 - **Inherited git configuration cannot change the extraction.** `-c core.bigFileThreshold=100g` is pinned, because a
   lower threshold (`git -c core.bigFileThreshold=1 commit`, or the same key in the repository config) makes git treat
   every file as binary and show no added lines, so a token would commit with no output. The command-line pin wins over
-  the repository config, `GIT_CONFIG_PARAMETERS` and `GIT_CONFIG_COUNT`. 26 other settings (`diff.*`, `core.autocrlf`,
+  the repository config, `GIT_CONFIG_PARAMETERS` and `GIT_CONFIG_COUNT`
+  (`test_real_core_big_file_threshold_cannot_make_a_token_commit_silently`). The pin is also the ceiling: a text file
+  bigger than 100 GiB (4095 MiB on Windows, where Git for Windows keeps the value in 32 bits) is binary to git and is
+  not scanned, whatever your own setting says. 26 other settings (`diff.*`, `core.autocrlf`,
   `core.eol`, `core.safecrlf`, `color.*`, `core.quotePath`, encodings, ...) were swept in all three forms; none changes
   the result (`tests/test_inherited_config.sh`).
 - **Local overrides win.** A repository-local `hook.git-secret-guard.enabled=false` or a different `.command` in its

@@ -3,7 +3,8 @@
 False positives are recorded **in the repository**, so everyone who clones it gets the same result and every exemption
 is versioned and reviewable. Three in-repo mechanisms exist, plus three local switches. All the in-repo files are read
 **from HEAD**, never from the index or the work tree: a commit cannot exempt itself, and the first commit that an
-exemption covers is the one after it was committed.
+exemption covers is the one after it was committed. The one exception: `git commit --amend` of the commit that added an
+exemption is covered by it, because HEAD already holds it (the `git commit --amend` row below).
 
 ## `.secret-scan-ignore`: skip paths
 

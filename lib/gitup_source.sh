@@ -93,15 +93,17 @@ gitup_source_lib_outside() {
 }
 
 # ^ invariant rc 0 when DIR ($1) has $2 kilobytes free; else a refusal naming the same threshold in megabytes, the room and what changed
+# ^ coupled $3 is the subject of the refusal and $4 the advice; the build directory and the prefix each pass their own (#114)
 gitup_source_room() {
+    : "${3:?gitup_source_room needs a subject}" "${4:?gitup_source_room needs advice}"
     local kb
     kb="$(gitup_free_kb "$1")" || {
         printf '%s: cannot measure the free disk space in %s; install refused, %s\n' "$GSG_NAME" "$1" "$(brew_unchanged_text)" >&2
         return 1
     }
     if [ "$kb" -ge "$2" ]; then return 0; fi
-    printf '%s: the build needs at least %s MB of free disk space in %s and %s MB is free; free some space (TMPDIR moves the build directory); install refused, %s\n' \
-        "$GSG_NAME" "$(($2 / 1024))" "$1" "$((kb / 1024))" "$(brew_unchanged_text)" >&2
+    printf '%s: %s needs at least %s MB of free disk space in %s and %s MB is free; %s; install refused, %s\n' \
+        "$GSG_NAME" "$3" "$(($2 / 1024))" "$1" "$((kb / 1024))" "$4" "$(brew_unchanged_text)" >&2
     return 1
 }
 
@@ -237,8 +239,8 @@ gitup_source_prepare() {
     fi
     gitup_source_pins || return 1
     install_require_curl || return 1
-    gitup_source_room "${TMPDIR:-/tmp}" "$GITUP_BUILD_MIN_KB" || return 1
-    gitup_source_room "$GITUP_PREFIX" "$GITUP_PREFIX_MIN_KB" || return 1
+    gitup_source_room "${TMPDIR:-/tmp}" "$GITUP_BUILD_MIN_KB" "the build" "free some space (TMPDIR moves the build directory)" || return 1
+    gitup_source_room "$GITUP_PREFIX" "$GITUP_PREFIX_MIN_KB" "installing git" "free some space there" || return 1
     GITUP_BUILD_DIR="$(mktemp -d "${TMPDIR:-/tmp}/gsg-git-build.XXXXXX")" || return 1
     GITUP_STAGE="$GITUP_BUILD_DIR/stage"
     GITUP_SRC_DIR="$GITUP_BUILD_DIR/src/git-$GITUP_PIN_VER"

@@ -213,6 +213,16 @@ EOF
     cat >"$SANDBOX/pathbin/df" <<'EOF' || return 1
 #!/bin/sh
 d="$(cd "${0%/*}/.." && pwd -P)" || exit 1
+for last; do :; done
+if [ -f "$d/df.avail.dirs" ]; then
+    while read -r kb dir; do
+        if [ "$dir" = "$last" ]; then
+            echo "Filesystem 1024-blocks Used Available Capacity Mounted on"
+            echo "fake 1000000 1 $kb 1% /"
+            exit 0
+        fi
+    done <"$d/df.avail.dirs"
+fi
 if [ -f "$d/df.avail" ]; then
     echo "Filesystem 1024-blocks Used Available Capacity Mounted on"
     echo "fake 1000000 1 $(cat "$d/df.avail") 1% /"
@@ -386,7 +396,7 @@ lc_begin() {
     if [ "$TEST_IS_WINDOWS" -eq 1 ]; then LC_EXE=.exe; fi
     rm -rf -- "$LC_HOME" "$SANDBOX/xdg" "$SANDBOX/pathbin" "$LC_FIX" "$SANDBOX/systemctl.log" "$SANDBOX/systemctl.fail" \
         "$SANDBOX/launchctl.log" "$SANDBOX/launchctl.fail" "$SANDBOX/launchctl.failonce" "$SANDBOX/launchctl.loaded" "$SANDBOX/brew.map" \
-        "$SANDBOX"/gitup.log "$SANDBOX"/sudo.fail "$SANDBOX"/dnf.* "$SANDBOX"/make.* "$SANDBOX"/rpm.* "$SANDBOX"/sudo.failon "$SANDBOX"/sudo.skip "$SANDBOX"/newgit.broken "$SANDBOX"/df.avail "$SANDBOX"/ldd.out "$SANDBOX"/apt.* "$SANDBOX/root" "$SANDBOX/os-release" || return 1
+        "$SANDBOX"/gitup.log "$SANDBOX"/sudo.fail "$SANDBOX"/dnf.* "$SANDBOX"/make.* "$SANDBOX"/rpm.* "$SANDBOX"/sudo.failon "$SANDBOX"/sudo.skip "$SANDBOX"/newgit.broken "$SANDBOX"/df.avail "$SANDBOX"/df.avail.dirs "$SANDBOX"/ldd.out "$SANDBOX"/apt.* "$SANDBOX/root" "$SANDBOX/os-release" || return 1
     mkdir -p -- "$LC_HOME" "$SANDBOX/xdg/data" "$SANDBOX/xdg/state" "$SANDBOX/pathbin" || return 1
     lc_brew_reset || return 1
     lc_systemctl_standin || return 1

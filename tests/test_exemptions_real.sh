@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ^ external a dead proxy makes trufflehog's verification fail => "unknown" (online, a fake credential is "unverified" and hidden); see CLAUDE.md
+# ^ external a dead proxy makes trufflehog's verification fail => "unknown" (online, a fake credential is "unverified" and hidden); see docs/scan.md
 # shellcheck source=tests/lib.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
 

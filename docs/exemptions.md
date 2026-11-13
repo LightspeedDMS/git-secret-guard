@@ -58,7 +58,7 @@ points at `**`) and `*/**` exempts only files below the top level; both are warn
 ## Inline markers: skip one line, per tool
 
 Verified with the real trufflehog 3.99.2 and betterleaks 1.9.0
-(`tests/test_exemptions_real.sh`, `tests/test_real.sh`; the dead-proxy trick in `CLAUDE.md` makes trufflehog report
+(`tests/test_exemptions_real.sh`, `tests/test_real.sh`; the dead-proxy trick in [scan.md](scan.md#maintainer-notes) makes trufflehog report
 `unknown` offline):
 
 | Marker on the same line as the secret | trufflehog | betterleaks | Commit |
@@ -159,7 +159,8 @@ For a repository you do not control, where an in-repo file is not an option:
 
 - **HEAD reads** go through `exempt_head_blob` (`git ls-tree --full-tree HEAD -- <path>`, then `git cat-file blob`); git's
   stderr lands in `EXEMPT_GIT_ERR` and becomes `cannot read X at HEAD (git said: ...)`. The gitleaks files are
-  materialised as `repo-gitleaks.toml` and `repo-gitleaksignore`. Tests: `tests/test_exemptions.sh`,
+  materialised as `repo-gitleaks.toml` and `repo-gitleaksignore`. A root `.gitleaksignore` or `.betterleaksignore` in the scanned tree is
+  renamed `<name>.gsg-committed` (`betterleaks_stage_tree`), so a commit cannot mute itself through them. Tests: `tests/test_exemptions.sh`,
   `tests/test_exemptions_real.sh`.
 - **Pathspecs** (git 2.56): each pattern becomes `:(exclude,top,glob)<p>`. `top` is required: without it `/x` and `../x`
   abort and `.` excludes everything. `**/` and `[` exclude nothing; malformed globs never fail. `scan_ignore_parse`

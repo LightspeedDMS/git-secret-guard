@@ -346,13 +346,13 @@ md_link_problems() {
 test_every_relative_markdown_link_in_the_docs_resolves() {
     cd -- "$GSG_PROJECT" || return 1
     local md links=0
-    for md in README.md docs/*.md; do
+    for md in README.md CLAUDE.md CONTRIBUTING.md docs/*.md; do
         [ -f "$md" ] || { fail "$md does not exist"; continue; }
         run_cap md_link_problems "$md"
         assert_empty "$OUT" "broken links in $md"
         links=$((links + $(md_link_targets "$md" | wc -l)))
     done
-    [ "$links" -ge 10 ] || fail "only $links links outside code fences found in README.md and docs/*.md"
+    [ "$links" -ge 10 ] || fail "only $links links outside code fences found in README.md, CLAUDE.md, CONTRIBUTING.md and docs/*.md"
     [ -f docs/install.md ] && [ -f docs/platforms.md ] && [ -f docs/scan.md ] && [ -f docs/exemptions.md ] && [ -f docs/doctor.md ] \
         || fail "one of the five docs files is missing"
 }

@@ -310,7 +310,7 @@ repository, so only an absolute value gives a reliable answer.
   (`test_status_ignores_an_old_git_that_is_not_first_on_path`). `status_hook_listing` runs `status_hook_ask` in a subshell (its traps never
   touch `status`): traps first, then `mktemp -d`, then `hooklist_probe_line` (`lib/hookspath.sh`): `git rev-parse --local-env-vars` unset
   except `GIT_CONFIG_PARAMETERS` and `GIT_CONFIG_COUNT` (`test_status_ignores_the_repository_a_caller_points_git_at`,
-  `test_status_sees_a_disable_given_through_the_environment`), `git init -q --bare --template=`, and `hooklist_read` (the same reading
+  `test_status_sees_a_disable_given_through_the_environment`), a bare repository written by hand (`HEAD`, `objects/`, `refs/`; never `git init`, which writes `HEAD` through a ref transaction and fires the user's `reference-transaction` hooks), and `hooklist_read` (the same reading
   `doctor_repo_hook` uses). **One verdict**: git's. `doctor`'s machine section calls the same `hooklist_probe_line` in `DR_WORK`
   (`doctor_hook_verdict`), so the two commands cannot disagree. `hp_hook_enabled_scan` stays only to locate the setting git blamed (key,
   scope, file, advice) and never decides: no word list, no version gate for `hook.pre-commit.enabled` (git reports `event-disabled` only
@@ -319,7 +319,7 @@ repository, so only an absolute value gives a reliable answer.
   `event-disabled`. Cleanup is pinned by `test_status_leaves_no_temp_directory_after_a_normal_run` and
   `test_an_interrupted_status_leaves_no_temp_directory`; the failure lines by `test_status_reports_each_failing_git_step_and_prints_no_control_character`
   and `test_status_exits_1_when_only_its_own_mktemp_fails`; Ctrl-C by `test_an_interrupt_during_the_hook_check_stops_status_with_130`. The hand-built repository
-  has no `config` and no hooks, so a template `config` (which `init --template=` once had to be told not to copy) cannot leak in; a template is
+  has no `config` and no hooks, so a template `config` cannot leak in; a template is
   repository-level and `doctor`'s job (`test_status_ignores_a_template_config_that_only_a_new_repository_would_copy`). Nothing the user configured
   runs while `status` asks (`test_status_runs_no_hook_of_the_users_while_it_asks_git`, `test_the_machine_section_runs_no_hook_of_the_users`), and
   `git hook list` runs under the settings' `timeout --foreground` binary, 30 seconds (git stays in status's process group, so Ctrl-C ends it too) (`test_status_bounds_the_hook_listing_with_the_settings_timeout`); without usable
@@ -401,3 +401,59 @@ repository, so only an absolute value gives a reliable answer.
 - **`/etc/os-release` is data, never sourced** (`install_os_release_field`; `GSG_OS_RELEASE` in tests;
   `test_the_container_script_reads_os_release_as_data`). Hints: `install_os_family`, `install_fix_hint`, `install_git_hint`
   (`tests/test_prerequisites.sh`).
+- **The CLI ends with `main "$@"; exit`**, so bash never reads a file `install` just replaced (`bin/git-secret-guard`).
+- **Conditional includes in `status`.** `status_conditional_includes` prints the one informational line for them: the probe cannot see an
+  `includeIf`, and `doctor` checks each repository.
+- **Historical host note.** The reference RHEL host had `/usr/local/bin/git` 2.56 (built from source) and `/usr/bin/git` 2.52, which silently
+  ignores `hook.<name>.*`; that 2.52 stays reachable, so `doctor` reports it as a WARNING (exit 1 is only for a PROBLEM). Tests pick their git with `GSG_TEST_GIT`
+  (`tests/lib.sh`: `/usr/local/bin/git` on Linux, `/usr/bin/git` on macOS, the one on `PATH` on Windows); set it where that path does not exist.
+
+## Maintainer notes: git upgrade
+
+Behaviour: [the RPM](platforms.md#rhel-rocky-and-fedora-rpm), [the apt](platforms.md#ubuntu-and-debian-apt) and
+[the Windows](platforms.md#upgrading-git-for-windows) sections; module contract: [CONTRIBUTING.md](../CONTRIBUTING.md#adding-an-os-module).
+Internals only here.
+
+- **Plan equals log.** The plan lists every command that can run, full path first; conditional ones end in two spaces plus
+  `[only when ...]`, which `check_plan_matches_log` (`tests/gitup.sh`) strips before it compares whole normalized commands with the
+  sudo log. The build runs with `PATH=/usr/bin:/bin` (`GSG_GITUP_BUILD_PATH` in tests). `gitup_apt_plan_fallback` captures
+  `gitup_source_print_plan` in a temp file: a command substitution would lose the `GITUP_PRIV_CMDS` it fills. Every apt command is
+  one array, `gitup_apt_cmd` (`env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a APT_LISTCHANGES_FRONTEND=none ...`), because `sudo` drops the environment.
+- **Takeover internals.** `active` needs the real `excludepkgs` line (`gitup_tk_entry_present`, spaces or commas), not only the
+  marker; identity is link-aware (`gitup_tk_id`); links by `ln -sfT` then `mv -T`; one undo, `gitup_tk_restore_core`, serves
+  rollback, interrupt and `restore-system-git`.
+- **Source route records.** `MANIFEST.partial` is saved before the copy and renamed `MANIFEST` after it; `gitup_source_read_manifests` reads both into
+  `GITUP_KNOWN` (every listed path), `GITUP_DONE` (paths of finished MANIFESTs) and `GITUP_PARTIALS` (the `.partial` files); the
+  "partly copied" clause enters `GITUP_CHANGED` before the `cp` (an interrupt ends the shell) and `gitup_changed_drop` removes it
+  after. The `make` words are one array, `gitup_source_make_words` (`sysconfdir=$GITUP_SYSCONFDIR`, #90), for the plan line and both
+  runs. A failed build keeps `make.log` as `$TMPDIR/gsg-git-build-failed.*.log`.
+- **Ctrl-C.** A bash script without a trap ignores SIGINT when the child it waits for survives it (`sudo`, `cp` finishing normally),
+  so `install` and `restore-system-git` trap INT/TERM/HUP (`gitup_tk_restore_stopped`: state, next command, work dir removed).
+  Interrupt tests: `gu_interrupt_run` (the `sudo.stall` knob; signals only the group it started with `setsid`, never `pkill -f`).
+- **apt internals.** `gitup_apt_upstream` drops epoch and suffix (tests `test_ubuntu_2404_*`, `test_ubuntu_2204_*`,
+  `test_a_ppa_that_lags_*`); `gitup_apt_preflight` records existing PPA state first; `gitup_apt_adder_ok` probes `--help` for `-n`;
+  `gitup_apt_ppa_disable` removes both file forms and `trusted.gpg.d/git-core-ubuntu-ppa.gpg*` (apt trusts it for every repository);
+  `GITUP_APT_PPA_PENDING` plus `gitup_apt_abort` disable an unchecked PPA on Ctrl-C. Real `add-apt-repository` merges the key into
+  an existing keyring, so a keyring holding the pin plus any other key is not the pin.
+- **Windows internals.** `gitup_windows_apply` returns 2 and the core exits 3; the `.cmd` (`install_cli_cmd_text`, `goto :handoff`)
+  is straight-line code: one runner call, one rerun of bash, no loop. `gitup_windows_handoff_place` and `gitup_windows_no_links`
+  (MSYS shows junctions as links) check `GSG_HANDOFF` (only `git-upgrade/handoff.txt` below `LOCALAPPDATA`, no `..`); the directory
+  is emptied of `Git-*-64-bit.exe` and `handoff.txt*` only; `uninstall_gitup_handoff` cleans both places. Elevation = mandatory
+  label `S-1-16-12288` in `whoami /groups` (`gitup_windows_detect` reads `Git_is1` with `reg.exe` from `System32`).
+- **Test seams.** `lc_begin` adds the stand-ins `sudo dnf rpm restorecon make df ldd` and user-owned exec wrappers of
+  `cp rm mv mkdir install ln rmdir touch env`; `tests/platform/rpm.sh` needs `policycoreutils` in the image for `restorecon`. Windows: the `.cmd`
+  tests copy the product and replace only `bin/git-secret-guard`, because Git for Windows' `bin\bash.exe` prepends its own git to `PATH`; run a
+  native `cmd` as `cmd.exe //c` (`MSYS2_ARG_CONV_EXCL` would reach the bash below); a Windows path in a `sed` replacement hits
+  GNU `\U`; certificate writers run under `wu_with_cert_lock` and never count the whole Keys directory (#77).
+- **Windows runner seams** (`tests/gitup_windows.sh`: `wu`, `wu_begin`). The runner reads no environment (a test asserts no `$env:`); tests run a
+  sandbox copy with its own `tools.lock`, and `wu_runner_seam` changes exactly one line of the copy (the status, the one-line `Test-Elevated`).
+  `wu_runner_shadow` wraps `Start-Process` to record the verb, hold between the checks and the start (`GSG_TEST_HOLD` belongs to the wrapper),
+  or throw `Win32Exception(1223)`; its `norun` mode lets `test_real_the_pinned_installer_...` check the real cached asset against the unmodified
+  runner and lock. The signed stand-in is built once into the tools cache (`gsg-test-standin`); its key and CA copy are deleted (`-DeleteKey`),
+  and the build records its own key file name (`key.name`). Windows runs test files in parallel and they share the user's certificate store: every
+  writer runs under `wu_with_cert_lock` (`wu_build_standin`; the safety tests use `wu_build_standin_unlocked` inside it). Windows-only tests need an
+  elevated prompt (`fltmc`), or a machine-wide run would show a UAC prompt.
+- **apt stand-ins** (`tests/apt.sh`). A `STUBGARBAGE` line makes the gpg stand-in exit 2, and an input with no `STUBKEY` also exits 2 like the real
+  tool. Fixtures: `gu_apt_setup`, `gu_apt_fixture sources|list`, `gu_apt_without_sps`; `gua_run`/`gua_reply` call module functions directly.
+  `lc_begin` installs the stand-ins; they use `printf`, not `echo` (Ubuntu's `/bin/sh` is dash), and read an entry as active only on a
+  non-comment line without `Enabled: no`.

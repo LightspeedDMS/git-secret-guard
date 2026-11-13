@@ -87,8 +87,9 @@ in [docs/platforms.md](docs/platforms.md); they are not part of `tests/run.sh`.
   for that, and `tests/test_windows.sh` is where it is tested on every platform.
 - **`.cmd` files stay CRLF** (`.gitattributes`); everything else is LF, also in a Windows checkout.
 
-[CLAUDE.md](CLAUDE.md) holds the maintainer notes: why the code is shaped the way it is, and which "simplifications"
-break it. Read it before changing the hook, extraction, exemptions or install. It is written for AI coding agents too.
+[CLAUDE.md](CLAUDE.md) is the index of the rules and the invariants a "simplification" breaks; the maintainer notes (why the code is
+shaped the way it is) are at the end of each file in `docs/`, and CLAUDE.md links the right one. Read it before changing the hook,
+extraction, exemptions or install. It is written for AI coding agents too.
 
 ## Adding an OS module
 
@@ -140,7 +141,7 @@ break it. Read it before changing the hook, extraction, exemptions or install. I
    naming the module and the missing function, so a new module is checked by being added. `tests/test_gitup_contract.sh` shows each optional capability driven through a test
    module. System paths come from `GSG_GITUP_ROOT` (a sandbox directory in tests), never from `/usr`, `/etc` or `/var` directly. **Fixtures copy the real layout**: the RPM
    has three relative symlinks among its six files, and fixtures of six regular files hid a data-loss bug.
-5. **The docs** to update: `docs/platforms.md` (the platform section), `docs/install.md`, `lib/usage.md`, `CLAUDE.md` (layout and facts), and the install hint in
+5. **The docs** to update: `docs/platforms.md` (the platform section), `docs/install.md` (with its [git upgrade maintainer notes](docs/install.md#maintainer-notes-git-upgrade)), `lib/usage.md`, and the install hint in
    `install_git_hint` for the class.
 
 ## Sign your commits (DCO)
@@ -182,7 +183,7 @@ and `status` shows it). It follows [Semantic Versioning](https://semver.org/); w
 
 - **A pull request that changes what a user gets** (the hook, the CLI, install, `status`, `doctor`, a pinned tool in `tools.lock`)
   bumps `VERSION` in that pull request: a new feature or a changed behaviour raises `y` and resets `z`, a fix raises `z`.
-- **Docs, tests and CI only** keep the version.
+- **Docs, tests and CI only** keep the version. Tests read `VERSION`, never a literal. The first tagged version is 0.2.0.
 - **After the merge** the merge commit on `main` is tagged `v<VERSION>` (annotated, `git tag -a v0.2.0 -m "v0.2.0"`) and the tag is pushed.
   A tag is never moved, replaced or deleted and re-created: a mistake gets the next version.
 - Two open pull requests that both bump: the one merged second takes the next number when it is brought up to date with `main`.

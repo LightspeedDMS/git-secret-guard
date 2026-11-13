@@ -181,6 +181,13 @@ Then a commit from that SmartGit must print the summary line of [How to tell](#h
 | Windows, portable SmartGit 26.1.057 (`win-portable.7z`) | **Measured, not detected** (2026-11-12): settings in `<unpack dir>\.settings\` with no `<major>` directory; `status` and `doctor` did not list it, `install --configure-smartgit` left it untouched (its running check did catch a running portable SmartGit). A GUI commit from it ran its bundled git 2.53.0 and **landed unscanned while `status` said rc 0 "commits are scanned"**. Set it by hand: [Windows, portable SmartGit](#windows-portable-smartgit-not-detected). |
 | Whether any SmartGit feature misbehaves with an external git | Not tested beyond commit and the checks above. |
 
+## Maintainer notes: code
+
+Files: `lib/smartgit{,_report,_offer,_lfs,_apply,_flatpak}.sh`. Only the `executable:` lines of the `git:` block of a recorded `preferences.yml`
+are edited; YAML is never re-serialised. `smartgit_find_snap` only detects a Snap (a `status` line), no Snap settings location is searched;
+`smartgit_flatpak_call` runs under `timeout --foreground`. The seams are `GSG_SMARTGIT_*` (`tests/smartgit.sh`, set for every suite in
+`tests/lib.sh`); the flows are `tests/{,test_}smartgit_linux.sh` and `tests/{,test_}smartgit_windows.sh`.
+
 ## Maintainer notes: the macOS spike (SmartGit 26.1)
 
 Measured on a real Mac (macOS 26.7.1, arm64) with SmartGit 26.1.056 from `brew install --cask smartgit`; nothing below is inferred from the manual.

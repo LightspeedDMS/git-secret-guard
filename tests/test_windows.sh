@@ -85,6 +85,103 @@ test_jq_is_managed_only_when_absent_or_already_ours() {
     assert_eq "$OUT" "[trufflehog betterleaks] [] []" "other platforms never manage it"
 }
 
+# ^ why a lock of its own, not the product's; the pinned jq.exe is a download, a test file cannot have its hash
+jq_adopt_lock() {
+    local file="$1" ver="$2" sha="$3"
+    grep -v '^jq ' "$GSG_PROJECT/tools.lock" >"$file" || return 1
+    printf 'jq %s windows_amd64 %s\n' "$ver" "$sha" >>"$file"
+}
+
+# ^ why a script, not bytes; plan_tools runs the file with --version
+jq_adopt_file() {
+    local file="$1" ver="$2"
+    printf '#!/usr/bin/env bash\necho jq-%s\n' "$ver" >"$file" && chmod 755 "$file"
+}
+
+JQ_ADOPT_ENV='GSG_OS=MINGW64_NT-10.0-26200 GSG_ARCH=x86_64 GSG_NAME=git-secret-guard GSG_SHARE=/s ST_REPLACED="" ST_TOOLS="" INSTALL_TIMEOUT_BIN=$(type -P timeout)'
+
+# ^ why the whole chain, not hand-set variables; a hand-set ST_TOOLS hid a state never listing the adopted jq
+# ^ order manage, plan and write before read and uninstall_tools => the sequence install and uninstall --remove-tools run in one shell
+jq_adopt_chain() {
+    local bin="$1" lock="$2" jqbin="$3"
+    win "$JQ_ADOPT_ENV"' GSG_TOOLS_LOCK="$2" GSG_BIN_DIR="$1" INSTALL_JQ_BIN="$3" ST_PLACED="" GSG_STATE_DIR="$1/st" GSG_STATE_FILE="$1/st/state"
+GSG_TOOL_NEWSHA=("" "" "") ST_BACKUP="" ST_PREV_SET=no GSG_PREV_SET=no GSG_LEGACY_TOOL_NAMES=() GSG_LEGACY_PLACED="" INSTALL_TIMER=0
+install_manage_jq; install_plan_lock && install_plan_tools; echo "names=[${GSG_TOOL_NAMES[*]}] need=${GSG_TOOL_NEED[2]} aside=[${GSG_TOOL_ASIDE[2]}] wrapper=[$INSTALL_JQ_WRAPPER]"
+state_make_dir && install_write_state final && state_read && echo "tools=[$ST_TOOLS] placed=[$ST_PLACED]"
+UN_HANDLED=" "; uninstall_read_placed && uninstall_tools' "$bin" "$lock" "$jqbin"
+}
+
+test_a_jq_left_by_an_earlier_install_is_adopted_and_recorded() {
+    local bin="$SANDBOX/adopt" sha
+    mkdir -p "$bin" && jq_adopt_file "$bin/jq.exe" 1.8.2 || return 1
+    sha="$(sha_of "$bin/jq.exe")"
+    jq_adopt_lock "$SANDBOX/lock1" 1.8.2 "$sha" || return 1
+    jq_adopt_chain "$bin" "$SANDBOX/lock1" "$bin/jq.exe"
+    assert_contains "$OUT" "names=[trufflehog betterleaks jq] need=0 aside=[] wrapper=[/s/jq]" "managed, kept in place, JQ_BIN stays the wrapper"
+    assert_contains "$OUT" "jq] placed=[" "tools_installed_by_us lists it"
+    assert_contains "$OUT" "jq:$sha]" "tools_placed lists it"
+    assert_no_file "$bin/jq.exe" "uninstall --remove-tools removes it"
+}
+
+test_a_jq_at_the_pin_is_adopted_when_the_install_dir_is_not_on_path() {
+    local bin="$SANDBOX/nopath" sha
+    mkdir -p "$bin" && jq_adopt_file "$bin/jq.exe" 1.8.2 || return 1
+    sha="$(sha_of "$bin/jq.exe")"
+    jq_adopt_lock "$SANDBOX/lock2" 1.8.2 "$sha" || return 1
+    jq_adopt_chain "$bin" "$SANDBOX/lock2" ""
+    assert_contains "$OUT" "need=0 aside=[]" "kept in place"
+    assert_contains "$OUT" "jq] placed=[" "tools_installed_by_us lists it although no jq was found on PATH"
+    assert_contains "$OUT" "jq:$sha]" "tools_placed lists it"
+    assert_no_file "$bin/jq.exe" "uninstall --remove-tools removes it"
+}
+
+test_an_adopted_jq_is_replaced_in_place_on_a_pin_bump() {
+    local bin="$SANDBOX/bump" sha new
+    mkdir -p "$bin" && jq_adopt_file "$bin/jq.exe" 1.8.2 || return 1
+    sha="$(sha_of "$bin/jq.exe")"
+    new="$(printf 'other\n' | sha256sum | cut -d' ' -f1)"
+    jq_adopt_lock "$SANDBOX/lock-old" 1.8.2 "$sha" && jq_adopt_lock "$SANDBOX/lock-new" 1.8.3 "$new" || return 1
+    win "$JQ_ADOPT_ENV"' GSG_BIN_DIR="$1" INSTALL_JQ_BIN="$1/jq.exe" ST_PLACED=""
+GSG_TOOLS_LOCK="$2" install_manage_jq
+GSG_TOOLS_LOCK="$3" install_plan_lock && install_plan_tools; echo "need=${GSG_TOOL_NEED[2]} aside=[${GSG_TOOL_ASIDE[2]}] placed=[$ST_PLACED]"' "$bin" "$SANDBOX/lock-old" "$SANDBOX/lock-new"
+    assert_contains "$OUT" "need=1 aside=[] placed=[jq:$sha]" "a new pin replaces it in place, nothing is moved aside"
+}
+
+test_a_jq_with_another_hash_at_the_install_path_is_never_adopted() {
+    local bin="$SANDBOX/theirs" sha
+    mkdir -p "$bin" && jq_adopt_file "$bin/jq.exe" 1.8.2 || return 1
+    sha="$(printf 'not this file\n' | sha256sum | cut -d' ' -f1)"
+    jq_adopt_lock "$SANDBOX/lock-x" 1.8.2 "$sha" || return 1
+    win "$JQ_ADOPT_ENV"' GSG_TOOLS_LOCK="$2" GSG_BIN_DIR="$1" INSTALL_JQ_BIN="$1/jq.exe" ST_PLACED=""
+install_manage_jq; echo "[${GSG_TOOL_NAMES[*]}] [$INSTALL_JQ_BIN] [$ST_PLACED]"' "$bin" "$SANDBOX/lock-x"
+    assert_eq "$OUT" "[trufflehog betterleaks] [$bin/jq.exe] []" "used as it is, no record"
+    win 'GSG_BIN_DIR="$1" ST_EXISTS=1 ST_TOOLS="" UN_HANDLED=" " ST_PLACED=""
+uninstall_read_placed && uninstall_tools' "$bin"
+    assert_file "$bin/jq.exe" "and never removed"
+}
+
+test_a_jq_elsewhere_on_path_is_never_adopted() {
+    local bin="$SANDBOX/else" other="$SANDBOX/else-other" sha
+    mkdir -p "$bin" "$other" && jq_adopt_file "$other/jq.exe" 1.8.2 || return 1
+    sha="$(sha_of "$other/jq.exe")"
+    jq_adopt_lock "$SANDBOX/lock-e" 1.8.2 "$sha" || return 1
+    cp -- "$other/jq.exe" "$bin/jq.exe" || return 1
+    win "$JQ_ADOPT_ENV"' GSG_TOOLS_LOCK="$3" GSG_BIN_DIR="$1" INSTALL_JQ_BIN="$2/jq.exe" ST_PLACED=""
+install_manage_jq; echo "[${GSG_TOOL_NAMES[*]}] [$ST_PLACED]"' "$bin" "$other" "$SANDBOX/lock-e"
+    assert_eq "$OUT" "[trufflehog betterleaks] []" "same bytes, another directory: the user's"
+}
+
+test_a_link_at_the_install_path_is_never_adopted() {
+    local bin="$SANDBOX/link" other="$SANDBOX/link-other" sha
+    mkdir -p "$bin" "$other" && jq_adopt_file "$other/jq.exe" 1.8.2 || return 1
+    sha="$(sha_of "$other/jq.exe")"
+    jq_adopt_lock "$SANDBOX/lock-e" 1.8.2 "$sha" || return 1
+    ln -s -- "$other/jq.exe" "$bin/jq.exe" 2>/dev/null && [ -L "$bin/jq.exe" ] || skip_test "this platform makes no symlinks"
+    win "$JQ_ADOPT_ENV"' GSG_TOOLS_LOCK="$3" GSG_BIN_DIR="$1" INSTALL_JQ_BIN="$1/jq.exe" ST_PLACED=""
+install_manage_jq; echo "[${GSG_TOOL_NAMES[*]}] [$ST_PLACED]"' "$bin" "$other" "$SANDBOX/lock-e"
+    assert_eq "$OUT" "[trufflehog betterleaks] []" "a link is not adopted"
+}
+
 test_a_managed_jq_writes_no_version_key_to_the_settings() {
     win 'GSG_BIN_DIR=/b GSG_TOOL_NAMES+=(jq) GSG_TOOL_VER=(1 2 3) INSTALL_JQ_BIN=/b/jq.exe INSTALL_JQ_WRAPPER=/s/jq
 INSTALL_TIMEOUT_BIN=/t INSTALL_BASH_BIN="" INSTALL_GNUBIN_DIR="" INSTALL_TIMER_BIN=""

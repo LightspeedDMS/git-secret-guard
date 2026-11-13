@@ -51,14 +51,38 @@ install_prune_replaced() {
 }
 
 # ^ invariant Windows only; a jq on PATH install did not place stays in use, one recorded in tools_placed stays managed on every rerun
+# ^ invariant the file at the install path with the pinned SHA-256 is install's own after an uninstall kept it => adopted, recorded in both state keys now
 # ^ order after state_read and before install_plan_lock => jq joins the parallel arrays and gets the same lock, staging, ownership and aside handling
 install_manage_jq() {
     if ! tools_is_windows; then return 0; fi
-    if [ -n "$INSTALL_JQ_BIN" ] && [[ " $ST_PLACED " != *" jq:"* ]]; then return 0; fi
+    if [[ " $ST_PLACED " != *" jq:"* ]]; then
+        if [ -z "$INSTALL_JQ_BIN" ]; then
+            install_adopt_jq || true
+        elif [ "$INSTALL_JQ_BIN" -ef "$GSG_BIN_DIR/$(tools_binary_name jq)" ]; then
+            install_adopt_jq || return 0
+        else
+            return 0
+        fi
+    fi
     GSG_TOOL_NAMES+=(jq)
     INSTALL_JQ_BIN="$GSG_BIN_DIR/$(tools_binary_name jq)"
     # shellcheck disable=SC2034
     INSTALL_JQ_WRAPPER="$GSG_SHARE/jq"
+}
+
+# ^ why the lock row decides, not a record; uninstall without --remove-tools deletes the state and keeps the file => its hash is the only proof left
+# ^ security a link, another directory or another hash is the user's jq => never recorded, never replaced, never removed
+# ^ invariant rc 1 = nothing adopted, no error; tools_installed_by_us gets jq too = uninstall_tools walks only the list of tools_installed_by_us
+install_adopt_jq() {
+    local path plat row sha
+    path="$GSG_BIN_DIR/$(tools_binary_name jq)"
+    if [ ! -f "$path" ] || [ -L "$path" ]; then return 1; fi
+    plat="$(tools_platform_key jq "$GSG_OS" "$GSG_ARCH")" || return 1
+    row="$(tools_lock_lookup "$(tools_lock_path)" jq "$plat")" || return 1
+    sha="$(sha256sum -- "$path" | cut -d' ' -f1)" || return 1
+    if [ -z "$sha" ] || [ "$sha" != "${row##* }" ]; then return 1; fi
+    ST_PLACED+="${ST_PLACED:+ }jq:$sha"
+    if [[ " $ST_TOOLS " != *" jq "* ]]; then ST_TOOLS+="${ST_TOOLS:+ }jq"; fi
 }
 
 # ^ order pure bash, no timeout needed => install_run calls it before the brew install, a missing or invalid lock row refuses with the machine untouched

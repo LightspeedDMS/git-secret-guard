@@ -441,8 +441,13 @@ that run a git 2.54 or newer, because the hook lives in the global git config.
   checks its SHA-256 against `tools.lock`, and places it in `~/.local/bin` beside the scanners. No package manager is
   needed (the Windows Server 2019 test host has no winget). It follows the scanner rules: all downloads are verified before anything
   changes, a rerun keeps it, a pin bump replaces it, and `uninstall --remove-tools` removes it. A `jq` you already have on
-  `PATH` is used as it is and never recorded as ours. Open bug [#97](https://github.com/LightspeedDMS/git-secret-guard/issues/97): after an `uninstall` that keeps the tools,
-  the next `install` takes the `jq.exe` it had placed for one of yours, so from then on a pin bump does not replace it and `--remove-tools` does not remove it.
+  `PATH` is used as it is and never recorded as ours. The one exception is the file `uninstall` left behind: a regular file (not a link) at
+  `~/.local/bin/jq.exe` whose SHA-256 equals the `tools.lock` pin is taken as install's own on the next `install`, when it is the `jq`
+  found on `PATH` or no `jq` is found at all (a `~/.local/bin` that is not on `PATH`); a `jq` found elsewhere on `PATH` keeps it yours. It is
+  recorded (`jq:<sha256>` in `tools_placed`, and in `tools_installed_by_us`), so a pin bump replaces it in place and `--remove-tools` removes
+  it. The test is the hash alone: a byte-identical copy of the pinned jq that you put there yourself counts as ours and is removed by
+  `--remove-tools`. A file at that path with any other hash is never recorded or removed; when no `jq` is on `PATH` and it is not at the
+  pinned version, it is moved aside and `uninstall` puts it back, as for the scanners (bug [#97](https://github.com/LightspeedDMS/git-secret-guard/issues/97)).
 - **`git` in PowerShell.** The Git for Windows installer normally puts `git` on `PATH`. If `git` is not found there, re-run
   it and choose "Git from the command line", or add `C:\Program Files\Git\cmd` to `PATH`. `git-secret-guard.cmd` finds Git
   for Windows either way, next to `git.exe` or in its default locations, and never uses the WSL `bash.exe` in `System32`.

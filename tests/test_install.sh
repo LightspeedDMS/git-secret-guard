@@ -348,29 +348,45 @@ test_install_records_the_pinned_scanner_versions_in_the_settings() {
 
 cfg_count() { gitx config --global --get-all "$1" 2>/dev/null | wc -l; }
 
-test_fresh_install_sets_exactly_one_event_and_one_absolute_command() {
+test_fresh_install_sets_exactly_the_two_events_and_one_absolute_command() {
     fresh_install
     assert_rc 0 "fresh install"
-    assert_eq "$(gitx config --global --get-all hook.git-secret-guard.event)" "pre-commit" "one event"
-    assert_eq "$(cfg_count hook.git-secret-guard.event)" 1 "event is single-valued"
+    assert_eq "$(gitx config --global --get-all hook.git-secret-guard.event | tr '\n' ' ')" "pre-commit commit-msg " "the two events, lines first"
+    assert_eq "$(cfg_count hook.git-secret-guard.event)" 2 "one value per event"
     assert_eq "$(gitx config --global --get-all hook.git-secret-guard.command)" "$LC_DATA/hooks/secret-scan" "command is the installed hook, absolute"
     assert_eq "$(cfg_count hook.git-secret-guard.command)" 1 "command is single-valued"
-    assert_eq "$(gitx config --global --get-regexp '^hook\.' | wc -l)" 2 "nothing else under hook.*"
+    assert_eq "$(gitx config --global --get-regexp '^hook\.' | wc -l)" 3 "nothing else under hook.*"
 }
 
 test_install_replaces_duplicate_and_stale_config_values_instead_of_adding() {
     lc_begin && lc_make_fixtures && lc_use_fixtures || return 1
     gitx config --global --add hook.git-secret-guard.event pre-commit || return 1
+    gitx config --global --add hook.git-secret-guard.event pre-commit || return 1
+    gitx config --global --add hook.git-secret-guard.event pre-push || return 1
+    gitx config --global --add hook.git-secret-guard.event commit-msg || return 1
     gitx config --global --add hook.git-secret-guard.event commit-msg || return 1
     gitx config --global --add hook.git-secret-guard.command /old/one || return 1
     gitx config --global --add hook.git-secret-guard.command /old/two || return 1
     gsg install
     assert_rc 0 "install over stale values"
-    assert_eq "$(gitx config --global --get-all hook.git-secret-guard.event)" "pre-commit" "one event, the stale commit-msg is gone"
+    assert_eq "$(gitx config --global --get-all hook.git-secret-guard.event | tr '\n' ' ')" "pre-commit commit-msg " "exactly the two events, the stale pre-push and the duplicates are gone"
     assert_eq "$(gitx config --global --get-all hook.git-secret-guard.command)" "$LC_DATA/hooks/secret-scan" "one command, the stale paths are gone"
     gsg install
     assert_rc 0 "second install"
-    assert_eq "$(cfg_count hook.git-secret-guard.event)$(cfg_count hook.git-secret-guard.command)" 11 "still single-valued"
+    assert_eq "$(cfg_count hook.git-secret-guard.event)$(cfg_count hook.git-secret-guard.command)" 21 "still two events and one command"
+}
+
+test_install_repairs_an_old_install_that_has_only_the_pre_commit_event() {
+    lc_begin && lc_make_fixtures && lc_use_fixtures || return 1
+    gitx config --global --add hook.git-secret-guard.event pre-commit || return 1
+    gitx config --global --add hook.git-secret-guard.command "$LC_DATA/hooks/secret-scan" || return 1
+    gsg install
+    assert_rc 0 "install over a 0.3.x config"
+    assert_eq "$(gitx config --global --get-all hook.git-secret-guard.event | tr '\n' ' ')" "pre-commit commit-msg " "the second event was added"
+    assert_eq "$(cfg_count hook.git-secret-guard.command)" 1 "the command stays single-valued"
+    gsg install
+    assert_rc 0 "second install"
+    assert_eq "$(gitx config --global --get-all hook.git-secret-guard.event | tr '\n' ' ')" "pre-commit commit-msg " "a rerun adds nothing"
 }
 
 test_fresh_install_records_the_state() {
@@ -607,7 +623,7 @@ test_an_install_from_a_newer_checkout_replaces_the_files_and_keeps_the_record() 
     assert_file "$LC_DATA/lib/added-in-0.2.0.sh" "new files arrive"
     assert_no_file "$LC_DATA/lib/stale-from-0.1.0.sh" "files the new version no longer ships are gone"
     assert_eq "$(cmp -s "$GSG_PROJECT/lib/common.sh" "$LC_DATA/lib/common.sh" && echo same)" same "a local edit is overwritten"
-    assert_eq "$(cfg_count hook.git-secret-guard.event)$(cfg_count hook.git-secret-guard.command)" 11 "config keys stay single-valued"
+    assert_eq "$(cfg_count hook.git-secret-guard.event)$(cfg_count hook.git-secret-guard.command)" 21 "the two events and the one command stay as they were"
     assert_eq "$(state_value tools_installed_by_us)" "trufflehog betterleaks" "tools downloaded by the first install stay recorded"
     gsg_installed version
     assert_eq "$OUT" "git-secret-guard 0.2.0" "the installed CLI is the new one"
@@ -887,7 +903,7 @@ test_install_creates_the_global_config_on_a_machine_that_has_none() {
     rm -f -- "$SANDBOX/gitconfig" || return 1
     gsg install
     assert_rc 0 "no global git config file at all"
-    assert_eq "$(gitx config --global --get hook.git-secret-guard.event)" pre-commit "the file was created with the hook config"
+    assert_eq "$(gitx config --global --get-all hook.git-secret-guard.event | tr '\n' ' ')" "pre-commit commit-msg " "the file was created with the hook config"
     assert_not_contains "$(cat -- "$SANDBOX/gitconfig")" "gsg-install-probe" "and the write probe left no trace"
 }
 
@@ -925,7 +941,7 @@ test_install_keeps_scanning_when_the_final_hooks_path_unset_fails() {
     gsg install --replace-hooks-path
     assert_rc 1 "git refuses to unset core.hooksPath"
     assert_contains "$ERR" "could not unset the global core.hooksPath" "says what failed"
-    assert_eq "$(gitx config --global --get hook.git-secret-guard.event)" pre-commit "the hook config was set before the unset: commits are scanned"
+    assert_eq "$(gitx config --global --get-all hook.git-secret-guard.event | tr '\n' ' ')" "pre-commit commit-msg " "the hook config was set before the unset: commits are scanned"
     assert_eq "$(gitx config --global --get core.hooksPath)" "$old" "the old hooksPath still applies"
     assert_file "$LC_STATE/state" "the record exists, so uninstall can undo it"
     rm -f -- "$SANDBOX/pathbin/git"

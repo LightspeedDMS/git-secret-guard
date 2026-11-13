@@ -2,8 +2,8 @@
 
 [![tests](https://github.com/LightspeedDMS/git-secret-guard/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/LightspeedDMS/git-secret-guard/actions/workflows/tests.yml?query=branch%3Amain)
 
-Scans the lines each commit made on this machine (with git 2.54 or newer) adds to files for secrets, before the commit
-is made. **trufflehog** and **betterleaks** check them in parallel, and any finding blocks the commit. It is a
+Scans the lines each commit made on this machine (with git 2.54 or newer) adds to files, and its message, for secrets
+before the commit is made. **trufflehog** and **betterleaks** check them in parallel, and any finding blocks the commit. It is a
 git config-based hook, so it runs alongside whatever hooks a repository brings (husky, the pre-commit framework,
 `.git/hooks`), also in repositories cloned later.
 
@@ -104,12 +104,12 @@ Details: [docs/exemptions.md](docs/exemptions.md).
 ## Limits
 
 - Commits made with git older than 2.54 are not scanned (check the git your IDE or GUI client bundles; for SmartGit see [docs/smartgit.md](docs/smartgit.md)).
-- Only `pre-commit` runs the scan: automatic merge commits, cherry-picks, rebases and `git am` are not scanned (a merge finished with `git commit` is).
-- Only the lines a commit adds to files are scanned: a commit message, an annotated tag message and `git notes` are not.
+- Lines are scanned by `pre-commit`, the message by `commit-msg`. Not scanned: automatic merge commits, cherry-picks, rebases and `git am` (lines);
+  `revert`, `cherry-pick`, `git am`, `rebase -i` squash and fixup, tags and `git notes` (messages) ([docs/scan.md](docs/scan.md#the-commit-message)).
 - Binary files, including UTF-16 text, are not scanned. On Windows that matters more than elsewhere: Windows PowerShell 5.1 can write UTF-16 with `>` and `Out-File`, so a secret saved that way is invisible to the scan.
 - A staged Git LFS pointer is followed to its object in the local LFS storage and the object's text is scanned (a binary object, like any binary file, adds nothing to scan); a commit whose object is missing, does not match the pointer or was transformed by a Git LFS extension is blocked, never passed unscanned ([docs/scan.md](docs/scan.md#limits)).
 - Offline, trufflehog cannot verify a candidate and reports it as `unknown`, which blocks.
-- About 2 seconds per commit that adds lines.
+- About 2 seconds per commit that adds lines, and about 2 more for the message (measured 1.8 s and 3.5 s per commit in all: trufflehog's start-up).
 
 The scan's limits are in [docs/scan.md](docs/scan.md#limits); install, exemptions and doctor list their own.
 

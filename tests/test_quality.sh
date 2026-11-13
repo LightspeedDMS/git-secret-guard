@@ -294,6 +294,14 @@ test_the_docs_do_not_claim_the_hook_has_no_PATH_lookup() {
     done
 }
 
+# ^ why 165, not the 160 of the code comments; the notes are prose with links and an index line may carry a path or two more
+GSG_CLAUDE_MD_MAX_LINE_LENGTH=165
+test_claude_md_has_no_line_over_the_length_limit() {
+    local long
+    long="$(awk -v max="$GSG_CLAUDE_MD_MAX_LINE_LENGTH" 'length($0) > max { printf "%d: %d  ", FNR, length($0) }' "$GSG_PROJECT/CLAUDE.md")" || return 1
+    [ -z "$long" ] || fail "CLAUDE.md has lines over $GSG_CLAUDE_MD_MAX_LINE_LENGTH characters (line: length): $long"
+}
+
 GSG_README_MAX_LINES=135
 
 test_the_readme_stays_a_short_overview() {

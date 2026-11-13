@@ -151,8 +151,15 @@ sandbox_create() {
 configure_hook() {
     local cmd="$SHARE/hooks/secret-scan"
     if [ -n "$TEST_BASH" ]; then cmd="'$TEST_BASH' '$cmd'"; fi
-    env -i "${GSG_ENV[@]}" "$GIT" config --global "hook.$HOOK_NAME.event" pre-commit || exit 2
+    # ^ why --replace-all, not a plain set; a test before this one may have added the commit-msg event and git refuses to overwrite two values
+    env -i "${GSG_ENV[@]}" "$GIT" config --global --replace-all "hook.$HOOK_NAME.event" pre-commit || exit 2
     env -i "${GSG_ENV[@]}" "$GIT" config --global "hook.$HOOK_NAME.command" "$cmd" || exit 2
+}
+
+# ^ why opt-in, not a second event in configure_hook; the stub-driven suites would scan every message and count its scanner calls
+# ^ coupled production (install) writes both events; a test of the message scan calls this first
+enable_message_hook() {
+    env -i "${GSG_ENV[@]}" "$GIT" config --global --add "hook.$HOOK_NAME.event" commit-msg || exit 2
 }
 
 sandbox_destroy() {

@@ -202,6 +202,8 @@ inline_report() {
     {
         # shellcheck disable=SC2016
         printf 'numstat=%s\n' "$(inline_run "$1" 'cd "$1" && source "$2/lib/common.sh" && source "$2/lib/extract.sh" && staged_trees_init "$1" && staged_added_file_count' _ "$CORPUS" "$GSG_PROJECT")"
+        # shellcheck disable=SC2016
+        printf 'cut=%s\n' "$(inline_run "$1" 'source "$1/lib/common.sh" && source "$1/lib/message.sh" && printf "%s\n" subject "; note" "; $2" "; Do not modify" "diff --git a b" "-removed" | _message_split_cut "$3/s1" "$3/s2"' _ "$GSG_PROJECT" '------------------------ >8 ------------------------' "$SANDBOX")"
         bounds_case "$1" files-at-limit 3 1 3 100
         bounds_case "$1" files-over-limit 4 1 3 100
         bounds_case "$1" files-ten-over-nine 10 0 9 100
@@ -227,6 +229,7 @@ inline_report() {
 inline_expected() {
     cat <<'EOF'
 numstat=14
+cut=5 6 0 0
 bounds files-at-limit rc=0
 bounds files-over-limit rc=1 git-secret-guard: refusing to back up DIR: it holds more than 3 files
 bounds files-ten-over-nine rc=1 git-secret-guard: refusing to back up DIR: it holds more than 9 files

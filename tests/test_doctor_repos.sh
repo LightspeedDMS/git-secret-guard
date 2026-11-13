@@ -40,6 +40,27 @@ test_hook_pre_commit_enabled_false_is_reported_with_its_own_key() {
     assert_contains "$OUT" "PROBLEM  disabled in local config: hook.pre-commit.enabled=false ($DR_REAL/off/.git/config); remove that key to cover this repository" "the event key is named"
 }
 
+test_a_repo_with_the_hook_disabled_gets_one_finding_not_one_per_event() {
+    dr_begin && dr_repo off || return 1
+    gitx -C "$DR_ROOTS/off" config hook.git-secret-guard.enabled false || return 1
+    doctor
+    assert_rc 1 "the hook is switched off"
+    assert_eq "$(grep -c 'PROBLEM  disabled in local config: hook.git-secret-guard.enabled=false' <<<"$OUT")" 1 "one finding for the key that switches off both events"
+}
+
+test_hook_commit_msg_enabled_false_is_reported_with_its_own_key() {
+    dr_begin && dr_repo off || return 1
+    gitx -C "$DR_ROOTS/off" config hook.commit-msg.enabled false || return 1
+    case "$(gitx -C "$DR_ROOTS/off" hook list commit-msg 2>/dev/null)" in
+        *event-disabled*) ;;
+        *) skip_test "this git does not implement hook.<event>.enabled" ;;
+    esac
+    doctor
+    assert_rc 1 "the message event is switched off"
+    assert_contains "$OUT" "PROBLEM  disabled in local config: hook.commit-msg.enabled=false ($DR_REAL/off/.git/config); remove that key to cover this repository" "the event key is named"
+    assert_not_contains "$OUT" "hook.pre-commit.enabled" "the lines event is fine"
+}
+
 test_a_disabling_key_in_an_included_global_file_names_that_file() {
     dr_begin && dr_repo inc || return 1
     printf '[hook "git-secret-guard"]\n\tenabled = false\n' >"$SANDBOX/team.conf" || return 1

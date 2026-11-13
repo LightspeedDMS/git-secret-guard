@@ -150,6 +150,13 @@ exempt_warn_rows() {
     if [ "$GSG_WHOLE_WARNED" -eq 0 ]; then _warn_if_union_covers_tree "${GSG_EXCLUDES[@]}"; fi
 }
 
+# ^ why only HEAD's betterleaks files, not .secret-scan-ignore; a path exemption names files and a message is none
+# ^ invariant the message run announces both files like the lines run; a merge and a reword never run pre-commit, no other run says what mutes
+exempt_load_config_only() {
+    GSG_EXCLUDES=()
+    _load_gitleaks_files "$1"
+}
+
 # ^ invariant an applied repo betterleaks file is always announced in one line; exemptions are never silent
 _load_gitleaks_files() {
     local work="$1" rc

@@ -17,9 +17,11 @@ hooks_path_is_unset() {
 
 test_uninstall_removes_what_install_added_and_keeps_the_tools() {
     fresh_install
+    assert_eq "$(gitx config --global --get-all hook.git-secret-guard.event | tr '\n' ' ')" "pre-commit commit-msg " "install wrote both events"
     gsg uninstall
     assert_rc 0 "uninstall"
-    assert_eq "$(gitx config --global --get-regexp '^hook\.git-secret-guard\.' | wc -l)" 0 "no hook.git-secret-guard keys"
+    assert_eq "$(gitx config --global --get-regexp '^hook\.git-secret-guard\.' | wc -l)" 0 "no hook.git-secret-guard keys, so neither event is left"
+    assert_empty "$(gitx config --global --get-all hook.git-secret-guard.event)" "no event value"
     assert_not_contains "$(cat -- "$SANDBOX/gitconfig")" "git-secret-guard" "the section header is gone too"
     assert_contains "$(cat -- "$SANDBOX/gitconfig")" "Test User" "the rest of the global config is intact"
     hooks_path_is_unset || fail "core.hooksPath is not unset"
@@ -94,7 +96,7 @@ test_uninstall_restores_core_hooks_path_before_removing_the_hook_config() {
     assert_rc 1 "git refuses to write core.hooksPath"
     assert_contains "$ERR" "core.hooksPath not restored" "says what failed"
     assert_contains "$ERR" "run uninstall again" "and what to do"
-    assert_eq "$(gitx config --global --get hook.git-secret-guard.event)" pre-commit "the hook config is still there: commits stay scanned"
+    assert_eq "$(gitx config --global --get-all hook.git-secret-guard.event | tr '\n' ' ')" "pre-commit commit-msg " "the hook config is still there: commits stay scanned"
     assert_file "$LC_DATA/hooks/secret-scan" "the hook it points to is still there"
     assert_file "$LC_STATE/state" "the record is kept so the second run knows the old value"
     rm -f -- "$SANDBOX/pathbin/git"

@@ -237,7 +237,7 @@ install_check_config_writable() {
 }
 
 # ^ external hook list line = name, "disabled<TAB>name" (enabled=false) or "event-disabled<TAB>name" (hook.pre-commit.enabled=false); git 2.56
-# ^ invariant hooklist_read ERRFILE [GIT_ARGS...] sets HL_STATUS = effective, disabled, event-disabled or absent; HL_RC = git's exit status; REPLY = its message
+# ^ invariant hooklist_read ERRFILE EVENT [ARGS...] sets HL_STATUS (effective, disabled, event-disabled, absent), HL_RC (git's exit) and REPLY (its message)
 # ^ invariant HL_BOUND = timeout prefix for the git call (empty = unbounded); set by hooklist_bind_timeout for status and doctor machine checks
 HL_BOUND=()
 
@@ -250,12 +250,12 @@ hooklist_bind_timeout() {
 
 # ^ invariant returns 0 = listed (an empty list too, also a command without its event), 2 = an event without its command (git exits 128), 1 = git failed
 hooklist_read() {
-    local errfile="$1" outfile="$1.out" line
+    local errfile="$1" outfile="$1.out" event="$2" line
     local -a listed=()
-    shift
+    shift 2
     HL_STATUS=absent
     # ^ why a foreground command and a file, not mapfile < <(...); bash 5.3 starts its child with SIGINT ignored => git outlived Ctrl-C; #68
-    "${HL_BOUND[@]}" "$GSG_GIT" "$@" hook list pre-commit 2>"$errfile" >"$outfile"
+    "${HL_BOUND[@]}" "$GSG_GIT" "$@" hook list "$event" 2>"$errfile" >"$outfile"
     HL_RC=$?
     first_message "$errfile"
     # ^ external hook list exit 1 + "no hooks found" on stderr = an empty list, not a failure
@@ -279,9 +279,14 @@ hooklist_read() {
 
 # ^ security every local variable git names is unset (GIT_DIR and the like); GIT_CONFIG_PARAMETERS and GIT_CONFIG_COUNT stay, a commit sees them too
 # ^ security no git init => it writes HEAD and fires reference-transaction hooks (core.hooksPath and config); the bare repository is built by hand
-# ^ invariant hooklist_probe WORK = git hook list on HEAD, objects/ and refs/ written below WORK; rc 0 sets HL_STATUS, rc 1 HL_STEP HL_RC REPLY (subshell only)
+# ^ invariant the events the hook is installed for, in the order git-secret-guard writes them; status and doctor judge each one by git's own listing
+GSG_HOOK_EVENTS=(pre-commit commit-msg)
+
+# ^ invariant hooklist_probe WORK = git hook list for each event on HEAD, objects/ and refs/ written below WORK, one repository for both
+# ^ invariant rc 0 sets HL_STATUS (pre-commit) and HL_STATUS_MSG (commit-msg); rc 1 HL_STEP HL_RC REPLY of the first failing call (subshell only)
 hooklist_probe() {
-    local work="$1" vars v rc repo="$1/repo"
+    local work="$1" vars v rc repo="$1/repo" event lines_status=absent msg_status=absent
+    HL_STATUS_MSG=absent
     if tools_is_windows; then repo="$(cygpath -m "$work")/repo" || repo="$work/repo"; fi
     HL_STEP="rev-parse --local-env-vars"
     vars="$("$GSG_GIT" rev-parse --local-env-vars 2>"$work/err.txt")"
@@ -304,15 +309,19 @@ hooklist_probe() {
         REPLY="cannot write below the temp directory"
         return 1
     fi
-    HL_STEP="hook list pre-commit"
-    hooklist_read "$work/err.txt" --git-dir="$repo"
+    for event in "${GSG_HOOK_EVENTS[@]}"; do
+        HL_STEP="hook list $event"
+        hooklist_read "$work/err.txt" "$event" --git-dir="$repo" || return 1
+        if [ "$event" = commit-msg ]; then msg_status="$HL_STATUS"; else lines_status="$HL_STATUS"; fi
+    done
+    HL_STATUS="$lines_status" HL_STATUS_MSG="$msg_status"
 }
 
-# ^ invariant prints "ok<TAB>STATUS" or "fail<TAB>STEP<TAB>EXIT<TAB>MESSAGE" for the caller to parse; the probe unsets stay in its subshell
+# ^ invariant prints ok, the pre-commit status, the commit-msg status (TAB-separated) or fail, STEP, EXIT, MESSAGE; the unsets stay in the subshell
 hooklist_probe_line() {
     (
         if hooklist_probe "$1"; then
-            printf 'ok\t%s\n' "$HL_STATUS"
+            printf 'ok\t%s\t%s\n' "$HL_STATUS" "$HL_STATUS_MSG"
         else
             printf 'fail\t%s\t%s\t%s\n' "$HL_STEP" "$HL_RC" "$REPLY"
         fi
@@ -327,7 +336,7 @@ hp_hook_enabled_scan() {
     # ^ why no git version gate, not the 2.55 rule; git reports event-disabled only where it reads hook.<event>.enabled
     local -a r_key=() r_scope=() r_origin=() r_value=()
     HP_EN_KIND=() HP_EN_KEY=() HP_EN_SCOPE=() HP_EN_ORIGIN=() HP_EN_VALUE=()
-    hp_records -C / config --show-scope --show-origin -z --get-regexp '^hook\.(git-secret-guard|pre-commit)\.enabled$'
+    hp_records -C / config --show-scope --show-origin -z --get-regexp '^hook\.(git-secret-guard|pre-commit|commit-msg)\.enabled$'
     rc=$?
     if [ "$rc" -gt 1 ]; then return 1; fi
     for ((i = 0; i + 2 < ${#GSG_HP_OUT[@]}; i += 3)); do
@@ -339,7 +348,7 @@ hp_hook_enabled_scan() {
         fi
         r_key+=("$key") r_scope+=("$scope") r_origin+=("$origin") r_value+=("${rec#*$'\n'}")
     done
-    for key in hook.git-secret-guard.enabled hook.pre-commit.enabled; do
+    for key in hook.git-secret-guard.enabled hook.pre-commit.enabled hook.commit-msg.enabled; do
         dec=-1 decval="" bad=-1
         for j in "${!r_key[@]}"; do
             if [ "${r_key[$j]}" != "$key" ]; then continue; fi

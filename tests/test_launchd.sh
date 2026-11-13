@@ -181,7 +181,7 @@ test_a_failing_bootstrap_keeps_the_hook_and_a_rerun_loads_the_agent_over_a_loade
     gsg install --with-timer
     assert_rc 1 "launchctl cannot bootstrap the agent"
     assert_contains "$ERR" "could not load $LABEL (launchctl exit 1); the hook is installed and scanning; fix the cause and run install --with-timer again" "says what is true"
-    assert_eq "$(gitx config --global --get hook.git-secret-guard.event)" pre-commit "the hook config is in place"
+    assert_eq "$(gitx config --global --get-all hook.git-secret-guard.event | tr '\n' ' ')" "pre-commit commit-msg " "the hook config is in place"
     assert_eq "$(state_value timer_installed)" yes "the state lets uninstall find the plist"
     assert_file "$(plist_path)" "the plist is written"
     rm -f -- "$SANDBOX/launchctl.fail" "$SANDBOX/launchctl.log" || return 1

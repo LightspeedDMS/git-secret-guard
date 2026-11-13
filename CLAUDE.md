@@ -1,9 +1,9 @@
 # git-secret-guard: project notes
 
-Bash only (no Python/Node). A git config hook (`hook.git-secret-guard.*`, git >= 2.54) runs trufflehog and betterleaks on the lines each
-commit adds; `bin/git-secret-guard` installs it. Issues: GitHub LightspeedDMS/git-secret-guard (epics #1, #8). This file is an index: each
-topic states what must not break and links the doc holding the detail. Read that doc's **Maintainer notes** before changing the area, and put
-new internals there, not here.
+Bash only (no Python/Node). A git config hook (`hook.git-secret-guard.*`, git >= 2.54, events `pre-commit` and `commit-msg`) runs trufflehog and
+betterleaks on the lines each commit adds and on its message; `bin/git-secret-guard` installs it. Issues: GitHub LightspeedDMS/git-secret-guard
+(epics #1, #8). This file is an index: each topic states what must not break and links the doc holding the detail. Read that doc's
+**Maintainer notes** before changing the area, and put new internals there, not here.
 
 ## Where things are
 
@@ -53,7 +53,12 @@ new internals there, not here.
   rule always runs, a second `--enable-rule` run when HEAD has a config: [scan.md#limits](docs/scan.md#limits).
 - **Output:** a clean commit prints one pass line, then the coverage reminder only after `REMINDER_READY=1`; the commit's exit status
   never depends on the reminder: [scan.md#the-coverage-reminder](docs/scan.md#the-coverage-reminder),
-  [scan.md#maintainer-notes](docs/scan.md#maintainer-notes).
+  [scan.md#maintainer-notes](docs/scan.md#maintainer-notes). **The `commit-msg` run** (the hook has one argument, the message file) comes
+  before `run_reminder` and `REMINDER_READY`, prints nothing when clean (the pass line stays the only line; HEAD's betterleaks files are
+  announced as in the lines run), starts no reminder, applies no path exemption, and skips text below a cut line only when it equals git's own
+  `git diff --cached` against HEAD or HEAD^ byte for byte (the work tree part of `-v -v` is always scanned):
+  [scan.md#the-commit-message](docs/scan.md#the-commit-message),
+  [scan.md#the-commit-msg-event](docs/scan.md#the-commit-msg-event).
 - **A commit cannot mute itself:** exemptions and betterleaks config come from HEAD only, root ignore files are renamed, built-in-rule status
   is judged by betterleaks' behaviour, never by parsing TOML: [exemptions.md#maintainer-notes](docs/exemptions.md#maintainer-notes).
 - **Extraction:** added line N stays at line N (never count scan-tree lines); fixed diff flags and `-c` pins (new keys into
@@ -70,8 +75,9 @@ new internals there, not here.
 - **Install order:** refusable checks before any lasting change, state before config, unset `core.hooksPath` last, uninstall restores it
   first; our scanner files are known by hash (recorded, or a kept file equal to the lock's binary-hash column); `/etc/os-release` is data:
   [install.md#maintainer-notes](docs/install.md#maintainer-notes).
-- **One verdict, git's:** `status` and doctor share `hooklist_probe_line` (a bare repo written by hand, never `git init`); `status` exits 1 on
-  any `MISMATCH`/`MISSING`: [install.md#maintainer-notes](docs/install.md#maintainer-notes).
+- **One verdict, git's:** `status` and doctor share `hooklist_probe_line` (a bare repo written by hand, never `git init`; one `git hook list` per
+  event of `GSG_HOOK_EVENTS`, `pre-commit` and `commit-msg`); `status` exits 1 on any `MISMATCH`/`MISSING`, also a missing or disabled `commit-msg`;
+  `install` writes the exact two-event set and leaves a set that is already exact untouched: [install.md#maintainer-notes](docs/install.md#maintainer-notes).
 - **Doctor** exits 1 only for a PROBLEM, runs nothing a repository configures, never prints a hook `command`/`event` value; the findings
   record is data, merged under the lock: [doctor.md#maintainer-notes](docs/doctor.md#maintainer-notes).
 - **macOS:** `/bin/bash` 3.2 cannot parse the libs (bootstrap re-exec, two loop bounds); every install refusal uses `brew_unchanged_text`.

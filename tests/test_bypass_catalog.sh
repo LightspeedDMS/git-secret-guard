@@ -211,14 +211,16 @@ test_real_catalog_a13_a_pure_rename_adds_no_lines_and_passes_a_documented_gap() 
     no_leak "$(fake_github_token)"
 }
 
-test_real_catalog_a14_a_token_in_the_commit_message_is_not_scanned_a_documented_gap() {
+test_real_catalog_a14_a_token_in_the_commit_message_is_blocked() {
     need_real_tools
+    enable_message_hook
     new_repo a14 || return 1
     printf 'fix: rotate\n\n%s\n' "$(token_line)" >"$SANDBOX/msg14"
     stage_file x.txt hello
     run_cap gitx commit -q -F "$SANDBOX/msg14"
-    catalog A14 Gap 'git commit -F msg (token in the message only)'
-    assert_rc 0 "A14 no commit-msg hook"
+    catalog A14 Block 'git commit -F msg (token in the message only)'
+    assert_blocked A14
+    assert_contains "$ERR" "commit message:3" "A14 the finding is in the message, at its line"
     no_leak "$(fake_github_token)"
 }
 

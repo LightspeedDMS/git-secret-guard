@@ -270,7 +270,7 @@ test_a_failing_enable_keeps_the_hook_installed_and_a_rerun_finishes_the_timer() 
     gsg install --with-timer
     assert_rc 1 "systemctl cannot enable the timer"
     assert_contains "$ERR" "could not enable $TIMER (systemctl exit 1); the hook is installed and scanning; fix the cause and run install --with-timer again" "says what is true"
-    assert_eq "$(gitx config --global --get hook.git-secret-guard.event)" pre-commit "the hook config is in place"
+    assert_eq "$(gitx config --global --get-all hook.git-secret-guard.event | tr '\n' ' ')" "pre-commit commit-msg " "the hook config is in place"
     assert_eq "$(state_value timer_installed)" yes "the state lets uninstall find the units"
     rm -f -- "$SANDBOX/systemctl.fail" || return 1
     gsg install --with-timer

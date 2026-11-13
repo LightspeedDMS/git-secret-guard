@@ -858,10 +858,16 @@ install_retire_legacy_tools() {
 }
 
 # ^ why --replace-all, not a plain set; a plain set exits 5 when the key already has several values, and --add would duplicate the event
+# ^ order the reset to pre-commit comes first, commit-msg is appended after it => pre-commit is never missing, a stale event is gone
+# ^ why no write when the set is exact, not a reset on every run; a reset moves the event lines behind the command and a rerun must change nothing
 install_set_config() {
-    local cmd
+    local cmd have
     cmd="$(hook_command_text "$GSG_SHARE" "$INSTALL_BASH_BIN")" || return 1
-    "$GSG_GIT" config --global --replace-all hook.git-secret-guard.event pre-commit || return 1
+    have="$("$GSG_GIT" config --global --get-all hook.git-secret-guard.event)" || [ "$?" -eq 1 ] || return 1
+    if [ "$have" != $'pre-commit\ncommit-msg' ]; then
+        "$GSG_GIT" config --global --replace-all hook.git-secret-guard.event pre-commit || return 1
+        "$GSG_GIT" config --global --replace-all hook.git-secret-guard.event commit-msg '^commit-msg$' || return 1
+    fi
     "$GSG_GIT" config --global --replace-all hook.git-secret-guard.command "$cmd" || return 1
 }
 

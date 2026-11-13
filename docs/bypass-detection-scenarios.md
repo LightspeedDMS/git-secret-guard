@@ -47,7 +47,7 @@ Scenario catalog for validating the `LightspeedDMS/git-secret-guard` rollout: ho
 | A11 | Generic high-entropy password assigned to a variable | Block (verify rule exists) |
 | A12 | Secret in a file staged with `git add -p` (partial staging) | Block |
 | A13 | Secret in a renamed or moved file | Block |
-| A14 | Secret in the commit message | Block if commit-msg hook exists, else Gap |
+| A14 | Secret in the commit message | Block (the `commit-msg` event, since 0.4.0) |
 | A15 | Secret introduced via `git commit --amend` | Block |
 | A16 | Secret in a file with CRLF endings, UTF-16 encoding, or a path with spaces/unicode | Block |
 | A17 | Secret in a large file, a binary, or a Git LFS-tracked file | Record behavior |

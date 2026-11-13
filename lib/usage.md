@@ -48,7 +48,7 @@ commands:
         Says "nothing to restore" when SmartGit was never changed.
   status
         Show the installed version, hook command, the git in use, tool versions and the recorded core.hooksPath.
-        Exit 0 only when installed, the global config matches, git runs the hook (git hook list pre-commit), the
+        Exit 0 only when installed, the global config matches, git runs the hook (git hook list pre-commit and commit-msg), the
         first git on PATH is >= 2.54 and no tool line says MISMATCH or MISSING.
   doctor [--roots DIR...]
         Coverage report: the machine (install, hook config, tools, core.hooksPath, old git)

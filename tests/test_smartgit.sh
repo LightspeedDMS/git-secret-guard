@@ -495,7 +495,7 @@ test_uninstall_stops_before_changing_anything_while_smartgit_runs() {
     assert_rc 1 "SmartGit is running"
     assert_contains "$ERR" "uninstall stopped before removing anything else" "says nothing else was removed"
     assert_contains "$ERR" "SmartGit is running" "and why"
-    assert_eq "$(gitx config --global --get hook.git-secret-guard.event)" pre-commit "the hook config is still there"
+    assert_eq "$(gitx config --global --get-all hook.git-secret-guard.event | tr '\n' ' ')" "pre-commit commit-msg " "the hook config is still there"
     assert_file "$LC_STATE/state" "the state is still there"
     assert_file "$LC_BIN/git-secret-guard" "and so is the CLI link, to run again"
     rm -f -- "$SANDBOX/smartgit.running" || return 1

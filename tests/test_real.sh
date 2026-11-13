@@ -18,6 +18,34 @@ make_token_tree() {
 }
 GL_COMMON=(--report-format json --no-banner --no-color)
 
+# ^ why the cached real binary, not the oracle of the e2e test; a wrong fifth column leaves the oracle empty on both sides, a silent pass
+# ^ invariant prints "<pinned version> <lock binary hash> <sha256 of the file>" for a tool, or "none" when the file does not report the pinned version
+real_pin_probe() {
+    bash -c 'source "$1/lib/common.sh" && source "$1/lib/tools.sh" || exit 1
+plat="$(tools_platform_key "$2" "$(uname -s)" "$(uname -m)")" || exit 1
+row="$(tools_lock_lookup "$1/tools.lock" "$2" "$plat")" || exit 1
+if ! tools_has_version "$3" "${row%% *}" timeout; then echo none; exit 0; fi
+printf "%s %s %s\n" "${row%% *}" "$(tools_lock_binary_sha "$1/tools.lock" "$2" "$plat")" "$(sha256sum -- "$3" | cut -d" " -f1)"' _ "$GSG_PROJECT" "$1" "$2"
+}
+
+test_real_the_cached_scanners_hash_to_the_binary_hash_in_the_lock() {
+    local tool bin probe checked=0 want got
+    for tool in trufflehog betterleaks; do
+        bin="$REAL_TRUFFLEHOG"
+        if [ "$tool" = betterleaks ]; then bin="$REAL_BETTERLEAKS"; fi
+        [ -x "$bin" ] || continue
+        probe="$(real_pin_probe "$tool" "$bin")" || {
+            fail "could not read the lock row for $tool"
+            return 1
+        }
+        if [ "$probe" = none ]; then continue; fi
+        read -r _ want got <<<"$probe"
+        assert_eq "$got" "$want" "$tool: the file at the pinned version has the lock's binary SHA-256 (fix the fifth column of its row)"
+        checked=$((checked + 1))
+    done
+    if [ "$checked" -eq 0 ]; then skip_test "no real scanner at the pinned version was found ($REAL_TRUFFLEHOG, $REAL_BETTERLEAKS)"; fi
+}
+
 test_real_clean_diff_passes_quietly_with_both_tools() {
     need_real_tools
     new_repo realclean || return 1

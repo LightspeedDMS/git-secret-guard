@@ -11,16 +11,16 @@ test_the_lock_holds_exactly_the_fourteen_pinned_rows() {
     local rows
     rows="$(grep -v -e '^[[:space:]]*#' -e '^[[:space:]]*$' "$GSG_PROJECT/tools.lock" | LC_ALL=C sort)" || return 1
     assert_eq "$rows" "$(LC_ALL=C sort <<'EOF'
-trufflehog 3.99.2 linux_amd64 3c7b0d1dc4278294269bfdd7594bca8bb28c78da0a4a06ad202ded37b48deca4
-trufflehog 3.99.2 linux_arm64 929b81efffca752eafd58bf6f17bf725d354f338636a7bbbee65c086d2f9ddf3
-trufflehog 3.99.2 darwin_amd64 c23a1b10522b8b84cfd04dc88a3a8819d3dc23b20f15e23540ba442b4b2fbeed
-trufflehog 3.99.2 darwin_arm64 b612143d840b4c75d41fe40436c5932efead001951283f18c87013c4145e1675
-betterleaks 1.9.0 linux_x64 f8b185a39ffcece2a1ca82bf3a4e7435cd81963ffd16b7a9128daf75f35f6de7
-betterleaks 1.9.0 linux_arm64 1d39116e0a58dc94574715e2aa12a2dbd5062f193eee3fec011fef6ba06bd13b
-betterleaks 1.9.0 darwin_x64 68dfd83458d9e7f90663daa7a81c7f944083b170dae82e4f5f8d0581ed519ef1
-betterleaks 1.9.0 darwin_arm64 83dd7eaab13d44a1e8e347a17064cdef153a1478db473276d41b38d55613d3f2
-trufflehog 3.99.2 windows_amd64 494672f03ef4c1c07887bd626f2f68cc5f55305ea961685207d349e273a238e8
-betterleaks 1.9.0 windows_x64 b765daec9fda475b031b5a5159798cbe4294a3f2a50683cbc0471226e376d3da
+trufflehog 3.99.2 linux_amd64 3c7b0d1dc4278294269bfdd7594bca8bb28c78da0a4a06ad202ded37b48deca4 aba71aa8cee0ef87f4adddafbcd778a112b740bfba4a81a2de299d1a8e15f074
+trufflehog 3.99.2 linux_arm64 929b81efffca752eafd58bf6f17bf725d354f338636a7bbbee65c086d2f9ddf3 a6e0f1038b3da3c47a53bf7b1c0caa61b75ced36ec957dddef9310dc3e3e099e
+trufflehog 3.99.2 darwin_amd64 c23a1b10522b8b84cfd04dc88a3a8819d3dc23b20f15e23540ba442b4b2fbeed b112ae962fce91d95ebda4fdb528978be36ef59f80ef612b55032ebaac50136f
+trufflehog 3.99.2 darwin_arm64 b612143d840b4c75d41fe40436c5932efead001951283f18c87013c4145e1675 21146dfb0467efc1882eca5518c7580947f088fd7af499682b070f78fccd8493
+betterleaks 1.9.0 linux_x64 f8b185a39ffcece2a1ca82bf3a4e7435cd81963ffd16b7a9128daf75f35f6de7 0ace40b41652344608f89967fe93c6caf4faae9a4df20423632c7efb02a4d4e1
+betterleaks 1.9.0 linux_arm64 1d39116e0a58dc94574715e2aa12a2dbd5062f193eee3fec011fef6ba06bd13b 488e0aa9f34e4144c70ba58ab83f1cda11fb4a5f84897b513e55b2afe71b7e8a
+betterleaks 1.9.0 darwin_x64 68dfd83458d9e7f90663daa7a81c7f944083b170dae82e4f5f8d0581ed519ef1 1581b1ad0d7d640459c728344c9d431339c8855cd2b5ccd35a9a56a7260b071a
+betterleaks 1.9.0 darwin_arm64 83dd7eaab13d44a1e8e347a17064cdef153a1478db473276d41b38d55613d3f2 70d2103c2915aababa0e1eea121bd3db0ff0da86bee40ddc6f5982181acaf6d0
+trufflehog 3.99.2 windows_amd64 494672f03ef4c1c07887bd626f2f68cc5f55305ea961685207d349e273a238e8 5fb458d2308805158c41c0de90bd554e5e4f50cafa0efd50153a5004c68cab35
+betterleaks 1.9.0 windows_x64 b765daec9fda475b031b5a5159798cbe4294a3f2a50683cbc0471226e376d3da 41a3dc5e75712d52d25aa7203b0b6bc2fa9c796fe5109d3835c60226a9a69352
 jq 1.8.2 windows_amd64 a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627
 git 2.56.0 source 26c56c296b38c0695b26fa95f475f1d01704d2d38e73465ca30b0b2f5dc789d3
 git-manpages 2.56.0 source 1f62a7fabaa36a0469c4d51fe247d12e7e246b890d2b8b49aec91df610f417c7
@@ -280,6 +280,46 @@ test_lock_lookup_refuses_a_lock_with_too_many_lines() {
     tl tools_lock_lookup "$f" betterleaks linux_x64
     assert_rc 2 "1001 lines"
     assert_contains "$ERR" "has more than 1000 lines" "says why"
+}
+
+test_lock_lookup_accepts_a_binary_hash_column_and_keeps_its_output() {
+    local sha=3c7b0d1dc4278294269bfdd7594bca8bb28c78da0a4a06ad202ded37b48deca4 bin=aba71aa8cee0ef87f4adddafbcd778a112b740bfba4a81a2de299d1a8e15f074 f
+    f="$(lock_file five "betterleaks 1.9.0 linux_x64 $sha $bin" "trufflehog 3.99.2 linux_amd64 $sha")"
+    tl tools_lock_lookup "$f" betterleaks linux_x64
+    assert_rc 0 "five fields"
+    assert_eq "$OUT" "1.9.0 $sha" "the output is still version and archive hash"
+    tl tools_lock_binary_sha "$f" betterleaks linux_x64
+    assert_rc 0 "binary hash lookup"
+    assert_eq "$OUT" "$bin" "the fifth column"
+    tl tools_lock_binary_sha "$f" trufflehog linux_amd64
+    assert_rc 0 "a four field row"
+    assert_eq "$OUT" "" "has no binary hash"
+    tl tools_lock_binary_sha "$f" betterleaks linux_arm64
+    assert_rc 1 "no row"
+}
+
+test_lock_lookup_refuses_a_bad_binary_hash_or_a_sixth_field() {
+    local sha=3c7b0d1dc4278294269bfdd7594bca8bb28c78da0a4a06ad202ded37b48deca4 f bad
+    for bad in "${sha:0:63}" "${sha^^}" "${sha}0" "$sha extra"; do
+        f="$(lock_file bad5 "betterleaks 1.9.0 linux_x64 $sha $bad")"
+        tl tools_lock_lookup "$f" betterleaks linux_x64
+        assert_rc 2 "binary column [$bad] is malformed"
+        tl tools_lock_binary_sha "$f" betterleaks linux_x64
+        assert_rc 2 "and so for the binary lookup [$bad]"
+    done
+}
+
+test_the_real_lock_gives_every_scanner_row_a_binary_hash_and_no_other_row() {
+    local n=0 tool bin extra
+    while read -r tool _ _ _ bin extra; do
+        n=$((n + 1))
+        assert_eq "$extra" "" "no sixth field"
+        case "$tool" in
+            trufflehog | betterleaks) [[ $bin =~ ^[0-9a-f]{64}$ ]] || fail "a $tool row has no binary hash: bump the pin with its extracted binary's SHA-256" ;;
+            *) assert_eq "$bin" "" "$tool is not a scanner, its asset is hashed whole" ;;
+        esac
+    done < <(grep -v -e '^[[:space:]]*#' -e '^[[:space:]]*$' "$GSG_PROJECT/tools.lock")
+    assert_eq "$n" 14 "every row was read"
 }
 
 run_file_tests

@@ -66,7 +66,7 @@ new internals there, not here.
   keep `timeout --foreground`, doctor's git shim omits it; a git or find that Ctrl-C must stop never runs inside `< <(...)` (bash 5.3):
   [scan.md#maintainer-notes](docs/scan.md#maintainer-notes), [doctor.md#maintainer-notes](docs/doctor.md#maintainer-notes).
 - **Install order:** refusable checks before any lasting change, state before config, unset `core.hooksPath` last, uninstall restores it
-  first; our scanner files are known by hash; `/etc/os-release` is data: [install.md#maintainer-notes](docs/install.md#maintainer-notes).
+  first; our scanner files are known by hash (recorded, or a kept file equal to the lock's binary-hash column); `/etc/os-release` is data: [install.md#maintainer-notes](docs/install.md#maintainer-notes).
 - **One verdict, git's:** `status` and doctor share `hooklist_probe_line` (a bare repo written by hand, never `git init`); `status` exits 1 on
   any `MISMATCH`/`MISSING`: [install.md#maintainer-notes](docs/install.md#maintainer-notes).
 - **Doctor** exits 1 only for a PROBLEM, runs nothing a repository configures, never prints a hook `command`/`event` value; the findings

@@ -913,6 +913,7 @@ install_run_state_checks() {
         return 1
     }
     install_note_legacy
+    install_adopt_scanners
     install_manage_jq
     install_check_recorded_hooks_path || return 1
     install_plan_lock || {

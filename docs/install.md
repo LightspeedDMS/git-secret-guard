@@ -162,8 +162,8 @@ directory to back up or record. If the directory does not exist there is nothing
 
 ## Pinned tools: `tools.lock`
 
-`tools.lock` holds one line per tool and platform: name, version, platform, SHA-256 of the vendor's release tarball
-(the vendors' checksums, fetched 2026-10-30; vendors name platforms differently, `linux_amd64` against `linux_x64`).
+`tools.lock` holds one line per tool and platform: name, version, platform, SHA-256 of the vendor's release tarball, and for the scanners a fifth column, the SHA-256 of the binary extracted from it (computed locally from the verified archives on 2026-11-13, not vendor-published; checked on install, used to recognise a scanner an earlier `uninstall` kept; [maintainer notes](#maintainer-notes))
+(the archive checksums are the vendors', fetched 2026-10-30; vendors name platforms differently, `linux_amd64` against `linux_x64`).
 Linux x86_64 and arm64, macOS arm64 and Windows x86_64 are used; the macOS x86_64 rows are mapped but not tested. The `jq` row is Windows only: elsewhere `jq` is a system prerequisite. A lock that is unreadable or has a
 malformed line anywhere is refused as a whole; two rows for the tool and platform being looked up are refused as
 ambiguous (duplicates for another platform are not looked at), and a missing row is a refusal, never a skip.
@@ -194,6 +194,12 @@ record is gone afterwards). A tool is deleted only when it is a regular file who
 it. Your own build of the same version, a symlink, or any file install cannot prove it placed (for instance when the
 state comes from an older install that recorded no hashes) stays, and uninstall says `<path> is not the file install put
 there; left in place` (or that no hash was recorded).
+
+A scanner that an earlier `uninstall` kept is install's own again after the next `install`, when it is a regular file (not a link)
+whose SHA-256 equals the one `tools.lock` names for the binary of the pinned version: the next `install` records it, so
+`--remove-tools` removes it and a pin bump replaces it in place. Any other file, a link, or a scanner kept from an
+**older** pin (the new lock names another binary) is yours: it stays, and a bump moves it aside, and `uninstall` puts it back.
+As for `jq`, the test is the hash alone, so a byte-identical copy you put there yourself counts as ours.
 
 - **Your own scanner comes back.** A file install moved aside as `<tool>.gsg-replaced-<UTC stamp>` is moved back over
   the tool install put there, on every uninstall, with or without `--remove-tools`: same bytes, same mode. This happens
@@ -366,10 +372,23 @@ repository, so only an absolute value gives a reliable answer.
   (`tools_extract_binary` copies it). A jq install did not place stays in use, except a regular file at `~/.local/bin/jq.exe`
   with the pinned SHA-256 (the `PATH` jq, or no jq found at all):
   `install_adopt_jq` appends `jq:<sha>` to `ST_PLACED` and `jq` to `ST_TOOLS` (bug #97; `test_a_jq_left_by_an_earlier_install_is_adopted_and_recorded`,
-  `test_a_jq_at_the_pin_is_adopted_when_the_install_dir_is_not_on_path`). A scanner kept with no record has no such adoption, because its pin is an archive
-  hash and the file cannot be matched: `--remove-tools` keeps it, and a pin bump moves our old scanner aside and `uninstall` restores that file
-  ([#101](https://github.com/LightspeedDMS/git-secret-guard/issues/101)). Linux keeps its package-manager hint (no
+  `test_a_jq_at_the_pin_is_adopted_when_the_install_dir_is_not_on_path`). Linux keeps its package-manager hint (no
   silent sudo).
+- **Scanners kept by an uninstall** ([#101](https://github.com/LightspeedDMS/git-secret-guard/issues/101)): the scanner pins in
+  `tools.lock` are hashes of the release archives, so a row carries an optional fifth column, the SHA-256 of the binary inside the archive
+  (`tools_lock_lookup` still prints `<version> <archive sha256>`; `tools_lock_binary_sha` prints the fifth column, empty when absent;
+  both share one parse, which rejects a malformed fifth field and a sixth). Two uses: `install_check_binary_sha` (in `install_stage_tools`, after
+  `tools_extract_binary`, before the version probe) refuses an extracted binary that differs, and `install_adopt_scanners` (in
+  `install_run_state_checks`, after `state_read`, before `install_manage_jq`) records a regular file (not a link) at `$GSG_BIN_DIR` whose
+  SHA-256 equals it, when `tools_placed` holds no hash for that scanner: `install_adopt_if_hash` appends `<tool>:<sha>` to `ST_PLACED` and the tool to
+  `ST_TOOLS`, the same helper `install_adopt_jq` now uses. There is no `PATH` condition, scanners are always at `$GSG_BIN_DIR`. A row without the fifth
+  column adopts nothing and checks nothing (the test locks of stand-in tarballs; `LC_BINSHA=1` in `lc_make_fixtures` adds it).
+  `test_the_real_lock_gives_every_scanner_row_a_binary_hash_and_no_other_row` makes a pin bump carry the hash. Known limit: a kept scanner
+  at an OLDER pin (uninstall, then an install with a bumped lock) does not match the new row, so it is moved aside as the user's and `uninstall`
+  puts it back (`test_a_scanner_kept_at_an_older_pin_is_still_moved_aside_as_the_users`). Tests, all through the real install, uninstall and state files:
+  `tests/test_install_adopt.sh` (`test_scanners_kept_by_an_uninstall_are_adopted_and_removed_by_remove_tools`,
+  `test_an_adopted_scanner_is_replaced_in_place_by_a_pin_bump_never_moved_aside`, the never-adopted cases, and
+  `test_install_refuses_when_the_extracted_binary_is_not_the_one_the_lock_names`); the `.exe` names in `tests/test_windows.sh`.
 - **Step order** (refusable steps before any lasting change; exceptions: the macOS `brew install bash` bootstrap, the
   config write probe that sets and removes its section, and on a Mac without GNU `timeout` the staging that follows the
   one `brew install`): `install_check_prerequisites`, platform, `core.hooksPath`

@@ -1,17 +1,18 @@
-# Pinned scanner releases. One row per line: <tool> <version> <platform> <sha256 of the release tarball>
-# Checksums are the vendor-published ones (trufflehog fetched 2026-10-30; betterleaks 1.9.0 from its checksums.txt, 2026-11-02, equal to the SHA-256 computed locally). Platform names are the vendors' own (they differ).
+# Pinned scanner releases. One row per line: <tool> <version> <platform> <sha256 of the release tarball> [<sha256 of the extracted binary>]
+# Row format: <tool> <version> <platform> <archive sha256> [<binary sha256>]. The optional fifth column (scanners only) is not vendor-published; it is the SHA-256, computed locally on 2026-11-13 from the verified archives, of the binary inside the archive; install checks the extracted file against it and adopts a kept file with that hash (#101). A pin bump must carry it: download the archive, check the fourth column, extract, sha256sum the binary (2026-11-13 for the current pins).
+# Archive checksums (fourth column) are the vendor-published ones (trufflehog fetched 2026-10-30; betterleaks 1.9.0 from its checksums.txt, 2026-11-02, equal to the SHA-256 computed locally). Platform names are the vendors' own (they differ).
 # The darwin_arm64 rows are installed and tested on macOS 26.7.1; the darwin_amd64 and darwin_x64 rows are mapped but not tested.
-trufflehog 3.99.2 linux_amd64 3c7b0d1dc4278294269bfdd7594bca8bb28c78da0a4a06ad202ded37b48deca4
-trufflehog 3.99.2 linux_arm64 929b81efffca752eafd58bf6f17bf725d354f338636a7bbbee65c086d2f9ddf3
-trufflehog 3.99.2 darwin_amd64 c23a1b10522b8b84cfd04dc88a3a8819d3dc23b20f15e23540ba442b4b2fbeed
-trufflehog 3.99.2 darwin_arm64 b612143d840b4c75d41fe40436c5932efead001951283f18c87013c4145e1675
-betterleaks 1.9.0 linux_x64 f8b185a39ffcece2a1ca82bf3a4e7435cd81963ffd16b7a9128daf75f35f6de7
-betterleaks 1.9.0 linux_arm64 1d39116e0a58dc94574715e2aa12a2dbd5062f193eee3fec011fef6ba06bd13b
-betterleaks 1.9.0 darwin_x64 68dfd83458d9e7f90663daa7a81c7f944083b170dae82e4f5f8d0581ed519ef1
-betterleaks 1.9.0 darwin_arm64 83dd7eaab13d44a1e8e347a17064cdef153a1478db473276d41b38d55613d3f2
+trufflehog 3.99.2 linux_amd64 3c7b0d1dc4278294269bfdd7594bca8bb28c78da0a4a06ad202ded37b48deca4 aba71aa8cee0ef87f4adddafbcd778a112b740bfba4a81a2de299d1a8e15f074
+trufflehog 3.99.2 linux_arm64 929b81efffca752eafd58bf6f17bf725d354f338636a7bbbee65c086d2f9ddf3 a6e0f1038b3da3c47a53bf7b1c0caa61b75ced36ec957dddef9310dc3e3e099e
+trufflehog 3.99.2 darwin_amd64 c23a1b10522b8b84cfd04dc88a3a8819d3dc23b20f15e23540ba442b4b2fbeed b112ae962fce91d95ebda4fdb528978be36ef59f80ef612b55032ebaac50136f
+trufflehog 3.99.2 darwin_arm64 b612143d840b4c75d41fe40436c5932efead001951283f18c87013c4145e1675 21146dfb0467efc1882eca5518c7580947f088fd7af499682b070f78fccd8493
+betterleaks 1.9.0 linux_x64 f8b185a39ffcece2a1ca82bf3a4e7435cd81963ffd16b7a9128daf75f35f6de7 0ace40b41652344608f89967fe93c6caf4faae9a4df20423632c7efb02a4d4e1
+betterleaks 1.9.0 linux_arm64 1d39116e0a58dc94574715e2aa12a2dbd5062f193eee3fec011fef6ba06bd13b 488e0aa9f34e4144c70ba58ab83f1cda11fb4a5f84897b513e55b2afe71b7e8a
+betterleaks 1.9.0 darwin_x64 68dfd83458d9e7f90663daa7a81c7f944083b170dae82e4f5f8d0581ed519ef1 1581b1ad0d7d640459c728344c9d431339c8855cd2b5ccd35a9a56a7260b071a
+betterleaks 1.9.0 darwin_arm64 83dd7eaab13d44a1e8e347a17064cdef153a1478db473276d41b38d55613d3f2 70d2103c2915aababa0e1eea121bd3db0ff0da86bee40ddc6f5982181acaf6d0
 # Windows (Git for Windows bash): checksums from the vendors' own checksum files (trufflehog fetched 2026-11-02, betterleaks 2026-11-03). trufflehog ships .tar.gz, betterleaks .zip.
-trufflehog 3.99.2 windows_amd64 494672f03ef4c1c07887bd626f2f68cc5f55305ea961685207d349e273a238e8
-betterleaks 1.9.0 windows_x64 b765daec9fda475b031b5a5159798cbe4294a3f2a50683cbc0471226e376d3da
+trufflehog 3.99.2 windows_amd64 494672f03ef4c1c07887bd626f2f68cc5f55305ea961685207d349e273a238e8 5fb458d2308805158c41c0de90bd554e5e4f50cafa0efd50153a5004c68cab35
+betterleaks 1.9.0 windows_x64 b765daec9fda475b031b5a5159798cbe4294a3f2a50683cbc0471226e376d3da 41a3dc5e75712d52d25aa7203b0b6bc2fa9c796fe5109d3835c60226a9a69352
 # jq is installed only on Windows and only when none is on PATH: the release asset is the bare .exe, checksum from jqlang's sha256sum.txt (fetched 2026-11-04).
 jq 1.8.2 windows_amd64 a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627
 # git is pinned as source for the RPM and Debian upgrade (install --upgrade-git); platform is "source", the tarball is the same everywhere. Digests from kernel.org's

@@ -41,6 +41,21 @@ test_real_install_downloads_and_verifies_the_pinned_tarballs_from_github() {
     assert_eq "$(find "$LC_BIN" -mindepth 1 | wc -l)" 0 "the downloaded tools are removed again"
 }
 
+# ^ why a fake uname, not the host's; the .exe name and the tar choice follow the host, a linux or darwin archive holds a plain name
+# ^ invariant arguments tool version platform archive-sha256 dir; fetch, extract and binary check as install runs them, against the lock's fifth column
+# shellcheck disable=SC2016
+tl_target() {
+    run_cap env -i "${GSG_ENV[@]}" "${EXTRA_ENV[@]}" bash -c 'set -u
+uname() { echo Linux; }
+source "$1/lib/common.sh" && source "$1/lib/tools.sh" && source "$1/lib/install_tools.sh" || exit 9
+tool="$2" ver="$3" plat="$4" sha="$5" dir="$6"
+tarball="$(tools_fetch_verified "$tool" "$ver" "$plat" "$sha" "$dir")" || exit 1
+mkdir -p -- "$dir/out-$plat" && tools_extract_binary "$tarball" "$tool" "$dir/out-$plat" || exit 2
+want="$(tools_lock_binary_sha "$1/tools.lock" "$tool" "$plat")" || exit 3
+if [ -z "$want" ]; then echo "no binary hash for $tool $plat" >&2; exit 4; fi
+install_check_binary_sha "$tool" "$dir/out-$plat/$tool" "$want" || exit 5' _ "$GSG_PROJECT" "$@"
+}
+
 test_the_other_platform_rows_of_the_lock_match_the_real_tarballs() {
     need_network
     lc_begin || return 1
@@ -48,11 +63,11 @@ test_the_other_platform_rows_of_the_lock_match_the_real_tarballs() {
     mkdir -p -- "$dest" || return 1
     for tool in trufflehog betterleaks; do
         mine="$(lc_platform "$tool")" || return 1
-        while read -r _ ver plat sha; do
+        while read -r _ ver plat sha _; do
             if [ "$plat" = "$mine" ]; then continue; fi
-            tl tools_fetch_verified "$tool" "$ver" "$plat" "$sha" "$dest"
-            assert_rc 0 "$tool $ver $plat matches its row in tools.lock"
-            rm -f -- "$OUT" || return 1
+            tl_target "$tool" "$ver" "$plat" "$sha" "$dest"
+            assert_rc 0 "$tool $ver $plat: the archive and the extracted binary match their row in tools.lock"
+            rm -rf -- "$dest" && mkdir -p -- "$dest" || return 1
         done < <(grep -E "^$tool [0-9.]+ (linux|darwin)_" "$lock")
     done
 }

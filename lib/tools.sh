@@ -218,9 +218,10 @@ tools_version_matches() {
 }
 
 # ^ security every row validated, asked for or not => a lock unreadable in full is never trusted for one row
-# ^ invariant rc 0 prints "<version> <sha256>"; rc 1 = no row for tool+platform; rc 2 = lock unreadable, malformed or ambiguous
+# ^ invariant rc 0 prints "<version> <sha256>" of the archive; with $4 = binary only the optional fifth column ("" when the row has none)
+# ^ invariant rc 1 = no row for tool+platform; rc 2 = lock unreadable, malformed or ambiguous; one parse serves both outputs
 tools_lock_lookup() {
-    local lock="$1" tool="$2" platform="$3" line t v p s extra n=0 matches=0 found=""
+    local lock="$1" tool="$2" platform="$3" mode="${4:-row}" line t v p s b extra n=0 matches=0 found="" foundbin=""
     local -a lines=()
     if [ ! -r "$lock" ] || [ -d "$lock" ]; then
         printf '%s: cannot read the lock file %s\n' "$GSG_NAME" "$lock" >&2
@@ -234,15 +235,16 @@ tools_lock_lookup() {
     for line in "${lines[@]}"; do
         n=$((n + 1))
         if [[ $line =~ ^[[:space:]]*(#|$) ]]; then continue; fi
-        read -r t v p s extra <<<"$line"
+        read -r t v p s b extra <<<"$line"
         if [ -n "$extra" ] || [[ ! $t =~ ^[a-z][a-z0-9-]*$ ]] || [[ ! $v =~ ^[0-9][0-9A-Za-z.+-]*$ ]] \
-            || [[ ! $p =~ ^[a-z0-9_]+$ ]] || [[ ! $s =~ ^[0-9a-f]{64}$ ]]; then
-            printf '%s: line %s is malformed in the lock file %s (want: tool version platform sha256, lowercase hex)\n' "$GSG_NAME" "$n" "$lock" >&2
+            || [[ ! $p =~ ^[a-z0-9_]+$ ]] || [[ ! $s =~ ^[0-9a-f]{64}$ ]] || { [ -n "$b" ] && [[ ! $b =~ ^[0-9a-f]{64}$ ]]; }; then
+            printf '%s: line %s is malformed in the lock file %s (want: tool version platform sha256 [binary sha256], lowercase hex)\n' "$GSG_NAME" "$n" "$lock" >&2
             return 2
         fi
         if [ "$t" = "$tool" ] && [ "$p" = "$platform" ]; then
             matches=$((matches + 1))
             found="$v $s"
+            foundbin="$b"
         fi
     done
     if [ "$matches" -gt 1 ]; then
@@ -253,5 +255,12 @@ tools_lock_lookup() {
         printf '%s: no row for %s on %s in the lock file %s\n' "$GSG_NAME" "$tool" "$platform" "$lock" >&2
         return 1
     fi
-    printf '%s\n' "$found"
+    if [ "$mode" = binary ]; then
+        printf '%s\n' "$foundbin"
+    else
+        printf '%s\n' "$found"
+    fi
 }
+
+# ^ invariant prints the SHA-256 of the binary inside the release archive, or an empty line when the row has none; same return codes as tools_lock_lookup
+tools_lock_binary_sha() { tools_lock_lookup "$1" "$2" "$3" binary; }

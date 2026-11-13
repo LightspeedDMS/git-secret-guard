@@ -71,25 +71,44 @@ install_manage_jq() {
 }
 
 # ^ why the lock row decides, not a record; uninstall without --remove-tools deletes the state and keeps the file => its hash is the only proof left
-# ^ security a link, another directory or another hash is the user's jq => never recorded, never replaced, never removed
-# ^ invariant rc 1 = nothing adopted, no error; tools_installed_by_us gets jq too = uninstall_tools walks only the list of tools_installed_by_us
+# ^ security a link, another directory or another hash is the user's file => never recorded, never replaced, never removed
+# ^ invariant rc 1 = nothing adopted, no error; tools_installed_by_us gets the tool too = uninstall_tools walks only the list of tools_installed_by_us
+install_adopt_if_hash() {
+    local tool="$1" expect="$2" path sha
+    path="$GSG_BIN_DIR/$(tools_binary_name "$tool")"
+    if [ -z "$expect" ] || [ ! -f "$path" ] || [ -L "$path" ]; then return 1; fi
+    sha="$(sha256sum -- "$path" | cut -d' ' -f1)" || return 1
+    if [ -z "$sha" ] || [ "$sha" != "$expect" ]; then return 1; fi
+    ST_PLACED+="${ST_PLACED:+ }$tool:$sha"
+    if [[ " $ST_TOOLS " != *" $tool "* ]]; then ST_TOOLS+="${ST_TOOLS:+ }$tool"; fi
+}
+
+# ^ invariant the jq asset is the bare binary => the lock row's archive hash is its binary hash
 install_adopt_jq() {
-    local path plat row sha
-    path="$GSG_BIN_DIR/$(tools_binary_name jq)"
-    if [ ! -f "$path" ] || [ -L "$path" ]; then return 1; fi
+    local plat row
     plat="$(tools_platform_key jq "$GSG_OS" "$GSG_ARCH")" || return 1
     row="$(tools_lock_lookup "$(tools_lock_path)" jq "$plat")" || return 1
-    sha="$(sha256sum -- "$path" | cut -d' ' -f1)" || return 1
-    if [ -z "$sha" ] || [ "$sha" != "${row##* }" ]; then return 1; fi
-    ST_PLACED+="${ST_PLACED:+ }jq:$sha"
-    if [[ " $ST_TOOLS " != *" jq "* ]]; then ST_TOOLS+="${ST_TOOLS:+ }jq"; fi
+    install_adopt_if_hash jq "${row##* }"
+}
+
+# ^ invariant scanners always sit at $GSG_BIN_DIR => no PATH condition as for jq; a tool with a hash in tools_placed is left alone
+# ^ invariant a row without the fifth column adopts nothing; a file kept from an older pin does not match the new row and stays the user's
+# ^ order after state_read, before install_plan_lock and install_manage_jq => the adopted words are in ST_PLACED when the plan and install_write_state read them
+install_adopt_scanners() {
+    local tool plat want
+    for tool in "${GSG_TOOL_NAMES[@]}"; do
+        if [[ " $ST_PLACED " == *" $tool:"* ]]; then continue; fi
+        plat="$(tools_platform_key "$tool" "$GSG_OS" "$GSG_ARCH")" || continue
+        want="$(tools_lock_binary_sha "$(tools_lock_path)" "$tool" "$plat" 2>/dev/null)" || continue
+        install_adopt_if_hash "$tool" "$want" || true
+    done
 }
 
 # ^ order pure bash, no timeout needed => install_run calls it before the brew install, a missing or invalid lock row refuses with the machine untouched
-# ^ invariant parallel arrays indexed like GSG_TOOL_NAMES, holding platform key, pinned version and SHA-256 from the lock
+# ^ invariant parallel arrays indexed like GSG_TOOL_NAMES, holding platform key, version, archive SHA-256 and binary SHA-256 ("" without the fifth column)
 install_plan_lock() {
     local tool plat row lock
-    GSG_TOOL_VER=() GSG_TOOL_SHA=() GSG_TOOL_PLAT=()
+    GSG_TOOL_VER=() GSG_TOOL_SHA=() GSG_TOOL_PLAT=() GSG_TOOL_BSHA=()
     lock="$(tools_lock_path)"
     for tool in "${GSG_TOOL_NAMES[@]}"; do
         plat="$(tools_platform_key "$tool" "$GSG_OS" "$GSG_ARCH")" || return 1
@@ -97,6 +116,7 @@ install_plan_lock() {
         GSG_TOOL_PLAT+=("$plat")
         GSG_TOOL_VER+=("${row%% *}")
         GSG_TOOL_SHA+=("${row##* }")
+        GSG_TOOL_BSHA+=("$(tools_lock_binary_sha "$lock" "$tool" "$plat")") || return 1
     done
 }
 
@@ -140,6 +160,17 @@ install_stage_refused() {
     return 1
 }
 
+# ^ invariant rc 0 when $3 is empty (the lock row has no binary hash) or equals the SHA-256 of $2; rc 1 with a message otherwise
+# ^ why before the version probe, not after; the probe would run a file the lock does not vouch for
+install_check_binary_sha() {
+    local tool="$1" bin="$2" want="$3" got
+    if [ -z "$want" ]; then return 0; fi
+    got="$(sha256sum -- "$bin" | cut -d' ' -f1)" || return 1
+    if [ "$got" = "$want" ]; then return 0; fi
+    printf '%s: the extracted %s does not match the SHA-256 in the lock for the binary (want %s, got %s)\n' "$GSG_NAME" "$tool" "$want" "${got:-none}" >&2
+    return 1
+}
+
 # ^ order every needed tool is downloaded, verified and version-checked before any file leaves the staging dir => a bad second tool installs nothing
 install_stage_tools() {
     local i tool tarball out bin
@@ -155,6 +186,7 @@ install_stage_tools() {
         tarball="$(tools_fetch_verified "$tool" "${GSG_TOOL_VER[$i]}" "${GSG_TOOL_PLAT[$i]}" "${GSG_TOOL_SHA[$i]}" "$GSG_STAGE")" || install_stage_refused || return 1
         tools_extract_binary "$tarball" "$tool" "$GSG_STAGE/out" || install_stage_refused || return 1
         bin="$GSG_STAGE/out/$(tools_binary_name "$tool")"
+        install_check_binary_sha "$tool" "$bin" "${GSG_TOOL_BSHA[$i]:-}" || install_stage_refused || return 1
         if ! tools_has_version "$bin" "${GSG_TOOL_VER[$i]}" "$INSTALL_TIMEOUT_BIN"; then
             out="$("$INSTALL_TIMEOUT_BIN" "$GSG_VERSION_PROBE_SECONDS" "$bin" --version 2>&1 | head -c 200)"
             printf '%s: the extracted %s does not report version %s (it said: %s)\n' "$GSG_NAME" "$tool" "${GSG_TOOL_VER[$i]}" "${out//[^[:print:]]/?}" >&2

@@ -20,6 +20,27 @@ sw_classify() {
     sw_run 'SGP_EXEC="$1" SGP_ABS="$2"; shift 2; SG_INST_PATH=("$@"); smartgit_classify windows 26.1; printf "%s|%s" "$SGP_CHOICE" "$SGP_GITPATH"' "$exec" "$abs" "$@"
 }
 
+test_a_windows_settings_root_reports_the_older_major_as_left_over() {
+    local base="$SANDBOX/appdata-left/syntevo/SmartGit" m
+    rm -rf -- "$SANDBOX/appdata-left" || return 1
+    for m in 25.1 26.1; do
+        mkdir -p -- "$base/$m" && cp -- "$GSG_PROJECT/tests/fixtures/smartgit/windows-26.1/preferences.yml" "$base/$m/" && : >"$base/$m/startup" || return 1
+    done
+    set_env GSG_SMARTGIT_SETTINGS_BASE="$base"
+    sw_run 'status_line() { printf "%s: %s\n" "$1" "$2"; }; status_problem() { echo PROBLEM; }; smartgit_status_lines'
+    assert_rc 0 "status lines"
+    assert_contains "$OUT" "SmartGit settings: $base/25.1 (25.1): left over, SmartGit uses the newer 26.1 here; this directory is not edited or counted and can be deleted once SmartGit 25.1 is no longer used" "one info line for 25.1"
+    assert_not_contains "$OUT" "26.1): left over" "26.1 is the live one"
+}
+
+test_the_no_startup_refusal_with_an_untellable_process_check_gives_no_pgrep_advice_on_windows() {
+    sw_run 'SG_SET_KIND=(windows) SG_SET_MAJOR=(26.1) SG_SET_DIR=(/c/x/26.1); smartgit_is_running() { return 2; }; smartgit_refuse_no_startup 0'
+    assert_rc 1 "refused"
+    assert_contains "$ERR" "(ps -W is missing or failed)" "names the Windows tool"
+    assert_contains "$ERR" "no startup file" "names the missing setup"
+    assert_not_contains "$ERR" "install pgrep" "pgrep is not a Windows tool"
+}
+
 test_the_wizard_state_is_bundled_and_its_git_is_read_from_executable_absolute() {
     sw_classify '${smartgit.install}\git\bin\git.exe' 'C:\Program Files\SmartGit\git\bin\git.exe'
     assert_rc 0 "classify"

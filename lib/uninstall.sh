@@ -371,6 +371,9 @@ uninstall_steps() {
     local remove_tools="$1" had_records=0
     if smartgit_has_records; then had_records=1; fi
     # ^ order the SmartGit restore runs before everything else; a refusal (SmartGit running) leaves the installed CLI in place to run again
+    # ^ coupled read by the restore refusals of lib/smartgit_apply.sh and lib/smartgit_lfs.sh to name uninstall as the command to run again
+    # shellcheck disable=SC2034
+    SMARTGIT_AGAIN="$GSG_NAME uninstall"
     smartgit_restore_all || {
         printf '%s: uninstall stopped before removing anything else; fix what is said above and run %s uninstall again\n' "$GSG_NAME" "$GSG_NAME" >&2
         return 1

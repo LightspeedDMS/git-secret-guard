@@ -525,4 +525,194 @@ test_a_rerun_after_a_stop_completes_the_flatpak_setup_and_restore_undoes_it() {
     assert_no_file "$SL_TMPDIR" "no temp directory"
 }
 
+test_a_left_over_older_major_is_an_info_line_in_status_and_never_a_problem() {
+    sl_leftover_setup || return 1
+    gsg install </dev/null
+    assert_rc 0 "install"
+    assert_not_contains "$OUT$ERR" "run: git-secret-guard install --configure-smartgit" "no hint to configure a directory nobody uses"
+    gsg status
+    assert_rc 0 "status: the leftover does not count"
+    assert_contains "$OUT" "SmartGit settings: $SL_OLD (25.1): $(sl_leftover_tail 25.1 26.1)" "one info line names the leftover"
+    assert_not_contains "$OUT" "MISMATCH" "no MISMATCH anywhere"
+    assert_contains "$OUT" "SmartGit settings: $SG_SETTINGS (26.1): $SANDBOX/pathbin/git, git 2.56.0; commits are scanned" "the live directory is judged as before"
+}
+
+test_doctor_prints_a_left_over_older_major_as_info_and_records_no_problem() {
+    local rec=""
+    sl_leftover_setup || return 1
+    gsg install </dev/null
+    assert_rc 0 "install"
+    mkdir -p -- "$SANDBOX/roots" || return 1
+    gsg doctor --roots "$SANDBOX/roots"
+    assert_rc 0 "doctor: no PROBLEM"
+    assert_contains "$OUT" "  info     SmartGit 25.1 ($SL_OLD): $(sl_leftover_tail 25.1 26.1)" "the info line"
+    assert_not_contains "$OUT" "PROBLEM" "no PROBLEM"
+    if [ -f "$LC_STATE/findings" ]; then rec="$(<"$LC_STATE/findings")"; fi
+    assert_not_contains "$rec" "SmartGit" "nothing of it is recorded, so no commit reminder names it"
+}
+
+test_configure_smartgit_exits_0_and_edits_nothing_when_only_a_leftover_is_old() {
+    sl_leftover_setup || return 1
+    gsg install --configure-smartgit </dev/null
+    assert_rc 0 "the live directory is fine, the leftover is not an error"
+    assert_not_contains "$ERR" "was not recorded" "the leftover is not refused"
+    assert_contains "$OUT" "nothing to change" "says there is nothing to change"
+    assert_eq "$(sg_hash "$SL_OLD/preferences.yml")" "$SL_OLD_HASH" "the leftover is never edited"
+    assert_no_file "$SG_BACKUPS" "no backup or manifest"
+}
+
+test_a_live_directory_of_an_unrecorded_major_gets_the_by_hand_step_in_status_doctor_and_the_hint() {
+    local by_hand='by hand: in SmartGit open Preferences, Commands, choose "Other Git Executable"'
+    sl_tarball_setup || return 1
+    rm -rf -- "$SG_SETTINGS" || return 1
+    sl_extra_major "$LC_HOME/.config/smartgit" 27.1 linux-tarball-26.1 "$SL_INSTALL" || return 1
+    gsg install </dev/null
+    assert_rc 0 "install only prints the hint"
+    assert_contains "$OUT" "SmartGit: found $LC_HOME/.config/smartgit/27.1" "the hint names the directory"
+    assert_contains "$OUT" "so its commits are not scanned; $by_hand" "the hint gives the by-hand step"
+    assert_not_contains "$OUT$ERR" "run: git-secret-guard install --configure-smartgit" "never the command that refuses 27.1"
+    gsg status
+    assert_rc 1 "a live directory still counts"
+    assert_contains "$OUT" "(27.1): bundled git, git 2.53.0; commits are NOT scanned MISMATCH: $by_hand" "status gives the by-hand step"
+    assert_not_contains "$OUT" "run: git-secret-guard install --configure-smartgit" "status never names the command"
+    mkdir -p -- "$SANDBOX/roots" || return 1
+    gsg doctor --roots "$SANDBOX/roots"
+    assert_rc 1 "doctor: a PROBLEM"
+    assert_contains "$OUT" "PROBLEM  SmartGit 27.1 ($LC_HOME/.config/smartgit/27.1): Git Executable is the bundled git 2.53.0, so its commits are not scanned; $by_hand" "doctor gives the by-hand step"
+    assert_not_contains "$OUT" "run: git-secret-guard install --configure-smartgit" "doctor never names the command"
+}
+
+test_an_older_flatpak_directory_is_left_over_until_the_installed_flatpak_has_that_major() {
+    local root old
+    sl_flatpak_setup linux-flatpak-26.1-byhand || return 1
+    root="$LC_HOME/.var/app/$SL_APP_ID/config/smartgit"
+    old="$root/25.1"
+    sl_hand_wrapper || return 1
+    sl_extra_major "$root" 25.1 linux-flatpak-26.1 /app || return 1
+    gsg install </dev/null
+    assert_rc 0 "install"
+    gsg status
+    assert_rc 0 "Flatpak 26.1.057 installed: 25.1 is left over"
+    assert_contains "$OUT" "SmartGit settings: $old (25.1): $(sl_leftover_tail 25.1 26.1)" "the info line"
+    printf '25_1_100\n' >"$SANDBOX/flatpak.version" || return 1
+    gsg status
+    assert_rc 1 "the installed Flatpak is 25.1.100: its directory is live and on the old bundled git"
+    assert_contains "$OUT" "SmartGit settings: $old (25.1): bundled git, git 2.53.0; commits are NOT scanned MISMATCH: by hand:" "the by-hand step"
+    assert_not_contains "$OUT" "run: git-secret-guard install --configure-smartgit" "status never names the refused command"
+    assert_not_contains "$OUT" "left over" "nothing is left over now"
+}
+
+# ^ invariant sl_still_live LABEL = 26.1 (on the old bundled git) still counts, status exits 1 with MISMATCH and no directory is reported as left over
+sl_still_live() {
+    gsg status
+    assert_rc 1 "$1: status still counts 26.1"
+    assert_contains "$OUT" "SmartGit settings: $SG_SETTINGS (26.1): bundled git, git 2.53.0; commits are NOT scanned MISMATCH" "$1: 26.1 is judged"
+    assert_not_contains "$OUT" "left over" "$1: nothing is left over"
+}
+
+test_a_newer_directory_smartgit_never_set_up_does_not_demote_the_live_one() {
+    local newer
+    sl_tarball_setup || return 1
+    newer="$LC_HOME/.config/smartgit/26.2"
+    mkdir -p -- "$newer" || return 1
+    gsg install </dev/null
+    sl_still_live "an empty 26.2"
+    mkdir -p -- "$SANDBOX/roots" || return 1
+    gsg doctor --roots "$SANDBOX/roots"
+    assert_rc 1 "doctor"
+    assert_contains "$OUT" "PROBLEM  SmartGit 26.1 ($SG_SETTINGS): Git Executable is the bundled git 2.53.0" "doctor still has the PROBLEM"
+    sl_extra_major "$LC_HOME/.config/smartgit" 26.2 linux-tarball-26.1 "$SL_INSTALL" || return 1
+    rm -f -- "$newer/startup" || return 1
+    sl_still_live "26.2 with a preferences file and no startup file (its wizard is open)"
+    rm -rf -- "$newer" || return 1
+    mkdir -p -- "$SANDBOX/elsewhere" && : >"$SANDBOX/elsewhere/startup" && ln -s -- "$SANDBOX/elsewhere" "$newer" || return 1
+    sl_still_live "26.2 a symbolic link"
+}
+
+test_a_flatpak_whose_ps_fails_gets_the_flatpak_advice_not_install_pgrep() {
+    sl_flatpak_setup || return 1
+    rm -f -- "$SG_SETTINGS/startup" || return 1
+    : >"$SANDBOX/flatpak.ps.fail" || return 1
+    gsg install --configure-smartgit </dev/null
+    assert_rc 1 "refused"
+    assert_contains "$ERR" "it cannot be told whether SmartGit is running" "says it cannot tell"
+    assert_contains "$ERR" "check that flatpak ps works" "the advice names the tool that failed"
+    assert_not_contains "$ERR" "install pgrep" "pgrep is not what the Flatpak check uses"
+}
+
+test_the_advice_for_an_untellable_process_check_depends_on_the_kind() {
+    local script kind expected
+    script='for l in smartgit smartgit_report smartgit_offer; do source "$GSG_ROOT/lib/$l.sh" || exit 9; done; smartgit_untellable_advice "$1"'
+    while IFS='|' read -r kind expected; do
+        gu_run "$script" "$kind"
+        assert_rc 0 "$kind: the helper runs"
+        assert_eq "$OUT" "$expected" "$kind: the advice"
+    done <<'EOF'
+linux|install pgrep
+macos|install pgrep
+flatpak|check that flatpak ps works
+windows|
+EOF
+}
+
+test_a_newer_directory_with_unreadable_preferences_is_a_warning_and_the_older_one_is_left_over() {
+    local newer
+    sl_tarball_setup || return 1
+    newer="$LC_HOME/.config/smartgit/26.2"
+    sg_point_at_git "$SG_PREFS" "$SANDBOX/pathbin/git" || return 1
+    sl_extra_major "$LC_HOME/.config/smartgit" 26.2 linux-tarball-26.1 "$SL_INSTALL" || return 1
+    grep -v '^  executable: ' "$newer/preferences.yml" >"$newer/preferences.new" && mv -- "$newer/preferences.new" "$newer/preferences.yml" || return 1
+    gsg install </dev/null
+    gsg status
+    assert_rc 0 "status: an unreadable newer directory is not a problem"
+    assert_contains "$OUT" "SmartGit settings: $newer (26.2): preferences.yml cannot be read as SmartGit writes it" "26.2 gets the cannot tell line"
+    assert_contains "$OUT" "SmartGit settings: $SG_SETTINGS (26.1): $(sl_leftover_tail 26.1 26.2)" "26.1 is left over"
+    mkdir -p -- "$SANDBOX/roots" || return 1
+    gsg doctor --roots "$SANDBOX/roots"
+    assert_rc 0 "doctor"
+    assert_contains "$OUT" "WARNING  SmartGit 26.2 ($newer): preferences.yml cannot be read as SmartGit writes it" "doctor warns for 26.2"
+    assert_contains "$OUT" "  info     SmartGit 26.1 ($SG_SETTINGS): $(sl_leftover_tail 26.1 26.2)" "and has an info line for 26.1"
+}
+
+test_the_minor_of_a_major_compares_numerically() {
+    sl_leftover_setup || return 1
+    sl_extra_major "$LC_HOME/.config/smartgit" 26.2 linux-tarball-26.1 "$SL_INSTALL" || return 1
+    sl_extra_major "$LC_HOME/.config/smartgit" 26.10 linux-tarball-26.1 "$SL_INSTALL" || return 1
+    gsg install </dev/null
+    gsg status
+    assert_contains "$OUT" "(26.2): $(sl_leftover_tail 26.2 26.10)" "26.2 is older than 26.10"
+    assert_not_contains "$OUT" "26.10): left over" "26.10 is the live one"
+}
+
+test_a_major_with_an_absurd_number_is_skipped_without_a_shell_error() {
+    sl_leftover_setup || return 1
+    sl_extra_major "$LC_HOME/.config/smartgit" 99999999999999999999.1 linux-tarball-26.1 "$SL_INSTALL" || return 1
+    gsg install </dev/null
+    gsg status
+    assert_not_contains "$ERR" "integer" "no shell arithmetic error"
+    assert_not_contains "$OUT$ERR" "99999999999999999999" "the directory is not taken for a SmartGit major"
+    assert_rc 0 "26.1 stays live next to the 25.1 leftover"
+}
+
+test_a_running_smartgit_with_no_startup_file_names_running_first_and_the_missing_setup() {
+    sl_tarball_setup || return 1
+    rm -f -- "$SG_SETTINGS/startup" || return 1
+    sg_running || return 1
+    sl_tarball_refused "SmartGit (or another Syntevo app) of this user is running"
+    assert_contains "${ERR%%no startup file*}" "is running" "running comes first"
+    assert_contains "$ERR" "no startup file" "the missing setup is named too"
+    assert_contains "${ERR%%Repository, Exit*}" "finish the wizard" "the wizard is finished first, it is modal and Exit is unreachable before"
+    assert_contains "$ERR" "Repository, Exit" "then SmartGit is exited"
+}
+
+test_a_running_check_that_cannot_tell_and_no_startup_file_keep_the_install_pgrep_advice() {
+    sl_tarball_setup || return 1
+    rm -f -- "$SG_SETTINGS/startup" || return 1
+    mkdir -p -- "$SANDBOX/no-tools" || return 1
+    set_env GSG_SMARTGIT_TOOL_DIR="$SANDBOX/no-tools"
+    sl_tarball_refused "it cannot be told whether SmartGit is running"
+    assert_contains "$ERR" "no startup file" "the missing setup is named too"
+    assert_contains "$ERR" "install pgrep" "and the pgrep advice of the plain refusal is kept"
+}
+
 run_file_tests

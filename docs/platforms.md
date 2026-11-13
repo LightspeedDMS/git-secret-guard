@@ -4,7 +4,7 @@
 |---|---|
 | RHEL 9-compatible (x86_64) | Supported. RHEL 9-compatible (tested on Rocky Linux 9.7); there `/usr/local/bin/git` is built from source and `/usr/bin/git` 2.52 is left alone. |
 | Ubuntu 24.04 LTS | Supported. The whole suite and an install E2E with real downloads run in a podman `ubuntu:24.04` container, as a non-root user, with mawk as the default awk: `tests/platform/ubuntu.sh`. `install` offers the git upgrade: see [Ubuntu and Debian (apt)](#ubuntu-and-debian-apt). |
-| Ubuntu 22.04 LTS and Debian 13 | Offer tested against stand-ins (2.34.1 on 22.04 takes the PPA in its older `.list` form, Debian takes the source build) and, with real apt, in debootstrap chroots (22.04, 24.04, Debian 13, 20.04). Debian 13 also ran the `--phase upgrade` container E2E (source route, 21/0). **Not run:** an Ubuntu 22.04 container and an x86_64 container ([details](#ubuntu-and-debian-apt)). |
+| Ubuntu 22.04 LTS and Debian 13 | Offer tested against stand-ins (2.34.1 on 22.04 takes the PPA in its older `.list` form, Debian takes the source build) and, with real apt, in debootstrap chroots (22.04, 24.04, Debian 13, 20.04). Both ran in podman containers on hosted x86_64 runners ([CI record](#results)): the `--phase upgrade` E2E (22.04 PPA route in the `.list` form, 28/0; Debian 13 source route, 21/0) and the default phases (install E2E 31/0, whole suite 1108 passed, 0 failed). Debian 13's upgrade E2E also ran on an arm64 Mac ([details](#ubuntu-and-debian-apt)). |
 | macOS arm64 (tested on macOS 26.7.1) | Supported, with Homebrew: see [macOS (Homebrew)](#macos-homebrew). The whole suite and an install E2E in a scratch home run on a real Mac, and the whole suite runs on every pull request on a GitHub-hosted Mac: see [CI on a hosted Mac](#ci-on-a-hosted-mac). |
 | Windows x86_64 (tested on Windows Server 2019) | Supported with Git for Windows: see [Windows (Git for Windows)](#windows-git-for-windows). No weekly timer; the lifecycle test suites do not run there. |
 | WSL (Ubuntu, Debian, RPM distributions) | Implemented, fixture-tested, and run for real on hosted WSL 1 and WSL 2: Ubuntu 22.04 and 24.04 on both, Rocky 9.8 and Fedora 44 on WSL 2 only (the vendor images cannot be imported on WSL 1), a typed yes and No, a `metadata` mount; see [WSL](#wsl-windows-subsystem-for-linux). WSL 1 on Windows Server 2019 blue-screened the maintainer's host twice in its own driver; the cause is not established. |
@@ -247,7 +247,7 @@ Ran on 2026-11-06 (arm64 Mac, podman, branch head 29763a8). `mac-linux.sh` takes
 - `ubuntu:24.04@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852`, via `mac-linux.sh ubuntu --phase upgrade`: E2E 27 passed, 0 failed, PPA route (2.43.0 to 2.56.0 from the PPA package).
 - `debian:13@sha256:9c6e381421d0f48d1b8133e573f33c185ee16cbf505eda9c4a8a4791b25ea8a6` (the `ubuntu.sh` pin), via the same podman command `mac-linux.sh` builds with that image and `ubuntu-container.sh --expect-os debian:13 --skip-isolation <reason> --phase upgrade`: E2E 21 passed, 0 failed, source route (2.47.3 to `/usr/local` 2.56.0).
 
-**Not run:** the Ubuntu 22.04 container (`--os` cannot be forwarded through `mac-linux.sh`) and any x86_64 container. Earlier real-apt chroot runs (22.04, 24.04, Debian 13, 20.04) covered the file forms.
+**In that run, not run:** the Ubuntu 22.04 container (`--os` cannot be forwarded through `mac-linux.sh`) and any x86_64 container; both ran in CI on hosted x86_64 runners ([CI record](#results)). Earlier real-apt chroot runs (22.04, 24.04, Debian 13, 20.04) covered the file forms.
 
 ### By hand
 
@@ -576,8 +576,8 @@ that could be a bug gets fixed.
 > GitHub runner (below), never on that machine.
 
 **Status: implemented, fixture-tested and run for real on hosted WSL 1 and WSL 2 (see the runs below, every leg that could start passes).** Not possible: Rocky and Fedora on WSL 1, because wsl --import fails there. Still unproven: Fedora's upgrade route (the vendor image already holds git 2.56.0), and the Windows Server 2019 build 17763 host (a crash there is neither explained nor cleared). What a WSL 1 chroot E2E of the apt route on Windows Server 2019 showed is recorded in issue #29
-(its comments). The `wsl` workflow (`.github/workflows/wsl.yml`, started by hand from the Actions tab) runs the scenarios below on a hosted runner; until its first results are written into
-this section, treat what the status line lists as unproven as unproven. The measured answers are in the table below.
+(its comments). The `wsl` workflow (`.github/workflows/wsl.yml`, started by hand from the Actions tab) runs the scenarios below on a hosted runner. Its results are recorded below (the
+measured table of run 42237326449, then **Later runs**); what the status line lists as unproven stays unproven.
 
 WSL runs a real Linux distribution, so `install` takes the Linux path and the distribution's own git route: Ubuntu and Debian follow
 [the apt rule](#ubuntu-and-debian-apt) and RPM distributions the [RPM route](#rhel-rocky-and-fedora-rpm), with the same checks and the same plan. WSL adds only this:
@@ -607,7 +607,7 @@ WSL runs a real Linux distribution, so `install` takes the Linux path and the di
 Rocky 9.8 (`Rocky-9-WSL-Base-9.8-20260525.0.x86_64.wsl`, SHA-256 `58de2455cd47...3829221`) and Fedora 44 (`Fedora-WSL-Base-44-1.7.x86_64.wsl`, SHA-256 `2e5b153ba4b6...d319a`) are the vendors' own WSL tars, imported
 with `wsl --import`; the digests are the ones in the vendors' CHECKSUM files, checked in the job (a mismatch stops it), and the same files were hashed once by hand. To bump an image, read the new file name and digest from the vendor's
 CHECKSUM file and change both in the `Import the RPM distribution` step. `consent=typed` types the answer at the real prompt on a pty instead of passing `--upgrade-git`. Every phase runs through `tests/platform/wsl-phase.ps1`
-in the distribution named by `WSL_TARGET`. Rocky and Fedora run the WSL 2 leg only (the matrix has no WSL 1 entry for them), because `wsl --import` of their vendor tars fails on WSL 1 (see the later runs above); a typed No is always run first, and on a stock git that is already new enough the flow checks that nothing is offered.
+in the distribution named by `WSL_TARGET`. Rocky and Fedora run the WSL 2 leg only (the matrix has no WSL 1 entry for them), because `wsl --import` of their vendor tars fails on WSL 1 (see the later runs below); a typed No is always run first, and on a stock git that is already new enough the flow checks that nothing is offered.
 
 **Tested where.** `tests/test_wsl.sh` drives all of this through fixture kernel files (`GSG_WSL_OSRELEASE`, `GSG_WSL_INTEROP`, `GSG_WSL_SYSTEMD_DIR`, announced on stderr like the other test seams, except that seams which look like plain Linux are silent) and a faked
 `uname`, so it runs on Linux, macOS and Git for Windows alike. The real runs are `tests/platform/wsl-ci.sh`, started by `.github/workflows/wsl.yml`.
@@ -840,7 +840,7 @@ Both run the whole suite and the install E2E as a non-root user, in a podman-mac
   Ubuntu one: anonymous token from `auth.docker.io` for `repository:rockylinux/rockylinux:pull`, then `curl -I --max-time 30` on
   `registry-1.docker.io/v2/rockylinux/rockylinux/manifests/9.7` with the OCI index and Docker manifest-list `Accept` headers; it equals the DIGEST column of
   `podman images --digests`). Its repositories already serve 9.8, so the run mixes 9.7 base packages with current 9.x updates.
-- **Not covered:** x86_64 (the `linux_x64` and `linux_amd64` rows of `tools.lock` are not exercised on an arm64 VM), and macOS itself, which
+- **Not covered in that run:** x86_64 (the `linux_x64` and `linux_amd64` rows of `tools.lock` are not exercised on an arm64 VM; the x86_64 containers run in CI, see [Results](#results)), and macOS itself, which
   `tests/run.sh` covers natively.
 
 ## CI on real platforms
@@ -1075,7 +1075,7 @@ The `windows` job runs on `windows-2025` (Windows Server 2025, build 26100, elev
   Windows branches are also tested on Linux and macOS; `tests/windows-skips.list` names the tests that cannot apply, with reasons.
 - **WSL internals.** `lib/wsl.sh` (CLI-only, loaded before `gitup`): `wsl_is`, `wsl_version` (REPLY 1 when the raw kernel text holds `Microsoft` with a capital M, else 2: real WSL 2 kernels exist without a `WSL2`
   suffix, such as `4.19.128-microsoft-standard`), `wsl_systemd_running`, `wsl_check_timer` (called by `install_precheck_timer`), `wsl_announce_overrides` (only when an override makes the run a WSL run, so a plain
-  fixture adds nothing to stderr), `install_pins_running_script` and `install_wsl_notice`. The last one finds `git.exe` with `install_find_bin` of `lib/install.sh`, the one place that may call `type -P`.
+  fixture adds nothing to stderr), `install_pins_running_script` and `install_wsl_notice`. The last one finds `git.exe` with `install_find_bin` of `lib/install.sh` (`type -P` is allowed only in `lib/install.sh`, `lib/brew.sh` and the one line of `smartgit_tool`).
   The test harness (`sandbox_create` in `tests/lib.sh`) points the three seams at a plain kernel for every test file, so no result depends on the kernel of the machine running the suite; `tests/test_wsl.sh` sets its own.
   `gitup_os_class` returns `wsl` only for an rpm, ubuntu or debian family; the wrapper module `lib/gitup_wsl.sh` sets `GITUP_INNER_CLASS` and delegates with `gitup_delegate`; the apt module reads
   `gitup_inner_class` where it used to read `GITUP_CLASS`. The wrapper defines all five takeover functions (the set is all or none) and answers "not supported" for an inner module without them.

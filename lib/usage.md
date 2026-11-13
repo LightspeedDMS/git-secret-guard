@@ -14,7 +14,7 @@ commands:
         wrapper running the host git and a smartgit.vmoptions line, each recorded first and undone exactly.
         That override removes the SmartGit sandbox, so it needs its own yes: a second question at a terminal,
         or --allow-smartgit-sandbox-removal (only together with --configure-smartgit). Refuses while SmartGit
-        runs and for any version or platform not recorded (Snap); the manual steps are printed instead.
+        runs and for any version not recorded; the manual steps are printed instead. A Snap is only listed.
         --upgrade-git lets install upgrade or rebuild git where its module can (RHEL, Rocky, Fedora, Ubuntu, Debian,
         Windows; macOS through Homebrew, as your user): it prints the plan with each privileged command, then runs
         it. In a terminal install asks first (default No); without a terminal the flag is the only way to say yes.

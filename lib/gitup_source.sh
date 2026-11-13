@@ -92,7 +92,7 @@ gitup_source_lib_outside() {
     return 1
 }
 
-# ^ invariant rc 0 when DIR ($1) has $2 kilobytes free; else a refusal naming the need ($3 megabytes), the room and what changed
+# ^ invariant rc 0 when DIR ($1) has $2 kilobytes free; else a refusal naming the same threshold in megabytes, the room and what changed
 gitup_source_room() {
     local kb
     kb="$(gitup_free_kb "$1")" || {
@@ -100,8 +100,8 @@ gitup_source_room() {
         return 1
     }
     if [ "$kb" -ge "$2" ]; then return 0; fi
-    printf '%s: the build needs about %s MB of free disk space in %s and %s MB is free; free some space (TMPDIR moves the build directory); install refused, %s\n' \
-        "$GSG_NAME" "$3" "$1" "$((kb / 1024))" "$(brew_unchanged_text)" >&2
+    printf '%s: the build needs at least %s MB of free disk space in %s and %s MB is free; free some space (TMPDIR moves the build directory); install refused, %s\n' \
+        "$GSG_NAME" "$(($2 / 1024))" "$1" "$((kb / 1024))" "$(brew_unchanged_text)" >&2
     return 1
 }
 
@@ -139,7 +139,7 @@ gitup_source_build() {
     jobs="$(nproc 2>/dev/null)" || jobs=2
     if [[ ! $jobs =~ ^[0-9]+$ ]] || [ "$jobs" -lt 1 ]; then jobs=2; fi
     if [ "$jobs" -gt 8 ]; then jobs=8; fi
-    printf '%s: building git %s (about %s MB of disk, several minutes; the make output is kept only if the build fails)\n' "$GSG_NAME" "$GITUP_PIN_VER" "$GITUP_BUILD_NEED_MB"
+    printf '%s: building git %s (the build uses about %s MB of disk, several minutes; the make output is kept only if the build fails)\n' "$GSG_NAME" "$GITUP_PIN_VER" "$GITUP_BUILD_NEED_MB"
     gitup_source_make_words || return 1
     if gitup_source_make "$GITUP_SRC_DIR" "-j$jobs" "${GITUP_MAKE_WORDS[@]}" all &&
         gitup_source_make "$GITUP_SRC_DIR" "${GITUP_MAKE_WORDS[@]}" "DESTDIR=$GITUP_STAGE" install; then
@@ -237,8 +237,8 @@ gitup_source_prepare() {
     fi
     gitup_source_pins || return 1
     install_require_curl || return 1
-    gitup_source_room "${TMPDIR:-/tmp}" "$GITUP_BUILD_MIN_KB" "$GITUP_BUILD_NEED_MB" || return 1
-    gitup_source_room "$GITUP_PREFIX" "$GITUP_PREFIX_MIN_KB" "$((GITUP_PREFIX_MIN_KB / 1024))" || return 1
+    gitup_source_room "${TMPDIR:-/tmp}" "$GITUP_BUILD_MIN_KB" || return 1
+    gitup_source_room "$GITUP_PREFIX" "$GITUP_PREFIX_MIN_KB" || return 1
     GITUP_BUILD_DIR="$(mktemp -d "${TMPDIR:-/tmp}/gsg-git-build.XXXXXX")" || return 1
     GITUP_STAGE="$GITUP_BUILD_DIR/stage"
     GITUP_SRC_DIR="$GITUP_BUILD_DIR/src/git-$GITUP_PIN_VER"
@@ -357,7 +357,7 @@ gitup_source_takeover_blocks() {
 gitup_source_print_plan() {
     printf '  route: source (%s)\n' "$1"
     printf '  download git %s and its man pages from %s, each checked against the SHA-256 in tools.lock\n' "$GITUP_PIN_VER" "$(tools_release_url git "$GITUP_PIN_VER" source)"
-    printf '  build as %s in a temporary directory under env -i with PATH=%s (about %s MB of disk, several minutes)\n' "$(id -un)" "$GITUP_BUILD_PATH" "$GITUP_BUILD_NEED_MB"
+    printf '  build as %s in a temporary directory under env -i with PATH=%s (the build uses about %s MB of disk, %s MB must be free; several minutes)\n' "$(id -un)" "$GITUP_BUILD_PATH" "$GITUP_BUILD_NEED_MB" "$((GITUP_BUILD_MIN_KB / 1024))"
     gitup_source_make_words || return 1
     printf '  the build runs: make %s all, then the same with DESTDIR=<build dir>/stage install\n' "${GITUP_MAKE_WORDS[*]}"
     local docdir

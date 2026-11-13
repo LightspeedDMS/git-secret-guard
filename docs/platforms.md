@@ -53,7 +53,7 @@ group and others cannot write, and the plan prints its full path (`as root: /usr
 
 **The source route** follows the procedure that worked on the reference host, in this order:
 
-1. Check the free space (about 570 MB in the build directory, 300 MB for `/usr/local`) before anything changes.
+1. Check the free space (at least 800 MB free in the build directory, because the build itself uses about 570 MB, and at least 300 MB free for `/usr/local`) before anything changes.
 2. Download `git-<version>.tar.xz` and `git-manpages-<version>.tar.xz` from kernel.org and check both SHA-256 digests against `tools.lock`
    (`git` and `git-manpages`, platform `source`). A mismatch stops here with the machine untouched. (The story listed the dependency install
    first; the downloads come first because a tampered tarball then changes nothing.)

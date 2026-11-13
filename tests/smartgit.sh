@@ -56,7 +56,8 @@ case "$1" in
     info) [ -f "$d/flatpak.installed" ] || { echo "error: com.syntevo.SmartGit not installed" >&2; exit 1; }
           v=26_1_057; if [ -f "$d/flatpak.version" ]; then v="$(cat "$d/flatpak.version")"; fi
           printf "SmartGit - Use Git the Smart Way\n\n            ID: com.syntevo.SmartGit\n       Version: %s\n   Installation: system\n" "$v" ;;
-    ps) if [ -f "$d/flatpak.ps" ]; then cat "$d/flatpak.ps"; fi; exit 0 ;;
+    ps) [ ! -f "$d/flatpak.ps.fail" ] || { echo "error: flatpak ps fails on request" >&2; exit 1; }
+        if [ -f "$d/flatpak.ps" ]; then cat "$d/flatpak.ps"; fi; exit 0 ;;
     run)
         [ ! -f "$d/flatpak.run.fail" ] || { echo "error: flatpak run fails on request" >&2; exit 1; }
         cwd=""
@@ -236,3 +237,12 @@ sg_interrupt_run() {
 
 # ^ invariant prints every line of a preferences file except the two the edit may change; a test can compare the rest byte for byte
 sg_others() { grep -v -E '^  executable(\.absolute)?: ' "$1"; }
+
+# ^ invariant sg_point_at_git FILE GIT makes the Git Executable of a scrubbed fixture the plain path GIT and drops executable.absolute; every other line stays
+sg_point_at_git() {
+    local text old='  executable: ${smartgit.install}/git/bin/git'
+    text="$(grep -v '^  executable\.absolute: ' "$1" && printf x)" || return 1
+    text="${text%x}"
+    case "$text" in *"$old"*) ;; *) return 1 ;; esac
+    printf '%s' "${text//"$old"/  executable: $2}" >"$1"
+}

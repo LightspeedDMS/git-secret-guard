@@ -368,7 +368,7 @@ smartgit_lfs_undo() {
             if [ "$rc" -eq 2 ]; then return 1; fi
             if [ "$rc" -eq 0 ]; then
                 "$GSG_GIT" -C / config --global --remove-section filter.lfs || {
-                    printf '%s: the filter.lfs section could not be removed from the global git config; run the restore again\n' "$GSG_NAME" >&2
+                    printf '%s: the filter.lfs section could not be removed from the global git config; run %s again\n' "$GSG_NAME" "$SMARTGIT_AGAIN" >&2
                     return 1
                 }
                 printf '%s: removed the filter.lfs.* settings that git lfs install added\n' "$GSG_NAME"

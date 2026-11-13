@@ -340,12 +340,12 @@ smartgit_restore_check() {
     case $? in
         0)
             smartgit_running_who "$SGM_KIND"
-            printf '%s: %s is running; exit it with Repository, Exit and run the restore again; nothing was changed\n' "$GSG_NAME" "$REPLY" >&2
+            printf '%s: %s is running; exit it with Repository, Exit and run %s again; nothing was changed\n' "$GSG_NAME" "$REPLY" "$SMARTGIT_AGAIN" >&2
             return 1
             ;;
         1) ;;
         *)
-            printf '%s: it cannot be told whether SmartGit is running; exit it and run the restore again; nothing was changed\n' "$GSG_NAME" >&2
+            printf '%s: it cannot be told whether SmartGit is running; exit it and run %s again; nothing was changed\n' "$GSG_NAME" "$SMARTGIT_AGAIN" >&2
             return 1
             ;;
     esac

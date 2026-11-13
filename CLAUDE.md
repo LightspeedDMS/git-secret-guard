@@ -74,7 +74,8 @@ new internals there, not here.
   privileged tools only through `gitup_system_bin`, the printed plan is what runs; partly applied states are tested contracts; the PPA key
   check precedes `apt-get update`; on Windows bash never runs the installer: [install.md#maintainer-notes-git-upgrade](docs/install.md#maintainer-notes-git-upgrade).
 - **SmartGit:** only the `executable:` lines of a recorded `preferences.yml`, never re-serialised YAML; the Flatpak's four steps are one unit,
-  each recorded before it acts: [smartgit.md](docs/smartgit.md).
+  each recorded before it acts. Per settings root only the newest set-up major is live; an older one is left over (info, no exit status, never
+  edited) unless an install has exactly that major (#88): [smartgit.md](docs/smartgit.md).
 - **CI on real platforms** (`platforms.yml`): `workflow_dispatch` only, never merge a `push:` trigger; read the artifacts, not the logs;
   `ubuntu.sh` never mentions `--skip-isolation`: [platforms.md#ci-on-real-platforms](docs/platforms.md#ci-on-real-platforms).
 

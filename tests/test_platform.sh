@@ -575,6 +575,8 @@ dev_baseline() {
     local -a files=(core fd full null ptmx random stderr stdin stdout tty urandom zero pts/ptmx)
     rm -rf -- "$1" && mkdir -p -- "$1" || return 1
     for name in "${dirs[@]}"; do mkdir -- "$1/$name" || return 1; done
+    # ^ external the root of an mqueue filesystem has mode 1777 (kernel mqueue root inode); measured as directory 1777 on podman 6.1.3
+    chmod 1777 -- "$1/mqueue" || return 1
     for name in "${files[@]}"; do : >"$1/$name" || return 1; done
 }
 
@@ -598,6 +600,39 @@ test_the_device_check_lists_entries_of_dev_outside_the_baseline_and_fails_closed
     container_fn isolation_stray_devices "$SANDBOX/no-such-dev"
     assert_rc 2 "a /dev that cannot be listed is not an empty list"
     assert_contains "$ERR" "cannot list" "and says so"
+}
+
+# ^ invariant devices_with_mode MODE DIR = isolation_stray_devices DIR with MODE expected on mqueue; a test has no SELinux denial and uses mode bits
+# shellcheck disable=SC2016
+devices_with_mode() {
+    run_cap env -i PATH="/usr/local/bin:/usr/bin:/bin" bash -c 'source "$1"; ISOLATION_MQUEUE_MODE="$2"; isolation_stray_devices "$3"' _ \
+        "$GSG_PROJECT/tests/platform/ubuntu-container.sh" "$1" "$2"
+}
+
+# ^ external podman 6.1.3 on SELinux gives find and ls "Permission denied" on /dev/mqueue (stat says directory 1777, uid 0); the mount table pins its fstype
+test_the_device_check_checks_a_mqueue_directory_it_cannot_open_by_stat_instead_of_listing_it() {
+    local d="$SANDBOX/dev4"
+    dev_baseline "$d" || return 1
+    chmod 1111 "$d/mqueue" || return 1
+    devices_with_mode 1111 "$d"
+    assert_rc 0 "a mqueue directory of the expected type and mode that cannot be opened is accepted without a listing"
+    assert_empty "$OUT" "nothing is named"
+    devices_with_mode 1777 "$d"
+    assert_rc 1 "an unopenable directory with another mode is not the mqueue root"
+    assert_contains "$OUT" "mqueue (directory 1111)" "named with type and mode"
+    chmod 1777 "$d/mqueue" && chmod 755 "$d/mqueue" || return 1
+    devices_with_mode 1777 "$d"
+    assert_rc 1 "a readable directory with another mode"
+    assert_contains "$OUT" "mqueue (directory 755)" "named"
+    rm -rf -- "${d:?}/mqueue" && : >"$d/mqueue" || return 1
+    devices_with_mode 1777 "$d"
+    assert_rc 1 "a file where the directory belongs"
+    assert_contains "$OUT" "mqueue (regular empty file 644)" "named"
+    rm -f -- "$d/mqueue" && ln -s "$SANDBOX" "$d/mqueue" || return 1
+    devices_with_mode 1777 "$d"
+    assert_rc 1 "a symlink to a host directory"
+    assert_contains "$OUT" "mqueue (symbolic link 777)" "named"
+    no_leak "$SANDBOX"
 }
 
 test_the_device_check_fails_closed_on_an_unreadable_subdirectory_and_stops_at_500_entries() {

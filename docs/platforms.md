@@ -845,6 +845,25 @@ and not part of `tests.yml`. It runs only by `workflow_dispatch`.
 
 - **Isolation checks: one mount rule added, nothing skipped.** Podman 4.9.3 masks `/sys/dev/block` as well (the `maskedPaths` of its `config.json`, read in a probe job). `ISOLATION_MOUNT_RULES`
   gained `/sys/dev/block=tmpfs`; the fstype is checked like every other entry, and the variable, `/dev`, namespace, `/run/secrets` and read-only `/src` checks are unchanged. `ubuntu.sh` still has no way to skip a check.
+- **Isolation checks on podman 6.1.3 (Fedora 45 with SELinux, crun 1.30.1, 12 CPUs; issue #93).** The Debian 13 image aborted the run on three things, all measured in a probe container with the
+  launcher's flags: 12 mounts of `/sys/devices/system/cpu/cpu<N>/thermal_throttle`, `/sys/devices/virtual/powercap` mounted twice, and `find: '/dev/mqueue': Permission denied`. Podman 6's `maskedPaths`
+  names every `thermal_throttle` directory and `powercap` twice. The first two are accepted only as proven masks; the third has a known limit:
+  - Each `thermal_throttle` mount must be a `tmpfs`; the path matches `^/sys/devices/system/cpu/cpu(0|[1-9][0-9]*)/thermal_throttle$` and nothing else (`isolation_mount_want`). Each CPU still counts once.
+    Podman 4.9.3 and 5 do not mask these paths, so a volume there must not pass: the mount also has to be the mask itself (`isolation_mask_gate`). It must be read-only (`ro` in the options),
+    a `tmpfs`, and have the same device (field 3) and root (field 4) as the `/sys/firmware` mount of the same table, which must itself be a read-only `tmpfs`. Without that reference line the
+    allowance is refused. Measured in the podman 6.1.3 sample: all 18 crun masks (`/proc/acpi`, `/proc/scsi`, `/sys/firmware`, `/sys/fs/selinux`, powercap twice, 12 `thermal_throttle`) share device `0:3`
+    and root `/crun/.empty-directory`; `/sys/firmware` is masked by every podman version, so it is the reference. The root is compared and never printed. Not measured: the `/sys/firmware` device and root on
+    4.9.3, which does not matter while no `thermal_throttle` line exists there.
+  - `powercap` may repeat once, only as a `tmpfs` mounted on top of the first (the second line's parent id is the first line's mount id; `ISOLATION_MOUNT_STACKABLE`) and only as the same proven
+    mask. A third mount, a mount beside the first, another fstype, a repeat that is not the mask (a host tmpfs on top is the visible one) or any other path still fails.
+  - `/dev/mqueue` is not listed by `find` when it cannot be opened. `isolation_mqueue_check` requires `stat` to say `directory 1777` (the mode the kernel gives the root of an mqueue
+    filesystem), lists it when it can (any entry is stray), and accepts an unreadable one only on the exact `find: '<dir>/mqueue': Permission denied` message (`LC_ALL=C`); any other `find` error still stops the run.
+    **Known limit, weaker than before on this path:** where SELinux makes the directory unreadable, a host `/dev/mqueue` bound into the container looks the same as the container's own (fstype `mqueue`,
+    mode 1777, same error), and the ipc namespace check only compares the launcher's ids. No sound extra check exists: the host's mqueue device number cannot be known from inside the container, and stat
+    fields (owner, time) are mapping artefacts. Where the directory is readable, a non-empty host mqueue is still caught.
+  Podman 4.9.3 is proven by the `platforms.yml` run, not by a unit test: no raw 4.9.3 table was kept, and the optional-masks test covers the `/sys/dev/block` rule. The podman 6 sample is
+  `tests/fixtures/podman/mountinfo-podman-6.1.3.txt` (host paths scrubbed). The mount list is read to at most `ISOLATION_MAX_MOUNT_LINES` (500) lines and fails closed beyond that: with about 37 other
+  mounts, a host of about 460 CPUs or more aborts the run until the limit is raised.
 - **Debian 13 prepare.** `software-properties-common` does not exist on Debian; the package list is now per distribution (`apt_prerequisites`), the Debian default is the source build (no Launchpad PPA is tried), and the
   stock `git` is installed as on Rocky. This was a real failure of the default phases on Debian (run 42252845651).
 - **Rocky containers need `/etc/shadow` at mode 0400** (`rpm_fix_shadow`). At the image's 000 every `sudo` of a non-root user failed with "PAM account management error" under this runner's rootless podman.

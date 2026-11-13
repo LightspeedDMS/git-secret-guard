@@ -16,7 +16,7 @@ smartgit_check_target() {
 
 smartgit_manual_steps() {
     printf '%s: by hand: in SmartGit open Preferences, Commands, choose "Other Git Executable" and enter %s, then check that git --version through it says %s or newer; every step is in docs/smartgit.md\n' \
-        "$GSG_NAME" "${GSG_GIT:-the git that status reports}" "$(smartgit_min_git)" >&2
+        "$GSG_NAME" "${SMARTGIT_WIN_TARGET:-${GSG_GIT:-the git that status reports}}" "$(smartgit_min_git)" >&2
 }
 
 smartgit_refuse() {
@@ -44,8 +44,8 @@ smartgit_check_dir() {
         smartgit_refuse "$i" "SmartGit $major was not recorded: this tool has only seen SmartGit $SMARTGIT_RECORDED_MAJOR, and edits nothing it has not seen" 1
         return 1
     fi
-    if [ "$kind" != macos ] && [ "$kind" != linux ] && [ "$kind" != flatpak ]; then
-        smartgit_refuse "$i" "a $kind settings directory is not one this tool edits (macOS, Linux and the Flatpak were recorded)" 1
+    if [ "$kind" != macos ] && [ "$kind" != linux ] && [ "$kind" != flatpak ] && [ "$kind" != windows ]; then
+        smartgit_refuse "$i" "a $kind settings directory is not one this tool edits (macOS, Linux, the Flatpak and Windows were recorded)" 1
         return 1
     fi
     case "${SG_SET_STATE[$i]}" in
@@ -75,7 +75,11 @@ smartgit_check_dir() {
         return 1
     fi
     if [ "$rc" -ne 1 ]; then
-        smartgit_refuse "$i" "it cannot be told whether SmartGit is running (pgrep or flatpak ps is missing or failed); exit SmartGit and install pgrep"
+        if [ "$kind" = windows ]; then
+            smartgit_refuse "$i" "it cannot be told whether SmartGit is running (ps -W is missing or failed); exit SmartGit with Repository, Exit and run the command again"
+        else
+            smartgit_refuse "$i" "it cannot be told whether SmartGit is running (pgrep or flatpak ps is missing or failed); exit SmartGit and install pgrep"
+        fi
         return 1
     fi
 }
@@ -107,6 +111,45 @@ smartgit_hint() {
 # ^ invariant the target must be an absolute path made of [A-Za-z0-9._/+@%-] only; this makes it a plain YAML scalar the edit can write without quoting
 smartgit_target_is_plain() { [[ $1 =~ ^/[A-Za-z0-9._/+@%-]+$ ]]; }
 
+# ^ invariant a Windows target is a drive letter and backslash components of [A-Za-z0-9._()+@%-] with inner spaces, a plain YAML scalar as SmartGit writes it
+# ^ invariant no component starts or ends with a space and none holds ..; a quote, a hash, a colon after the drive and the slash form are refused
+smartgit_win_target_is_plain() {
+    local comp='[A-Za-z0-9._()+@%-]([A-Za-z0-9._()+@% -]*[A-Za-z0-9._()+@%-])?' re bs=$'\\'
+    re="^[A-Za-z]:(${bs}${bs}${comp})+\$"
+    if [[ $1 == *..* ]]; then return 1; fi
+    [[ $1 =~ $re ]]
+}
+
+# ^ invariant sets SMARTGIT_WIN_TARGET (written into preferences.yml) and SMARTGIT_WIN_GIT (the POSIX path run for the checks); rc 1 prints why
+# ^ why cmd\git.exe of the same Git for Windows when its version equals, not the git in use; the GUI offers it and it survives the ucrt64 layout change
+smartgit_win_target() {
+    local w root cand_w cand ver_use ver_cmd
+    SMARTGIT_WIN_TARGET="" SMARTGIT_WIN_GIT="$GSG_GIT"
+    w="$(cygpath -w "$GSG_GIT")" || {
+        printf '%s: cannot turn %s into a Windows path (cygpath failed); SmartGit was not changed\n' "$GSG_NAME" "$GSG_GIT" >&2
+        return 1
+    }
+    if [[ ${w,,} != *.exe ]] && [ -f "$GSG_GIT.exe" ]; then w+=.exe; fi
+    root="${w%\\*}"
+    case "${root,,}" in
+        *\\cmd | *\\bin)
+            root="${root%\\*}"
+            case "${root,,}" in *\\mingw64 | *\\ucrt64 | *\\clang64 | *\\clangarm64 | *\\mingw32) root="${root%\\*}" ;; esac
+            cand_w="$root\\cmd\\git.exe"
+            cand="$(cygpath -u "$cand_w")" || cand=""
+            if [ -n "$cand" ] && [ -f "$cand" ] && ver_use="$(smartgit_git_version "$GSG_GIT")" && ver_cmd="$(smartgit_git_version "$cand")" && [ "$ver_use" = "$ver_cmd" ]; then
+                w="$cand_w"
+                SMARTGIT_WIN_GIT="$cand"
+            fi
+            ;;
+    esac
+    if ! smartgit_win_target_is_plain "$w"; then
+        printf '%s: the git %s is not a Windows path made of a drive letter, backslashes and [A-Za-z0-9._()+@%%-] (spaces inside a name), which this tool does not write into a YAML file; SmartGit was not changed\n' "$GSG_NAME" "$w" >&2
+        return 1
+    fi
+    SMARTGIT_WIN_TARGET="$w"
+}
+
 # ^ invariant the id of a settings directory is the POSIX cksum of its path (crc and size); no GNU tool is needed to name the backup files
 smartgit_dir_id() {
     local out crc size
@@ -121,7 +164,7 @@ smartgit_plan_dir() {
         printf '%s: SmartGit: cannot compute the backup id of %s (cksum failed); SmartGit was not changed\n' "$GSG_NAME" "${SG_SET_DIR[$i]}" >&2
         return 1
     }
-    local target="$GSG_GIT"
+    local target="${SMARTGIT_WIN_TARGET:-$GSG_GIT}"
     if [ "${SG_SET_KIND[$i]}" = flatpak ]; then target="$SGF_WRAPPER"; fi
     printf '  SmartGit %s, settings %s\n' "${SG_SET_MAJOR[$i]}" "${SG_SET_DIR[$i]}"
     printf '    Git Executable: %s -> %s (git %s)\n' "$(smartgit_choice_text "$i")" "$target" "$SMARTGIT_TARGET_VER"
@@ -188,11 +231,15 @@ smartgit_offer() {
     local flag="$1" i rc=0
     local -a elig=()
     shift
-    if ! smartgit_target_is_plain "$GSG_GIT"; then
+    SMARTGIT_WIN_TARGET="" SMARTGIT_WIN_GIT=""
+    smartgit_platform
+    if [ "$REPLY" = windows ]; then
+        smartgit_win_target || return "$flag"
+    elif ! smartgit_target_is_plain "$GSG_GIT"; then
         printf '%s: the git %s is not an absolute path made of [A-Za-z0-9._/+@%%-], which this tool does not write into a YAML file; SmartGit was not changed\n' "$GSG_NAME" "$GSG_GIT" >&2
         return "$flag"
     fi
-    smartgit_check_target "$GSG_GIT" || return "$flag"
+    smartgit_check_target "${SMARTGIT_WIN_GIT:-$GSG_GIT}" || return "$flag"
     for i in "$@"; do
         if smartgit_check_dir "$i"; then elig+=("$i"); else rc=1; fi
     done
@@ -206,13 +253,13 @@ smartgit_offer() {
     done
     smartgit_lfs_plan "$fp_run" || return "$flag"
     if [ "$host_run" -eq 1 ]; then
-        printf '  then: git --version and git lfs version through %s, and a fake-token commit in a scratch repository must be blocked; any failure restores the backup\n' "$GSG_GIT"
+        printf '  then: git --version and git lfs version through %s, a fake-token commit in a scratch repository must be blocked and a clean commit must print the summary line; any failure restores the backup\n' "${SMARTGIT_WIN_TARGET:-$GSG_GIT}"
     fi
     if [ "$fp_run" -eq 1 ]; then
         printf '  then (Flatpak): the same checks run through the wrapper %s inside the SmartGit sandbox (flatpak run, in your own session; the scratch repository under %s); any failure also undoes the Flatpak steps\n' "$SGF_WRAPPER" "$SGF_TMPDIR"
     fi
     gitup_need_elevation || return "$flag"
-    if ! gitup_consent "$flag" "Point SmartGit at $GSG_GIT?"; then
+    if ! gitup_consent "$flag" "Point SmartGit at ${SMARTGIT_WIN_TARGET:-$GSG_GIT}?"; then
         printf '%s: SmartGit was not changed\n' "$GSG_NAME"
         return 0
     fi

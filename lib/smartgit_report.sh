@@ -24,12 +24,19 @@ smartgit_install_text() {
     printf '%s (%s)' "${SG_INST_PATH[$1]}" "$ver"
 }
 
+# ^ invariant prints the git of settings directory $1 as the user knows it; on Windows the C:\ spelling SmartGit shows, not the Git Bash form
+smartgit_show_git() {
+    local p="${SG_SET_GIT[$1]}" w
+    if [ "${SG_SET_KIND[$1]}" = windows ] && w="$(cygpath -w "$p" 2>/dev/null)"; then p="$w"; fi
+    printf '%s' "$p"
+}
+
 # ^ invariant prints what the Git Executable setting of settings directory $1 is ("bundled git" or the path), followed by the git version read from it
 smartgit_choice_text() {
     local i="$1" what ver="${SG_SET_VER[$1]}"
     case "${SG_SET_CHOICE[$i]}" in
         bundled) what="bundled git" ;;
-        other) what="${SG_SET_GIT[$i]}" ;;
+        other) what="$(smartgit_show_git "$i")" ;;
         *) what="an executable setting of an unknown form" ;;
     esac
     if [ -n "$ver" ]; then printf '%s, git %s' "$what" "$ver"; else printf '%s, version unreadable' "$what"; fi
@@ -41,7 +48,7 @@ smartgit_what() {
     if [ "${SG_SET_CHOICE[$i]}" = bundled ]; then
         printf '%sbundled git %s' "${2:-}" "${SG_SET_VER[$i]}"
     else
-        printf '%s (git %s)' "${SG_SET_GIT[$i]}" "${SG_SET_VER[$i]}"
+        printf '%s (git %s)' "$(smartgit_show_git "$i")" "${SG_SET_VER[$i]}"
     fi
 }
 

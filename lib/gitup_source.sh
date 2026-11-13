@@ -1,6 +1,6 @@
 # shellcheck shell=bash disable=SC2034,SC2153
 # ^ coupled shared pinned source build of the upgrade modules; a module sets GITUP_SRC_DEPS and GITUP_SRC_FLAGS before gitup_source_apply
-# ^ external procedure of the reference host (2026-10-30) plus checks; CLAUDE.md "Git upgrade" has the facts behind each step
+# ^ external procedure of the reference host (2026-10-30) plus checks; docs/platforms.md#rhel-rocky-and-fedora-rpm has the facts per step
 
 # ^ invariant an optional privileged command a module runs before the dependency install (apt-get update); empty for modules without one
 GITUP_SRC_PRE=()

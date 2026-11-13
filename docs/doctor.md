@@ -388,7 +388,7 @@ starts with a bare environment). Stdout and stderr go to `doctor.log` in the sta
   printed (`doctor_values_text`; `test_the_machine_section_never_prints_a_hook_config_value`); a disabling `enabled` value is.
 - **Findings record** (`lib/doctor_findings.sh`): validated per line (`doctor_rec_line_ok`); `DR_REC_OLD` is assigned only
   after the whole file validated; the limits `GSG_FINDINGS_MAX_*` have one definition for reader and writer;
-  `doctor_rec_check_size` refuses an over-limit temp file before the `mv`. Per-line checks must stay linear
+  `doctor_rec_check_size` refuses an over-limit temp file before the `mv`. An unreached repository's record is dropped only when proven gone (`doctor_rec_proven_gone`). Per-line checks must stay linear
   (`${line//[^$'\t']/}` is quadratic: minutes on a 1 MiB line). `DR_RECHECK` picks the invalid-record wording;
   `DR_FIND_TREE` runs parallel to `DR_FIND` so a worktree finding is recorded with its worktree. `--recheck` validates the
   record before `doctor_require_git` (`test_recheck_with_no_record_or_an_empty_one_prints_nothing_and_runs_no_git`). It runs

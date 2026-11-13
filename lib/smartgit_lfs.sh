@@ -102,7 +102,7 @@ SG_LFS_KILL_GRACE_SECONDS=5
 
 # ^ security the query is bounded, reads no terminal and answers no to every prompt => an unimported repository key fails it instead of asking
 # ^ invariant a failed query and an empty answer are two refusals; neither names a repository this tool did not see, and none is ever enabled
-# ^ why the answer stays in a variable, not a file; dnf output is never written to disk (CLAUDE.md), stderr is dropped and the exit status reported
+# ^ why the answer stays in a variable, not a file; dnf output never reaches disk (docs/platforms.md#rhel-rocky-and-fedora-rpm), stderr dropped, rc reported
 smartgit_lfs_plan_dnf() {
     local dnf offered qrc=0
     smartgit_lfs_require_bin dnf || return 1

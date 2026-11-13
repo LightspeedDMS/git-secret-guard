@@ -94,7 +94,7 @@ git-secret-guard: 2 coverage problems still open (doctor run 2026-11-03):
 
 ## The settings file
 
-The hook reads `<share>/settings` (`<share>` = two levels above the resolved script path), written by `install`:
+The hook reads `<share>/settings` (`<share>` = two levels above the resolved script path), written by `install` (`install_write_settings`, with `printf %q`, because the hook sources it):
 absolute `TRUFFLEHOG_BIN`, `BETTERLEAKS_BIN`, `JQ_BIN`, `SETSID_BIN` (`TASKKILL_BIN` on Windows), `TIMEOUT_BIN`, the pinned `TRUFFLEHOG_VERSION` and
 `BETTERLEAKS_VERSION` (shown on the pass line only) and `SCAN_TIMEOUT_SECONDS`. The `GITLEAKS_*` keys of the previous
 build are neither written nor read (an inherited `GITLEAKS_BIN` is discarded like any other). A missing,
@@ -252,7 +252,7 @@ Why the scan code is shaped this way; each point was probed on the pinned versio
 - **Fixtures.** A finding only a built-in rule makes is `generic_key`/`builtin_line` in `tests/test_exemptions_real.sh`;
   `fake_aws_secret` is random per call. The pre-flight probe `betterleaks_probe_secret` is a bare fake GitHub token, where
   `github-pat` fires alone (a `token = "..."` line would also fire `generic-api-key`; an AWS ID is no use because of the
-  composite rule and our own rule).
+  composite rule and our own rule). A `..._KEY=<40 hex>` literal trips betterleaks' `generic-api-key` in `tests/test_quality.sh`, which scans the tree.
 - **Extraction.** Added line N sits at line N, the rest blank: never count scan-tree lines. The counts come from
   `lib/extract.awk` through `GSG_EXTRACT_COUNTS` (written in `END` only on success), and `exempt_extract_tree` sums both
   passes into `GSG_EXTRACT_FILES`/`GSG_EXTRACT_LINES` (`test_a_missing_or_garbage_counts_file_blocks_and_never_reports_zero`).
@@ -261,7 +261,7 @@ Why the scan code is shaped this way; each point was probed on the pinned versio
   comes from `PIPESTATUS` (`test_an_extraction_write_failure_blocks_with_a_message_about_extraction_and_keeps_the_awk_line`).
 - **Config pins.** A command-line `-c` beats repository config, `GIT_CONFIG_PARAMETERS` and `GIT_CONFIG_COUNT`.
   `tests/test_inherited_config.sh` sets its keys in all three forms; add any new one there
-  (`test_other_inherited_git_settings_cannot_change_what_is_extracted`). `replace_head_with_permissive_commit` is the
+  (`test_other_inherited_git_settings_cannot_change_what_is_extracted`). `core.bigFileThreshold` is `100g`, `4095m` on Windows. `replace_head_with_permissive_commit` is the
   helper for the replace-ref tests.
 - **Signals.** Scanners start as `setsid bash lib/run-scanner.sh` (pid = group id) through `proc_start_runner` and stop
   through `proc_stop_group`. `cleanup` sends TERM to the group, waits, polls (bounded), sends KILL, and only then removes

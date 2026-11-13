@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ^ see doc:docs/bypass-detection-scenarios.md; each test pins the hook's current answer to one catalog row, gaps included
-# ^ external a dead proxy makes trufflehog's verification fail => "unknown" (online, a fake credential is "unverified" and hidden); see CLAUDE.md
+# ^ external a dead proxy makes trufflehog's verification fail => "unknown" (online, a fake credential is "unverified" and hidden); see docs/scan.md
 # ^ security GSG_CATALOG_REPORT names a TSV the tests append to; hook stderr only, it never holds a value (no_leak checks each test)
 # shellcheck source=tests/lib.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"

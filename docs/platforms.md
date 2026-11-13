@@ -426,8 +426,13 @@ bin\git-secret-guard.cmd install    # downloads what is missing
 git-secret-guard status             # in a new terminal, once %USERPROFILE%\.local\bin is on PATH
 ```
 
-Git Bash works the same way with `bin/git-secret-guard install`. Commits are scanned from any shell and from GUI clients,
-because the hook lives in the global git config.
+Git Bash works the same way with `bin/git-secret-guard install`. Commits are scanned from any shell and from GUI clients
+that run a git 2.54 or newer, because the hook lives in the global git config.
+
+- **GUI clients with their own git.** SmartGit 26.1 bundles git 2.53.0, so its commits are not scanned until it is
+  pointed at Git for Windows: `install --configure-smartgit` does that (it writes `C:\Program Files\Git\cmd\git.exe`; see
+  [smartgit.md](smartgit.md#windows)). The portable SmartGit archive is not detected and is set by hand. `status` and
+  `doctor` report each SmartGit settings directory they find.
 
 - **Prerequisites.** Git for Windows with git 2.54 or newer (an older one is upgraded with `install --upgrade-git`, see below) on x86_64. `taskkill`,
   `timeout`, `curl`, `sha256sum` and the System32 `tar.exe` come with Windows or Git for Windows. `~/.local/bin` should be

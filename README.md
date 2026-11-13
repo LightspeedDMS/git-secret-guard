@@ -106,8 +106,8 @@ Details: [docs/exemptions.md](docs/exemptions.md).
 - Commits made with git older than 2.54 are not scanned (check the git your IDE or GUI client bundles; for SmartGit see [docs/smartgit.md](docs/smartgit.md)).
 - Only `pre-commit` runs the scan: automatic merge commits, cherry-picks, rebases and `git am` are not scanned (a merge
   finished with `git commit` is).
-- Binary files, including UTF-16 text, are not scanned. On Windows that matters more than elsewhere: Windows PowerShell
-  5.1 can write UTF-16 with `>` and `Out-File`, so a secret saved that way is invisible to the scan.
+- Binary files, including UTF-16 text, are not scanned. On Windows that matters more than elsewhere: Windows PowerShell 5.1 can write UTF-16 with `>` and `Out-File`, so a secret saved that way is invisible to the scan.
+- The content of a file tracked by Git LFS is not scanned, only its 3-line pointer: a secret in it is committed and pushed ([#98](https://github.com/LightspeedDMS/git-secret-guard/issues/98)).
 - Offline, trufflehog cannot verify a candidate and reports it as `unknown`, which blocks.
 - About 2 seconds per commit that adds lines.
 

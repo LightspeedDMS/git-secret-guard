@@ -154,6 +154,12 @@ with a reason when it is absent. `tests/fetch-test-tools.sh` downloads the pinne
   contains a NUL byte: a UTF-16LE file holding a credential commits unscanned (the hook says `no added lines to scan`, because git treats the file as binary)
   (`test_real_utf16_and_nul_byte_files_commit_unscanned_a_documented_limit`). Convert such files to UTF-8 first. Pure
   renames and mode changes add no lines.
+- **Files tracked by Git LFS: only the pointer is scanned.** git commits the 3-line pointer of an LFS-tracked file, not
+  its content, so the scan sees only the pointer and a secret in the file is committed and pushed. This holds for every
+  platform and client ([#98](https://github.com/LightspeedDMS/git-secret-guard/issues/98), not fixed). Reproduced with
+  the CLI and the installed hook: a plain file holding a fake key was refused; the same key in an LFS-tracked `.dat`
+  landed with `scanned 1 file, 3 added lines: no findings`, whether the file was edited after staging or not. SmartGit's
+  Git LFS: [smartgit.md](smartgit.md#git-lfs).
 - **Attributes: committed and user ones cannot hide text, two machine-local files can.** The diff runs with
   `--attr-source` set to the empty tree, so a `.gitattributes` in the same commit (`* -diff`, `*.txt binary`) has no
   effect, and with `-c core.attributesFile=/dev/null`, so the user's attributes file (and the XDG default) has none

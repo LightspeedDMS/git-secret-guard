@@ -360,10 +360,15 @@ repository, so only an absolute value gives a reliable answer.
 - **Release tarballs**: `trufflehog_<v>_linux_{amd64,arm64}`, `betterleaks_<v>_linux_{x64,arm64}`; betterleaks ships
   `.tar.gz` for Linux and macOS, with checksums in its `checksums.txt`. `tools_version_matches` accepts the pin only as a
   whole word, `v<pin>` or `jq-<pin>`, after dropping carriage returns.
-- **jq on Windows** (`install_manage_jq`, after `state_read`): no jq on `PATH`, or `jq:` in `tools_placed`, appends `jq` to
+- **jq on Windows** (`install_manage_jq`, after `state_read`): no jq on `PATH`, `jq:` in `tools_placed`, or the adopted file below, appends `jq` to
   `GSG_TOOL_NAMES` for this install run only, so lock, staging, ownership and asides come from the scanner path; status and
   doctor keep seeing the two scanners, and `install_write_settings` skips its `_VERSION` key. The asset is a bare `.exe`
-  (`tools_extract_binary` copies it). A jq install did not place stays in use. Linux keeps its package-manager hint (no
+  (`tools_extract_binary` copies it). A jq install did not place stays in use, except a regular file at `~/.local/bin/jq.exe`
+  with the pinned SHA-256 (the `PATH` jq, or no jq found at all):
+  `install_adopt_jq` appends `jq:<sha>` to `ST_PLACED` and `jq` to `ST_TOOLS` (bug #97; `test_a_jq_left_by_an_earlier_install_is_adopted_and_recorded`,
+  `test_a_jq_at_the_pin_is_adopted_when_the_install_dir_is_not_on_path`). A scanner kept with no record has no such adoption, because its pin is an archive
+  hash and the file cannot be matched: `--remove-tools` keeps it, and a pin bump moves our old scanner aside and `uninstall` restores that file
+  ([#101](https://github.com/LightspeedDMS/git-secret-guard/issues/101)). Linux keeps its package-manager hint (no
   silent sudo).
 - **Step order** (refusable steps before any lasting change; exceptions: the macOS `brew install bash` bootstrap, the
   config write probe that sets and removes its section, and on a Mac without GNU `timeout` the staging that follows the

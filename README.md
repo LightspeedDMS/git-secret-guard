@@ -128,8 +128,8 @@ The scan's limits are in [docs/scan.md](docs/scan.md#limits); install, exemption
 | [SECURITY.md](SECURITY.md) | how to report a vulnerability privately, and what to expect |
 | [THIRD_PARTY_LICENSES](THIRD_PARTY_LICENSES) | the third-party components `install` downloads, with version, license and copyright |
 
-## Maintainer
+## Maintainers
 
-[jsbattig](https://github.com/jsbattig) (Lightspeed DMS) maintains git-secret-guard and is responsible for its issues,
-reviews and releases. To contribute, read [CONTRIBUTING.md](CONTRIBUTING.md); to report a vulnerability, follow
+[jsbattig](https://github.com/jsbattig) (Lightspeed DMS) and [juanpio](https://github.com/juanpio) maintain git-secret-guard and are responsible for its
+issues, reviews and releases. To contribute, read [CONTRIBUTING.md](CONTRIBUTING.md); to report a vulnerability, follow
 [SECURITY.md](SECURITY.md) and do not open a public issue.

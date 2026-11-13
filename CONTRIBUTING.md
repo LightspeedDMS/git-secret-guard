@@ -73,8 +73,11 @@ in [docs/platforms.md](docs/platforms.md); they are not part of `tests/run.sh`.
   `fake_github_token` in `tests/lib.sh`) and never printed. `tests/test_quality.sh` scans the tree with the real
   scanners, and this repository is guarded by its own hook.
 - **Never dump the environment** (`env`, `set`, `export -p`) in a test or debug hook: it can print real tokens.
-- **Fail closed.** If the hook cannot scan, it blocks the commit and says why; it never lets a commit through
-  unscanned. Check every return value, keep loops bounded, use `set -u`.
+- **Fail closed.** When the hook cannot scan what it is meant to scan, it blocks the commit and says why: an unusable
+  tool, a settings or exemption file it cannot load, a failed extraction, an LFS object it cannot verify, a scanner that
+  fails or times out. An error never becomes a pass. What is not scanned by design (binary and UTF-16 files, files the
+  repository exempts, commit messages) is listed in [docs/scan.md](docs/scan.md#limits). Check every return value, keep
+  loops bounded, use `set -u`.
 - **Lint clean:** shellcheck 0.11.0 with no findings (info included). Comments use the coded form `# ^ tag clause`,
   checked by `awk -f tests/comment-rules.awk FILE` (`tests/run.sh tests/test_quality.sh` runs both).
 - **Keep files under 1000 lines;** split by responsibility when one grows past that.

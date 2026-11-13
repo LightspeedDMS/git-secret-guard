@@ -57,8 +57,10 @@ new internals there, not here.
 - **A commit cannot mute itself:** exemptions and betterleaks config come from HEAD only, root ignore files are renamed, built-in-rule status
   is judged by betterleaks' behaviour, never by parsing TOML: [exemptions.md#maintainer-notes](docs/exemptions.md#maintainer-notes).
 - **Extraction:** added line N stays at line N (never count scan-tree lines); fixed diff flags and `-c` pins (new keys into
-  `tests/test_inherited_config.sh`): [scan.md#maintainer-notes](docs/scan.md#maintainer-notes). Pathspecs `:(exclude,top,glob)` with
-  two diffs, `GIT_NO_REPLACE_OBJECTS=1`, the `GIT_*_PATHSPECS` unset: [exemptions.md](docs/exemptions.md) (table and maintainer notes).
+  `tests/test_inherited_config.sh`): [scan.md#maintainer-notes](docs/scan.md#maintainer-notes). Every diff is `diff-tree -M` of `write-tree` against
+  HEAD with `GIT_INDEX_FILE` missing (`staged_trees_init`), never `diff --cached` (git reads the work tree file, #103); tests use `touch -d` old
+  mtimes. Pathspecs `:(exclude,top,glob)` with two diffs, `GIT_NO_REPLACE_OBJECTS=1`, the `GIT_*_PATHSPECS` unset:
+  [exemptions.md](docs/exemptions.md) (table and maintainer notes).
 - **Git LFS (#98):** the hook never runs git-lfs; a pointer is known by content exactly as git-lfs decodes it, never by `.gitattributes`;
   the object comes from git config only (never `.lfsconfig`), size and SHA-256 are checked on the scanned copy, and every failure or `ext-`
   pointer blocks; no git process per file: [scan.md#maintainer-notes](docs/scan.md#maintainer-notes).

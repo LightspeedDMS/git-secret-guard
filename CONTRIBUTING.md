@@ -96,12 +96,15 @@ extraction, exemptions or install. It is written for AI coding agents too.
 `install` can offer to upgrade an old git (`install --upgrade-git`). The offer, the consent rules, the ordering with the other checks, the re-verification and the
 "what changed" refusal text live in `lib/gitup.sh` and are shared. An OS plugs in with **one file and one line**, and edits none of that logic:
 
-1. **The file** `lib/gitup_<module>.sh` (a plain lowercase word; `rpm` is the example). It is CLI-only: the hook never loads it, and `lib/install.sh` is the only place
-   that may look a tool up on `PATH` (`install_find_bin NAME [PATH]` sets `REPLY`).
-2. **The line** in `gitup_registry` (`lib/gitup.sh`). Each planned class has its own reserved line (`ubuntu`, `debian`, `macos`, `windows`, `other`), so parallel branches
-   change different lines: replace `windows) REPLY="" ;;` by `windows) REPLY=windows ;;`. **Keep the comment line between the entries:** git treats two changed lines
-   that touch as one conflict (real merges showed it), and with a comment line between them any two class branches merge cleanly
-   (`test_branches_that_each_take_one_reserved_registry_line_merge_without_conflicts` runs those merges). The registry is a plain `case`; there is no globbing and no
+1. **The file** `lib/gitup_<module>.sh` (a plain lowercase word; `rpm` is the example). It is CLI-only: the hook never loads it. A module looks a tool up on `PATH` only
+   through `install_find_bin NAME [PATH]` (`lib/install.sh`, sets `REPLY`): `type -P` is allowed only in `lib/install.sh`, `lib/brew.sh` and the one line of `smartgit_tool`
+   (`test_the_hook_never_looks_tools_up_on_PATH`).
+2. **The line** in `gitup_registry` (`lib/gitup.sh`). Every class `gitup_os_class` detects (`rpm`, `ubuntu`, `debian`, `macos`, `windows`, `wsl`, `other`) has its line, and
+   all have a module except `other) REPLY="" ;;`, the one reserved line left: a module for `other` replaces its `REPLY=""` by `REPLY=<module>`. A new class also needs
+   `gitup_os_class` to detect it, and adds its own `name) REPLY=<module> ;;` line before `other)`. **Keep the comment line between the entries:** git treats two changed
+   lines that touch as one conflict (real merges showed it); with a comment line between them, branches that each change a different existing line merge cleanly. Two
+   branches that both add a line at the same place still conflict. `test_branches_that_each_take_one_reserved_registry_line_merge_without_conflicts` runs those merges
+   over the lines still reserved (`REPLY=""`) and skips while fewer than two are, so with only `other` reserved it is dormant. The registry is a plain `case`; there is no globbing and no
    generated name outside `gitup_call`. `gitup_os_class` already detects every class, WSL (class `wsl`, the wrapper module `lib/gitup_wsl.sh`) included. Shared files a module branch does
    not edit: `tests/coverage.sh` globs `lib/gitup*.sh`, the registry test reads the class list from the library, the merge test (`test_branches_that_each_take_one_reserved_registry_line_merge_without_conflicts`) takes the classes still reserved from the library, the CLI loads only the shared `gitup` and
    `gitup_source`, a module sources its own helper libraries (`gitup_rpm.sh` does it for `gitup_takeover.sh`), and the contract tests use synthetic classes

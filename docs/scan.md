@@ -97,7 +97,8 @@ git-secret-guard: 2 coverage problems still open (doctor run 2026-11-03):
 
 The hook reads `<share>/settings` (`<share>` = two levels above the resolved script path), written by `install` (`install_write_settings`, with `printf %q`, because the hook sources it):
 absolute `TRUFFLEHOG_BIN`, `BETTERLEAKS_BIN`, `JQ_BIN`, `SETSID_BIN` (`TASKKILL_BIN` on Windows), `TIMEOUT_BIN`, the pinned `TRUFFLEHOG_VERSION` and
-`BETTERLEAKS_VERSION` (shown on the pass line only) and `SCAN_TIMEOUT_SECONDS`. The `GITLEAKS_*` keys of the previous
+`BETTERLEAKS_VERSION` (shown on the pass line only) and `SCAN_TIMEOUT_SECONDS`, plus the platform keys `BASH_BIN` and `GNUBIN_DIR` (macOS)
+and the timer key `SYSTEMCTL_BIN` or `LAUNCHCTL_BIN` (see [install.md](install.md)). The `GITLEAKS_*` keys of the previous
 build are neither written nor read (an inherited `GITLEAKS_BIN` is discarded like any other). A missing,
 relative or non-executable tool path blocks the commit and says nothing was scanned. A missing `SCAN_TIMEOUT_SECONDS`
 means 300; only an integer from 1 to 999999 written without a leading zero is accepted, anything else blocks (empty, a non-digit, `0`, `00`, `007`, `1000000`). GNU `timeout` reads `00` as no limit and fails open on a value of about 20 digits, so those must never reach it; `007` would mean 7 and is refused only to keep one strict form, the same as the pre-flight; missing or non-numeric versions only drop the versions from
@@ -337,9 +338,10 @@ Why the scan code is shaped this way; each point was probed on the pinned versio
   Verified: that listing. Assumed: that the tests find it, as `git lfs` through git's exec path on Windows and through
   `TEST_BASE_PATH` (Homebrew's `bin`) on macOS; where `git lfs version` fails the `test_real_*` LFS tests skip with a reason,
   the hand-built ones need no git-lfs and the hook itself never runs it.
-- **Doctor has no LFS gap.** It reads no file content and runs no scanner (none of `lib/doctor*.sh` mentions trufflehog,
-  betterleaks, `staged_diff` or `extract_added_lines`); it checks configuration and tool paths, so a pointer cannot be
-  mis-scanned by it.
+- **Doctor has no LFS gap.** It reads no staged or work-tree content and scans none. Its only scanner run is the betterleaks
+  config pre-flight (`doctor_repo_betterleaks` calls `betterleaks_config_preflight`): HEAD's `.gitleaks.toml` against a
+  built-in probe file. None of `lib/doctor*.sh` mentions trufflehog, `staged_diff` or `extract_added_lines`; it checks
+  configuration and tool paths, so a pointer cannot be mis-scanned by it.
 - **Config pins.** A command-line `-c` beats repository config, `GIT_CONFIG_PARAMETERS` and `GIT_CONFIG_COUNT`.
   `tests/test_inherited_config.sh` sets its keys in all three forms; add any new one there
   (`test_other_inherited_git_settings_cannot_change_what_is_extracted`). `core.bigFileThreshold` is `100g`, `4095m` on Windows. `replace_head_with_permissive_commit` is the

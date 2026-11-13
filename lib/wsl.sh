@@ -81,7 +81,7 @@ install_pins_running_script() {
 
 # ^ invariant a Windows git on a WSL PATH is a separate setup; the notice names it and says what covers it; never fails the install
 # ^ why git.exe by its own name, not git; install_collect_gits looks for git and never sees the Windows one (probed on WSL 1, #31)
-# ^ coupled the lookup is install_find_bin of lib/install.sh, the one place allowed to call type -P
+# ^ coupled the lookup is install_find_bin of lib/install.sh, one of three places allowed to call type -P (with lib/brew.sh and one line of smartgit_tool)
 install_wsl_notice() {
     if ! wsl_is; then return 0; fi
     if ! install_find_bin git.exe; then return 0; fi

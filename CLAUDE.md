@@ -68,16 +68,18 @@ new internals there, not here.
   keep `timeout --foreground`, doctor's git shim omits it; a git or find that Ctrl-C must stop never runs inside `< <(...)` (bash 5.3):
   [scan.md#maintainer-notes](docs/scan.md#maintainer-notes), [doctor.md#maintainer-notes](docs/doctor.md#maintainer-notes).
 - **Install order:** refusable checks before any lasting change, state before config, unset `core.hooksPath` last, uninstall restores it
-  first; our scanner files are known by hash (recorded, or a kept file equal to the lock's binary-hash column); `/etc/os-release` is data: [install.md#maintainer-notes](docs/install.md#maintainer-notes).
+  first; our scanner files are known by hash (recorded, or a kept file equal to the lock's binary-hash column); `/etc/os-release` is data:
+  [install.md#maintainer-notes](docs/install.md#maintainer-notes).
 - **One verdict, git's:** `status` and doctor share `hooklist_probe_line` (a bare repo written by hand, never `git init`); `status` exits 1 on
   any `MISMATCH`/`MISSING`: [install.md#maintainer-notes](docs/install.md#maintainer-notes).
 - **Doctor** exits 1 only for a PROBLEM, runs nothing a repository configures, never prints a hook `command`/`event` value; the findings
   record is data, merged under the lock: [doctor.md#maintainer-notes](docs/doctor.md#maintainer-notes).
 - **macOS:** `/bin/bash` 3.2 cannot parse the libs (bootstrap re-exec, two loop bounds); every install refusal uses `brew_unchanged_text`.
   **Windows:** three path forms, compare in one (`cygpath -m -l`); no process groups: [platforms.md#maintainer-notes](docs/platforms.md#maintainer-notes).
-- **Git upgrade** (`lib/gitup*.sh`): one module file plus one reserved registry line ([CONTRIBUTING.md#adding-an-os-module](CONTRIBUTING.md#adding-an-os-module));
-  privileged tools only through `gitup_system_bin`, the printed plan is what runs; partly applied states are tested contracts; the PPA key
-  check precedes `apt-get update`; on Windows bash never runs the installer: [install.md#maintainer-notes-git-upgrade](docs/install.md#maintainer-notes-git-upgrade).
+- **Git upgrade** (`lib/gitup*.sh`): one module file plus one registry line, only `other` still reserved
+  ([CONTRIBUTING.md#adding-an-os-module](CONTRIBUTING.md#adding-an-os-module)); privileged tools only through `gitup_system_bin`, the printed
+  plan is what runs; partly applied states are tested contracts; the PPA key check precedes `apt-get update`; on Windows bash never runs
+  the installer: [install.md#maintainer-notes-git-upgrade](docs/install.md#maintainer-notes-git-upgrade).
 - **SmartGit:** only the `executable:` lines of a recorded `preferences.yml`, never re-serialised YAML; the Flatpak's four steps are one unit,
   each recorded before it acts. Per settings root only the newest set-up major is live; an older one is left over (info, no exit status, never
   edited) unless an install has exactly that major (#88): [smartgit.md](docs/smartgit.md).

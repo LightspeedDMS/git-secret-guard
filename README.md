@@ -15,7 +15,7 @@ git config-based hook, so it runs alongside whatever hooks a repository brings (
 | **macOS arm64** (tested on macOS 26.7.1; x86_64 is mapped but not tested) | Homebrew | bash 4.4+, `coreutils`, `util-linux` and `jq`, with `brew install`, after its other checks have passed |
 | **Linux** x86_64 or arm64 (the suite and install E2E ran on Rocky Linux 9.7 and Ubuntu 24.04 in podman containers; the git upgrade ran for real on Ubuntu 24.04 and Debian 13 in podman containers on an arm64 Mac and in real-apt chroots on 22.04, 24.04, Debian 13 and 20.04; not run: an Ubuntu 22.04 container, an x86_64 container) | bash, `jq`, `setsid`, `timeout`, and `curl` plus `tar` to download the scanners; git 2.54 or newer, unless `install` can upgrade it for you | on RHEL, Rocky, AlmaLinux, Fedora, Ubuntu and Debian, an old or missing git, if you agree; anything else it names, with how to get it |
 
-**WSL** (Ubuntu, Debian or an RPM distribution inside Windows Subsystem for Linux) takes the Linux row above, with the same git upgrade offer. WSL and Windows are two separate git setups, and installing in one does not cover commits made by the other. Fixture-tested and run for real on hosted WSL 1 and WSL 2 (Ubuntu 22.04); other distributions are not run, and WSL 1 on Windows Server 2019 blue-screened the maintainer's host twice (cause not established): see [docs/platforms.md](docs/platforms.md#wsl-windows-subsystem-for-linux).
+**WSL** (Ubuntu, Debian or an RPM distribution inside Windows Subsystem for Linux) takes the Linux row above, with the same git upgrade offer. WSL and Windows are two separate git setups, and installing in one does not cover commits made by the other. Fixture-tested and run for real on hosted WSL 1 and WSL 2 (Ubuntu 22.04 and 24.04; Rocky 9.8 and Fedora 44 on WSL 2 only); other distributions are not run, and WSL 1 on Windows Server 2019 blue-screened the maintainer's host twice (cause not established): see [docs/platforms.md](docs/platforms.md#wsl-windows-subsystem-for-linux).
 
 **git 2.54 or newer has to be first on `PATH`** on every platform: older git ignores config hooks without any message.
 When `install` finds an older or missing git, what happens depends on the platform:
@@ -106,8 +106,8 @@ Details: [docs/exemptions.md](docs/exemptions.md).
 - Commits made with git older than 2.54 are not scanned (check the git your IDE or GUI client bundles; for SmartGit see [docs/smartgit.md](docs/smartgit.md)).
 - Only `pre-commit` runs the scan: automatic merge commits, cherry-picks, rebases and `git am` are not scanned (a merge
   finished with `git commit` is).
-- Binary files, including UTF-16 text, are not scanned. On Windows that matters more than elsewhere: Windows PowerShell
-  5.1 can write UTF-16 with `>` and `Out-File`, so a secret saved that way is invisible to the scan.
+- Binary files, including UTF-16 text, are not scanned. On Windows that matters more than elsewhere: Windows PowerShell 5.1 can write UTF-16 with `>` and `Out-File`, so a secret saved that way is invisible to the scan.
+- The content of a file tracked by Git LFS is not scanned, only its 3-line pointer: a secret in it is committed and pushed ([#98](https://github.com/LightspeedDMS/git-secret-guard/issues/98)).
 - Offline, trufflehog cannot verify a candidate and reports it as `unknown`, which blocks.
 - About 2 seconds per commit that adds lines.
 

@@ -314,12 +314,20 @@ test_small_plain_files_cost_no_git_process_per_file() {
 
 test_a_failing_sha256sum_blocks_with_a_clear_line_and_shasum_is_not_a_fallback() {
     begin lfs18 || return 1
+    local tool
     printf 'cannot hash\n' >"$SANDBOX/obj18" || return 1
     lfs_stage data/nohash.dat "$SANDBOX/obj18" || return 1
     mkdir -p -- "$SANDBOX/nosha" || return 1
     printf '#!/bin/sh\nexit 1\n' >"$SANDBOX/nosha/sha256sum" || return 1
     chmod 755 "$SANDBOX/nosha/sha256sum" || return 1
     set_env PATH="$SANDBOX/nosha:$REAL_HOME/.local/bin:$TEST_BASE_PATH"
+    # ^ external the hook puts GNUBIN_DIR from the settings first on PATH (macOS) => the stand-in must be in a gnubin copy, with every other GNU tool linked
+    if [ -n "$TEST_GNUBIN" ]; then
+        mkdir -p -- "$SANDBOX/gnubin-fail" || return 1
+        for tool in "$TEST_GNUBIN"/*; do ln -sf -- "$tool" "$SANDBOX/gnubin-fail/" || return 1; done
+        ln -sf -- "$SANDBOX/nosha/sha256sum" "$SANDBOX/gnubin-fail/sha256sum" || return 1
+        use_stubs "GNUBIN_DIR=$SANDBOX/gnubin-fail"
+    fi
     commit_cap "lfs"
     assert_rc 1 "blocked"
     assert_contains "$ERR" "Git LFS file data/nohash.dat: the SHA-256 of its object cannot be computed (sha256sum is missing or failed)" "path and reason"

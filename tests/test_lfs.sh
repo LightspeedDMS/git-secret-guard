@@ -466,11 +466,8 @@ test_real_git_lfs_rename_with_change_is_followed_and_a_pure_rename_adds_nothing(
     gitx mv old.dat same.dat || return 1
     commit_cap "pure rename"
     assert_rc 0 "a pure rename"
-    # ^ see issue #103; --attr-source hides filter=lfs, git reuses the stat-clean work tree file, the pure rename shows hunks and the object is followed
-    # ^ todo once #103 is fixed => a pure rename of an LFS file must print exactly the no added lines to scan line
-    [[ $ERR =~ $PASS_LINE_RE ]] || fail "a pure rename printed [$ERR]"
-    assert_eq "${BASH_REMATCH[1]}" 1 "the renamed file"
-    assert_eq "${BASH_REMATCH[2]}" 6 "3 lines of the work tree text from git plus 3 of the object"
+    # ^ why exactly this line, not a pass line; the diff is between two trees (#103), the rename leaves the pointer unchanged and adds nothing
+    assert_eq "$ERR" "git-secret-guard: no added lines to scan" "a pure rename of an LFS file adds nothing"
     gitx mv same.dat moved.dat && printf 'one\ntwo\nthree\naws_key = %s\n' "$key" >moved.dat && gitx add -- moved.dat || return 1
     commit_cap "rename with change"
     assert_rc 1 "a rename that adds a key to the object"

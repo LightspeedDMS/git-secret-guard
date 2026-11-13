@@ -431,4 +431,93 @@ test_real_a_lone_aws_key_id_under_a_skipped_path_passes_with_and_without_a_repo_
     done
 }
 
+# ^ why touch -d 2 hours ago, not a fresh file; a racy file makes git read the blob by luck, a stat-clean one made it read the work tree (#103)
+test_real_a_key_staged_through_working_tree_encoding_is_scanned_from_the_blob() {
+    need_real_tools
+    command -v iconv >/dev/null 2>&1 || skip_test "iconv is not installed"
+    new_repo realenc || return 1
+    local key
+    key="$(fake_aws_key)" || return 1
+    printf '*.txt working-tree-encoding=UTF-16LE\n' >.gitattributes && gitx add .gitattributes && gitx commit -q --no-verify -m attrs || return 1
+    printf 'aws_key = "%s"\n' "$key" | iconv -t UTF-16LE >conf.txt && touch -d '2 hours ago' conf.txt || return 1
+    gitx add -- conf.txt || return 1
+    [[ "$(gitx cat-file -p :conf.txt)" == *"$key"* ]] || fail "the staged blob does not hold the key in UTF-8"
+    commit_cap "encoded"
+    assert_rc 1 "blocked: the blob holds the key, the UTF-16 work tree file is not what is committed"
+    assert_contains "$ERR" "conf.txt:1" "the line of the staged blob"
+    no_leak "$key"
+}
+
+# ^ invariant args = repo name and the git commit arguments; HEAD holds a UTF-16 conf.txt, the old-mtime work tree copy has a key only in the blob
+real_encoded_key_case() {
+    local name="$1" key
+    shift
+    need_real_tools
+    command -v iconv >/dev/null 2>&1 || skip_test "iconv is not installed"
+    key="$(fake_aws_key)" || return 1
+    new_repo "$name" || return 1
+    printf '*.txt working-tree-encoding=UTF-16LE\n' >.gitattributes && printf 'clean line\n' | iconv -t UTF-16LE >conf.txt || return 1
+    gitx add .gitattributes conf.txt && gitx commit -q --no-verify -m base || return 1
+    printf 'clean line\naws_key = "%s"\n' "$key" | iconv -t UTF-16LE >conf.txt && touch -d '2 hours ago' conf.txt || return 1
+    if [ "${1:-}" != -a ]; then gitx add -- conf.txt || return 1; fi
+    run_cap gitx commit -q -m x "$@"
+    assert_rc 1 "blocked in this commit mode"
+    assert_contains "$ERR" "conf.txt:2" "the line of the staged blob"
+    no_leak "$key"
+    if [ "$(gitx rev-list --count HEAD)" != 1 ]; then fail "a commit was created"; fi
+}
+
+test_real_commit_a_scans_the_blob_of_a_stat_clean_encoded_file() {
+    real_encoded_key_case realenc-a -a
+}
+
+test_real_a_partial_commit_scans_the_blob_of_a_stat_clean_encoded_file() {
+    real_encoded_key_case realenc-p -- conf.txt
+}
+
+test_real_a_partial_commit_scans_the_temporary_index_not_the_real_one() {
+    need_real_tools
+    new_repo realtmpidx || return 1
+    local key
+    key="$(fake_aws_key)" || return 1
+    printf 'b0\n' >b.txt && gitx add b.txt && gitx commit -q --no-verify -m base || return 1
+    printf 'aws_key = "%s"\n' "$key" >a.key && gitx add a.key && printf 'b1\n' >b.txt || return 1
+    commit_cap "partial" -- b.txt
+    assert_rc 0 "the key staged in a.key is not part of this commit"
+    no_leak "$key"
+    if gitx cat-file -e HEAD:a.key 2>/dev/null; then fail "a.key was committed"; fi
+    if gitx diff --cached --quiet -- a.key; then fail "a.key is no longer staged"; fi
+}
+
+test_real_a_clean_filter_that_adds_content_cannot_hide_it_from_the_scan() {
+    need_real_tools
+    new_repo realfilter || return 1
+    local key
+    key="$(fake_aws_key)" || return 1
+    printf 'aws_key = "%s"\n' "$key" >"$SANDBOX/filter-extra" || return 1
+    gitx config filter.adder.clean "cat - $(git_path "$SANDBOX/filter-extra")" || return 1
+    printf '*.txt filter=adder\n' >.gitattributes && gitx add .gitattributes && gitx commit -q --no-verify -m attrs || return 1
+    printf 'plain text\n' >f.txt && touch -d '2 hours ago' f.txt || return 1
+    gitx add -- f.txt || return 1
+    [[ "$(gitx cat-file -p :f.txt)" == *"$key"* ]] || fail "the filter did not put the key into the staged blob"
+    commit_cap "filtered"
+    assert_rc 1 "blocked: the staged blob holds what the filter added"
+    assert_contains "$ERR" "f.txt:2" "the added line of the blob"
+    no_leak "$key"
+}
+
+test_real_a_commit_whose_index_cannot_be_written_as_a_tree_is_blocked() {
+    need_real_tools
+    new_repo realtree || return 1
+    stage_file f.txt "one" "two" || return 1
+    local sha
+    sha="$(gitx rev-parse :f.txt)" || return 1
+    rm -f -- ".git/objects/${sha:0:2}/${sha:2}" || return 1
+    commit_cap "no blob"
+    assert_rc 1 "blocked"
+    assert_contains "$ERR" "nothing was scanned" "the block says nothing was scanned"
+    assert_contains "$ERR" "git write-tree failed" "the message names the failing step"
+    if gitx rev-parse -q --verify HEAD >/dev/null 2>&1; then fail "a commit was created"; fi
+}
+
 run_file_tests

@@ -17,7 +17,7 @@
    rest. The shebang is not pinned to an absolute `bash`. On macOS the hook command names the recorded `BASH_BIN`
    instead. Child scripts (`lib/run-scanner.sh`, the coverage re-check) run under the same bash binary as the hook
    (`$BASH`), not through a new lookup.
-3. `git diff --cached` (fixed flags, `-U0`) is turned into a private scan tree under `${TMPDIR:-$HOME/.tmp}`
+3. The staged content (the index written as a tree, diffed against HEAD's tree; fixed flags, `-U0`) is turned into a private scan tree under `${TMPDIR:-$HOME/.tmp}`
    (on Windows a `TMPDIR` outside your home is ignored and `~/.tmp` is used, because NTFS ignores `chmod` and only your
    profile's permissions keep the staged lines private) (mode 700, removed on exit and on HUP/INT/TERM): each touched file at its real relative path, each **added** line
    at its real line number, every other line blank. Nothing added (empty commit, deletions only, binary only) means no
@@ -191,7 +191,9 @@ with a reason when it is absent. `tests/fetch-test-tools.sh` downloads the pinne
   effect, and with `-c core.attributesFile=/dev/null`, so the user's attributes file (and the XDG default) has none
   either. `$GIT_DIR/info/attributes` and the system-wide gitattributes file still apply (probed on git 2.56): a `-diff`
   or `binary` rule there hides the matching files. They are local, uncommitted, machine configuration that git offers
-  no per-command switch for (the system file is root-owned and could not be exercised by a test).
+  no per-command switch for (the system file is root-owned and could not be exercised by a test). The diff is between
+  two trees, so what is scanned is always the staged blob: `working-tree-encoding` and a clean filter cannot show the
+  scanner the work tree file instead ([#103](https://github.com/LightspeedDMS/git-secret-guard/issues/103), fixed in 0.3.4).
 - **Inherited git configuration cannot change the extraction.** `-c core.bigFileThreshold=100g` is pinned, because a
   lower threshold (`git -c core.bigFileThreshold=1 commit`, or the same key in the repository config) makes git treat
   every file as binary and show no added lines, so a token would commit with no output. The command-line pin wins over
@@ -283,9 +285,28 @@ Why the scan code is shaped this way; each point was probed on the pinned versio
   The awk unquotes C-quoted names, refuses `..`, `.`, empty components and absolute paths (exit 2), and dies on a hunk
   line that is not `+ - space \` or a diff that ends early. Its stderr goes through `_extract_clean_stderr` and its status
   comes from `PIPESTATUS` (`test_an_extraction_write_failure_blocks_with_a_message_about_extraction_and_keeps_the_awk_line`).
+- **The staged tree (#103).** Every diff of the hook (`_staged_git_diff`: the extraction, the exemption second pass,
+  `staged_added_file_count`, and the `--raw -z` and `--numstat -z` of the LFS code) is
+  `GIT_INDEX_FILE=<work dir>/no-index git --attr-source=<empty tree> ... diff-tree -r -M <HEAD tree> <staged tree>`, where
+  `staged_trees_init` ran `git write-tree` once (the tree objects `git commit` writes next; the empty tree before the
+  first commit). Why not `diff --cached`: `--attr-source` hides the attributes, so git concludes that a stat-clean entry
+  needs no conversion and reads the **work tree file** as the new side (`reuse_worktree_file` in git's `diff.c`).
+  With `*.txt working-tree-encoding=UTF-16LE` in a committed `.gitattributes`, or a local clean filter that adds content,
+  that file differs from the blob and a staged key was committed unscanned. A racy-fresh file (same second as the
+  index) makes git read the blob, which hid the bug: **tests must `touch -d '2 hours ago'` their files**. No switch turns
+  the reuse off (`GIT_WORK_TREE` at an empty directory, `diff-tree` with the index loaded and `-c` settings all failed);
+  with no index to consult git has only the two trees. `-M` and `-r` are passed because plumbing neither detects
+  renames nor recurses by default (it ignores `diff.renames`, so `diff.renames=copies` and `diff.renames=false` no longer matter; with `false` the old diff scanned a renamed and edited file
+  whole, 10 lines, and now only its added lines, 1, which is git's default behaviour). A failing
+  `write-tree` (an unmerged entry or a missing object) blocks with `git write-tree failed`
+  (`test_real_a_commit_whose_index_cannot_be_written_as_a_tree_is_blocked`). Callers of `staged_diff` outside the hook
+  call `staged_trees_init <dir>` first (`tests/test_extract.sh`). Not moved: `git ls-files --cached` in
+  `_warn_if_union_covers_tree` and the probe repository's `diff --cached --name-only` in `scan_ignore_scope` only read
+  names, never content (doctor shares them and is unchanged). Tests: `test_real_a_key_staged_through_working_tree_encoding_is_scanned_from_the_blob`,
+  `test_real_a_clean_filter_that_adds_content_cannot_hide_it_from_the_scan`.
 - **Git LFS (#98).** `extract_lfs_objects` (`lib/extract.sh`) runs after `exempt_extract_tree` and starts no git process per
   file (`test_small_plain_files_cost_no_git_process_per_file` counts runs with `GIT_TRACE`): `_lfs_staged_blobs` takes the
-  regular files of one `diff --cached --raw -z --no-abbrev` (the extraction's flags) that have a scan file, so exclusions
+  regular files of one `diff-tree --raw -z --no-abbrev` (the extraction's flags) that have a scan file, so exclusions
   are honoured; `_lfs_find_pointers` asks one `git cat-file --batch-check` for the sizes and one `--batch` for the blobs of
   at most 1023 bytes (`GSG_LFS_POINTER_MAX`), with NUL mapped to 0x01 by `tr` before bash reads them (3000 small plain files: 0.36 s for the whole
   step, 2 `cat-file` runs; the per-file version measured +29.7 s). Only a blob holding `oid sha256:` is parsed. The blob
@@ -301,14 +322,11 @@ Why the scan code is shaped this way; each point was probed on the pinned versio
   itself is unchanged, so the table test still compares the ext fixtures with git-lfs. `git lfs ls-files` and `git lfs push`
   only consider blobs under 1024 bytes (probed: 1023 is listed and pushed, 1024, 1025 and 1036 are not; `test_only_blobs_under_1024_bytes_are_pointers`),
   while `git lfs pointer --check` reads the first 1024 bytes only, so it is the wrong oracle above 1023 and a pointer padded
-  past that size passes `--check` but is neither pushed nor followed. **Known bug, [#103](https://github.com/LightspeedDMS/git-secret-guard/issues/103):
-  git reads the work tree file for an LFS path.** `--attr-source` hides `filter=lfs`, so for a stat-clean file git uses the
-  work tree content as the new side of `diff --cached` (a racy-fresh file does not, which made it look random: about one
-  commit in ten). A pure rename of an LFS file then shows its content as added lines. That text is the object's text, so
-  nothing is missed; the pass line counts lines it should not. The rename test sets an old mtime (`touch -d '2 hours ago'`)
-  and asserts that exact current outcome (1 file, 6 lines); after #103 is fixed it must give `no added lines to scan`. `_lfs_storage_dir` takes `git config --type=path --get lfs.storage` (any scope, last wins),
+  past that size passes `--check` but is neither pushed nor followed. A pure rename of an LFS file changes no pointer and
+  prints exactly `no added lines to scan` (it showed 1 file, 6 lines while git read the work tree file, [#103](https://github.com/LightspeedDMS/git-secret-guard/issues/103),
+  see "The staged tree" above; the test sets an old mtime). `_lfs_storage_dir` takes `git config --type=path --get lfs.storage` (any scope, last wins),
   `_lfs_fetch_object` copies the object into the work dir and checks size and SHA-256 **on the copy**, then `mv` replaces
-  the pointer's scan file. Counts: the pointer's added lines come from `git diff --numstat -z` (`_lfs_added_lines`), so
+  the pointer's scan file. Counts: the pointer's added lines come from `diff-tree --numstat -z` (`_lfs_added_lines`), so
   `GSG_EXTRACT_LINES` stays exact for renames; a binary object removes its file and one from the file count. The hook prints
   one line per failing file, naming the path (control characters mapped to `?`) and never the content. Tests:
   `tests/test_lfs.sh` (hand-built pointers and objects; `test_real_*` use the real scanners and the real `git lfs` and skip

@@ -13,10 +13,41 @@ _staged_git_diff() {
     # ^ why empty tree computed by hash-object, not hard-coded; the id differs for sha256 repositories
     empty_tree="$(git hash-object -t tree /dev/null)" || return 1
     # ^ why explicit prefixes/context/no-ext-diff/no-textconv, not the user's diff config; noprefix, interHunkContext and external diff would change the parse
-    # ^ why ACMRT, not ACMR; a symlink->file type change adds content
+    # ^ why ACMRT, not ACMR, with -M and -r spelled out; a symlink->file type change adds content, plumbing skips diff.renames and recursion
     # ^ hazard adding --text => binary content reaches the scanners; test:test_binary_content_is_not_extracted
-    git --attr-source="$empty_tree" -c core.quotePath=false -c core.bigFileThreshold="$threshold" -c core.attributesFile=/dev/null diff --cached --no-color --no-ext-diff --no-textconv \
-        --inter-hunk-context=0 --src-prefix=a/ --dst-prefix=b/ --diff-filter=ACMRT "$@"
+    local -a diff_flags=(-r -M --no-color --no-ext-diff --no-textconv --inter-hunk-context=0 --src-prefix=a/ --dst-prefix=b/ --diff-filter=ACMRT)
+    # ^ invariant staged_trees_init ran first => no tree id means no diff, never a diff of the wrong trees
+    if [ -z "${GSG_STAGED_TREE:-}" ] || [ -z "${GSG_BASE_TREE:-}" ] || [ -z "${GSG_NO_INDEX:-}" ]; then
+        printf '%s: internal error: the staged tree was not written before the diff; nothing was scanned.\n' "$GSG_NAME" >&2
+        return 1
+    fi
+    # ^ hazard diff --cached reads the work tree (#103); test:test_real_a_key_staged_through_working_tree_encoding_is_scanned_from_the_blob
+    # ^ security no index, trees from write-tree => only the staged blob is read; test:test_real_a_clean_filter_that_adds_content_cannot_hide_it_from_the_scan
+    GIT_INDEX_FILE="$GSG_NO_INDEX" git --attr-source="$empty_tree" -c core.quotePath=false -c core.bigFileThreshold="$threshold" -c core.attributesFile=/dev/null \
+        diff-tree "${diff_flags[@]}" "$GSG_BASE_TREE" "$GSG_STAGED_TREE" "$@"
+}
+
+# ^ why one write-tree per commit, not a tree per diff; it writes the trees git commit writes next; every count reads the same two
+# ^ invariant args = work dir; sets GSG_STAGED_TREE, GSG_BASE_TREE (HEAD's tree, the empty tree on an initial commit) and GSG_NO_INDEX (a path with no file)
+# ^ invariant rc 1 = failed with a message on stderr, the caller blocks; test:test_real_a_commit_whose_index_cannot_be_written_as_a_tree_is_blocked
+staged_trees_init() {
+    GSG_NO_INDEX="$1/no-index"
+    GSG_STAGED_TREE="" GSG_BASE_TREE=""
+    if [ -e "$GSG_NO_INDEX" ]; then
+        printf '%s: %s already exists; it must not, it stands for an empty index; nothing was scanned.\n' "$GSG_NAME" "$GSG_NO_INDEX" >&2
+        return 1
+    fi
+    GSG_STAGED_TREE="$(git write-tree)" || {
+        printf '%s: git write-tree failed (an unmerged entry or a missing object in the index); nothing was scanned.\n' "$GSG_NAME" >&2
+        GSG_STAGED_TREE=""
+        return 1
+    }
+    # ^ why rc 1 means an initial commit, not an error, as in exempt_head_blob; a broken HEAD diffs against the empty tree and scans more
+    if git rev-parse -q --verify 'HEAD^{commit}' >/dev/null 2>&1; then
+        GSG_BASE_TREE="$(git rev-parse --verify 'HEAD^{tree}')" || return 1
+    else
+        GSG_BASE_TREE="$(git hash-object -t tree /dev/null)" || return 1
+    fi
 }
 
 # ^ order callers pass "-- <pathspec>..." as arguments; nothing else may be added after the pathspecs

@@ -8,6 +8,7 @@ CONFIG_MATRIX=(
     core.attributesFile=ATTRS
     diff.external=/bin/false
     diff.renames=copies
+    diff.renames=false
     diff.renameLimit=1
     core.autocrlf=true
     core.autocrlf=input

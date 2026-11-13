@@ -65,7 +65,7 @@ extract_with() {
     rm -rf -- "$2"
     # shellcheck disable=SC2016
     run_cap env -i "${GSG_ENV[@]}" PATH="$farm:${GIT%/*}:$TEST_BASE_PATH" bash -c \
-        'set -o pipefail; cd "$1" && source "$2/lib/common.sh" && source "$2/lib/extract.sh" && staged_diff | extract_added_lines "$3"' _ "$CORPUS" "$GSG_PROJECT" "$2"
+        'set -o pipefail; cd "$1" && source "$2/lib/common.sh" && source "$2/lib/extract.sh" && staged_trees_init "$3" && staged_diff | extract_added_lines "$3"' _ "$CORPUS" "$GSG_PROJECT" "$2"
 }
 
 check_tree() {
@@ -201,7 +201,7 @@ inline_report() {
     printf 'TRACE sample.sh:2:\nTRACE sample.sh:4:\nTTRACE sample.sh:8:\n' >"$cov/trace"
     {
         # shellcheck disable=SC2016
-        printf 'numstat=%s\n' "$(inline_run "$1" 'cd "$1" && source "$2/lib/common.sh" && source "$2/lib/extract.sh" && staged_added_file_count' _ "$CORPUS" "$GSG_PROJECT")"
+        printf 'numstat=%s\n' "$(inline_run "$1" 'cd "$1" && source "$2/lib/common.sh" && source "$2/lib/extract.sh" && staged_trees_init "$1" && staged_added_file_count' _ "$CORPUS" "$GSG_PROJECT")"
         bounds_case "$1" files-at-limit 3 1 3 100
         bounds_case "$1" files-over-limit 4 1 3 100
         bounds_case "$1" files-ten-over-nine 10 0 9 100

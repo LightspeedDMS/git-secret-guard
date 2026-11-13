@@ -23,6 +23,8 @@ test_a_rocky_machine_with_an_old_git_builds_the_pinned_source_when_the_user_acce
     assert_contains "$OUT" "git 2.56.0" "and the pinned version"
     assert_contains "$OUT" "git-2.56.0.tar.xz" "and the tarball"
     assert_contains "$OUT" "env -i with PATH=" "and the clean build environment"
+    assert_contains "$OUT" "the build uses about 570 MB of disk, 800 MB must be free; several minutes" "the plan tells the build size and the free space it requires (#109)"
+    assert_contains "$OUT$ERR" "the build uses about 570 MB of disk, several minutes" "the progress line says the 570 MB is what the build uses (#109)"
     assert_contains "$OUT" "as root: $SANDBOX/pathbin/dnf install -y gcc make perl-interpreter" "and the dependency command with the full path of the dnf root will run"
     assert_contains "$OUT" "/cp -dR --remove-destination --preserve=timestamps,links" "and the copy, which replaces an existing file instead of writing through a link"
     assert_contains "$(gu_log)" "make -C" "make ran"
@@ -392,8 +394,20 @@ test_too_little_free_space_refuses_before_anything_changes() {
     printf '1000' >"$SANDBOX/df.avail"
     gsg install --upgrade-git </dev/null
     assert_rc 1 "no room to build"
-    assert_contains "$ERR" "needs about 570 MB" "says how much"
+    assert_contains "$ERR" "needs at least 800 MB of free disk space" "says how much"
     assert_contains "$ERR" "nothing was changed" "and that nothing changed"
+    assert_not_contains "$(gu_log)" "dnf install" "no dependency install"
+}
+
+# ^ why 716800 KB, not 1000; 700 MB is above the 570 MB build estimate and below the 800 MB threshold (#109)
+test_free_space_between_the_estimate_and_the_threshold_names_the_threshold() {
+    gu_rpm_setup || return 1
+    printf '716800' >"$SANDBOX/df.avail"
+    gsg install --upgrade-git </dev/null
+    assert_rc 1 "700 MB is below the threshold"
+    assert_contains "$ERR" "needs at least 800 MB of free disk space" "names the threshold"
+    assert_contains "$ERR" "and 700 MB is free" "and the room"
+    assert_not_contains "$ERR" "570" "the build estimate is not the number the check uses"
     assert_not_contains "$(gu_log)" "dnf install" "no dependency install"
 }
 

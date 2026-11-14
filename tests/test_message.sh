@@ -131,7 +131,8 @@ test_a_crlf_diff_below_the_cut_matches_byte_for_byte_and_is_blanked() {
     printf 'keep\r\ngone %s\r\n' "$MARKER" >c.txt && gitx add c.txt && gitx commit -q --no-verify -m base || return 1
     printf 'keep\r\nnew line\r\n' >c.txt && gitx add c.txt || return 1
     gitx diff --cached | verbose_message "$SANDBOX/msg-crlf"
-    if ! grep -q $'\r' "$SANDBOX/msg-crlf"; then fail "the fixture holds no carriage return"; fi
+    # ^ why tr, not grep; GNU grep may read a file in text mode on Git for Windows and hide the carriage returns it is asked about
+    assert_eq "$(tr -cd '\r' <"$SANDBOX/msg-crlf" | wc -c | tr -d ' ')" 3 "the fixture holds the carriage returns of its three content lines"
     run_message_hook crlf "$SANDBOX/msg-crlf"
     assert_not_contains "$(<"$SANDBOX/record-crlf.trufflehog")" "$MARKER" "carriage returns reach awk and cmp unchanged, the diff matches"
 }

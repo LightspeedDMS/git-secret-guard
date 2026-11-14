@@ -10,7 +10,8 @@ GSG_MESSAGE_KILL_AFTER_SECONDS=5
 # ^ invariant reads the message on stdin; writes the text after the cut and its comment lines to S1 (up to the next comment line) and S2 (after it)
 # ^ invariant prints "none" (no cut line), "bad" (a third part), or the line ranges "A1 B1 A2 B2" of S1 and S2, 0 0 when a part is empty
 _message_split_cut() {
-    LC_ALL=C awk -v cut="$GSG_MESSAGE_SCISSORS" -v s1="$1" -v s2="$2" '
+    # ^ external gawk on Git for Windows reads and writes text mode and drops a carriage return unless BINMODE=3; other awks treat it as a plain variable
+    LC_ALL=C awk -v BINMODE=3 -v cut="$GSG_MESSAGE_SCISSORS" -v s1="$1" -v s2="$2" '
         BEGIN { n = length(cut); state = 0; a1 = 0; b1 = 0; a2 = 0; b2 = 0; bad = 0; printf "" > s1; printf "" > s2 }
         function is_cut(l) { return length(l) > n && substr(l, length(l) - n + 1) == cut }
         state == 0 { if (is_cut($0)) { prefix = substr($0, 1, length($0) - n); state = 1 } next }
@@ -86,6 +87,6 @@ message_scan_prepare() {
     # ^ hazard a diff of git for a commit this hook cannot rebuild is no match and is scanned; at worst a removed secret blocks the commit
     if [ -n "$rest" ] || [[ ! $a1 =~ ^[0-9]+$ ]] || [ "$b1" -eq 0 ]; then return 0; fi
     if ! _message_matches_git "$dir.cut/s1"; then return 0; fi
-    LC_ALL=C awk -v a1="$a1" -v b1="$b1" 'NR >= a1 && NR <= b1 { print ""; next } { print }' <"$src" >"$dir.cut/blanked" || return 1
+    LC_ALL=C awk -v BINMODE=3 -v a1="$a1" -v b1="$b1" 'NR >= a1 && NR <= b1 { print ""; next } { print }' <"$src" >"$dir.cut/blanked" || return 1
     mv -f -- "$dir.cut/blanked" "$dest"
 }

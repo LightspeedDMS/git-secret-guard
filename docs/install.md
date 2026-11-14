@@ -254,7 +254,8 @@ Besides the `MISMATCH` and `MISSING` lines above, `status` reports whether commi
   works. System, global and command-line config therefore count, a repository's own config does not, and neither does a conditional include (`includeIf`): that is `doctor`'s job (known limits below).
   Exit 1, with a `hook enabled: MISMATCH` line, when git lists the hook as `disabled` (`hook.git-secret-guard.enabled`) or
   `event-disabled` (`hook.pre-commit.enabled`, which stops every pre-commit config hook, or `hook.commit-msg.enabled`, which stops the
-  message scan; the line then reads `git hook list commit-msg shows ... so commit messages are not scanned`): any value git reads as off (`false`, `no`,
+  message scan; the line then reads `git hook list commit-msg shows ... so commit messages are not scanned`, and the locating line says
+  `disables the commit-msg event: commit messages are not scanned (lines still are)`, as doctor does): any value git reads as off (`false`, `no`,
   `off`, `0`, an empty value, `00`, `0k`, `0x0`, `-0`; a value git cannot read after `false` leaves it off, and a lone value git
   cannot read leaves the hook working and is not reported). Exit 1 with a `hook list: MISMATCH` line when the hook is not in the
   listing, or when a step fails: a key without a value or an `event` without its `command` makes `git hook list` itself fail ("missing value", exit 128) and every commit die,
@@ -268,6 +269,7 @@ Besides the `MISMATCH` and `MISSING` lines above, `status` reports whether commi
   terminate signal) during the check ends `status` at once with exit 130 (143) and prints no further line.
 - **Missing runtime tools.** `jq`, `setsid` (`taskkill` on Windows) and `timeout` count like the scanners: `MISSING or not
   executable` exits 1, because the hook blocks every commit in that state.
+- **A share of another version.** When a library this CLI lists is missing from a share whose own `VERSION` differs from the CLI's (a 0.3.7 install checked by 0.4.0, before `install` ran), `status` prints one line, `hook libraries: MISMATCH (the installed hook is git-secret-guard 0.3.7, this CLI is 0.4.0; run git-secret-guard install)`, and exits 1. It does not say the hook blocks commits: the installed hook loads its own list (`test_status_names_the_version_difference_when_the_installed_share_lacks_a_library`).
 - **A damaged share directory.** The line `hook libraries: <n> files present and readable` is printed on every installed run. A file the hook
   sources or runs from `<share>/lib` that is missing, unreadable, or not a regular file (`common.sh`, `extract.sh`, `exempt.sh`, `report.sh`,
   `proc.sh`, `extract.awk`, `run-scanner.sh`, `scanners/trufflehog.sh`, `scanners/betterleaks.sh`, `betterleaks-rule.toml`) gets one

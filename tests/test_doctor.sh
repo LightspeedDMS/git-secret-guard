@@ -73,7 +73,7 @@ test_a_disabled_commit_msg_event_is_a_problem_that_names_the_key() {
     esac
     doctor
     assert_rc 1 "the message event is off"
-    assert_contains "$OUT" "  PROBLEM  hook: hook.commit-msg.enabled=false in the global config ($SANDBOX/gitconfig) switches the hook off everywhere; remove it" "git's verdict, the key located"
+    assert_contains "$OUT" "  PROBLEM  hook: hook.commit-msg.enabled=false in the global config ($SANDBOX/gitconfig) disables the commit-msg event: commit messages are not scanned (lines still are); remove it" "git's verdict, the key located"
 }
 
 test_a_hook_command_that_is_missing_or_not_executable_is_a_problem() {

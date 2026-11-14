@@ -362,6 +362,34 @@ test_status_flags_commit_msg_switched_off_by_its_event_key() {
     assert_not_contains "$OUT" "git hook list pre-commit shows" "the lines run is still listed"
 }
 
+test_status_names_the_version_difference_when_the_installed_share_lacks_a_library() {
+    fresh_install
+    rm -f -- "$LC_DATA/lib/message.sh" || return 1
+    printf '0.3.7\n' >"$LC_DATA/VERSION" || return 1
+    gsg status
+    assert_rc 1 "an older share is a MISMATCH"
+    assert_contains "$OUT" "hook libraries: MISMATCH (the installed hook is git-secret-guard 0.3.7, this CLI is $(<"$GSG_PROJECT/VERSION"); run git-secret-guard install)" "the line names both versions and the way out"
+    assert_not_contains "$OUT" "blocks every commit" "the installed hook never loads the library, so it does not block"
+    assert_not_contains "$OUT" "cannot read" "no per-file complaint about a file the older hook does not use"
+}
+
+test_status_says_only_commit_messages_are_unscanned_for_a_disabled_commit_msg_event() {
+    st_install_for_hook_cases || return 1
+    case "$(git_enabled_sections)" in *pre-commit*) ;; *) return 0 ;; esac
+    st_hook_case commit-msg 1 "enabled = false"
+    assert_contains "$OUT" "hook.commit-msg.enabled=false in the global config" "the setting is located"
+    assert_contains "$OUT" "disables the commit-msg event: commit messages are not scanned (lines still are)" "per-event wording"
+    assert_not_contains "$OUT" "switches the hook off, commits are not scanned" "the lines scan still runs"
+}
+
+test_status_prints_only_the_part_of_the_global_config_that_differs() {
+    fresh_install
+    gitx config --global --replace-all hook.git-secret-guard.event pre-commit || return 1
+    gsg status
+    assert_contains "$OUT" "global config: MISMATCH (event=[pre-commit] want [pre-commit commit-msg])" "only the event part"
+    assert_not_contains "$OUT" "command=[" "the matching command is not repeated"
+}
+
 test_status_names_the_disabled_hook_once_not_per_event() {
     st_install_for_hook_cases || return 1
     st_hook_case git-secret-guard 1 "enabled = false"

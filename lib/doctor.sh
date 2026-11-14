@@ -226,7 +226,7 @@ doctor_hook_event() {
 
 # ^ invariant location only, git already said the hook is off or failed; rc 0 = at least one PROBLEM line named a setting, rc 1 = nothing was located
 doctor_hook_locate() {
-    local want="$1" i origin value printed=0
+    local want="$1" i origin value printed=0 effect
     if hp_hook_enabled_scan; then
         for i in "${!HP_EN_KIND[@]}"; do
             if [ "${HP_EN_KEY[$i]}" != "$want" ] && [ "${HP_EN_KIND[$i]}" != valueless ]; then continue; fi
@@ -238,7 +238,11 @@ doctor_hook_locate() {
             case "${HP_EN_KIND[$i]}" in
                 valueless) doctor_machine_line PROBLEM "hook: ${HP_EN_KEY[$i]} has no value in the ${HP_EN_SCOPE[$i]} config ($origin); git commands fail until it is removed" ;;
                 unjudged) doctor_machine_line PROBLEM "hook: git reports the hook disabled; the setting could not be located (the boolean probe failed: $value)" ;;
-                *) doctor_machine_line PROBLEM "hook: ${HP_EN_KEY[$i]}=$value in the ${HP_EN_SCOPE[$i]} config ($origin) switches the hook off everywhere; remove it" ;;
+                *)
+                    effect="switches the hook off everywhere; remove it"
+                    if [ "${HP_EN_KEY[$i]}" = hook.commit-msg.enabled ]; then effect="disables the commit-msg event: commit messages are not scanned (lines still are); remove it"; fi
+                    doctor_machine_line PROBLEM "hook: ${HP_EN_KEY[$i]}=$value in the ${HP_EN_SCOPE[$i]} config ($origin) $effect"
+                    ;;
             esac
             printed=1
         done

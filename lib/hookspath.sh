@@ -250,7 +250,7 @@ hooklist_bind_timeout() {
 
 # ^ invariant returns 0 = listed (an empty list too, also a command without its event), 2 = an event without its command (git exits 128), 1 = git failed
 hooklist_read() {
-    local errfile="$1" outfile="$1.out" event="$2" line
+    local errfile="$1" outfile="$1.out" event="$2" line tab=$'\t'
     local -a listed=()
     shift 2
     HL_STATUS=absent
@@ -267,11 +267,12 @@ hooklist_read() {
         REPLY="cannot read the output of git hook list"
         return 1
     fi
+    # ^ why the value quoted, not HL_STATUS=event-disabled; shellcheck 0.11.0 reads the unquoted assignment as arithmetic (SC2100)
     for line in "${listed[@]}"; do
         case "$line" in
             git-secret-guard) HL_STATUS=effective ;;
-            $'disabled\tgit-secret-guard') HL_STATUS=disabled ;;
-            $'event-disabled\tgit-secret-guard') HL_STATUS=event-disabled ;;
+            "disabled${tab}git-secret-guard") HL_STATUS=disabled ;;
+            "event-disabled${tab}git-secret-guard") HL_STATUS="event-disabled" ;;
         esac
     done
     return 0

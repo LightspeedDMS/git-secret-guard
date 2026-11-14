@@ -10,7 +10,11 @@ status_problem() {
 # ^ invariant names come from GSG_HOOK_LIBS and GSG_HOOK_FILES (lib/common.sh), the lists the hook loads from; a readable file is enough, none is sourced here
 # ^ coupled the text repeats the hook's own block, cannot load <path> and nothing was scanned; test:test_the_hook_loads_exactly_the_libraries_in_the_shared_list
 status_hook_files() {
-    local rel path why bad=0 total=0
+    local rel path why bad=0 total=0 other="" cli
+    # ^ why the share's own VERSION file, not the state; a CLI newer than the installed share lists libraries the installed hook never loads
+    cli="$(<"$GSG_ROOT/VERSION")" || cli=""
+    if [ -r "$GSG_SHARE/VERSION" ]; then other="$(<"$GSG_SHARE/VERSION")" || other=""; else other="${ST_VERSION:-}"; fi
+    if [ -z "$cli" ] || [ "$other" = "$cli" ]; then other=""; fi
     if ! hook_libs_listed; then
         status_line "hook libraries" "MISMATCH (GSG_HOOK_LIBS in $GSG_SHARE/lib/common.sh is unset or empty; the hook blocks every commit: nothing is scanned)"
         status_problem
@@ -22,23 +26,34 @@ status_hook_files() {
         if [ -f "$path" ] && [ -r "$path" ]; then continue; fi
         why="not a readable file"
         if [ ! -e "$path" ] && [ ! -L "$path" ]; then why=missing; fi
+        bad=$((bad + 1))
+        if [ -n "$other" ]; then continue; fi
         status_line "hook libraries" "MISMATCH (cannot read $path: $why; the hook blocks every commit: nothing is scanned)"
         status_problem
-        bad=$((bad + 1))
     done
+    if [ "$bad" -gt 0 ] && [ -n "$other" ]; then
+        status_line "hook libraries" "MISMATCH (the installed hook is $GSG_NAME $other, this CLI is $cli; run $GSG_NAME install)"
+        status_problem
+    fi
     if [ "$bad" -eq 0 ]; then status_line "hook libraries" "$total files present and readable"; fi
 }
 
 status_config() {
-    local events commands want_cmd
+    local events commands want_cmd diff=""
     want_cmd="$(hook_command_text "$GSG_SHARE" "$(share_recorded_bash "$GSG_SHARE")")" || return 1
     events="$("$GSG_GIT" config --global --get-all hook.git-secret-guard.event 2>/dev/null | tr '\n' ' ')"
     commands="$("$GSG_GIT" config --global --get-all hook.git-secret-guard.command 2>/dev/null | tr '\n' ' ')"
     # ^ why either order, not only the order install writes; git lists both events in any order, a hand edit swapping them is no fault
-    if { [ "$events" = "pre-commit commit-msg " ] || [ "$events" = "commit-msg pre-commit " ]; } && [ "$commands" = "$want_cmd " ]; then
+    if [ "$events" != "pre-commit commit-msg " ] && [ "$events" != "commit-msg pre-commit " ]; then
+        diff="event=[${events% }] want [pre-commit commit-msg]"
+    fi
+    if [ "$commands" != "$want_cmd " ]; then
+        diff+="${diff:+; }command=[${commands% }] want [$want_cmd]"
+    fi
+    if [ -z "$diff" ]; then
         status_line "global config" "matches (hook.git-secret-guard.event=pre-commit and commit-msg, .command=$want_cmd)"
     else
-        status_line "global config" "MISMATCH (event=[${events% }] want [pre-commit commit-msg]; command=[${commands% }] want [$want_cmd])"
+        status_line "global config" "MISMATCH ($diff)"
         status_problem
     fi
 }
@@ -95,7 +110,13 @@ status_hook_locate() {
         case "${HP_EN_KIND[$i]}" in
             valueless) status_line "hook enabled" "${HP_EN_KEY[$i]} has no value in the ${HP_EN_SCOPE[$i]} config ($origin); git commands fail until it is removed; $adv" ;;
             unjudged) status_line "hook enabled" "git reports the hook disabled; the setting could not be located (the boolean probe failed: $value)" ;;
-            *) status_line "hook enabled" "${HP_EN_KEY[$i]}=$value in the ${HP_EN_SCOPE[$i]} config ($origin) switches the hook off, commits are not scanned; $adv" ;;
+            *)
+                if [ "${HP_EN_KEY[$i]}" = hook.commit-msg.enabled ]; then
+                    status_line "hook enabled" "${HP_EN_KEY[$i]}=$value in the ${HP_EN_SCOPE[$i]} config ($origin) disables the commit-msg event: commit messages are not scanned (lines still are); $adv"
+                else
+                    status_line "hook enabled" "${HP_EN_KEY[$i]}=$value in the ${HP_EN_SCOPE[$i]} config ($origin) switches the hook off, commits are not scanned; $adv"
+                fi
+                ;;
         esac
     done
     if [ "$found" -eq 0 ] && [ "$want" != valueless ]; then

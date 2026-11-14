@@ -101,6 +101,7 @@ test_a_hanging_git_diff_is_a_mismatch_bounded_by_the_timeout() {
     begin hang || return 1
     verbose_repo || return 1
     mkdir -p -- "$SANDBOX/fakegit" || return 1
+    # shellcheck disable=SC2016
     printf '#!/bin/sh\nfor a in "$@"; do [ "$a" = diff ] && exec sleep 60; done\nexec %q "$@"\n' "$GIT" >"$SANDBOX/fakegit/git" && chmod 755 "$SANDBOX/fakegit/git" || return 1
     gitx diff --cached | verbose_message "$SANDBOX/msg-hang"
     use_stubs "SCAN_TIMEOUT_SECONDS=2"
@@ -287,6 +288,7 @@ test_the_message_run_never_starts_the_coverage_reminder() {
 test_a_hookdir_commit_msg_hook_and_the_config_hook_both_run() {
     begin hookdir || return 1
     set_env STUB_RECORD="$SANDBOX/record-hookdir"
+    # shellcheck disable=SC2016
     printf '#!/bin/sh\necho ran >>%q\nexit "${HOOKDIR_RC:-0}"\n' "$SANDBOX/hookdir.log" >.git/hooks/commit-msg || return 1
     chmod 755 .git/hooks/commit-msg || return 1
     stage_file src/app.txt one
@@ -308,7 +310,8 @@ test_the_macos_command_form_hands_the_message_file_to_the_hook() {
     local cmd
     # ^ why a share named with a quote and a space, not the sandbox share; the escaping of the form is part of what is proven
     cp -r -- "$SHARE" "$SANDBOX/it's a share" || return 1
-    cmd="$(source "$GSG_PROJECT/lib/common.sh" && hook_command_text "$SANDBOX/it's a share" "$(command -v bash)")" || return 1
+    # shellcheck disable=SC2016
+    cmd="$(bash -c 'source "$1/lib/common.sh" && hook_command_text "$2" "$3"' _ "$GSG_PROJECT" "$SANDBOX/it's a share" "$(command -v bash)")" || return 1
     gitx config --global hook.git-secret-guard.command "$cmd" || return 1
     set_env STUB_RECORD="$SANDBOX/record-macform"
     stage_file src/app.txt one

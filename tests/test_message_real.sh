@@ -44,6 +44,7 @@ test_real_a_token_in_dash_f_blocks_on_its_line() {
 # ^ invariant prints the path of a GIT_EDITOR script putting its arguments (one per line) above what git wrote into the message file
 editor_that_writes() {
     local file="$SANDBOX/editor-$$.sh"
+    # shellcheck disable=SC2016
     { printf '#!/bin/sh\n{\n'; printf 'printf "%%s\\n" %q\n' "$@"; printf 'cat "$1"\n} >"$1.new" && cat "$1.new" >"$1"\n'; } >"$file" || return 1
     chmod 755 -- "$file" || return 1
     printf '%s' "$file"
@@ -151,6 +152,7 @@ test_real_a_vv_file_reused_with_dash_f_blocks_the_unstaged_token() {
     stage_file w.txt "clean" && gitx commit -q --no-verify -m base || return 1
     stage_file w.txt "clean" "unstaged token = \"$tok\"" && gitx add w.txt && gitx reset -q w.txt || return 1
     stage_file s.txt "staged and clean" || return 1
+    # shellcheck disable=SC2016
     printf '#!/bin/sh\ncp "$1" %q\nprintf "subject %s\\n" >"$1"\n' "$saved" "$tok" >"$ed" && chmod 755 "$ed" || return 1
     set_env GIT_EDITOR="$ed"
     run_cap gitx commit -q -v -v
@@ -219,6 +221,7 @@ test_real_a_reword_in_an_interactive_rebase_runs_the_event() {
     local seq="$SANDBOX/seq.sh"
     stage_file a.txt one && gitx commit -q --no-verify -m "one" || return 1
     stage_file b.txt two && gitx commit -q --no-verify -m "two" || return 1
+    # shellcheck disable=SC2016
     printf '#!/bin/sh\nsed "1s/^pick/reword/" "$1" >"$1.new" && cat "$1.new" >"$1"\n' >"$seq" && chmod 755 "$seq" || return 1
     set_env GIT_SEQUENCE_EDITOR="$seq" GIT_EDITOR="$(editor_that_writes "reworded $(fake_github_token)")"
     run_cap gitx rebase -i HEAD~1
@@ -271,6 +274,7 @@ test_real_a_fixup_in_an_interactive_rebase_runs_no_event_a_documented_limit() {
     stage_file z.txt zero && gitx commit -q --no-verify -m "zero" || return 1
     stage_file a.txt one && gitx commit -q --no-verify -m "one" || return 1
     stage_file b.txt two && gitx commit -q --no-verify -m "two $tok" || return 1
+    # shellcheck disable=SC2016
     printf '#!/bin/sh\nsed "2s/^pick/fixup -C/" "$1" >"$1.new" && cat "$1.new" >"$1"\n' >"$seq" && chmod 755 "$seq" || return 1
     set_env GIT_SEQUENCE_EDITOR="$seq" GIT_EDITOR=true
     run_cap gitx rebase -i HEAD~2

@@ -64,9 +64,9 @@ test_status_flags_every_kind_of_drift_and_exits_1() {
     assert_contains "$OUT" "want [$LC_DATA/hooks/secret-scan]" "and what is expected"
 
     fresh_install
-    gitx config --global --add hook.git-secret-guard.event commit-msg || return 1
+    gitx config --global --add hook.git-secret-guard.event pre-push || return 1
     gsg status
-    assert_rc 1 "a second event"
+    assert_rc 1 "a third event"
     assert_contains "$OUT" "global config: MISMATCH" "flagged"
 
     fresh_install
@@ -327,7 +327,7 @@ test_status_names_the_key_scope_file_and_advice_and_prints_no_configured_command
 
 test_status_exits_1_when_the_hook_is_missing_from_the_listing() {
     fresh_install
-    gitx config --global --unset hook.git-secret-guard.event || return 1
+    gitx config --global --unset-all hook.git-secret-guard.event || return 1
     gsg status
     assert_rc 1 "no event reaches the hook"
     assert_contains "$OUT" "hook list: MISMATCH (git-secret-guard is not in git hook list pre-commit" "says which"
@@ -338,6 +338,62 @@ test_status_exits_1_when_the_hook_is_missing_from_the_listing() {
     assert_rc 1 "an event without its command"
     assert_contains "$OUT" "hook list: MISMATCH (git hook list pre-commit failed with exit 128" "git itself refuses the half-configured hook"
     assert_contains "$OUT" "'hook.git-secret-guard.command' must be configured" "and its words name the key"
+}
+
+test_status_flags_an_old_install_that_has_only_the_pre_commit_event() {
+    fresh_install
+    gitx config --global --replace-all hook.git-secret-guard.event pre-commit || return 1
+    gsg status
+    assert_rc 1 "a 0.3.x config: the message is not scanned"
+    assert_contains "$OUT" "global config: MISMATCH (event=[pre-commit] want [pre-commit commit-msg]" "the config line names both events"
+    assert_contains "$OUT" "hook list: MISMATCH (git-secret-guard is not in git hook list commit-msg, so commit messages are not scanned; run git-secret-guard install)" "git's own verdict for the second event"
+    gsg install
+    assert_rc 0 "install repairs it"
+    gsg status
+    assert_rc 0 "status is clean again"
+}
+
+test_status_flags_commit_msg_switched_off_by_its_event_key() {
+    st_install_for_hook_cases || return 1
+    case "$(git_enabled_sections)" in *pre-commit*) ;; *) return 0 ;; esac
+    st_hook_case commit-msg 1 "enabled = false"
+    assert_contains "$OUT" "hook enabled: MISMATCH (git hook list commit-msg shows git-secret-guard as event-disabled by hook.commit-msg.enabled, so commit messages are not scanned)" "reported by what git says"
+    assert_contains "$OUT" "hook.commit-msg.enabled=false in the global config" "the setting is located"
+    assert_not_contains "$OUT" "git hook list pre-commit shows" "the lines run is still listed"
+}
+
+test_status_names_the_version_difference_when_the_installed_share_lacks_a_library() {
+    fresh_install
+    rm -f -- "$LC_DATA/lib/message.sh" || return 1
+    printf '0.3.7\n' >"$LC_DATA/VERSION" || return 1
+    gsg status
+    assert_rc 1 "an older share is a MISMATCH"
+    assert_contains "$OUT" "hook libraries: MISMATCH (the installed hook is git-secret-guard 0.3.7, this CLI is $(<"$GSG_PROJECT/VERSION"); run git-secret-guard install)" "the line names both versions and the way out"
+    assert_not_contains "$OUT" "blocks every commit" "the installed hook never loads the library, so it does not block"
+    assert_not_contains "$OUT" "cannot read" "no per-file complaint about a file the older hook does not use"
+}
+
+test_status_says_only_commit_messages_are_unscanned_for_a_disabled_commit_msg_event() {
+    st_install_for_hook_cases || return 1
+    case "$(git_enabled_sections)" in *pre-commit*) ;; *) return 0 ;; esac
+    st_hook_case commit-msg 1 "enabled = false"
+    assert_contains "$OUT" "hook.commit-msg.enabled=false in the global config" "the setting is located"
+    assert_contains "$OUT" "disables the commit-msg event: commit messages are not scanned (lines still are)" "per-event wording"
+    assert_not_contains "$OUT" "switches the hook off, commits are not scanned" "the lines scan still runs"
+}
+
+test_status_prints_only_the_part_of_the_global_config_that_differs() {
+    fresh_install
+    gitx config --global --replace-all hook.git-secret-guard.event pre-commit || return 1
+    gsg status
+    assert_contains "$OUT" "global config: MISMATCH (event=[pre-commit] want [pre-commit commit-msg])" "only the event part"
+    assert_not_contains "$OUT" "command=[" "the matching command is not repeated"
+}
+
+test_status_names_the_disabled_hook_once_not_per_event() {
+    st_install_for_hook_cases || return 1
+    st_hook_case git-secret-guard 1 "enabled = false"
+    assert_eq "$(grep -c 'hook enabled: MISMATCH' <<<"$OUT")" 1 "one MISMATCH line for the key that disables both events"
 }
 
 test_status_reads_a_disable_in_the_system_config() {
@@ -528,7 +584,7 @@ test_the_hook_list_call_runs_in_the_foreground_not_in_a_process_substitution() {
     local body
     body="$(awk '/^hooklist_read\(\) \{/ { on = 1 } on && !/^[[:space:]]*#/ { print } on && /^\}/ { exit }' "$GSG_PROJECT/lib/hookspath.sh")" || return 1
     # shellcheck disable=SC2016
-    assert_contains "$body" 'hook list pre-commit 2>"$errfile" >"$outfile"' "git writes to a file as a foreground command"
+    assert_contains "$body" 'hook list "$event" 2>"$errfile" >"$outfile"' "git writes to a file as a foreground command"
     assert_not_contains "$body" '<(' "no process substitution in hooklist_read"
 }
 
@@ -538,7 +594,7 @@ test_an_unwritable_hook_list_output_file_gives_a_clean_message_not_a_raw_bash_er
     # shellcheck disable=SC2016
     run_cap env -i PATH="$TEST_BASE_PATH" bash -c 'GSG_ROOT=$1; source "$1/lib/common.sh" && source "$1/lib/tools.sh" && source "$1/lib/hookspath.sh" || exit 9
         GSG_GIT=$2; HL_BOUND=()
-        hooklist_read "$3/err.txt" --git-dir="$3/none"; rc=$?
+        hooklist_read "$3/err.txt" pre-commit --git-dir="$3/none"; rc=$?
         printf "rc=%s HL_RC=%s REPLY=[%s]\n" "$rc" "$HL_RC" "$REPLY"' _ "$GSG_PROJECT" "$GIT" "$SANDBOX/hl"
     assert_rc 0 "the probe shell itself ran"
     assert_contains "$OUT" "rc=1 HL_RC=1" "fails closed"

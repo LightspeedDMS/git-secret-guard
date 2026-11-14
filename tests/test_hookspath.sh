@@ -73,7 +73,7 @@ test_install_takes_over_a_hooks_path_when_the_xdg_file_is_the_only_global_file()
     assert_rc 0 "takeover"
     assert_eq "$(state_value previous_hooks_path)" "$LC_HOME/xh" "recorded"
     assert_empty "$(gitreal config --get-all core.hooksPath)" "and gone from the effective config"
-    assert_eq "$(gitreal config --global --get hook.git-secret-guard.event)" pre-commit "the hook config is in the XDG file git --global edits"
+    assert_eq "$(gitreal config --global --get-all hook.git-secret-guard.event | tr '\n' ' ')" "pre-commit commit-msg " "the hook config is in the XDG file git --global edits"
     assert_no_file "$LC_HOME/.gitconfig" "no second global file was created"
 }
 
@@ -86,7 +86,7 @@ test_install_writes_the_hook_config_into_the_global_file_never_into_an_included_
     gsg install
     assert_rc 0 "install next to an include that sets no hooksPath"
     assert_eq "$(sha256sum <"$LC_HOME/extra.conf")" "$inc_before" "the included file is byte-identical"
-    assert_eq "$(gitreal config --file "$LC_HOME/.gitconfig" --get hook.git-secret-guard.event)" pre-commit "the hook config is in ~/.gitconfig"
+    assert_eq "$(gitreal config --file "$LC_HOME/.gitconfig" --get-all hook.git-secret-guard.event | tr '\n' ' ')" "pre-commit commit-msg " "the hook config is in ~/.gitconfig"
     gsg uninstall
     assert_rc 0 "uninstall"
     assert_eq "$(sha256sum <"$LC_HOME/extra.conf")" "$inc_before" "the included file is still byte-identical"
@@ -101,7 +101,7 @@ test_a_symlinked_global_gitconfig_stays_a_symlink_through_install_and_uninstall(
     assert_rc 0 "install"
     [ -L "$LC_HOME/.gitconfig" ] || fail "the global .gitconfig is no longer a symlink after install"
     assert_eq "$(readlink -- "$LC_HOME/.gitconfig")" dotfiles/gitconfig "and still points at the same target"
-    assert_eq "$(gitreal config --file "$LC_HOME/dotfiles/gitconfig" --get hook.git-secret-guard.event)" pre-commit "the hook config went into the target"
+    assert_eq "$(gitreal config --file "$LC_HOME/dotfiles/gitconfig" --get-all hook.git-secret-guard.event | tr '\n' ' ')" "pre-commit commit-msg " "the hook config went into the target"
     gsg uninstall
     assert_rc 0 "uninstall"
     [ -L "$LC_HOME/.gitconfig" ] || fail "the global .gitconfig is no longer a symlink after uninstall"

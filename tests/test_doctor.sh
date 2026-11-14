@@ -14,7 +14,7 @@ test_a_healthy_machine_exits_0_and_shows_the_machine_section() {
     assert_rc 0 "healthy machine"
     assert_contains "$OUT" "machine:" "the machine section comes first"
     assert_contains "$OUT" "  ok       installed: version $want" "installed"
-    assert_contains "$OUT" "  ok       hook: hook.git-secret-guard.event=pre-commit, command=$LC_DATA/hooks/secret-scan (executable)" "hook config"
+    assert_contains "$OUT" "  ok       hook: hook.git-secret-guard.event=pre-commit and commit-msg, command=$LC_DATA/hooks/secret-scan (executable)" "hook config"
     assert_contains "$OUT" "  ok       trufflehog: $LC_BIN/trufflehog$LC_EXE 3.99.2 (pinned 3.99.2)" "trufflehog at the pin"
     assert_contains "$OUT" "  ok       betterleaks: $LC_BIN/betterleaks$LC_EXE 1.9.0 (pinned 1.9.0)" "betterleaks at the pin"
     assert_contains "$OUT" "  ok       jq: $(lc_expected_jq)" "jq"
@@ -49,9 +49,31 @@ test_a_missing_hook_config_is_a_problem_that_says_what_to_do() {
     gitx config --global --remove-section hook.git-secret-guard || return 1
     doctor
     assert_rc 1 "no hook config"
-    assert_contains "$OUT" "  PROBLEM  hook: hook.git-secret-guard.event is [unset], want exactly [pre-commit]; run git-secret-guard install" "event"
+    assert_contains "$OUT" "  PROBLEM  hook: hook.git-secret-guard.event is [unset], want exactly [pre-commit, commit-msg]; run git-secret-guard install" "event"
     assert_contains "$OUT" "  PROBLEM  hook: hook.git-secret-guard.command is [unset], want exactly [$LC_DATA/hooks/secret-scan]; run git-secret-guard install" "command"
     assert_not_contains "$OUT" "  ok       hook:" "and no ok line for the hook"
+}
+
+test_a_config_with_only_the_pre_commit_event_is_a_problem_that_names_the_missing_event() {
+    dr_begin || return 1
+    gitx config --global --replace-all hook.git-secret-guard.event pre-commit || return 1
+    doctor
+    assert_rc 1 "an old install"
+    assert_contains "$OUT" "hook.git-secret-guard.event has 1 value (global $SANDBOX/gitconfig), 1 of them wanted events, want exactly two, pre-commit and commit-msg; run git-secret-guard install" "the count says one of two"
+    assert_not_contains "$OUT" "not in git hook list commit-msg" "the config line explains the absent event, as for pre-commit"
+    assert_not_contains "$OUT" "  ok       hook:" "and no ok line for the hook"
+}
+
+test_a_disabled_commit_msg_event_is_a_problem_that_names_the_key() {
+    dr_begin || return 1
+    gitx config --global hook.commit-msg.enabled false || return 1
+    case "$(git_enabled_sections)" in
+        *pre-commit*) ;;
+        *) skip_test "this git does not implement hook.<event>.enabled" ;;
+    esac
+    doctor
+    assert_rc 1 "the message event is off"
+    assert_contains "$OUT" "  PROBLEM  hook: hook.commit-msg.enabled=false in the global config ($SANDBOX/gitconfig) disables the commit-msg event: commit messages are not scanned (lines still are); remove it" "git's verdict, the key located"
 }
 
 test_a_hook_command_that_is_missing_or_not_executable_is_a_problem() {
@@ -70,10 +92,11 @@ test_a_duplicated_or_disabled_hook_config_is_a_problem() {
     dr_begin || return 1
     gitx config --global --add hook.git-secret-guard.event pre-push || return 1
     doctor
-    assert_rc 1 "two events"
-    assert_contains "$OUT" "hook.git-secret-guard.event has 2 values (global $SANDBOX/gitconfig; global $SANDBOX/gitconfig), 1 of them pre-commit, want exactly one, pre-commit; run git-secret-guard install" "count, scope and file, never the values"
+    assert_rc 1 "three events"
+    assert_contains "$OUT" "hook.git-secret-guard.event has 3 values (global $SANDBOX/gitconfig; global $SANDBOX/gitconfig; global $SANDBOX/gitconfig), 2 of them wanted events, want exactly two, pre-commit and commit-msg; run git-secret-guard install" "count, scope and file, never the values"
     assert_not_contains "$OUT" "pre-push" "the foreign value is not printed"
     gitx config --global --replace-all hook.git-secret-guard.event pre-commit || return 1
+    gitx config --global --add hook.git-secret-guard.event commit-msg || return 1
     gitx config --global --add hook.git-secret-guard.command /elsewhere/secret-scan || return 1
     doctor
     assert_rc 1 "two commands"
@@ -156,7 +179,7 @@ test_the_machine_section_never_prints_a_hook_config_value() {
     doctor
     assert_rc 1 "a polluted global hook config"
     assert_contains "$OUT" "hook.git-secret-guard.command has 2 values" "reported by count"
-    assert_contains "$OUT" "hook.git-secret-guard.event has 2 values" "also the event"
+    assert_contains "$OUT" "hook.git-secret-guard.event has 3 values" "also the event"
     no_leak "$marker"
     gitx config --global --replace-all hook.git-secret-guard.command "/bin/true --token=$marker" || return 1
     doctor

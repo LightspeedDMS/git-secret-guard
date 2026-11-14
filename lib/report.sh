@@ -91,7 +91,18 @@ report_reminder_failed() {
 }
 
 report_results() {
-    local work="${1:-}" rows errs n
+    local work="${1:-}" rows errs n heading="in lines this commit adds" shown=""
+    case "${2:-}" in
+        "") ;;
+        message)
+            heading="in the commit message"
+            shown="commit message"
+            ;;
+        *)
+            printf '%s: internal error: unknown report mode [%s]; failing closed\n' "$GSG_NAME" "${2//[^[:print:]]/?}" >&2
+            return 1
+            ;;
+    esac
     if [ -z "$work" ] || [ ! -d "$work" ]; then
         printf '%s: internal error: no work dir to report from; failing closed\n' "$GSG_NAME" >&2
         return 1
@@ -110,8 +121,8 @@ report_results() {
         n="$(wc -l <"$rows")" || return 1
         # ^ external BSD wc pads the count with spaces and GNU wc does not; the printed line is the same on both
         n="${n//[[:space:]]/}"
-        printf '%s: %s potential secret(s) in lines this commit adds:\n' "$GSG_NAME" "$n" >&2
-        awk -F'\t' '{ printf "  %-11s %s (%s)  %s:%s\n", $1, $2, $3, $4, $5 }' "$rows" >&2
+        printf '%s: %s potential secret(s) %s:\n' "$GSG_NAME" "$n" "$heading" >&2
+        awk -F'\t' -v shown="$shown" '{ printf "  %-11s %s (%s)  %s:%s\n", $1, $2, $3, (shown != "" ? shown : $4), $5 }' "$rows" >&2
         printf '  (values are not shown; remove them and rotate any real credential)\n' >&2
     fi
     if [ -s "$errs" ] || [ -s "$rows" ]; then

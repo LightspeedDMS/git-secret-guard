@@ -4,8 +4,10 @@
 
 ## How it works
 
-1. Git (>= 2.54) runs `hook.git-secret-guard.command` for the `pre-commit` event, from the repo root, before the
-   repository's own hook. Both run even if the first fails; the commit is blocked if either fails.
+1. Git (>= 2.54) runs `hook.git-secret-guard.command` for the `pre-commit` event (the lines the commit adds) and for the
+   `commit-msg` event (the message, see [The commit message](#the-commit-message)), from the repo root, before the
+   repository's own hook. Both run even if the first fails; the commit is blocked if either fails. The hook tells the
+   events apart by its arguments: `pre-commit` passes none, `commit-msg` passes the message file.
 2. The script reads tool locations from `settings`, an installed file next to `hooks/` and `lib/`. Missing or
    non-executable `jq`, `trufflehog`, `betterleaks`, `setsid` or `timeout`, or a relative path, blocks the commit and says
    nothing was scanned. `setsid`, `timeout`, `jq` and both scanners come from the settings file only (no environment
@@ -54,6 +56,63 @@
    candidate value and no scanner text. The counts are what was handed to both scanners; betterleaks' default config still skips some
    paths itself (`node_modules/`, lockfiles, `go.sum`, ...), see "Betterleaks' default config skips whole paths" under Limits. Findings and every block keep their output and print no pass line. There is no switch
    to silence it: `settings` is rewritten by every install, so a hand edit would be lost.
+
+## The commit message
+
+A commit message is pushed and published like code, so a token in it is a leak too. The `commit-msg` event scans it.
+
+- **What is scanned.** The text that becomes the message, from the file git passes (`.git/COMMIT_EDITMSG`, `.git/MERGE_MSG`).
+  git runs the event **before** its own cleanup, so the file still holds the comment lines of the editor template. They are
+  scanned too: with `--cleanup=verbatim` they stay in the message and the hook cannot know the mode. git's own comment lines
+  hold paths, branch names and status words only. With `commit -v` or `commit.verbose` the file also holds the whole diff
+  below git's cut line (`<comment char> ------------------------ >8 ------------------------`); that diff is **not** scanned
+  **when it is git's own** (see "The cut line"), so a secret that only the removed lines of a `commit -v` diff hold does not
+  block. The added lines of the same diff are scanned by the `pre-commit` run.
+- **How.** The message becomes one scan file, `COMMIT_EDITMSG`, with its own line numbers, and goes through the same adapters,
+  the same HEAD `.gitleaks.toml` and `.gitleaksignore` handling, the same timeouts and the same fail-closed rules as the
+  lines. The exemption file `.secret-scan-ignore` names paths and a message has none, so **path exemptions do not apply to
+  a message**. A fingerprint in `.gitleaksignore` at HEAD can name it (`COMMIT_EDITMSG:<rule>:<line>`) like any file, and then
+  **mutes that rule on that line of every future message** in the repository (line 1, the subject, is the likely one): write such a
+  fingerprint only on purpose.
+- **Output.** A clean message prints nothing of its own: the pass line of the commit is the only line, and the coverage reminder
+  runs only from `pre-commit`. HEAD's betterleaks files are announced as in the lines run (`using .gitleaks.toml from HEAD`,
+  `using .gitleaksignore from HEAD`, the built-in-rules WARNING), also by the message run, because a merge and a reword never
+  run `pre-commit` and no other run would say what mutes; in a repository that has those files a commit therefore prints
+  those lines twice. A finding blocks and prints, without the value:
+  `trufflehog    Github (unknown)  commit message:3`. An empty message file is not scanned.
+- **The cut line.** git writes the diff below its cut line only for `commit -v` (also `commit.verbose`, `-v -v`) and the
+  template of `--cleanup=scissors`, and cuts there only under those modes; with `-F` of a file that holds a cut block (a
+  reused `.git/COMMIT_EDITMSG`) the text below it is **committed**. So the hook skips text below a cut line only when it is
+  **provably git's own diff**: after the cut line and its comment lines, the text up to the next comment line must equal, byte
+  for byte, `git diff --cached` (the staged diff; base `HEAD`, `HEAD^` or the empty tree). **Hidden text is only ever a real diff
+  between `HEAD` or `HEAD^` and the staged tree; a secret it contains is already in history** (its removed lines are in a commit
+  of the history, its added lines are in the tree being committed, which `pre-commit` scans), so hiding it puts nothing into the
+  repository that is not already there. `HEAD^` is tried on an ordinary commit too: that is safe for the same reason (it is the
+  base of `--amend`, which the hook cannot tell from a plain commit). The comparison runs in the hook's own repository and index
+  under the hook's timeout (`TIMEOUT_BIN`, `SCAN_TIMEOUT_SECONDS`, `--foreground`; a timeout or a failure is a mismatch) with
+  `--no-color --no-ext-diff --no-textconv` and `core.fsmonitor=false`, so it never runs a command the repository configures; the
+  user's `diff.*` settings apply as for `commit -v`, and `diff.mnemonicPrefix` may be as configured or on (`-v -v` forces it).
+  **The work tree part of `commit -v -v`** (after `# Changes not staged for commit:`) is **never hidden**: `git diff` of the
+  work tree converts files (it runs `filter.<x>.clean`), and its text is in no tree and in no commit, so a token on an unstaged
+  line must not pass through a message file reused with `-F`. Everything else is scanned too, including the cut line, the comment
+  lines under it and any text that is not that diff: a copied or forged cut block hides nothing. Matching lines become blank
+  lines, so line N of the scan file stays line N of the message. A diff the hook cannot rebuild (a `textconv` driver on a staged
+  file, an amend of a commit whose base cannot be found, a diff git cannot print in time) is scanned too. **A false block is
+  possible**: a secret-looking removed line in the work tree diff of `-v -v`, or in a diff the hook cannot rebuild, blocks the
+  commit; the hook fails safe, and `-m`, or no `-v`, avoids it. The comment characters come from the cut line itself, not from
+  `core.commentChar`, because `auto` picks a character the config does not hold.
+- **Bypass.** `git commit --no-verify` skips both events, as it skips `pre-commit`.
+
+Which commands run `commit-msg` (git 2.56, probed, see the maintainer notes):
+
+| Command | Event runs | Scanned |
+|---|---|---|
+| `git commit` (`-m`, `-F`, editor, `-v`, `--amend`, `--cleanup=...`) | yes | yes |
+| `git merge` that makes a commit, `git commit` after a merge or `merge --squash` | yes | yes (the lines of an automatic merge are not: it fires `pre-merge-commit`) |
+| `git rebase -i` with `reword` | yes | yes |
+| `git rebase -i` with `squash`, `fixup` (also `fixup -C`) | no | **no** (the combined message is committed unscanned) |
+| `git revert`, `git cherry-pick` (also `-e`), a pick of a rebase, `git am` | no | **no** (`am` runs `applypatch-msg`) |
+| `git tag -a`, `git notes` | no | **no** |
 
 ## The coverage reminder
 
@@ -136,18 +195,24 @@ with a reason when it is absent. `tests/fetch-test-tools.sh` downloads the pinne
 
 - **Git >= 2.54 only.** Older git (e.g. `/usr/bin/git` 2.52) ignores config hooks without any message; its commits are
   not scanned.
-- **Only the `pre-commit` event.** Commits that do not fire `pre-commit` are not scanned: a merge commit that
-  `git merge` makes by itself (it fires `pre-merge-commit`), `git cherry-pick`, `git rebase` and `git am`. A merge finished
-  with `git commit` (after resolving conflicts, or after `git merge --no-commit`) fires `pre-commit` and is scanned. Probed on the real install (git 2.56): a fake key
+- **Two events only.** The lines are scanned by `pre-commit` and the message by `commit-msg` ([table](#the-commit-message)).
+  Not scanned: the lines of commits that do not fire `pre-commit` (a merge commit that `git merge` makes by itself, it fires
+  `pre-merge-commit`; `git cherry-pick`, `git rebase` and `git am`), and the messages of commits that do not fire `commit-msg`
+  (`git revert`, `git cherry-pick`, `git am`, the picks, `squash` and `fixup` of a rebase), of tags (`git tag -a`) and of `git notes`. A merge
+  finished with `git commit` fires both events and is scanned. Probed on the real install (git 2.56): a fake key
   committed on a branch with `--no-verify` reached `main` through `cherry-pick` and through `rebase` with exit 0 and no
   scan. Scan before a branch is shared; `--no-verify` there is the hole, not the replay.
-- **Only the lines a commit adds to files.** A commit message, an annotated tag message and `git notes` are not
-  scanned. A token only in the commit message commits with `no findings`
-  (`test_real_catalog_a14_a_token_in_the_commit_message_is_not_scanned_a_documented_gap`); `git tag -a` and
-  `git notes add` fire no `pre-commit` at all.
-- **About 2 seconds per commit.** Both scanners start on every commit that adds lines (measured 2.0 to 2.2 s per commit
-  on this machine). Commits that add nothing (deletions only, empty) start no scan (only the betterleaks
-  pre-flight, when there is a `.gitleaks.toml` at HEAD).
+- **Tag messages and notes.** An annotated tag message and `git notes` are not scanned: `git tag -a` and `git notes add`
+  run neither `pre-commit` nor `commit-msg`.
+- **A cut block hides only the staged diff of git.** Text below a cut line is skipped only when it equals `git diff --cached`
+  against `HEAD` or `HEAD^` ([The cut line](#the-commit-message)): hidden text is only a real diff between `HEAD` or `HEAD^` and
+  the staged tree, and a secret it contains is already in history. A copied, edited or forged block, and the work tree part of
+  `commit -v -v`, are scanned, so a secret-looking removed line there can block (a false block, the hook fails safe).
+- **About 2 seconds per commit for the lines, about 2 more for the message.** Both scanners start on every commit that adds
+  lines (measured 1.8 s per commit on this machine, git 2.56, the pinned scanners) and on every commit message (measured
+  1.7 s more, 3.5 s per commit in all). The cost is trufflehog's start-up (1.6 s on a one-line directory; betterleaks
+  needs 0.05 s and the hook itself 0.1 s), so a short message costs as much as a long one. Commits that add nothing
+  (deletions only, empty) start no lines scan (only the betterleaks pre-flight, when there is a `.gitleaks.toml` at HEAD).
 - **The repository's own hooks still run when the scan blocks.** git runs every hook configured for `pre-commit`, the
   config hook and the repository's hookdir hook (`.git/hooks`, husky, the pre-commit framework); a blocked scan does not
   stop the repository's hook from running (probed: its marker file was written while the commit exited 1).
@@ -382,3 +447,71 @@ Why the scan code is shaped this way; each point was probed on the pinned versio
   (`STUB_GL_PREFLIGHT_RC`, `STUB_GL_PREFLIGHT_ERROR`, `STUB_GL_PREFLIGHT_SLEEP`); only real-betterleaks tests settle what a
   config means; timing assertions allow one extra sleep for the `--version` probe. `tests/fixtures/husky/h` is husky
   9.1.7's real `h` (MIT, verbatim). `tests/coverage.sh` measures shell lines through xtrace (not `lib/extract.awk`).
+
+### The commit-msg event
+
+Code: `lib/message.sh` (`message_scan_prepare`, `_message_split_cut`, `_message_matches_git`, `_message_bases`, in `GSG_HOOK_LIBS`), the `commit-msg` branch of
+`hooks/secret-scan` (before `run_reminder` and `REMINDER_READY`, so a block never starts the reminder), `run_scanners`, `report_results ... message`,
+`exempt_load_config_only` (HEAD's betterleaks files, announced, no `.secret-scan-ignore`). Tests: `tests/test_message.sh` (stand-ins, the hook
+run by hand and through git), `tests/test_message_real.sh` (real scanners), `test_real_catalog_a14_a_token_in_the_commit_message_is_blocked`.
+`enable_message_hook` (`tests/lib.sh`) adds the second event for a test; `configure_hook` keeps `pre-commit` only so the stand-in suites
+do not count a second scan. Facts measured on git 2.56.0 in a scratch `HOME` and `GIT_CONFIG_GLOBAL`, with a probe command logging `$#`, `$1`,
+`$PWD` and `cat -A "$1"`:
+
+- **Several events.** `git config --global --add hook.p.event pre-commit` and `--add hook.p.event commit-msg`, one `hook.p.command`:
+  `git hook list pre-commit` and `git hook list commit-msg` both print `p`. `-c hook.commit-msg.enabled=false` makes
+  `git hook list commit-msg` print `event-disabled<TAB>p` and leaves `pre-commit` alone; `-c hook.p.enabled=false` prints `disabled<TAB>p` for
+  both. `--replace-all hook.p.event pre-commit` drops `commit-msg`: `git hook list commit-msg` says `no hooks found` (exit 1). A plain
+  `git config hook.p.event X` on two values exits 5, so `install_set_config` writes with `--replace-all` and a value pattern.
+- **The argument.** `GIT_TRACE=1 git commit -m x` shows the command run as `<command> .git/COMMIT_EDITMSG`: git appends the path to the
+  command line, also for the macOS form `'<bash>' '<hook>'` (hook path with a space and a quote: the hook got `$# = 1`). The
+  pre-commit run shows `<command>` with no argument. A merge passes `.git/MERGE_MSG`. The path is relative to the work tree root
+  (cwd of the hook) in the main work tree, and absolute (`<common>/worktrees/<name>/COMMIT_EDITMSG`, with `GIT_DIR` set) in a linked
+  work tree; a commit from a subdirectory still passes `.git/COMMIT_EDITMSG`. The Windows form is the same command written with a
+  mixed path (`hook_command_text`): git runs it the same way, but no Windows run was possible here, only CI.
+- **Layout (before cleanup).** `-m x`, `-F f`: the file is the message, nothing else. The editor: the template (empty line, then comment
+  lines: help text, `On branch`, `Changes to be committed:` with paths) with what the editor changed. `-v` with an editor: the template, then
+  `<c> ------------------------ >8 ------------------------`, `<c> Do not modify or remove the line above.`,
+  `<c> Everything below it will be ignored.`, then the diff from `diff --git` on, removed lines included. `-v -m x`: no diff (git writes the diff
+  only into the editor template). `--cleanup=verbatim`: the template says `with '#' will be kept` and the comment lines stay in the commit.
+  `--cleanup=scissors` without `-v`: the template has the cut block and status comments, no diff. `core.commentChar=';'` and
+  `core.commentString=//` replace `#` in every one of those lines; `core.commentChar=auto` with a message starting with `#` picks `;`
+  (so the character cannot be read from the config, `_message_split_cut` takes it from the line). The cut line text is not translated, the lines under it are.
+- **Is the `-v` text equal to `git diff`?** Measured on git 2.56.0 inside a `commit-msg` probe that cut the file after the cut line and its comment
+  lines and `cmp`ed the rest with `git diff --cached --no-color --no-ext-diff --no-textconv` (same repository, `GIT_INDEX_FILE` as git hands it):
+  byte-identical for the initial commit, modify, add, delete, rename, binary file, mode change, CRLF content, `diff.noprefix`,
+  `diff.mnemonicPrefix`, `diff.algorithm=patience|minimal`, `diff.context`, `diff.renames=false`, `diff.interHunkContext`, `diff.indentHeuristic`,
+  `diff.srcPrefix`, `diff.colorMoved`, `core.abbrev`, `core.quotePath`, `diff.submodule=log`, `commit -a` and `commit <path>` (git hands the hook its
+  temporary index, which `git diff --cached` follows). Not identical: **colour** (`color.ui=always` colours `git diff`, never the template, hence
+  `--no-color`); **`diff.external`** (the template ignores it, `git diff` runs it, hence `--no-ext-diff`); **textconv** (the template runs it, so
+  `--no-textconv` differs for a file with a driver, which is then scanned: the hook never runs a repository's textconv command);
+  **`--amend`** (the base is `HEAD^`; `git diff --cached` against `HEAD` is a subset, so `HEAD^` is a second candidate; a root commit amended
+  has the empty tree as base, which needs a scratch object directory because the empty tree is not an object in the repository); and **`-v -v`**
+  (forces mnemonic prefixes `c/ i/ w/`, writes `# Changes to be committed:` before the staged diff and, after a line of dashes and
+  `# Changes not staged for commit:`, the worktree `git diff`; only the staged part is matched by `_message_matches_git`, the work tree part
+  is scanned: matching it would run `filter.<x>.clean` (a counter log showed 4 runs for one hook run) and hide text that is in no tree).
+  CRLF content and files without a final newline match as they are: the carriage returns and git's `\ No newline at end of file` line
+  are part of the compared bytes (`test_a_crlf_diff_below_the_cut_matches_byte_for_byte_and_is_blanked`,
+  `test_a_diff_with_no_newline_at_end_of_file_matches_and_a_missing_final_newline_is_normalised`); a message file without its last newline
+  is read as if it had one (awk adds it), the same lines. Tests: `test_the_scan_file_blanks_gits_own_verbose_diff_and_keeps_the_numbering`,
+  `test_a_cut_block_over_text_that_is_not_gits_diff_is_scanned_whole`, `test_the_message_run_never_runs_a_clean_filter_and_scans_the_worktree_part`,
+  `test_a_hanging_git_diff_is_a_mismatch_bounded_by_the_timeout` (a stand-in git whose `diff` sleeps), `test_a_root_commit_amend_diff_matches_through_the_scratch_empty_tree`,
+  `test_a_diff_against_head_parent_is_hidden_on_an_ordinary_commit_because_its_removed_lines_are_in_history`,
+  `test_real_a_head_parent_diff_with_an_added_token_not_in_the_staged_tree_blocks`, `test_real_a_vv_file_reused_with_dash_f_blocks_the_unstaged_token`,
+  `test_real_commit_v_v_passes_a_token_only_in_the_removed_lines_of_the_staged_diff`, `test_real_commit_v_v_blocks_a_token_in_a_removed_line_of_the_worktree_diff_a_documented_false_block`,
+  `test_real_amend_v_passes_a_token_removed_since_the_parent`, `test_real_a_cut_block_copied_into_a_dash_f_file_hides_nothing`.
+- **Commands.** `commit-msg` ran for: `commit` (`-m`, `-F`, editor, `-v`, `--amend`), `merge` that makes a commit (also `--no-edit`, `-m`), `commit`
+  after a conflicted merge and after `merge --squash`, and a `reword` of `rebase -i`. It did **not** run for `revert` (with or without
+  `--no-edit`), `cherry-pick` (also `-e`), `am` (it runs `applypatch-msg` with `.git/rebase-apply/final-commit`), a plain `pick`, a `squash`
+  or a `fixup` (also `-C`) of a rebase (the token committed), `tag -a`, `notes add`, nor with `--no-verify`. A bare `git revert` without a
+  terminal implies `--no-edit`, so the revert limit is tested with `revert --edit`. Probed twice, with a probe config hook and with a `.git/hooks/commit-msg` script.
+  `tests/test_message_real.sh` pins each of them (`..._the_event`, `..._do_not_run_the_event_a_documented_limit`).
+- **Decisions.** Comment lines above the cut are scanned (`test_real_a_token_in_a_comment_line_above_the_scissors_blocks`; a
+  clean template adds no finding, `test_real_a_token_typed_in_the_editor_blocks_and_git_own_comment_lines_do_not`). The scan file is the
+  message itself, so its line N is the message line N and no blank padding is needed. `.secret-scan-ignore` does not apply
+  (`test_real_a_catch_all_exemption_at_head_does_not_exempt_the_message`). The scan file name `COMMIT_EDITMSG` is shown as `commit message`
+  (`report_results`); a fingerprint of `.gitleaksignore` keeps the real name. An empty file skips the scan: trufflehog's completion check needs
+  `chunks >= 1` and logs 0 for an empty tree. Argument errors and an unreadable file block with "nothing was scanned"
+  (`test_a_bad_argument_list_blocks_before_any_scan`).
+- **Cost.** `trufflehog filesystem` on a one-line directory 1.62 s, `betterleaks dir .` 0.05 s, the hook with stand-in scanners 0.10 s, a
+  `commit-msg` run with the real tools 1.72 s; 12 commits with `pre-commit` only 1.78 s each, with both events 3.49 s each.

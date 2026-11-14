@@ -206,21 +206,50 @@ doctor_discover() {
 }
 
 # ^ external a config origin inside the repository is shown relative to it (file:.git/config), see doctor_origin_text
+# ^ invariant fills DR_LISTED[event] = git's status (effective, disabled, event-disabled, absent) for each hook event; rc 1 = a PROBLEM was printed, stop
+doctor_repo_hook_listing() {
+    local event rc
+    declare -gA DR_LISTED=()
+    for event in "${GSG_HOOK_EVENTS[@]}"; do
+        hooklist_read "$DR_WORK/hook.err" "$event"
+        rc=$?
+        if [ "$rc" -eq 2 ]; then
+            doctor_repo_finding PROBLEM "hook not reached: the global hook config is incomplete (see machine section)"
+            return 1
+        fi
+        if [ "$rc" -ne 0 ]; then
+            doctor_repo_finding PROBLEM "cannot read the hooks git runs (git hook list $event exit $HL_RC${REPLY:+: $REPLY})"
+            return 1
+        fi
+        DR_LISTED[$event]="$HL_STATUS"
+    done
+}
+
+# ^ coupled reads the last_value, last_scope and last_origin maps of doctor_repo_hook (bash dynamic scope); arg = event, judged by DR_LISTED[event]
+doctor_repo_hook_status() {
+    local event="$1" status="${DR_LISTED[$1]}" key
+    case "$status" in
+        disabled | event-disabled)
+            key=hook.git-secret-guard.enabled
+            if [ "$status" = event-disabled ]; then key="hook.$event.enabled"; fi
+            if [[ -n ${last_origin[$key]:-} ]]; then
+                doctor_origin_text "${last_origin[$key]}"
+                doctor_repo_finding PROBLEM "disabled in ${last_scope[$key]} config: $key=${last_value[$key]} ($REPLY); remove that key to cover this repository"
+            else
+                doctor_repo_finding PROBLEM "git hook list $event shows git-secret-guard as $status, and no config key says why"
+            fi
+            ;;
+        effective) ;;
+        *) doctor_repo_finding PROBLEM "git-secret-guard is not in 'git hook list $event'; no hook.git-secret-guard.event=$event reaches this repository" ;;
+    esac
+}
+
+# ^ external a config origin inside the repository is shown relative to it (file:.git/config), see doctor_origin_text
 doctor_repo_hook() {
-    local status rc i scope origin key want="$DR_HOOK_CMD"
+    local rc i scope origin key want="$DR_HOOK_CMD" event
     local -A last_value=() last_scope=() last_origin=()
-    hooklist_read "$DR_WORK/hook.err"
-    rc=$?
-    if [ "$rc" -eq 2 ]; then
-        doctor_repo_finding PROBLEM "hook not reached: the global hook config is incomplete (see machine section)"
-        return 0
-    fi
-    if [ "$rc" -ne 0 ]; then
-        doctor_repo_finding PROBLEM "cannot read the hooks git runs (git hook list pre-commit exit $HL_RC${REPLY:+: $REPLY})"
-        return 0
-    fi
-    status="$HL_STATUS"
-    hp_records config --show-scope --show-origin -z --get-regexp '^hook\.(git-secret-guard\.(enabled|command)|pre-commit\.enabled)$'
+    doctor_repo_hook_listing || return 0
+    hp_records config --show-scope --show-origin -z --get-regexp '^hook\.(git-secret-guard\.(enabled|command)|(pre-commit|commit-msg)\.enabled)$'
     rc=$?
     if [ "$rc" -gt 1 ]; then
         doctor_repo_finding PROBLEM "cannot read the hook config (git config exit $rc${GSG_HP_ERR:+: $GSG_HP_ERR})"
@@ -232,20 +261,11 @@ doctor_repo_hook() {
         doctor_split_record "${GSG_HP_OUT[i + 2]}"
         last_value[$REC_KEY]="$REC_VALUE" last_scope[$REC_KEY]="$scope" last_origin[$REC_KEY]="$origin"
     done
-    case "$status" in
-        disabled | event-disabled)
-            key=hook.git-secret-guard.enabled
-            if [ "$status" = event-disabled ]; then key=hook.pre-commit.enabled; fi
-            if [[ -n ${last_origin[$key]:-} ]]; then
-                doctor_origin_text "${last_origin[$key]}"
-                doctor_repo_finding PROBLEM "disabled in ${last_scope[$key]} config: $key=${last_value[$key]} ($REPLY); remove that key to cover this repository"
-            else
-                doctor_repo_finding PROBLEM "git hook list pre-commit shows git-secret-guard as $status, and no config key says why"
-            fi
-            ;;
-        effective) ;;
-        *) doctor_repo_finding PROBLEM "git-secret-guard is not in 'git hook list pre-commit'; no hook.git-secret-guard.event=pre-commit reaches this repository" ;;
-    esac
+    for event in "${GSG_HOOK_EVENTS[@]}"; do
+        # ^ why skip a repeated disable, not print it twice; hook.git-secret-guard.enabled=false switches both events off and one finding says so
+        if [ "$event" = commit-msg ] && [ "${DR_LISTED[commit-msg]}" = disabled ] && [ "${DR_LISTED[pre-commit]}" = disabled ]; then continue; fi
+        doctor_repo_hook_status "$event"
+    done
     key=hook.git-secret-guard.command
     if [[ -n ${last_scope[$key]:-} ]] && [ "${last_scope[$key]}" != global ] && [ "${last_value[$key]}" != "$want" ]; then
         doctor_origin_text "${last_origin[$key]}"

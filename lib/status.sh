@@ -10,7 +10,11 @@ status_problem() {
 # ^ invariant names come from GSG_HOOK_LIBS and GSG_HOOK_FILES (lib/common.sh), the lists the hook loads from; a readable file is enough, none is sourced here
 # ^ coupled the text repeats the hook's own block, cannot load <path> and nothing was scanned; test:test_the_hook_loads_exactly_the_libraries_in_the_shared_list
 status_hook_files() {
-    local rel path why bad=0 total=0
+    local rel path why bad=0 total=0 other="" cli
+    # ^ why the share's own VERSION file, not the state; a CLI newer than the installed share lists libraries the installed hook never loads
+    cli="$(<"$GSG_ROOT/VERSION")" || cli=""
+    if [ -r "$GSG_SHARE/VERSION" ]; then other="$(<"$GSG_SHARE/VERSION")" || other=""; else other="${ST_VERSION:-}"; fi
+    if [ -z "$cli" ] || [ "$other" = "$cli" ]; then other=""; fi
     if ! hook_libs_listed; then
         status_line "hook libraries" "MISMATCH (GSG_HOOK_LIBS in $GSG_SHARE/lib/common.sh is unset or empty; the hook blocks every commit: nothing is scanned)"
         status_problem
@@ -22,22 +26,34 @@ status_hook_files() {
         if [ -f "$path" ] && [ -r "$path" ]; then continue; fi
         why="not a readable file"
         if [ ! -e "$path" ] && [ ! -L "$path" ]; then why=missing; fi
+        bad=$((bad + 1))
+        if [ -n "$other" ]; then continue; fi
         status_line "hook libraries" "MISMATCH (cannot read $path: $why; the hook blocks every commit: nothing is scanned)"
         status_problem
-        bad=$((bad + 1))
     done
+    if [ "$bad" -gt 0 ] && [ -n "$other" ]; then
+        status_line "hook libraries" "MISMATCH (the installed hook is $GSG_NAME $other, this CLI is $cli; run $GSG_NAME install)"
+        status_problem
+    fi
     if [ "$bad" -eq 0 ]; then status_line "hook libraries" "$total files present and readable"; fi
 }
 
 status_config() {
-    local events commands want_cmd
+    local events commands want_cmd diff=""
     want_cmd="$(hook_command_text "$GSG_SHARE" "$(share_recorded_bash "$GSG_SHARE")")" || return 1
     events="$("$GSG_GIT" config --global --get-all hook.git-secret-guard.event 2>/dev/null | tr '\n' ' ')"
     commands="$("$GSG_GIT" config --global --get-all hook.git-secret-guard.command 2>/dev/null | tr '\n' ' ')"
-    if [ "$events" = "pre-commit " ] && [ "$commands" = "$want_cmd " ]; then
-        status_line "global config" "matches (hook.git-secret-guard.event=pre-commit, .command=$want_cmd)"
+    # ^ why either order, not only the order install writes; git lists both events in any order, a hand edit swapping them is no fault
+    if [ "$events" != "pre-commit commit-msg " ] && [ "$events" != "commit-msg pre-commit " ]; then
+        diff="event=[${events% }] want [pre-commit commit-msg]"
+    fi
+    if [ "$commands" != "$want_cmd " ]; then
+        diff+="${diff:+; }command=[${commands% }] want [$want_cmd]"
+    fi
+    if [ -z "$diff" ]; then
+        status_line "global config" "matches (hook.git-secret-guard.event=pre-commit and commit-msg, .command=$want_cmd)"
     else
-        status_line "global config" "MISMATCH (event=[${events% }] want [pre-commit]; command=[${commands% }] want [$want_cmd])"
+        status_line "global config" "MISMATCH ($diff)"
         status_problem
     fi
 }
@@ -94,7 +110,13 @@ status_hook_locate() {
         case "${HP_EN_KIND[$i]}" in
             valueless) status_line "hook enabled" "${HP_EN_KEY[$i]} has no value in the ${HP_EN_SCOPE[$i]} config ($origin); git commands fail until it is removed; $adv" ;;
             unjudged) status_line "hook enabled" "git reports the hook disabled; the setting could not be located (the boolean probe failed: $value)" ;;
-            *) status_line "hook enabled" "${HP_EN_KEY[$i]}=$value in the ${HP_EN_SCOPE[$i]} config ($origin) switches the hook off, commits are not scanned; $adv" ;;
+            *)
+                if [ "${HP_EN_KEY[$i]}" = hook.commit-msg.enabled ]; then
+                    status_line "hook enabled" "${HP_EN_KEY[$i]}=$value in the ${HP_EN_SCOPE[$i]} config ($origin) disables the commit-msg event: commit messages are not scanned (lines still are); $adv"
+                else
+                    status_line "hook enabled" "${HP_EN_KEY[$i]}=$value in the ${HP_EN_SCOPE[$i]} config ($origin) switches the hook off, commits are not scanned; $adv"
+                fi
+                ;;
         esac
     done
     if [ "$found" -eq 0 ] && [ "$want" != valueless ]; then
@@ -125,7 +147,7 @@ status_conditional_includes() {
 # ^ invariant rc 0 = git lists the hook as running before commits; rc 1 = a MISMATCH line was printed; runs in a subshell, see status_hook_listing
 # ^ order traps before mktemp => an interrupt leaves no directory behind; the probe unsets the caller's repository variables in its own subshell
 status_hook_ask() {
-    local res kind step rc msg
+    local res kind step rc msg lines_status msg_status bad=0
     trap status_cleanup EXIT
     trap 'exit 129' HUP
     trap 'exit 130' INT
@@ -146,18 +168,31 @@ status_hook_ask() {
         status_hook_locate valueless
         return 1
     fi
-    case "$step" in
+    # ^ invariant on ok the line holds two statuses, pre-commit first and commit-msg second (hooklist_probe_line); read here as step and rc
+    lines_status="$step" msg_status="$rc"
+    status_hook_event pre-commit "$lines_status" "commits are not scanned" || bad=1
+    # ^ why skip a repeated disable, not print it twice; hook.git-secret-guard.enabled=false switches both events off and one line says so
+    if ! { [ "$lines_status" = disabled ] && [ "$msg_status" = disabled ]; }; then
+        status_hook_event commit-msg "$msg_status" "commit messages are not scanned" || bad=1
+    fi
+    return "$bad"
+}
+
+# ^ invariant args = event, its status from git's listing, what it means for the user; prints a MISMATCH line and locates the setting; rc 1 = not effective
+status_hook_event() {
+    local event="$1" listed="$2" meaning="$3"
+    case "$listed" in
         effective) return 0 ;;
         disabled)
-            status_line "hook enabled" "MISMATCH (git hook list pre-commit shows git-secret-guard as disabled by hook.git-secret-guard.enabled, so commits are not scanned)"
+            status_line "hook enabled" "MISMATCH (git hook list $event shows git-secret-guard as disabled by hook.git-secret-guard.enabled, so $meaning)"
             status_hook_locate hook.git-secret-guard.enabled
             ;;
         event-disabled)
-            status_line "hook enabled" "MISMATCH (git hook list pre-commit shows git-secret-guard as event-disabled by hook.pre-commit.enabled, so commits are not scanned)"
-            status_hook_locate hook.pre-commit.enabled
+            status_line "hook enabled" "MISMATCH (git hook list $event shows git-secret-guard as event-disabled by hook.$event.enabled, so $meaning)"
+            status_hook_locate "hook.$event.enabled"
             ;;
         *)
-            status_line "hook list" "MISMATCH (git-secret-guard is not in git hook list pre-commit, so commits are not scanned; run $GSG_NAME install)"
+            status_line "hook list" "MISMATCH (git-secret-guard is not in git hook list $event, so $meaning; run $GSG_NAME install)"
             ;;
     esac
     return 1

@@ -25,7 +25,7 @@ GSG_JQ_CLEAN='def clean: tostring | gsub("[\u0000-\u001f\u007f]"; "?"); '
 # ^ coupled hooks/secret-scan sources common.sh first and GSG_HOOK_LIBS after it; status_hook_files reads both lists => one list, no copy
 # ^ see test:test_the_hook_loads_exactly_the_libraries_in_the_shared_list; a library the hook newly sources must be added here
 # shellcheck disable=SC2034
-GSG_HOOK_LIBS=(extract.sh exempt.sh report.sh proc.sh)
+GSG_HOOK_LIBS=(extract.sh exempt.sh report.sh proc.sh message.sh)
 # ^ invariant rc 0 = the list holds a name, [*] also sees a list of empty names; the hook calls it as "|| block" => a missing function blocks too
 hook_libs_listed() {
     [ -n "${GSG_HOOK_LIBS[*]:-}" ]

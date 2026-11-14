@@ -187,24 +187,46 @@ doctor_values_text() {
 # ^ invariant the verdict comes from hooklist_probe_line, the reader status shares; the value scan only locates the setting git blamed
 # ^ invariant rc 1 = a PROBLEM was printed; an absent hook or a failed step add one only when no config-shape problem explains it (arg 1 = 1)
 doctor_hook_verdict() {
-    local prior="$1" res kind step rc msg want i origin value printed=0
+    local prior="$1" res kind step rc msg bad=0
     hooklist_bind_timeout
     res="$(hooklist_probe_line "$DR_WORK")"
     HL_BOUND=()
     IFS=$'\t' read -r kind step rc msg <<<"$res"
-    case "$kind:$step" in
-        ok:effective) return 0 ;;
-        ok:disabled) want=hook.git-secret-guard.enabled ;;
-        ok:event-disabled) want=hook.pre-commit.enabled ;;
-        ok:*)
-            if [ "$prior" -eq 0 ]; then doctor_machine_line PROBLEM "hook: git-secret-guard is not in git hook list pre-commit, so commits are not scanned; run git-secret-guard install"; return 1; fi
+    if [ "$kind" = ok ]; then
+        # ^ invariant on ok the two fields after the kind are the pre-commit and commit-msg statuses (hooklist_probe_line)
+        doctor_hook_event pre-commit "$step" "$prior" "commits are not scanned" || bad=1
+        # ^ why skip a repeated disable, not print it twice; hook.git-secret-guard.enabled=false switches both events off and one line says so
+        if ! { [ "$step" = disabled ] && [ "$rc" = disabled ]; }; then
+            doctor_hook_event commit-msg "$rc" "$prior" "commit messages are not scanned" || bad=1
+        fi
+        return "$bad"
+    fi
+    if [ "$kind" != fail ]; then step="hook probe" rc="?" msg="no answer"; fi
+    if doctor_hook_locate valueless; then return 1; fi
+    if [ "$prior" -eq 0 ]; then doctor_machine_line PROBLEM "hook: git $step failed with exit $rc${msg:+: $msg}; commits may be blocked or unscanned until it works"; return 1; fi
+    return 0
+}
+
+# ^ invariant args = event, its status from git's listing, the config-shape flag, what it means; rc 1 = a PROBLEM was printed
+doctor_hook_event() {
+    local event="$1" listed="$2" prior="$3" meaning="$4" want
+    case "$listed" in
+        effective) return 0 ;;
+        disabled) want=hook.git-secret-guard.enabled ;;
+        event-disabled) want="hook.$event.enabled" ;;
+        *)
+            if [ "$prior" -eq 0 ]; then doctor_machine_line PROBLEM "hook: git-secret-guard is not in git hook list $event, so $meaning; run git-secret-guard install"; return 1; fi
             return 0
             ;;
-        *)
-            want=valueless
-            if [ "$kind" != fail ]; then step="hook probe" rc="?" msg="no answer"; fi
-            ;;
     esac
+    if doctor_hook_locate "$want"; then return 1; fi
+    doctor_machine_line PROBLEM "hook: git reports the hook disabled; the setting could not be located (find it with: git config --show-origin --get-all $want)"
+    return 1
+}
+
+# ^ invariant location only, git already said the hook is off or failed; rc 0 = at least one PROBLEM line named a setting, rc 1 = nothing was located
+doctor_hook_locate() {
+    local want="$1" i origin value printed=0 effect
     if hp_hook_enabled_scan; then
         for i in "${!HP_EN_KIND[@]}"; do
             if [ "${HP_EN_KEY[$i]}" != "$want" ] && [ "${HP_EN_KIND[$i]}" != valueless ]; then continue; fi
@@ -216,25 +238,23 @@ doctor_hook_verdict() {
             case "${HP_EN_KIND[$i]}" in
                 valueless) doctor_machine_line PROBLEM "hook: ${HP_EN_KEY[$i]} has no value in the ${HP_EN_SCOPE[$i]} config ($origin); git commands fail until it is removed" ;;
                 unjudged) doctor_machine_line PROBLEM "hook: git reports the hook disabled; the setting could not be located (the boolean probe failed: $value)" ;;
-                *) doctor_machine_line PROBLEM "hook: ${HP_EN_KEY[$i]}=$value in the ${HP_EN_SCOPE[$i]} config ($origin) switches the hook off everywhere; remove it" ;;
+                *)
+                    effect="switches the hook off everywhere; remove it"
+                    if [ "${HP_EN_KEY[$i]}" = hook.commit-msg.enabled ]; then effect="disables the commit-msg event: commit messages are not scanned (lines still are); remove it"; fi
+                    doctor_machine_line PROBLEM "hook: ${HP_EN_KEY[$i]}=$value in the ${HP_EN_SCOPE[$i]} config ($origin) $effect"
+                    ;;
             esac
             printed=1
         done
     fi
-    if [ "$printed" -eq 1 ]; then return 1; fi
-    if [ "$want" = valueless ]; then
-        if [ "$prior" -eq 0 ]; then doctor_machine_line PROBLEM "hook: git $step failed with exit $rc${msg:+: $msg}; commits may be blocked or unscanned until it works"; return 1; fi
-        return 0
-    fi
-    doctor_machine_line PROBLEM "hook: git reports the hook disabled; the setting could not be located (find it with: git config --show-origin --get-all $want)"
-    return 1
+    [ "$printed" -eq 1 ]
 }
 
 # ^ external git config --show-scope --show-origin -z --get-regexp = "scope NUL origin NUL key NL value NUL" (probed on git 2.56)
 # ^ why -C /, not the current directory; the machine view must not include a repository's local config
 doctor_check_hook_config() {
     local rc i scope origin value want="$DR_HOOK_CMD" hookfile="$GSG_SHARE/hooks/secret-scan" bad=0 msg
-    local ev_n=0 ev_ok=0 ev_src="" cmd_n=0 cmd_ok=0 cmd_src=""
+    local ev_n=0 ev_ok=0 ev_src="" ev_lines=0 ev_msg=0 cmd_n=0 cmd_ok=0 cmd_src=""
     hp_records -C / config --show-scope --show-origin -z --get-regexp '^hook\.git-secret-guard\.'
     rc=$?
     if [ "$rc" -gt 1 ]; then
@@ -250,7 +270,8 @@ doctor_check_hook_config() {
             hook.git-secret-guard.event)
                 ev_n=$((ev_n + 1))
                 ev_src+="${ev_src:+; }$scope ${origin#file:}"
-                if [ "$value" = pre-commit ]; then ev_ok=$((ev_ok + 1)); fi
+                if [ "$value" = pre-commit ]; then ev_lines=$((ev_lines + 1)); fi
+                if [ "$value" = commit-msg ]; then ev_msg=$((ev_msg + 1)); fi
                 ;;
             hook.git-secret-guard.command)
                 cmd_n=$((cmd_n + 1))
@@ -259,12 +280,15 @@ doctor_check_hook_config() {
                 ;;
         esac
     done
+    # ^ why distinct wanted events, not matching values; two pre-commit values are one wanted event and one duplicate
+    if [ "$ev_lines" -gt 0 ]; then ev_ok=$((ev_ok + 1)); fi
+    if [ "$ev_msg" -gt 0 ]; then ev_ok=$((ev_ok + 1)); fi
     if [ "$ev_n" -eq 0 ]; then
-        doctor_machine_line PROBLEM "hook: hook.git-secret-guard.event is [unset], want exactly [pre-commit]; run git-secret-guard install"
+        doctor_machine_line PROBLEM "hook: hook.git-secret-guard.event is [unset], want exactly [pre-commit, commit-msg]; run git-secret-guard install"
         bad=1
-    elif [ "$ev_n" -ne 1 ] || [ "$ev_ok" -ne 1 ]; then
-        doctor_values_text "$ev_n" "$ev_ok" "$ev_src" pre-commit
-        doctor_machine_line PROBLEM "hook: hook.git-secret-guard.event $REPLY, want exactly one, pre-commit; run git-secret-guard install"
+    elif [ "$ev_n" -ne 2 ] || [ "$ev_lines" -ne 1 ] || [ "$ev_msg" -ne 1 ]; then
+        doctor_values_text "$ev_n" "$ev_ok" "$ev_src" "wanted events"
+        doctor_machine_line PROBLEM "hook: hook.git-secret-guard.event $REPLY, want exactly two, pre-commit and commit-msg; run git-secret-guard install"
         bad=1
     fi
     if [ "$cmd_n" -eq 0 ]; then
@@ -280,7 +304,7 @@ doctor_check_hook_config() {
     fi
     doctor_hook_verdict "$bad" || bad=1
     if [ "$bad" -eq 0 ]; then
-        doctor_machine_line ok "hook: hook.git-secret-guard.event=pre-commit, command=$want (executable)"
+        doctor_machine_line ok "hook: hook.git-secret-guard.event=pre-commit and commit-msg, command=$want (executable)"
     fi
 }
 

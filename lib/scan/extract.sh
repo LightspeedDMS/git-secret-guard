@@ -21,7 +21,7 @@ _staged_git_diff() {
         printf '%s: internal error: the staged tree was not written before the diff; nothing was scanned.\n' "$GSG_NAME" >&2
         return 1
     fi
-    # ^ hazard diff --cached reads the work tree (#103); test:test_real_a_key_staged_through_working_tree_encoding_is_scanned_from_the_blob
+    # ^ hazard diff --cached reads the work tree; test:test_real_a_key_staged_through_working_tree_encoding_is_scanned_from_the_blob
     # ^ security no index, trees from write-tree => only the staged blob is read; test:test_real_a_clean_filter_that_adds_content_cannot_hide_it_from_the_scan
     GIT_INDEX_FILE="$GSG_NO_INDEX" git --attr-source="$empty_tree" -c core.quotePath=false -c core.bigFileThreshold="$threshold" -c core.attributesFile=/dev/null \
         diff-tree "${diff_flags[@]}" "$GSG_BASE_TREE" "$GSG_STAGED_TREE" "$@"

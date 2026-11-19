@@ -26,7 +26,7 @@ git 2.56.0 source 26c56c296b38c0695b26fa95f475f1d01704d2d38e73465ca30b0b2f5dc789
 git-manpages 2.56.0 source 1f62a7fabaa36a0469c4d51fe247d12e7e246b890d2b8b49aec91df610f417c7
 git-for-windows 2.56.0.4 windows_amd64 4961a4a8cc778d8b6e00a5819e5fe4d078b754555aff7aedc2d77a5d74c2de80
 EOF
-)" "the lock rows match the story's table"
+)" "the lock rows match the expected table"
 }
 
 test_the_git_pins_are_source_rows_that_the_lookup_finds_and_the_scanner_list_ignores() {
@@ -179,7 +179,7 @@ test_a_version_matches_only_as_a_whole_word_of_the_tool_output() {
     done
 }
 
-# ^ hazard Git for Windows bash 5.3 does not return on a here-string of 65,537 to 65,664 bytes (#155); a wrong binary can print as much
+# ^ hazard Git for Windows bash 5.3 does not return on a here-string of 65,537 to 65,664 bytes; a wrong binary can print as much
 # ^ invariant 18 bytes of version line + 65,581 filler = 65,599, 65,600 with the newline a here-string adds; 124 = it hung
 test_a_64_kib_version_output_is_judged_without_hanging() {
     # shellcheck disable=SC2016

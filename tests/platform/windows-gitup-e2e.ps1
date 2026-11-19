@@ -1,4 +1,4 @@
-# Real-machine scenarios of the Git for Windows upgrade (story #30), for a disposable windows-2025 runner. Never run it on a machine you use:
+# Real-machine scenarios of the Git for Windows upgrade, for a disposable windows-2025 runner. Never run it on a machine you use:
 # it replaces Git for Windows with an old release first, then upgrades it, kills installers and sets global git configuration.
 # One scenario per run, chosen by -Scenario; the output ends with 'E2E SUMMARY: N passed, M failed'. The fake credential is built at run time and never printed.
 param(

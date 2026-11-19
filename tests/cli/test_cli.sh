@@ -87,7 +87,7 @@ cli_prints_version() {
     assert_eq "$OUT" "git-secret-guard $want" "$label prints the version"
 }
 
-# ^ external macOS 12 has no realpath in /usr/bin or /bin (#157) and the CLI resolves itself before the bootstrap; install_link_cli starts it by link
+# ^ external macOS 12 has no realpath in /usr/bin or /bin and the CLI resolves itself before the bootstrap; install_link_cli starts it by link
 test_the_cli_started_through_links_finds_its_share_with_a_PATH_that_has_no_realpath() {
     realpath_free_path_dir || return 1
     lc_begin || return 1
@@ -101,7 +101,7 @@ test_the_cli_started_through_links_finds_its_share_with_a_PATH_that_has_no_realp
     cli_prints_version "an exported CDPATH" "$SANDBOX/links/outer" PATH="$NO_REALPATH_DIR" CDPATH="$SANDBOX/links"
 }
 
-# ^ external on macOS 12 the shebang picks /bin/bash 3.2; the walk must succeed there and the bootstrap, not the walk, refuses (#157 died before it)
+# ^ external on macOS 12 the shebang picks /bin/bash 3.2; the walk must succeed there and the bootstrap, not the walk, refuses (the CLI once died before it)
 # ^ why one test for both hosts, not a skip; elsewhere the shebang bash is new enough and the version prints
 test_the_cli_started_by_its_shebang_through_a_link_without_realpath_reaches_the_bootstrap() {
     realpath_free_path_dir || return 1

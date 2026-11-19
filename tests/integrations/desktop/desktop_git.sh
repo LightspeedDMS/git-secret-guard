@@ -41,7 +41,7 @@ dgit() {
 
 # ^ invariant dg_count_begin = Desktop's git and a bash first on PATH log each start; git to $SANDBOX/dg.calls (arguments), bash to $SANDBOX/dg.bash (first arg)
 # ^ invariant a hook wrapper started through "#!/usr/bin/env bash" logs its hook name; the loop of dg_checkouts logs -c; both logs start empty
-# ^ why a counting shim, not a timer; time cannot tell one bash per hook run from two (wrapped over plain is about 3.7 by construction, #150)
+# ^ why a counting shim, not a timer; time cannot tell one bash per hook run from two (wrapped over plain is about 3.7 by construction)
 dg_count_begin() {
     local real_bash
     real_bash="$(env -i "${GSG_ENV[@]}" bash -c 'command -v bash')" || return 1

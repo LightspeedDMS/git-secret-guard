@@ -73,7 +73,7 @@ gnubin_dir_unusable() {
     [ "${GNUBIN_DIR#/}" = "$GNUBIN_DIR" ] || [ ! -d "$GNUBIN_DIR" ]
 }
 
-# ^ invariant the one place holding escape sequences and icons (#139); text printed through it is already cleaned of control characters
+# ^ invariant the one place holding escape sequences and icons; text printed through it is already cleaned of control characters
 # ^ invariant GSG_UI_OUT and GSG_UI_ERR hold the decision for stdout and stderr, "" = not decided yet, t = terminal mode, p = plain mode
 GSG_UI_OUT=""
 GSG_UI_ERR=""
@@ -175,7 +175,7 @@ strip_ansi() {
 
 GSG_MSG_WORDS_MAX=4096
 
-# ^ hazard Git for Windows bash 5.3 does not return on a here-string of 65,537 to 65,664 bytes (#155) => an unbounded value never goes through one
+# ^ hazard Git for Windows bash 5.3 does not return on a here-string of 65,537 to 65,664 bytes => an unbounded value never goes through one
 # ^ invariant sets SPLIT_LINES = the lines of $1 exactly as mapfile -t <<<"$1" gives them; each pass drops one line => at most ${#1} + 1 passes
 split_lines() {
     local rest="$1"
@@ -188,7 +188,7 @@ split_lines() {
 }
 
 # ^ security fields (key=value) can carry the candidate or a URL holding it => only msg words are printed
-# ^ why the first line cut to GSG_MSG_WORDS_MAX characters, not all of $1; read takes one line anyway, and a log line has no length bound (#155)
+# ^ why the first line cut to GSG_MSG_WORDS_MAX characters, not all of $1; read takes one line anyway, and a log line has no length bound
 msg_words() {
     local w out="" i line="${1%%$'\n'*}"
     local -a words=()

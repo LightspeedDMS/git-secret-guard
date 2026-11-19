@@ -260,7 +260,7 @@ hooklist_read() {
     local -a listed=()
     shift 2
     HL_STATUS=absent
-    # ^ why a foreground command and a file, not mapfile < <(...); bash 5.3 starts its child with SIGINT ignored => git outlived Ctrl-C; #68
+    # ^ why a foreground command and a file, not mapfile < <(...); bash 5.3 starts its child with SIGINT ignored => git outlived Ctrl-C
     "${HL_BOUND[@]}" "$GSG_GIT" "$@" hook list "$event" 2>"$errfile" >"$outfile"
     HL_RC=$?
     first_message "$errfile"

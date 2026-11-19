@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # shellcheck shell=bash disable=SC2016
-# ^ invariant install --auto-update, update's task, status, doctor, uninstall on Windows (#132); schtasks is the stand-in of tests/support/lifecycle.sh
+# ^ invariant install --auto-update, update's task, status, doctor, uninstall on Windows; schtasks is the stand-in of tests/support/lifecycle.sh
 # ^ security no test here registers a real task; the stand-in is first on PATH and install records its absolute path for uninstall
 # shellcheck source=tests/support/lib.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/../support/lib.sh"
@@ -207,7 +207,7 @@ test_a_stale_record_is_a_problem_and_a_missing_one_is_judged_by_the_wrapper_age(
     assert_contains "$OUT" "auto-update: timer inactive: no update run is recorded" "a wrapper written long ago and no record"
 }
 
-# ^ invariant AC1 of #132; a task runs no shell, the wrapper redirects into the log and bash does the rest
+# ^ invariant the task output lands in the log; a task runs no shell, the wrapper redirects into the log and bash does the rest
 test_the_wrapper_runs_update_and_the_output_lands_in_the_log() {
     sch_install
     assert_rc 0 "install --auto-update"

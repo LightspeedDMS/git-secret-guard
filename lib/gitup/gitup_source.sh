@@ -93,7 +93,7 @@ gitup_source_lib_outside() {
 }
 
 # ^ invariant rc 0 when DIR ($1) has $2 kilobytes free; else a refusal naming the same threshold in megabytes, the room and what changed
-# ^ coupled $3 is the subject of the refusal and $4 the advice; the build directory and the prefix each pass their own (#114)
+# ^ coupled $3 is the subject of the refusal and $4 the advice; the build directory and the prefix each pass their own
 gitup_source_room() {
     : "${3:?gitup_source_room needs a subject}" "${4:?gitup_source_room needs advice}"
     local kb
@@ -122,7 +122,7 @@ gitup_source_make() {
         "$GITUP_MAKE" -C "$dir" "$@" >>"$GITUP_BUILD_DIR/make.log" 2>&1
 }
 
-# ^ why sysconfdir=/etc, not git's default $(prefix)/etc; the new git reads the /etc/gitconfig of the distribution's git (#90)
+# ^ why sysconfdir=/etc, not git's default $(prefix)/etc; the new git reads the /etc/gitconfig of the distribution's git
 # ^ why INSTALL_SYMLINKS=1, not git's hard links; one inode under bin and libexec gets one SELinux label from two policy rules, and restorecon flips it
 # ^ invariant rc 0 sets GITUP_MAKE_WORDS for both make runs and the plan; rc 1 with a message when GITUP_PREFIX or GITUP_SYSCONFDIR is empty
 gitup_source_make_words() {

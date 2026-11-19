@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -u
-# ^ external the arrangements of the git upgrade E2E missing from rpm-upgrade-e2e.sh (#40); arguments rocky|fedora and MODE
+# ^ external the arrangements of the git upgrade E2E missing from rpm-upgrade-e2e.sh; arguments rocky|fedora and MODE
 # ^ coupled uses the helpers and the Rocky steps of rpm-upgrade-e2e.sh, sourced above; the modes are named by the phases of rpm-phase.sh
 # ^ security the fake credential comes from fake_key there and is never printed; the sudo password is read from a file and never printed
 
@@ -140,7 +140,7 @@ mode_bump() {
     check "the rebuild at the current pin exits 0" rc_is 0
     check "git $cur is in /usr/local" test "$(git_ver /usr/local/bin/git)" = "$cur"
     check "its MANIFEST is there" test -f "$docs/git-$cur-local/MANIFEST"
-    check "the rebuilt git reads the system config from /etc (#90)" test "$(/usr/local/bin/git var GIT_CONFIG_SYSTEM)" = /etc/gitconfig
+    check "the rebuilt git reads the system config from /etc" test "$(/usr/local/bin/git var GIT_CONFIG_SYSTEM)" = /etc/gitconfig
     check "the directory of the older build is gone" test ! -e "$docs/git-$BUMP_OLD_VERSION-local"
     check "the rebuild turned the hard links into symlinks: git has one name" test "$(stat -c %h /usr/local/bin/git)" = 1
     check "and the libexec entry git-merge is a symlink" test -L /usr/local/libexec/git-core/git-merge

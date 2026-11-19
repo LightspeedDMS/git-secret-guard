@@ -2,7 +2,7 @@
 set -u
 set -o pipefail
 
-# ^ invariant runs as root in the container of tests/platform/autoupdate.sh (systemd is PID 1); the manual end-to-end test of #129, steps 1 to 9
+# ^ invariant runs as root in the container of tests/platform/autoupdate.sh (systemd is PID 1); the manual end-to-end test of auto-update, steps 1 to 9
 # ^ security every account, checkout and origin is made here and goes with the container; no step reaches the host
 WORK=/tmp/gsg-autoupdate-e2e
 LOGS="$WORK/logs"
@@ -39,7 +39,7 @@ HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)" || exit 2
 source "$HERE/autoupdate-e2e-lib.sh" || exit 2
 # shellcheck source=tests/platform/autoupdate-e2e-visibility.sh
 source "$HERE/autoupdate-e2e-visibility.sh" || exit 2
-# ^ invariant 1 runs the #130 group (status and doctor) between steps 7 and 8; 0 leaves exactly the steps of #129
+# ^ invariant 1 runs the visibility group (status and doctor) between steps 7 and 8; 0 leaves exactly steps 1 to 9
 VISIBILITY_STEPS=1
 
 # ^ invariant og = git as the owner in the checkout the installs follow, dg = git as the owner in the second clone releases are pushed from

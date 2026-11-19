@@ -461,7 +461,7 @@ lc_begin() {
     LC_ENV=("${GSG_ENV[@]}" PATH="$SANDBOX/pathbin:$TEST_BASE_PATH"
         XDG_DATA_HOME="$SANDBOX/xdg/data" XDG_STATE_HOME="$SANDBOX/xdg/state")
     # ^ why the two Linux overrides off Windows only, not everywhere; the windows module announces any override it finds and neither changes anything there
-    # ^ why GSG_GITUP_ROOT in the sandbox by default (#151), not the host's /usr; a host with Desktop adds a WARNING to status, and set_env wins later
+    # ^ why GSG_GITUP_ROOT in the sandbox by default, not the host's /usr; a host with Desktop adds a WARNING to status, and set_env wins later
     # ^ coupled the root stays off on Windows too; gitup_windows_sysdir reads GSG_GITUP_ROOT there and would lose reg.exe and whoami
     if [ "$TEST_IS_WINDOWS" -ne 1 ]; then LC_ENV+=(GSG_OS_RELEASE="$SANDBOX/os-release" GSG_GITUP_BUILD_PATH="$SANDBOX/pathbin" GSG_GITUP_ROOT="$SANDBOX/root"); fi
     gitx config --global user.name "Test User" || return 1
@@ -507,7 +507,7 @@ lc_lock_binary_sha() {
 lc_asset_name() { (source "$GSG_PROJECT/lib/core/common.sh" && source "$GSG_PROJECT/lib/install/tools.sh" && tools_tarball_name "$@"); }
 
 # ^ security the fakes print the version and nothing else => a passing test never needed the real tool
-# ^ invariant LC_BINSHA=1 adds the SHA-256 of the fake binary as the fifth lock column (#101); without it the rows have four fields, as before
+# ^ invariant LC_BINSHA=1 adds the SHA-256 of the fake binary as the fifth lock column; without it the rows have four fields, as before
 lc_make_fixtures() {
     local tv="${1:-3.99.2}" gv="${2:-1.9.0}" tool ver plat dir tar sha bin bsha
     mkdir -p -- "$LC_FIX/src" || return 1

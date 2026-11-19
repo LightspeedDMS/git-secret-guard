@@ -8,7 +8,7 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/../support/gitup.sh"
 # shellcheck source=tests/support/gitup_macos.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/../support/gitup_macos.sh"
 
-# ^ external the Intel Mac paths (#156); a fake uname answers Darwin x86_64 or arm64 and brew is the recording stand-in, no real brew runs
+# ^ external the Intel Mac paths; a fake uname answers Darwin x86_64 or arm64 and brew is the recording stand-in, no real brew runs
 if [ "$TEST_IS_WINDOWS" -eq 1 ]; then FILE_SKIP_REASON="Homebrew flows"; fi
 
 INTEL_BREW_REFUSAL="Homebrew (brew) was not found on PATH; install it from https://brew.sh (and open a new terminal so brew is on PATH), then run install again; on an Intel Mac Homebrew's installer may refuse to run: see \"Homebrew on an Intel Mac\" in docs/platforms.md for the manual steps; nothing was changed"

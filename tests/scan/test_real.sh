@@ -493,7 +493,7 @@ test_real_a_lone_aws_key_id_under_a_skipped_path_passes_with_and_without_a_repo_
     done
 }
 
-# ^ why touch -d 2 hours ago, not a fresh file; a racy file makes git read the blob by luck, a stat-clean one made it read the work tree (#103)
+# ^ why touch -d 2 hours ago, not a fresh file; a racy file makes git read the blob by luck, a stat-clean one made it read the work tree
 test_real_a_key_staged_through_working_tree_encoding_is_scanned_from_the_blob() {
     need_real_tools
     command -v iconv >/dev/null 2>&1 || skip_test "iconv is not installed"

@@ -742,7 +742,7 @@ hs_problems() {
     hs_allowed "$2" >"$d/hs.allowed" || return 1
     LC_ALL=C comm -23 "$d/hs.found" "$d/hs.allowed" >"$d/hs.new" || return 1
     LC_ALL=C comm -13 "$d/hs.found" "$d/hs.allowed" >"$d/hs.stale" || return 1
-    awk -v list="$HS_LIST_NAME" '{ f = $1; sub(/^[^ ]* /, ""); printf "%s: %s is not in %s; Git for Windows bash 5.3 never returns on a here-string or here-doc of 65,537 to 65,664 bytes (#155): pipe the value, use a file or split_lines, or list it with why it is bounded\n", f, $0, list }' "$d/hs.new" || return 1
+    awk -v list="$HS_LIST_NAME" '{ f = $1; sub(/^[^ ]* /, ""); printf "%s: %s is not in %s; Git for Windows bash 5.3 never returns on a here-string or here-doc of 65,537 to 65,664 bytes: pipe the value, use a file or split_lines, or list it with why it is bounded\n", f, $0, list }' "$d/hs.new" || return 1
     awk -v list="$HS_LIST_NAME" '{ f = $1; sub(/^[^ ]* /, ""); printf "%s: %s is listed in %s but no longer in the file; drop it\n", f, $0, list }' "$d/hs.stale"
 }
 

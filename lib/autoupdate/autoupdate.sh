@@ -1,6 +1,6 @@
 # shellcheck shell=bash disable=SC2153,SC2034
 
-# ^ invariant one update cycle of one user (#129); the checkout's owner fetches and fast-forwards to the newest released tag, every user installs from an export
+# ^ invariant one update cycle of one user; the checkout's owner fetches and fast-forwards to the newest released tag, every user installs from an export
 # ^ invariant every doubtful case is a skip with a recorded reason and no change; exit 0 for current, updated and skipped, 1 for failed
 # ^ coupled lib/core/state.sh names the record and the lock (GSG_UPDATE_RECORD, GSG_UPDATE_LOCK); the units run "<share>/bin/git-secret-guard update"
 
@@ -52,7 +52,7 @@ AU_TAGS=() AU_TAG_HEADS=()
 autoupdate_is_ancestor() {
     local grand
     if [ "$PPID" = "$1" ]; then return 0; fi
-    # ^ external the MSYS ps has no -o (probed, #132); /proc/PID/ppid holds the parent there, as lib/core/proc.sh reads it
+    # ^ external the MSYS ps has no -o (probed); /proc/PID/ppid holds the parent there, as lib/core/proc.sh reads it
     if tools_is_windows; then
         { read -r grand <"/proc/$PPID/ppid"; } 2>/dev/null || return 1
     else
@@ -91,7 +91,7 @@ autoupdate_lock_release() {
 # ^ invariant rc 1 = $1/.git is not a directory (a worktree or a submodule has a file there, a missing checkout nothing) or, on Windows, no repository
 autoupdate_role() {
     if [ ! -d "$1/.git" ]; then return 1; fi
-    # ^ external [ -O ] cannot tell the owner under MSYS (probed, #132) => on Windows git's own check decides, rc 1 when the directory is no repository
+    # ^ external [ -O ] cannot tell the owner under MSYS (probed) => on Windows git's own check decides, rc 1 when the directory is no repository
     if tools_is_windows; then
         winupdate_role "$1"
         return
@@ -128,7 +128,7 @@ autoupdate_newer() {
 }
 
 # ^ invariant rc 0 = version $1 must be installed, 1 = it is installed, 2 = $1, the state's version or the installed VERSION is not x.y.z
-# ^ invariant needed = $1 is newer than the state's version OR than the installed VERSION; install records the version before it copies (the gap, #129)
+# ^ invariant needed = $1 is newer than the state's version OR than the installed VERSION; install records the version before it copies (the gap)
 # ^ invariant an installed copy without a VERSION file needs the install; nothing says it is current
 autoupdate_needs_install() {
     local state_rc=0 share_rc=0
@@ -269,7 +269,7 @@ autoupdate_at_commit() {
     [ -n "$head" ] && [ "$head" = "$REPLY" ]
 }
 
-# ^ order shallow, no origin, not on main, dirty (#129 AC7); the first check to hold names the skip, later ones do not run after it
+# ^ order shallow, no origin, not on main, dirty; the first check to hold names the skip, later ones do not run after it
 # ^ invariant rc 0 = the checkout may be fetched into and fast-forwarded, 1 = the outcome is set
 autoupdate_owner_checks() {
     autoupdate_git rev-parse --is-shallow-repository || { autoupdate_git_failed "git rev-parse"; return 1; }
@@ -300,9 +300,9 @@ autoupdate_owner_checks() {
     fi
 }
 
-# ^ external timeout without --foreground signals its whole group; under setsid git has no controlling terminal => ssh cannot prompt (#129, Bounded fetch)
+# ^ external timeout without --foreground signals its whole group; under setsid git has no controlling terminal => ssh cannot prompt
 # ^ invariant no --force for tags; a tag moved on origin is rejected, the fetch exits non-zero, the local tag stays (tests/autoupdate/test_autoupdate_probes.sh)
-# ^ external Windows has no setsid (probed, #132); GNU timeout alone ends git and every process below it (probed), winupdate.sh sets GCM_INTERACTIVE=never
+# ^ external Windows has no setsid (probed); GNU timeout alone ends git and every process below it (probed), winupdate.sh sets GCM_INTERACTIVE=never
 autoupdate_fetch() {
     local -a launcher=()
     if ! tools_is_windows; then launcher=("$SETSID_BIN"); fi

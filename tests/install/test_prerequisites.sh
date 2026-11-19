@@ -15,7 +15,7 @@ os_release() {
     mkdir -p -- "$SANDBOX/root/usr/bin" "$SANDBOX/root/usr/local/bin" && printf '%s\n' "$@" >"$SANDBOX/os-release" && set_env GSG_OS_RELEASE="$SANDBOX/os-release" GSG_GITUP_ROOT="$SANDBOX/root"
 }
 
-# ^ why a sandbox root, not the real /usr/local; WSL Rocky with its own build in place got the path-fix refusal (run 42278541531)
+# ^ why a sandbox root, not the real /usr/local; WSL Rocky with its own build in place got the path-fix refusal
 apt_root() { set_env GSG_GITUP_ROOT="$SANDBOX/gitup-root"; }
 
 ubuntu_release() { os_release 'NAME="Ubuntu"' 'ID=ubuntu' 'ID_LIKE=debian' 'VERSION_ID="24.04"' && apt_root; }

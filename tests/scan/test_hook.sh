@@ -654,7 +654,7 @@ test_a_git_client_with_the_system_bash_first_on_PATH_still_scans() {
     assert_empty "$(workdirs)" "private temp dir removed"
 }
 
-# ^ external macOS 12 has no realpath in /usr/bin or /bin (#157) and a GUI client's PATH has nothing else; the hook finds itself without one
+# ^ external macOS 12 has no realpath in /usr/bin or /bin and a GUI client's PATH has nothing else; the hook finds itself without one
 test_the_hook_scans_with_a_PATH_that_has_no_realpath() {
     realpath_free_path_dir || return 1
     begin norealpath || return 1

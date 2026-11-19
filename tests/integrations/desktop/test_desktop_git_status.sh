@@ -169,7 +169,7 @@ test_on_macos_the_desktop_update_advice_is_a_warning_in_status_and_an_icon_line_
     assert_contains "$OUT" $'\n\e[33m▲\e[0m '"$note" "the note with the warning icon"
 }
 
-# ^ invariant a lifecycle test with no Desktop fixture sees no Desktop, whatever the host has in /usr/lib/github-desktop (#151)
+# ^ invariant a lifecycle test with no Desktop fixture sees no Desktop, whatever the host has in /usr/lib/github-desktop
 # ^ why the empty-root run is the real guard, not the env check; it fails only on a host with Desktop installed, as a developer's machine may have
 test_a_default_lifecycle_test_never_sees_the_hosts_github_desktop() {
     local tok found=0

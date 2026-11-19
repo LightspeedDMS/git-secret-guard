@@ -31,142 +31,146 @@ Scenario catalog for validating the `LightspeedDMS/git-secret-guard` rollout: ho
 | **Record** | Record the behaviour, never counted as a failure. |
 | **FailClosed** | The hook stops it before scanning (`nothing was scanned`). |
 
+### Legend for "Who covers it"
+
+Each row also says who is responsible for it. **Hook**: git-secret-guard stops it (or, for an Allow row, passes it) and an automated test pins that. **Hook gap**: a known hole the hook cannot close, pinned by a test or stated as a limit in [scan.md](scan.md#limits) or this catalog; the organisation's server-side scan or alerting must catch it. **Org**: entirely the organisation's job (endpoint protection, device management, the server-side gate, IT procedures). **Record**: a question to answer or a fact to log, not a control. **Undecided**: no test or document settles it yet. **N/A**: the scenario does not apply to this hook. A row with several parts names each. Most tests behind these values are listed in [Automated coverage](#automated-coverage); A01, A11, B01 and F08 also rest on `tests/scan/test_real.sh` and `tests/scan/test_exemptions_real.sh`, D22 on [platform-testing.md](platform-testing.md#github-desktops-bundled-git), F01–F03 on the `windows`, `windows-suite`, `macos-suite` and `suite` CI jobs, and F05 on `tests/platform/wsl-ci.sh`.
+
 ---
 
 ## A. Baseline detection (the hook works)
 
-| ID | Scenario | Expected |
-|---|---|---|
-| A01 | Commit a file with an AWS access key + secret | Block |
-| A02 | GitLab PAT (`glpat-…`) | Block |
-| A03 | GitHub PAT or fine-grained token | Block |
-| A04 | Private key (PEM, OpenSSH, PuTTY `.ppk`) | Block |
-| A05 | Slack token or webhook URL | Block |
-| A06 | Azure storage key, SAS token, or client secret | Block |
-| A07 | DB connection string with password (JDBC, SQL Server, Postgres URI) | Block |
-| A08 | JWT / bearer token | Block |
-| A09 | `.env`, `application.properties`, or `appsettings.json` with secrets | Block |
-| A10 | Basic-auth credentials in a URL (a user name and password written before the host name) | Block |
-| A11 | Generic high-entropy password assigned to a variable | Block (verify rule exists) |
-| A12 | Secret in a file staged with `git add -p` (partial staging) | Block |
-| A13 | Secret in a renamed or moved file | Block |
-| A14 | Secret in the commit message | Block (the `commit-msg` event) |
-| A15 | Secret introduced via `git commit --amend` | Block |
-| A16 | Secret in a file with CRLF endings, UTF-16 encoding, or a path with spaces/unicode | Block |
-| A17 | Secret in a large file, a binary, or a Git LFS-tracked file | Record behavior |
-| A18 | Secret in a Jupyter notebook or other JSON blob | Block |
+| ID | Scenario | Expected | Who covers it |
+|---|---|---|---|
+| A01 | Commit a file with an AWS access key + secret | Block | Hook |
+| A02 | GitLab PAT (`glpat-…`) | Block | Hook |
+| A03 | GitHub PAT or fine-grained token | Block | Hook |
+| A04 | Private key (PEM, OpenSSH, PuTTY `.ppk`) | Block | Hook (PEM, OpenSSH); Undecided (`.ppk`) |
+| A05 | Slack token or webhook URL | Block | Undecided |
+| A06 | Azure storage key, SAS token, or client secret | Block | Undecided |
+| A07 | DB connection string with password (JDBC, SQL Server, Postgres URI) | Block | Undecided |
+| A08 | JWT / bearer token | Block | Undecided |
+| A09 | `.env`, `application.properties`, or `appsettings.json` with secrets | Block | Hook (`.env`, `appsettings.json`); Undecided (`application.properties`) |
+| A10 | Basic-auth credentials in a URL (a user name and password written before the host name) | Block | Undecided |
+| A11 | Generic high-entropy password assigned to a variable | Block (verify rule exists) | Hook (`api_key = "<random>"`); Undecided (other variable names) |
+| A12 | Secret in a file staged with `git add -p` (partial staging) | Block | Hook |
+| A13 | Secret in a renamed or moved file | Block | Hook (token added); Hook gap (pure rename) |
+| A14 | Secret in the commit message | Block (the `commit-msg` event) | Hook |
+| A15 | Secret introduced via `git commit --amend` | Block | Hook |
+| A16 | Secret in a file with CRLF endings, UTF-16 encoding, or a path with spaces/unicode | Block | Hook (CRLF, path); Hook gap (UTF-16) |
+| A17 | Secret in a large file, a binary, or a Git LFS-tracked file | Record behavior | Hook (large text, LFS object); Hook gap (binary) |
+| A18 | Secret in a Jupyter notebook or other JSON blob | Block | Hook |
 
 ## B. False positives and noise
 
-| ID | Scenario | Expected |
-|---|---|---|
-| B01 | AWS docs `EXAMPLE` keys and obvious placeholders (`changeme`, `<TOKEN>`) | Allow |
-| B02 | Lockfiles, hashes, UUIDs, base64-embedded images | Allow |
-| B03 | Commit latency on a large change (~10k files) | Record latency |
-| B04 | Normal commit with no secrets | Allow, and no alert fires |
+| ID | Scenario | Expected | Who covers it |
+|---|---|---|---|
+| B01 | AWS docs `EXAMPLE` keys and obvious placeholders (`changeme`, `<TOKEN>`) | Allow | Hook (betterleaks passes a lone `EXAMPLE` key ID and an all-`A` placeholder); Record (the whole commit, the rest) |
+| B02 | Lockfiles, hashes, UUIDs, base64-embedded images | Allow | Undecided |
+| B03 | Commit latency on a large change (~10k files) | Record latency | Record |
+| B04 | Normal commit with no secrets | Allow, and no alert fires | Hook |
 
 ## C. Suppression and allowlist abuse (no admin needed)
 
-| ID | Scenario | Expected |
-|---|---|---|
-| C01 | Inline ignore comment (e.g. `gitleaks:allow`, `# nosec`) on a real-format secret | Detect, or apply policy decision |
-| C02 | Add the secret's path/fingerprint to a repo-level allowlist or ignore file in the same commit | Detect |
-| C03 | Edit a user-level scanner config or rules file, if one exists in a user-writable path | Detect |
-| C04 | Set any env-var kill switch found in the code (e.g. `SKIP=`, `*_DISABLE=1`) | Detect |
-| C05 | Obfuscated secret: base64-encoded, split across lines, or string-concatenated | Gap (record) |
+| ID | Scenario | Expected | Who covers it |
+|---|---|---|---|
+| C01 | Inline ignore comment (e.g. `gitleaks:allow`, `# nosec`) on a real-format secret | Detect, or apply policy decision | Hook gap |
+| C02 | Add the secret's path/fingerprint to a repo-level allowlist or ignore file in the same commit | Detect | Hook |
+| C03 | Edit a user-level scanner config or rules file, if one exists in a user-writable path | Detect | Hook (shipped rule file removed); Undecided (rule file or settings edited) |
+| C04 | Set any env-var kill switch found in the code (e.g. `SKIP=`, `*_DISABLE=1`) | Detect | Hook gap |
+| C05 | Obfuscated secret: base64-encoded, split across lines, or string-concatenated | Gap (record) | Hook gap |
 
 ## D. Client bypass without admin rights
 
-| ID | Scenario | Expected |
-|---|---|---|
-| D01 | `git commit --no-verify` | Detect |
-| D02 | `git commit -n` | Detect |
-| D03 | `git -c core.hooksPath= commit` (empty value or a path with no hooks) | Detect |
-| D04 | `git config --global core.hooksPath <other dir>` | Detect + remediation restores |
-| D05 | `git config --local core.hooksPath <other dir>` | Detect + remediation restores |
-| D06 | `GIT_CONFIG_NOSYSTEM=1 git commit` | Detect |
-| D07 | `GIT_CONFIG_GLOBAL=<alt file>`, or injection via `GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_0` / `GIT_CONFIG_VALUE_0` | Detect |
-| D08 | `include.path` pointing to a config that overrides `hooksPath` | Detect |
-| D09 | Alias: `git config --global alias.ci "commit --no-verify"` | Detect |
-| D10 | Delete, empty, or replace `.git/hooks/pre-commit` (if hooks are per-repo) | Detect + remediation restores |
-| D11 | Make the hook non-executable with `chmod -x` (macOS/Linux) | Detect |
-| D12 | Shadow the scanner with a dummy binary earlier in the user `PATH` | Block (hook should call scanner by absolute path), else Detect |
-| D13 | Scanner crashes, times out, or its rules file is removed — does the hook fail open? | Block (must fail closed) |
-| D14 | Plumbing commit: `git hash-object -w` + `git commit-tree` + `git update-ref` (no hooks run) | Detect / Server |
-| D15 | Secret introduced via `git merge` (only pre-merge-commit hook runs) | Block if covered, else Server |
-| D16 | Secret introduced via `git cherry-pick`, `git rebase`, or `git am` (pre-commit doesn't run) | Gap → pre-push / Server |
-| D17 | `git push --no-verify` (if a pre-push hook exists) | Detect / Server |
-| D18 | `git worktree add`, then commit in the worktree | Block |
-| D19 | Commit inside a submodule | Block |
-| D20 | New repo via `git init`, or `git clone --template=<empty dir>` | Block |
-| D21 | Portable Git / MinGit unzipped into the user profile (ignores managed system config) | Detect |
-| D22 | GUI client with bundled git (GitHub Desktop, SourceTree embedded git) | Block / Detect (record) |
-| D23 | VS Code with `git.allowNoVerifyCommit` on, using "Commit (No Verify)" | Detect |
-| D24 | JetBrains IDE with "Run Git hooks" unchecked | Detect |
-| D25 | libgit2- or JGit-based client (e.g. Eclipse EGit) that may not run hooks | Record → Server |
+| ID | Scenario | Expected | Who covers it |
+|---|---|---|---|
+| D01 | `git commit --no-verify` | Detect | Hook gap |
+| D02 | `git commit -n` | Detect | Hook gap |
+| D03 | `git -c core.hooksPath= commit` (empty value or a path with no hooks) | Detect | Hook |
+| D04 | `git config --global core.hooksPath <other dir>` | Detect + remediation restores | Hook |
+| D05 | `git config --local core.hooksPath <other dir>` | Detect + remediation restores | Hook |
+| D06 | `GIT_CONFIG_NOSYSTEM=1 git commit` | Detect | Hook |
+| D07 | `GIT_CONFIG_GLOBAL=<alt file>`, or injection via `GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_0` / `GIT_CONFIG_VALUE_0` | Detect | Hook gap |
+| D08 | `include.path` pointing to a config that overrides `hooksPath` | Detect | Hook (`hooksPath`); Hook gap (an include that disables the hook) |
+| D09 | Alias: `git config --global alias.ci "commit --no-verify"` | Detect | Hook gap |
+| D10 | Delete, empty, or replace `.git/hooks/pre-commit` (if hooks are per-repo) | Detect + remediation restores | N/A |
+| D11 | Make the hook non-executable with `chmod -x` (macOS/Linux) | Detect | Hook |
+| D12 | Shadow the scanner with a dummy binary earlier in the user `PATH` | Block (hook should call scanner by absolute path), else Detect | Hook |
+| D13 | Scanner crashes, times out, or its rules file is removed — does the hook fail open? | Block (must fail closed) | Hook |
+| D14 | Plumbing commit: `git hash-object -w` + `git commit-tree` + `git update-ref` (no hooks run) | Detect / Server | Hook gap |
+| D15 | Secret introduced via `git merge` (only pre-merge-commit hook runs) | Block if covered, else Server | Hook gap (merge commit); Hook (conflict finished with `git commit`) |
+| D16 | Secret introduced via `git cherry-pick`, `git rebase`, or `git am` (pre-commit doesn't run) | Gap → pre-push / Server | Hook gap |
+| D17 | `git push --no-verify` (if a pre-push hook exists) | Detect / Server | N/A; Org (server gate) |
+| D18 | `git worktree add`, then commit in the worktree | Block | Hook |
+| D19 | Commit inside a submodule | Block | Hook |
+| D20 | New repo via `git init`, or `git clone --template=<empty dir>` | Block | Hook |
+| D21 | Portable Git / MinGit unzipped into the user profile (ignores managed system config) | Detect | Hook gap (a git older than 2.54); Undecided (2.54 or newer) |
+| D22 | GUI client with bundled git (GitHub Desktop, SourceTree embedded git) | Block / Detect (record) | Hook gap (a bundled git older than 2.54, e.g. GitHub Desktop's); Undecided (the rest) |
+| D23 | VS Code with `git.allowNoVerifyCommit` on, using "Commit (No Verify)" | Detect | Hook gap |
+| D24 | JetBrains IDE with "Run Git hooks" unchecked | Detect | Undecided |
+| D25 | libgit2- or JGit-based client (e.g. Eclipse EGit) that may not run hooks | Record → Server | Record |
 
 ## E. Elevated bypass — MANUAL, test VM only, run by IT
 
 Testers without admin rights must not run these. IT runs them in a dedicated test VM, through the organisation's elevation process.
 
-| ID | Scenario | Expected |
-|---|---|---|
-| E01 | Elevate PowerShell through the elevation tool with a business justification; record what its log captures | Log has user, app, justification |
-| E02 | Elevated: edit the system gitconfig to remove `hooksPath` | Detect (endpoint detection alert + device marked noncompliant) |
-| E03 | Elevated: delete or replace the hook binary under Program Files | Detect + remediation reinstalls |
-| E04 | Elevated: uninstall git-secret-guard via Apps & Features | Detect + reinstall |
-| E05 | Elevated: stop/disable the device-management agent service or delete its scheduled tasks | Detect |
-| E06 | Elevated: add an endpoint-protection exclusion for the hook path | Blocked by tamper protection + alert |
-| E07 | Elevated: install a second git system-wide | Detect |
-| E08 | Is generic PowerShell/Terminal elevation confirmed by the user alone, or approved by support? | Record |
+| ID | Scenario | Expected | Who covers it |
+|---|---|---|---|
+| E01 | Elevate PowerShell through the elevation tool with a business justification; record what its log captures | Log has user, app, justification | Org |
+| E02 | Elevated: edit the system gitconfig to remove `hooksPath` | Detect (endpoint detection alert + device marked noncompliant) | Org |
+| E03 | Elevated: delete or replace the hook binary under Program Files | Detect + remediation reinstalls | Org |
+| E04 | Elevated: uninstall git-secret-guard via Apps & Features | Detect + reinstall | Org |
+| E05 | Elevated: stop/disable the device-management agent service or delete its scheduled tasks | Detect | Org |
+| E06 | Elevated: add an endpoint-protection exclusion for the hook path | Blocked by tamper protection + alert | Org |
+| E07 | Elevated: install a second git system-wide | Detect | Org |
+| E08 | Is generic PowerShell/Terminal elevation confirmed by the user alone, or approved by support? | Record | Record |
 
 ## F. Platforms and environments
 
 Run sections A–D on each environment where they apply.
 
-| ID | Environment | Notes |
-|---|---|---|
-| F01 | Windows, standard user | Primary target |
-| F02 | macOS, non-admin and admin user | Validate how configuration drift is reported |
-| F03 | Ubuntu workstation | Validate how configuration drift is reported |
-| F04 | Managed Windows VM and Linux VM | Confirm hook is baked into the golden image |
-| F05 | WSL distro on a managed laptop (Linux git) | Expected Gap → Detect / Server |
-| F06 | Dev container / Docker with git inside | Expected Gap → Server |
-| F07 | Unmanaged local VM (Hyper-V, VirtualBox) | Expected Gap → Server |
-| F08 | Hook running offline or behind a proxy | Fails closed? Telemetry queued and sent later? |
+| ID | Environment | Notes | Who covers it |
+|---|---|---|---|
+| F01 | Windows, standard user | Primary target | Hook (elevated CI runner); Undecided (standard user) |
+| F02 | macOS, non-admin and admin user | Validate how configuration drift is reported | Hook (CI runner account); Undecided (non-admin user); Org (drift reporting) |
+| F03 | Ubuntu workstation | Validate how configuration drift is reported | Hook; Org (drift reporting) |
+| F04 | Managed Windows VM and Linux VM | Confirm hook is baked into the golden image | Org |
+| F05 | WSL distro on a managed laptop (Linux git) | Expected Gap → Detect / Server | Hook (installed in the distribution); Hook gap (a distribution without it) |
+| F06 | Dev container / Docker with git inside | Expected Gap → Server | Hook gap |
+| F07 | Unmanaged local VM (Hyper-V, VirtualBox) | Expected Gap → Server | Hook gap |
+| F08 | Hook running offline or behind a proxy | Fails closed? Telemetry queued and sent later? | Hook (scan needs no network); Org (telemetry) |
 
 ## G. Server side and alert validation
 
 Requires Security and IT to confirm results from their consoles, using the UTC timestamps logged by the tester.
 
-| ID | Scenario | Expected |
-|---|---|---|
-| G01 | Push a commit with a secret to the throwaway GitLab project | Server blocks (secret push protection) |
-| G02 | `git push -o secret_push_protection.skip_all` | Allowed + audit event + alert to the security team |
-| G03 | `[skip secret push protection]` in the commit message | Allowed + audit event + alert |
-| G04 | Secret in a file >1 MiB, a binary, or the initial push that creates the repo | Missed by push protection → caught by pipeline secret detection |
-| G05 | Secret in a path excluded from push protection | Pipeline detection catches it |
-| G06 | Commit via GitLab Web IDE / web editor | Server blocks |
-| G07 | Commit via GitLab REST API (commits endpoint) | Record whether push protection applies |
-| G08 | Push to a GitHub public repo | Record coverage (still to be confirmed) |
-| G09 | Heartbeat correlation: pushed commit with no matching hook scan event (from D01, D14, F05) | Bypass alert fires |
-| G10 | For every **Detect** row: which detector fired (endpoint detection rule, remediation script, device compliance, heartbeat, audit event), latency, and whether the alert reached the security team | Record |
-| G11 | Device marked noncompliant: is its access to GitLab blocked? | Access blocked |
-| G12 | Time for remediation to restore the hook after D04, D05, D10 | Record vs. target SLA |
+| ID | Scenario | Expected | Who covers it |
+|---|---|---|---|
+| G01 | Push a commit with a secret to the throwaway GitLab project | Server blocks (secret push protection) | Org |
+| G02 | `git push -o secret_push_protection.skip_all` | Allowed + audit event + alert to the security team | Org |
+| G03 | `[skip secret push protection]` in the commit message | Allowed + audit event + alert | Org |
+| G04 | Secret in a file >1 MiB, a binary, or the initial push that creates the repo | Missed by push protection → caught by pipeline secret detection | Org |
+| G05 | Secret in a path excluded from push protection | Pipeline detection catches it | Org |
+| G06 | Commit via GitLab Web IDE / web editor | Server blocks | Org |
+| G07 | Commit via GitLab REST API (commits endpoint) | Record whether push protection applies | Record |
+| G08 | Push to a GitHub public repo | Record coverage (still to be confirmed) | Record |
+| G09 | Heartbeat correlation: pushed commit with no matching hook scan event (from D01, D14, F05) | Bypass alert fires | Org |
+| G10 | For every **Detect** row: which detector fired (endpoint detection rule, remediation script, device compliance, heartbeat, audit event), latency, and whether the alert reached the security team | Record | Record |
+| G11 | Device marked noncompliant: is its access to GitLab blocked? | Access blocked | Org |
+| G12 | Time for remediation to restore the hook after D04, D05, D10 | Record vs. target SLA | Record |
 
 ## N. Found while testing
 
 Scenarios added while the catalog was automated. There is no N06.
 
-| ID | Scenario | Expected |
-|---|---|---|
-| N01 | Overwrite the installed hook script (`~/.local/share/git-secret-guard/hooks/secret-scan`, user-writable) with `exit 0` | Detect |
-| N02 | Shadow `find` with a no-op earlier in the user `PATH` | Block |
-| N03 | Commit a catch-all pattern (`*`, `**`) to the repository's exemption file, then commit a secret | Detect (the hook warns on every commit) |
-| N04 | Commit a `.gitleaks.toml` without `[extend] useDefault = true`, turning betterleaks' built-in rules off | Detect (the hook warns on every commit) |
-| N05 | `git config --global --remove-section hook.git-secret-guard` | Detect |
-| N07 | Config that changes how git prints a diff (`-c`, `GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_COUNT`, repository config), to hide added lines from extraction | Block |
-| N08 | `git config --local hook.git-secret-guard.command true` | Detect |
+| ID | Scenario | Expected | Who covers it |
+|---|---|---|---|
+| N01 | Overwrite the installed hook script (`~/.local/share/git-secret-guard/hooks/secret-scan`, user-writable) with `exit 0` | Detect | Hook gap |
+| N02 | Shadow `find` with a no-op earlier in the user `PATH` | Block | Undecided |
+| N03 | Commit a catch-all pattern (`*`, `**`) to the repository's exemption file, then commit a secret | Detect (the hook warns on every commit) | Hook gap (the hook warns) |
+| N04 | Commit a `.gitleaks.toml` without `[extend] useDefault = true`, turning betterleaks' built-in rules off | Detect (the hook warns on every commit) | Hook gap (the hook warns) |
+| N05 | `git config --global --remove-section hook.git-secret-guard` | Detect | Hook gap |
+| N07 | Config that changes how git prints a diff (`-c`, `GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_COUNT`, repository config), to hide added lines from extraction | Block | Hook |
+| N08 | `git config --local hook.git-secret-guard.command true` | Detect | Hook gap |
 
 ---
 

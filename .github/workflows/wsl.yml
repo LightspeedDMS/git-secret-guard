@@ -28,7 +28,7 @@ permissions:
 
 jobs:
   wsl:
-    # windows-2022 has WSL 1 enabled in the image (actions/runner-images Windows2022-Readme); both versions start there with setup-wsl (runs 42237326449 and later)
+    # windows-2022 has WSL 1 enabled in the image (actions/runner-images Windows2022-Readme); both versions start there with setup-wsl
     runs-on: windows-2022
     timeout-minutes: 150
     strategy:
@@ -61,7 +61,7 @@ jobs:
 
       # Vampire/setup-wsl v7.2.0, pinned by commit; git is the stock package of the distribution on purpose (2.34 on 22.04, 2.43 on 24.04).
       # For Rocky and Fedora it only enables the WSL platform (it offers no RPM distribution); an Ubuntu is installed and not used.
-      # On windows-2022 with WSL 2 it runs wsl --update 10 times with no delay; a 403 answered all 10 in 2 s (run 43951587028, attempt 1). One more
+      # On windows-2022 with WSL 2 it runs wsl --update 10 times with no delay; a 403 answered all 10 in 2 s (on the first attempt). One more
       # attempt follows after 120 s: setup-wsl skips a distribution already installed, and the second attempt has no continue-on-error, so its failure fails the job.
       - id: setup-wsl
         uses: Vampire/setup-wsl@4c48163d9f981914dd8caa0fc335fe19cca5bff4
@@ -107,7 +107,7 @@ jobs:
             default { throw "no image is pinned for $env:DISTRIBUTION" }
           }
           $file = Join-Path $env:RUNNER_TEMP 'rootfs.wsl'
-          # --retry-all-errors (curl 7.71+): plain --retry does not retry curl 18, a body cut off (twice on Rocky-9, run 43951587028). Each retry
+          # --retry-all-errors (curl 7.71+): plain --retry does not retry curl 18, a body cut off (twice on Rocky-9). Each retry
           # truncates the partial file and starts over (no -C - resume); the pinned SHA-256 below checks what arrived.
           "curl: $((Get-Command curl.exe).Source), $((curl.exe --version) | Select-Object -First 1)"
           curl.exe -fsSL --retry 4 --retry-delay 15 --retry-all-errors -o $file $url

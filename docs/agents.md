@@ -29,7 +29,7 @@ releases and finishing. Where [CONTRIBUTING.md](../CONTRIBUTING.md) already says
   [CONTRIBUTING.md#running-the-tests](../CONTRIBUTING.md#running-the-tests)):
   - `GSG_TEST_GIT`: the git of 2.54 or newer the tests use. The Linux default `/usr/local/bin/git` is missing on many machines, and then
     every file fails with "produced no test results"; name the machine's own git.
-  - `GSG_TEST_SHELLCHECK`: a shellcheck **0.11.0** binary (`GSG_SHELLCHECK_PIN` in `tests/test_quality.sh`). With no shellcheck or another
+  - `GSG_TEST_SHELLCHECK`: a shellcheck **0.11.0** binary (`GSG_SHELLCHECK_PIN` in `tests/project/test_quality.sh`). With no shellcheck or another
     version the lint gate skips, which proves nothing, and a lint finding shows up only in CI. When the machine has no 0.11.0, download that
     release into a scratch directory and point this knob at it, rather than changing the machine's own setup.
   - `GSG_TEST_FILE_TIMEOUT`: seconds before a test file is killed (default 900, 2400 on Windows). With other suites running on the

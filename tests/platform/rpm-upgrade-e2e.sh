@@ -197,7 +197,7 @@ rocky_upgrade() {
     check "and no ~/.gitconfig was created by the write probe" test ! -e "$HOME/.gitconfig"
     check "and /usr/local/bin/git does not exist" test ! -e /usr/local/bin/git
     # ^ invariant the build starts without perl-interpreter => the plan installs it and the source builds with it, never with the perl metapackage
-    # ^ why rpm -e --nodeps, not dnf remove; dnf remove took the stock git-core out with perl-interpreter (run 42358458414), and the later checks need it
+    # ^ why rpm -e --nodeps, not dnf remove; dnf remove took the stock git-core out with perl-interpreter, and the later checks need it
     show "required by: $(rpm -q --whatrequires perl-interpreter 2>&1 | head -n 8 | tr '\n' ' ')"
     if rpm -q perl-interpreter >/dev/null 2>&1; then sudo rpm -e --nodeps perl-interpreter >/dev/null 2>&1 || true; fi
     show "before the build: $(rpm -q perl-interpreter 2>&1 | head -n 1); $(rpm -q perl 2>&1 | head -n 1)"

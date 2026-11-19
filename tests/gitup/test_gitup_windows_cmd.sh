@@ -7,7 +7,7 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/../support/lifecycle.sh"
 source "$(dirname -- "${BASH_SOURCE[0]}")/../support/gitup_windows.sh"
 
 # ^ coupled the .cmd front ends and a Git for Windows left half installed by a stopped installer; tests/gitup/test_gitup_windows.sh holds the rest
-# ^ external a killed installer left bin/bash.exe (the launcher) without usr/bin/bash.exe, and the launcher failed with its own text (run 42267563578)
+# ^ external a killed installer left bin/bash.exe (the launcher) without usr/bin/bash.exe, and the launcher failed with its own text
 test_a_half_installed_git_for_windows_is_named_and_not_run_as_if_it_were_missing_or_fine() {
     local g="$SANDBOX/halfgit" w32
     if [ "$TEST_IS_WINDOWS" -ne 1 ]; then skip_test "gsg-bash.cmd is a Windows batch file"; fi

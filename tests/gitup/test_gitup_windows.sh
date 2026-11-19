@@ -235,7 +235,7 @@ test_a_tampered_installer_never_runs_when_it_is_swapped_after_the_download_was_v
     assert_eq "$(wu_installer_log)" "" "the installer never ran"
 }
 
-# ^ external a Git Bash process holding Git files made the silent installer wait 15 minutes with no output (run 42270993343); winget failed at once
+# ^ external a Git Bash process holding Git files made the silent installer wait 15 minutes with no output; winget failed at once
 test_a_program_running_from_the_git_directory_stops_the_runner_before_anything_starts() {
     local gd="$SANDBOX/heldgit" pid
     wu_need_windows_runner
@@ -607,7 +607,7 @@ test_the_runner_reads_no_environment_variable() {
     assert_eq "$(grep -c 'gsg-signer git-for-windows' "$GSG_PROJECT/tools.lock")" 1 "the signer is data in tools.lock next to the digest row"
 }
 
-# ^ external PowerShell 5.1 started from PowerShell 7 inherits its PSModulePath and cannot load the Security module (run 42264892011)
+# ^ external PowerShell 5.1 started from PowerShell 7 inherits its PSModulePath and cannot load the Security module
 test_the_runner_resets_the_module_path_before_the_first_cmdlet_that_loads_a_module() {
     local r="$GSG_PROJECT/bin/gsg-gitup.ps1" reset first
     reset="$(grep -n "SetEnvironmentVariable('PSModulePath'" "$r" | head -n 1 | cut -d: -f1)"

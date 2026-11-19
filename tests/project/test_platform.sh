@@ -883,7 +883,7 @@ test_the_container_script_accepts_the_real_machine_phases_and_nothing_else() {
     done
 }
 
-# ^ external Debian 13 has no software-properties-common (add-apt-repository); the prepare phase of the default run failed on it (run 42252845651)
+# ^ external Debian 13 has no software-properties-common (add-apt-repository); the prepare phase of the default run failed on it
 # shellcheck disable=SC2016
 test_the_prepare_phase_asks_for_software_properties_common_on_ubuntu_only() {
     local id

@@ -94,7 +94,7 @@ logdir="${GSG_VM_LOGDIR:-$work/logs}"
 mkdir -p -- "$logdir" || exit 2
 
 printf '== fetching %s\n' "$IMAGE_NAME"
-# ^ why --retry-all-errors, not plain --retry; plain --retry skips curl 92 (HTTP/2 PROTOCOL_ERROR, run 43951572171) and 18 (a cut-off body)
+# ^ why --retry-all-errors, not plain --retry; plain --retry skips curl 92 (HTTP/2 PROTOCOL_ERROR) and 18 (a cut-off body)
 # ^ why a clean restart, not -C - resume; curl truncates the partial file before each retry, and the pinned digest below checks the result
 timeout "$DOWNLOAD_TIMEOUT" curl -fsSL --retry 4 --retry-delay 15 --retry-all-errors -o "$work/base.qcow2" "$IMAGE_URL" || {
     printf 'rocky-vm.sh: cannot download the image\n' >&2

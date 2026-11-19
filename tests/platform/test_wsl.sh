@@ -438,7 +438,7 @@ test_the_systemd_analyze_probe_names_a_machine_that_cannot_verify_and_never_a_un
 }
 
 
-# ^ external the Fedora 44 WSL image has no awk and install finished => every commit was blocked for the missing awk (run 42275538317)
+# ^ external the Fedora 44 WSL image has no awk and install finished => every commit was blocked for the missing awk
 # ^ invariant awk is a prerequisite of install on Linux and WSL, named with its package like jq, setsid and timeout
 test_a_missing_awk_is_refused_by_install_with_its_package_not_found_out_at_the_first_commit() {
     local bin="$SANDBOX/noawk" tool

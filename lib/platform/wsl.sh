@@ -28,7 +28,7 @@ wsl_kernel_text() {
 }
 
 # ^ invariant rc 0 = the kernel files say WSL; read as data, uname must say Linux (Darwin and Git for Windows never are)
-# ^ why microsoft in any case or the interop file, not WSL_DISTRO_NAME; the variable is not set at all on WSL 1 (#31 probe)
+# ^ why microsoft in any case or the interop file, not WSL_DISTRO_NAME; the variable is not set at all on WSL 1 (probed)
 wsl_is() {
     local found=1
     if [ "$(uname -s)" != Linux ]; then return 1; fi
@@ -83,7 +83,7 @@ install_pins_running_script() {
 }
 
 # ^ invariant a Windows git on a WSL PATH is a separate setup; the notice names it and says what covers it; never fails the install
-# ^ why git.exe by its own name, not git; install_collect_gits looks for git and never sees the Windows one (probed on WSL 1, #31)
+# ^ why git.exe by its own name, not git; install_collect_gits looks for git and never sees the Windows one (probed on WSL 1)
 # ^ coupled the lookup is install_find_bin of lib/install/install.sh, one of three places allowed to call type -P (with brew.sh and one line of smartgit_tool)
 install_wsl_notice() {
     if ! wsl_is; then return 0; fi

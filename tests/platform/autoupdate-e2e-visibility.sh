@@ -1,7 +1,7 @@
 # shellcheck shell=bash disable=SC2034
 
-# ^ invariant sourced by tests/platform/autoupdate-e2e.sh; the manual end-to-end test of #130 (updater visibility in status and doctor), steps 1 to 6
-# ^ order runs after step 7 of #129 and before its steps 8 and 9; both installs exist, step 9 uninstalls them at the version this group leaves (VIS_FINAL)
+# ^ invariant sourced by tests/platform/autoupdate-e2e.sh; the manual end-to-end test of updater visibility in status and doctor, steps 1 to 6
+# ^ order runs after step 7 of the auto-update test, before its steps 8 and 9; both installs exist, step 9 uninstalls them at VIS_FINAL, the last version here
 # ^ coupled the constants, report, excerpt, check_*, run, fixture, as, bare, path_of, mark and expect_* come from autoupdate-e2e.sh and autoupdate-e2e-lib.sh
 PLAIN=gsgplain
 VIS_FINAL=""
@@ -30,7 +30,7 @@ doctor_as() {
     run "doctor-$2" as "$1" "$cli" doctor --roots "$roots"
 }
 
-# ^ invariant story step 1; a third account of the shared group installs from the same checkout without --auto-update
+# ^ invariant step 1; a third account of the shared group installs from the same checkout without --auto-update
 vis_plain_install() {
     local state
     fixture "useradd-$PLAIN" useradd -m -s /bin/bash -g "$GROUP" "$PLAIN" || return 1
@@ -41,8 +41,8 @@ vis_plain_install() {
     check_has "$state/state" "source_checkout=$CHECKOUT" "$PLAIN: and the checkout it ran from"
 }
 
-# ^ invariant story step 2 for one account; the exit status is part of the PASS or FAIL line
-# ^ coupled step 7 of #129 ran just before => the last record of both auto-update accounts says current
+# ^ invariant step 2 for one account; the exit status is part of the PASS or FAIL line
+# ^ coupled step 7 of the auto-update test ran just before => the last record of both auto-update accounts says current
 vis_status() {
     local a="$1" cli
     cli="$(path_of "$a" cli)" || return 1
@@ -76,7 +76,7 @@ vis_wait_idle() {
     return 1
 }
 
-# ^ invariant story step 3; vis_older_cycle PREV NEXT pushes tag vNEXT, both auto-update installs and the plain one are at PREV
+# ^ invariant step 3; vis_older_cycle PREV NEXT pushes tag vNEXT, both auto-update installs and the plain one are at PREV
 # ^ why the follower's timer is stopped, not raced; the gap exists only between the owner's fast-forward and the follower's next run
 vis_older_cycle() {
     local prev="$1" v="$2" older
@@ -108,7 +108,7 @@ vis_older_cycle() {
     check_has "$OUTF" "PROBLEM  $older" "$PLAIN: doctor keeps reporting the install older"
 }
 
-# ^ invariant story step 4; the wants link is what systemctl enable writes, enable writes it back
+# ^ invariant step 4; the wants link is what systemctl enable writes, enable writes it back
 vis_wants_link() {
     local wants
     wants="$(path_of "$FOLLOWER" units)/timers.target.wants/$TIMER" || return 1
@@ -120,7 +120,7 @@ vis_wants_link() {
     check_ok "$FOLLOWER: systemctl --user enable wrote the wants link back" test -e "$wants"
 }
 
-# ^ invariant story step 5; the checkout is moved back before this returns, whatever the doctor runs gave
+# ^ invariant step 5; the checkout is moved back before this returns, whatever the doctor runs gave
 vis_checkout_moved() {
     local away="$CHECKOUT.e2e-away" missing="auto-update: the recorded checkout $CHECKOUT is missing"
     fixture checkout-away mv -- "$CHECKOUT" "$away" || return 1
@@ -136,7 +136,7 @@ vis_checkout_moved() {
 }
 
 # ^ invariant rc 0 once the follower's user manager answers and its update timer is active again; at most MANAGER_WAIT seconds
-# ^ coupled step 9 of #129 uninstalls through this manager, the timer must be back before it
+# ^ coupled step 9 of the auto-update test uninstalls through this manager, the timer must be back before it
 vis_manager_back() {
     local n state
     for ((n = 0; n < MANAGER_WAIT && SECONDS < E2E_DEADLINE; n++)); do
@@ -149,7 +149,7 @@ vis_manager_back() {
     return 1
 }
 
-# ^ invariant story step 6; disable-linger stops the follower's user manager, enable-linger and the wants link bring it and the timer back
+# ^ invariant step 6; disable-linger stops the follower's user manager, enable-linger and the wants link bring it and the timer back
 vis_linger() {
     local file="/var/lib/systemd/linger/$FOLLOWER"
     fixture disable-linger loginctl disable-linger "$FOLLOWER" || return 1
@@ -161,10 +161,10 @@ vis_linger() {
     check_ok "$FOLLOWER: linger is back, the user manager answers and the update timer is active" vis_manager_back
 }
 
-# ^ invariant step_visibility PREV NEXT; the story's steps 1 to 6 in order, tag vNEXT is pushed in step 3
+# ^ invariant step_visibility PREV NEXT; the group's steps 1 to 6 in order, tag vNEXT is pushed in step 3
 step_visibility() {
     local a
-    printf '== step S2: updater visibility in status and doctor (#130)\n'
+    printf '== step S2: updater visibility in status and doctor\n'
     vis_plain_install || return 1
     for a in "$OWNER" "$FOLLOWER" "$PLAIN"; do vis_status "$a"; done
     vis_older_cycle "$1" "$2"

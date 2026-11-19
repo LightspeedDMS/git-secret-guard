@@ -243,7 +243,7 @@ test_more_repositories_than_the_bound_is_a_discovery_error() {
     assert_contains "$ERR" "more than 2 repositories or worktrees under the roots; narrow --roots" "says what to do"
 }
 
-# ^ hazard Git for Windows bash 5.3 does not return on a here-string of 65,537 to 65,664 bytes (#155); the linked worktrees once went through one
+# ^ hazard Git for Windows bash 5.3 does not return on a here-string of 65,537 to 65,664 bytes; the linked worktrees once went through one
 # ^ invariant 656 paths "/no/" + 91 + 4 digits = 99 characters, joined by newlines = 65,599 bytes; the per-tree hook check is stubbed, the split is real
 test_64_kib_of_linked_worktree_paths_are_entered_and_listed_without_hanging() {
     dr_begin && dr_repo one || return 1
@@ -528,7 +528,7 @@ dr_interrupt_find() {
     done
 }
 
-# ^ external a procsub child can outlive Ctrl-C (bash 5.3 on macOS by measurement; this test failed on the old code on Linux too); Mac run pending CI (#71)
+# ^ external a procsub child can outlive Ctrl-C (bash 5.3 on macOS by measurement; this test failed on the old code on Linux too); Mac run pending CI
 test_an_interrupt_during_discovery_stops_doctor_and_leaves_no_find_behind() {
     dr_begin && dr_repo calm || return 1
     dr_interrupt_find discovery || return 1

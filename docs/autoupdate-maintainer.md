@@ -115,7 +115,7 @@ Behaviour: [Auto-update](install.md#auto-update---auto-update-and-update). Inter
   `test_an_install_with_the_interval_of_the_service_keeps_the_timer`). The timer sets no `AccuracySec`, so systemd's default
   of one minute applies and a 20 second test timer can fire late: give a poll loop room for it. The units are parsed by the
   real `systemd-analyze` where it exists (`test_the_update_units_pass_systemd_analyze_verify`).
-- **Windows (#132)** adds `lib/platform/schtasks.sh` (the adapter), `lib/platform/winupdate.sh` (re-exec, ownership probe) and four small branches in
+- **Windows** adds `lib/platform/schtasks.sh` (the adapter), `lib/platform/winupdate.sh` (re-exec, ownership probe) and four small branches in
   `lib/autoupdate/autoupdate.sh`, each behind `tools_is_windows` and each answering a probe made on Windows Server 2019 with Git for Windows:
   - **`autoupdate_is_ancestor`** reads `/proc/<pid>/ppid` because the MSYS `ps` has no `-o` (`ps: unknown option -- o`); without
     it the grandparent test fails and the child install is refused the lock. `exec` keeps the MSYS pid (the Windows pid
@@ -164,7 +164,7 @@ Behaviour: [Auto-update](install.md#auto-update---auto-update-and-update). Inter
   Administrator, a standard user is unverified). A real `launchctl` is not run by the update tests either: the
   lifecycle stand-in records calls (it keeps one loaded flag per label, so the tests assert the exact call logs); only `plutil -lint` on the update plist is
   Mac-only (`tests/macos-only.list`).
-- **macOS adapter** (`lib/platform/launchd.sh`, #131). `launchd_job_set doctor|update` fills the `LJ_*` table (job word = last
+- **macOS adapter** (`lib/platform/launchd.sh`). `launchd_job_set doctor|update` fills the `LJ_*` table (job word = last
   program argument, flag, message words, label, plist path, log path, marker, extra variable names); every plist function
   takes the job as an optional last argument, default `doctor`, so the doctor callers and texts are unchanged
   (`test_the_doctor_plist_text_is_unchanged` in `test_launchd_update.sh` compares the text with the output of `main`). The update

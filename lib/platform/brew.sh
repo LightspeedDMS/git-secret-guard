@@ -208,7 +208,7 @@ brew_use_gnubin() {
     return 1
 }
 
-# ^ external bug #10, an installed copy started by /bin/bash 3.2 with no brew on PATH still has the bash install recorded in its own settings file
+# ^ external an installed copy started by /bin/bash 3.2 with no brew on PATH still has the bash install recorded in its own settings file
 # ^ security the settings file is read as data, never sourced; only a plain absolute path of safe characters is believed, anything else is ignored
 # ^ invariant rc 0 sets BREW_RECORDED to a usable bash; rc 1 sets BREW_RECORDED_NOTE to the reason, empty when nothing was recorded; the last BASH_BIN line wins
 brew_recorded_bash() {

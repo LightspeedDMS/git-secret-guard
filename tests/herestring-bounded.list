@@ -1,6 +1,6 @@
 # Here-strings (<<<) and here-docs allowed in hooks/, bin/ and lib/, read by tests/project/test_quality.sh. Format: path, then its tokens (the operator
 # and the word after it, as tests/herestring-tokens.awk prints them), once per use. Git for Windows bash 5.3 never returns on a here-string or here-doc of
-# 65,537 to 65,664 bytes (#155): a value listed here is bounded well below 64 KiB, or that line never runs on Windows. Anything else goes through
+# 65,537 to 65,664 bytes: a value listed here is bounded well below 64 KiB, or that line never runs on Windows. Anything else goes through
 # a pipe, a file or split_lines (lib/core/common.sh). Why each one is bounded: docs/platforms.md#maintainer-notes.
 
 # fixed by git or by us: git rev-parse --local-env-vars, one ls-tree or diff --raw record, the probe repo listing, a pointer <= 1023 bytes,

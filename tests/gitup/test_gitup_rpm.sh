@@ -23,15 +23,15 @@ test_a_rocky_machine_with_an_old_git_builds_the_pinned_source_when_the_user_acce
     assert_contains "$OUT" "git 2.56.0" "and the pinned version"
     assert_contains "$OUT" "git-2.56.0.tar.xz" "and the tarball"
     assert_contains "$OUT" "env -i with PATH=" "and the clean build environment"
-    assert_contains "$OUT" "the build uses about 570 MB of disk, 800 MB must be free; several minutes" "the plan tells the build size and the free space it requires (#109)"
-    assert_contains "$OUT$ERR" "the build uses about 570 MB of disk, several minutes" "the progress line says the 570 MB is what the build uses (#109)"
+    assert_contains "$OUT" "the build uses about 570 MB of disk, 800 MB must be free; several minutes" "the plan tells the build size and the free space it requires"
+    assert_contains "$OUT$ERR" "the build uses about 570 MB of disk, several minutes" "the progress line says the 570 MB is what the build uses"
     assert_contains "$OUT" "as root: $SANDBOX/pathbin/dnf install -y gcc make perl-interpreter" "and the dependency command with the full path of the dnf root will run"
     assert_contains "$OUT" "/cp -dR --remove-destination --preserve=timestamps,links" "and the copy, which replaces an existing file instead of writing through a link"
     assert_contains "$(gu_log)" "make -C" "make ran"
     assert_contains "$(gu_log)" "prefix=$GU_ROOT/usr/local NO_RUST=1 NO_TCLTK=1 NO_GETTEXT=1 USE_LIBPCRE2=1" "with the proven flags and the prefix"
     assert_contains "$(gu_log)" "INSTALL_SYMLINKS=1" "git installs its siblings as symlinks, so no hard link ties bin/git to libexec"
     assert_contains "$(gu_log)" "DESTDIR=" "into a stage directory"
-    assert_eq "$(grep '^make ' <<<"$(gu_log)" | grep -cF " sysconfdir=$GU_ROOT/etc INSTALL_SYMLINKS=1 ")" 2 "the compile and the install both read the system config from /etc, as the distribution's git does (#90)"
+    assert_eq "$(grep '^make ' <<<"$(gu_log)" | grep -cF " sysconfdir=$GU_ROOT/etc INSTALL_SYMLINKS=1 ")" 2 "the compile and the install both read the system config from /etc, as the distribution's git does"
     assert_contains "$OUT" "make prefix=$GU_ROOT/usr/local NO_RUST=1 NO_TCLTK=1 NO_GETTEXT=1 USE_LIBPCRE2=1 sysconfdir=$GU_ROOT/etc INSTALL_SYMLINKS=1" "and the plan prints the make words it runs"
     assert_eq "$("$GU_ROOT/usr/local/bin/git" --version)" "git version 2.56.0" "git is built into /usr/local"
     assert_file "$LC_STATE/state" "install ran to the end"
@@ -95,7 +95,7 @@ test_the_repository_query_is_read_only_bounded_and_never_answers_a_prompt() {
     assert_not_contains "$(grep repoquery "$SANDBOX/gitup.log")" " -y" "the query never says yes"
 }
 
-# ^ invariant story 28 changed on purpose => an unread repository no longer decides the route; the readable ones do, root excludes it
+# ^ invariant an unread repository never decides the route; the readable ones do, root excludes it
 test_an_unread_repository_is_excluded_and_the_readable_ones_decide_the_package_route() {
     gu_rpm_setup || return 1
     printf 'baseos\nacli\n' >"$SANDBOX/dnf.repos"
@@ -401,7 +401,7 @@ test_too_little_free_space_refuses_before_anything_changes() {
     assert_not_contains "$(gu_log)" "dnf install" "no dependency install"
 }
 
-# ^ why only the prefix short, not the build directory; the message must name the install location, as TMPDIR cannot move /usr/local (#114)
+# ^ why only the prefix short, not the build directory; the message must name the install location, as TMPDIR cannot move /usr/local
 test_too_little_free_space_in_the_install_prefix_names_the_prefix() {
     gu_rpm_setup || return 1
     printf '122880 %s\n10485760 %s\n' "$GU_ROOT/usr/local" "$SANDBOX/tmp" >"$SANDBOX/df.avail.dirs"
@@ -414,7 +414,7 @@ test_too_little_free_space_in_the_install_prefix_names_the_prefix() {
     assert_not_contains "$(gu_log)" "dnf install" "no dependency install"
 }
 
-# ^ why 716800 KB, not 1000; 700 MB is above the 570 MB build estimate and below the 800 MB threshold (#109)
+# ^ why 716800 KB, not 1000; 700 MB is above the 570 MB build estimate and below the 800 MB threshold
 test_free_space_between_the_estimate_and_the_threshold_names_the_threshold() {
     gu_rpm_setup || return 1
     printf '716800' >"$SANDBOX/df.avail"

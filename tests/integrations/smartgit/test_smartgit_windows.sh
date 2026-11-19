@@ -188,7 +188,7 @@ sw_ps_64k() {
     [ "$(wc -c <"$f")" -eq "$target" ]
 }
 
-# ^ hazard Git for Windows bash 5.3 does not return on a here-string of 65,537 to 65,664 bytes (#155); ps -W of a busy server is about this size
+# ^ hazard Git for Windows bash 5.3 does not return on a here-string of 65,537 to 65,664 bytes; ps -W of a busy server is about this size
 test_a_64_kib_process_listing_is_read_without_hanging() {
     local case tail want
     for case in svchost.exe:1 smartgit.exe:0; do

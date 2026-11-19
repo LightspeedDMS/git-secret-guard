@@ -54,8 +54,8 @@ proc_supervise_stop() {
     proc_stop_worker "$SUP_PGID" "$SUP_PID"
 }
 
-# ^ why a worker unit and a polling shell, not the scan in this shell; bash runs a trap after its foreground child returns (#120)
-# ^ hazard a blocking wait lets bash's SIGINT handler rewrite PIPESTATUS in signal context, a second trapped signal frees it twice, SIGABRT (#134)
+# ^ why a worker unit and a polling shell, not the scan in this shell; bash runs a trap after its foreground child returns
+# ^ hazard a blocking wait lets bash's SIGINT handler rewrite PIPESTATUS in signal context, a second trapped signal frees it twice, SIGABRT
 # ^ invariant a foreground sleep polls kill -0 => the trap runs within one tick, or at once when Ctrl-C stops the sleep; past the cap wait blocks as before
 GSG_PROC_SUPERVISE_TICK_S=0.1
 GSG_PROC_SUPERVISE_MAX_TICKS=36000

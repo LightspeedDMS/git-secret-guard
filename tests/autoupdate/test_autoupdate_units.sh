@@ -8,7 +8,7 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/../support/autoupdate_units.sh"
 # shellcheck source=tests/support/gitup.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/../support/gitup.sh"
 
-# ^ external Windows has no systemd => install --auto-update is refused there until its own story
+# ^ external Windows has no systemd => these units are Linux-only; the Windows task is tests/autoupdate/test_autoupdate_schtasks.sh
 if [ "$TEST_IS_WINDOWS" -eq 1 ]; then FILE_SKIP_REASON="systemd user units, Windows has no systemd"; fi
 
 test_install_auto_update_records_the_checkout_and_enables_the_update_timer() {

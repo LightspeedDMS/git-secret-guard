@@ -4,8 +4,8 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/../support/lib.sh"
 # shellcheck source=tests/support/lifecycle.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/../support/lifecycle.sh"
 
-# ^ why the real install, uninstall and state files, not a hand-set state; #97's review rejected a state set by hand (docs/install.md#maintainer-notes)
-# ^ invariant LC_BINSHA=1 puts the stand-in binary's SHA-256 into the test lock as the fifth column => the same rows the product lock has (#101)
+# ^ why the real install, uninstall and state files, not a hand-set state; a hand-set state proves what the test wrote, not what install records
+# ^ invariant LC_BINSHA=1 puts the stand-in binary's SHA-256 into the test lock as the fifth column => the same rows the product lock has
 
 bin_sha() { sha256sum -- "$LC_BIN/$1$LC_EXE" | cut -d' ' -f1; }
 

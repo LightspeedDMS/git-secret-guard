@@ -197,7 +197,7 @@ smartgit_edit_prefs() {
     mv -f -- "$tmp" "$f" || smartgit_edit_fail "$tmp" "cannot move the edited copy over $f"
 }
 
-# ^ security the fake credential below is made up, joined from fragments at run time and never printed; it only proves the hook blocks it (AC8)
+# ^ security the fake credential below is made up, joined from fragments at run time and never printed; it only proves the hook blocks it
 # ^ invariant runs in a subshell of smartgit_verify_run; rc 0 = the fake-token commit was blocked with findings text, a clean commit printed the summary line
 # ^ invariant 2 = scratch setup failed, 3 = fake-token commit not blocked, 4 = clean commit failed, 5 = no summary line, 6 = fake-token commit failed otherwise
 smartgit_verify_commits() {
@@ -287,7 +287,7 @@ smartgit_windows_ps_scan() {
 }
 
 # ^ invariant rc 0 = ps -W lists smartgit.exe or smartgitc.exe (any case), 1 = none, 2 = it cannot be told (no ps, ps failed, empty or huge listing)
-# ^ hazard ps -W of a busy host is about 64 KiB, and a here-string of 65,537 to 65,664 bytes never returns in Git for Windows bash 5.3 (#155) => a pipe
+# ^ hazard ps -W of a busy host is about 64 KiB, and a here-string of 65,537 to 65,664 bytes never returns in Git for Windows bash 5.3 => a pipe
 # ^ why a match first, not the status of ps; the scan returns at the match without draining, and ps may die of SIGPIPE
 smartgit_windows_running() {
     local -a st=()

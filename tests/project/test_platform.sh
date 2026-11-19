@@ -868,7 +868,7 @@ test_the_entry_script_runs_by_the_path_the_readme_documents() {
 }
 
 
-# ^ invariant the real-machine phases of story #40 are fixed names; any other word after upgrade- is refused, a typo starts nothing
+# ^ invariant the real-machine phases of the upgrade E2E are fixed names; any other word after upgrade- is refused, a typo starts nothing
 test_the_container_script_accepts_the_real_machine_phases_and_nothing_else() {
     local ph
     for ph in upgrade upgrade-root upgrade-password upgrade-bump upgrade-old upgrade-takeover upgrade-offline; do

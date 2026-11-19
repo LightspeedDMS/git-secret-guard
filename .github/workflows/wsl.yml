@@ -1,6 +1,6 @@
 name: wsl
 
-# Real WSL checks on a disposable GitHub-hosted Windows runner (story #31). It never runs on a pull request and never blocks one.
+# Real WSL checks on a disposable GitHub-hosted Windows runner. It never runs on a pull request and never blocks one.
 # tests/platform/wsl-ci.sh holds the scenarios and refuses to run unless GITHUB_ACTIONS is set, so it cannot run on a developer machine.
 # It runs only when started by hand: Actions, wsl, Run workflow (or gh workflow run wsl.yml --ref BRANCH -f distribution=NAME).
 on:

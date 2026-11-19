@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # shellcheck shell=bash disable=SC2016
-# ^ invariant the Windows parts of the updater (#132) run on real git, a real second owner and real processes; the scheduler has its own file
+# ^ invariant the Windows parts of the updater run on real git, a real second owner and real processes; the scheduler has its own file
 # shellcheck source=tests/support/lib.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/../support/lib.sh"
 # shellcheck source=tests/support/lifecycle.sh
@@ -64,7 +64,7 @@ EOF
     powershell -NoProfile -ExecutionPolicy Bypass -File "$(cygpath -w "$script")" -Pattern "$1" | tr -d '\r'
 }
 
-# ^ invariant issue 3 of #132; no setsid on Windows, GNU timeout alone ends git and every process below it within the bound
+# ^ invariant a hung fetch is bounded; no setsid on Windows, GNU timeout alone ends git and every process below it within the bound
 # ^ why the stand-in cuts the fetch to one second, not the real 120; the tree kill under test is the real timeout's
 test_a_fetch_against_a_hanging_origin_is_bounded_and_leaves_no_process() {
     local t0 elapsed
@@ -93,7 +93,7 @@ test_update_tells_credential_manager_never_to_prompt() {
     assert_eq "$(<"$SANDBOX/au-child.gcm")" never "the child install sees GCM_INTERACTIVE=never"
 }
 
-# ^ invariant AC3 of #132; [ -O ] says mine for another account under MSYS (probed), the role comes from the ownership check of git
+# ^ invariant the role follows the owner; [ -O ] says mine for another account under MSYS (probed), the role comes from the ownership check of git
 test_the_role_is_owner_for_my_checkout_and_follower_for_another_accounts_checkout() {
     local other="$SANDBOX/au-extra-other"
     au_setup_with_release || return 1
@@ -114,7 +114,7 @@ test_the_role_is_owner_for_my_checkout_and_follower_for_another_accounts_checkou
     assert_eq "$(<"$LC_DATA/VERSION")" 1.2.0 "the follower's copy is the tag's"
 }
 
-# ^ invariant issue 1 of #132; a script or a working directory in the share blocks the rename install does; update leaves both first
+# ^ invariant update replaces the share it runs from; a script or a working directory in the share blocks the rename install does; update leaves both first
 # ^ coupled the update starts from the installed copy, re-executes itself from a private copy in the state dir and removes it when it ends
 test_an_update_started_from_the_share_replaces_it_and_leaves_no_copy() {
     au_setup_with_release || return 1

@@ -1,5 +1,5 @@
 # shellcheck shell=bash disable=SC2153,SC2034
-# ^ coupled CLI-only library for the Windows side of the updater (#132), loaded after lib/autoupdate/autoupdate.sh; the hook never loads it
+# ^ coupled CLI-only library for the Windows side of the updater, loaded after lib/autoupdate/autoupdate.sh; the hook never loads it
 # ^ invariant autoupdate_role and bin/git-secret-guard reach it on Windows only, every other platform runs the code it had before
 
 # ^ invariant winupdate_git CEILING ARGS... runs git with the GIT_* repository variables unset and the walk up from the checkout stopped at CEILING

@@ -263,7 +263,7 @@ test_the_cli_started_by_the_system_bash_without_a_homebrew_bash_says_so_for_othe
     assert_eq "$(brew_calls)" "" "only install may run brew install"
 }
 
-# ^ external bug #10 starts with a GUI-like PATH without brew; the installed copy knows its bash from its own settings file
+# ^ external a GUI client starts with a PATH without brew; the installed copy knows its bash from its own settings file
 # ^ invariant $@ = settings lines written as given; the share copy is laid out like an install (bin, lib, hooks, VERSION, tools.lock, settings)
 installed_copy() {
     local share="$SANDBOX/instshare"
@@ -706,7 +706,7 @@ test_an_oversize_hooks_dir_is_refused_with_only_the_bsd_tools_on_path_and_before
     nothing_changed "oversize hooks dir"
 }
 
-# ^ external the macOS branch of status runs on any host through the fake uname; what it asks of a real Homebrew layout rests on these fixtures (issue #67)
+# ^ external the macOS branch of status runs on any host through the fake uname; what it asks of a real Homebrew layout rests on these fixtures
 mac_status_setup() {
     lc_begin && as_macos && lc_make_fixtures && lc_use_fixtures || return 1
     gsg install

@@ -1,5 +1,5 @@
 # shellcheck shell=bash disable=SC2034,SC2153
-# ^ coupled system git takeover of the rpm module (story 28); the step order is a safety rule (dnf entry, backup, atomic swaps, verification, rollback)
+# ^ coupled system git takeover of the rpm module; the step order is a safety rule (dnf entry, backup, atomic swaps, verification, rollback)
 # ^ external /usr/bin holds six git-core RPM files (git, git-receive-pack, git-shell, git-upload-archive, git-upload-pack, scalar); Rocky 9.7, Fedora 44
 # ^ external excludepkgs must name every installed package of the git-core source RPM (git git-core git-core-doc perl-Git), git-core alone breaks dnf update
 

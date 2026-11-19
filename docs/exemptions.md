@@ -181,7 +181,7 @@ For a repository you do not control, where an in-repo file is not an option:
 
 ## Maintainer notes
 
-- **The rows never go through a here-string** (#155). `exempt_warn_rows` writes the parsed rows to `<probe dir>.rows` in the caller's work dir
+- **The rows never go through a here-string**. `exempt_warn_rows` writes the parsed rows to `<probe dir>.rows` in the caller's work dir
   and reads the loop from that file: the file holds at most 1,000 lines of any length, and Git for Windows bash never returns on a here-string
   of 65,537 to 65,664 bytes ([platforms.md#maintainer-notes](platforms.md#maintainer-notes);
   `test_an_ignore_file_whose_rows_reach_64_kib_is_applied_without_hanging`).

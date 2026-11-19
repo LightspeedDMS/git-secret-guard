@@ -31,13 +31,17 @@ upgrade per platform and the known platform limits: [docs/platforms.md](docs/pla
 ```bash
 git clone https://github.com/LightspeedDMS/git-secret-guard.git
 cd git-secret-guard
-bin/git-secret-guard install          # Windows PowerShell or cmd: bin\git-secret-guard.cmd install
+bin/git-secret-guard install --auto-update   # Windows PowerShell or cmd: bin\git-secret-guard.cmd install --auto-update
 ```
 
 `install` places the pinned scanners and the `git-secret-guard` command in `~/.local/bin` (keep it on your `PATH`) and adds
 the hook to your global git config. It refuses to replace an existing global `core.hooksPath` unless you pass
-`--replace-hooks-path`. Run it again from a newer checkout to upgrade. Every flag and step: [docs/install.md](docs/install.md).
-On Linux, macOS and Windows, `install --auto-update` keeps the install at the checkout's newest released tag: [how](docs/install.md#auto-update---auto-update-and-update).
+`--replace-hooks-path`. Every flag and step: [docs/install.md](docs/install.md).
+
+**`--auto-update` is the recommended install** (Linux, macOS and Windows): an hourly job of your own user fetches this clone,
+fast-forwards it to the newest released tag and installs that, so keep the clone where it is: [how](docs/install.md#auto-update---auto-update-and-update).
+Where the job cannot run (WSL without systemd, no `systemctl`, `launchctl` or `schtasks`), install refuses before changing
+anything: run plain `install`, and run it again from a newer checkout to upgrade.
 
 ## Usage
 

@@ -193,7 +193,7 @@ inline_report() {
     build_corpus || return 1
     mkdir -p -- "$work" "$cov" || return 1
     printf 'trufflehog\tgithub\tunknown\tsrc/a b.txt\t12\ntrufflehog\tdetect%%sor\tunknown\tp%%d.txt\t1\n' >"$work/trufflehog.rows"
-    printf 'betterleaks\taws-access-token\tfinding\t100%%.txt\t3\n' >"$work/betterleaks.rows"
+    printf 'betterleaks\taws-access-token\tfinding\t100%%.txt\t3\nbetterleaks\tgithub-pat\tfinding\tp%%d.txt\t2\n' >"$work/betterleaks.rows"
     : >"$work/trufflehog.errors" && : >"$work/betterleaks.errors" || return 1
     printf '%s\n' 'x=1' '# ^ note this tag is not in the vocabulary' '# ^ why we pick bash here' '# explains the obvious' 'y=2 # trailing' >"$SANDBOX/planted.sh"
     # shellcheck disable=SC2016
@@ -241,11 +241,25 @@ bounds bytes-over-limit rc=1 git-secret-guard: refusing to back up DIR: it is la
 bounds bytes-hundred-over-ninety-nine rc=1 git-secret-guard: refusing to back up DIR: it is larger than 99 bytes
 bounds bytes-3g-over-2g rc=1 git-secret-guard: refusing to back up DIR: it is larger than 2147483648 bytes
 bounds empty-dir rc=0
-report: git-secret-guard: 3 potential secret(s) in lines this commit adds:
+report: git-secret-guard: 4 potential secret(s) in lines this commit adds:
 report:   betterleaks aws-access-token (finding)  100%.txt:3
+report:   betterleaks github-pat (finding)  p%d.txt:2
 report:   trufflehog  detect%sor (unknown)  p%d.txt:1
 report:   trufflehog  github (unknown)  src/a b.txt:12
 report:   (values are not shown; remove them and rotate any real credential)
+report: What to do:
+report:   1. A real credential: remove it from the change and rotate it. Nothing below is for a real credential.
+report:   2. A false positive or a test value, one line: put the marker of every scanner that reports the line on that same line.
+report:        trufflehog: trufflehog:ignore    betterleaks: betterleaks:allow    both: trufflehog:ignore betterleaks:allow
+report:      A marker works in this commit.
+report:   3. A betterleaks finding on a line that cannot hold a marker: add its line to .gitleaksignore at the repository root:
+report:        100%.txt:aws-access-token:3
+report:        p%d.txt:github-pat:2
+report:   4. A whole path of test data: add "<glob>  # <reason>" to .secret-scan-ignore at the repository root.
+report:      trufflehog has no per-finding file: its finding on a line that cannot hold a marker needs this step.
+report:   .gitleaksignore and .secret-scan-ignore are read from the last commit, never from the commit being made:
+report:   commit the entry by itself first (git add <file> && git commit -m "<message>" <file>), then commit this change.
+report: An automated agent asks its user before adding an exemption or using --no-verify.
 lint: SB/planted.sh:2: unknown tag [note]: # ^ note this tag is not in the vocabulary
 lint: SB/planted.sh:3: why needs ', not <alternative>': # ^ why we pick bash here
 lint: SB/planted.sh:4: free comment: # explains the obvious

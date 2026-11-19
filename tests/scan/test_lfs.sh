@@ -2,6 +2,8 @@
 # ^ coupled lib/scan/extract.sh:extract_lfs_objects; Git LFS pointers are followed to their object by content, never by .gitattributes (#98)
 # shellcheck source=tests/support/lib.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/../support/lib.sh"
+# shellcheck source=tests/scan/guidance_helpers.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/guidance_helpers.sh"
 
 begin() {
     local rc key_not_set=5
@@ -186,6 +188,44 @@ test_real_a_key_inside_an_lfs_object_blocks_and_is_never_printed() {
     # ^ why the key without its four-character AKIA prefix too, not only whole; a redacted print would still show the body
     no_leak "${key:4}"
     if gitx rev-parse -q --verify HEAD >/dev/null 2>&1; then fail "a commit was created"; fi
+}
+
+test_real_a_printed_marker_and_a_printed_fingerprint_work_for_an_lfs_object_under_the_pointers_path() {
+    [ -x "$REAL_TRUFFLEHOG" ] && [ -x "$REAL_BETTERLEAKS" ] || skip_test "the real scanners are not installed"
+    begin lfs15 || return 1
+    gitx lfs version >/dev/null 2>&1 || skip_test "git-lfs is not installed"
+    use_real_tools
+    local tok key marker fp
+    tok="$(fake_github_token)" || return 1
+    key="$(fake_aws_key)" || return 1
+    [ -n "$tok" ] && [ -n "$key" ] || return 1
+    gitx lfs install --local >/dev/null 2>&1 || return 1
+    gitx lfs track '*.dat' >/dev/null 2>&1 || return 1
+    gitx add .gitattributes || return 1
+    gitx commit -q --no-verify -m attrs || return 1
+    printf 'token = "%s"\n' "$tok" >"$SANDBOX/obj15a" || return 1
+    lfs_stage "m.dat" "$SANDBOX/obj15a" || return 1
+    commit_cap "token in an object"
+    assert_rc 1 "both scanners report the object under the pointer's path"
+    assert_contains "$ERR" "m.dat:1" "the pointer's path"
+    marker="$(guidance_marker)" || fail "no marker line in the output"
+    printf 'token = "%s" %s\n' "$tok" "$marker" >"$SANDBOX/obj15b" || return 1
+    lfs_stage "m.dat" "$SANDBOX/obj15b" || return 1
+    commit_cap "marker in the object"
+    assert_rc 0 "the printed marker in the object passes"
+    printf 'aws_key = %s\n' "$key" >"$SANDBOX/obj15c" || return 1
+    lfs_stage "sub/k.dat" "$SANDBOX/obj15c" || return 1
+    commit_cap "key in an object"
+    assert_rc 1 "the key in an object blocks"
+    fp="$(guidance_fingerprint)" || fail "no fingerprint line in the output"
+    assert_eq "$fp" "sub/k.dat:aws-access-key-id:1" "the pointer's path, our key-ID rule and the line of the object"
+    stage_file .gitleaksignore "$fp" || return 1
+    commit_cap "the entry by itself" .gitleaksignore
+    assert_rc 0 "the printed fingerprint commits by itself"
+    commit_cap "the object"
+    assert_rc 0 "the fingerprint of the pointer's path mutes the object's finding"
+    no_leak "$tok"
+    no_leak "$key"
 }
 
 test_real_git_lfs_objects_are_followed_on_add_and_on_modify() {

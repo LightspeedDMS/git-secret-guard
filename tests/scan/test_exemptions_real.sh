@@ -2,6 +2,8 @@
 # ^ external trufflehog runs --no-verification => a fake credential is a "match"; see docs/scan.md#limits
 # shellcheck source=tests/support/lib.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/../support/lib.sh"
+# shellcheck source=tests/scan/guidance_helpers.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/guidance_helpers.sh"
 
 need_real_tools() {
     [ -x "$REAL_TRUFFLEHOG" ] || skip_test "trufflehog not found at $REAL_TRUFFLEHOG"
@@ -226,6 +228,26 @@ test_real_a_gitleaksignore_fingerprint_at_head_suppresses_exactly_that_finding()
     assert_contains "$ERR" "src/k.txt:3" "same file, other line"
     assert_contains "$ERR" "src/m.txt:1" "other file, same line"
     assert_not_contains "$ERR" "src/k.txt:1" "the fingerprinted finding"
+    assert_contains "$ERR" "using .gitleaksignore from HEAD" "announced"
+    no_leak "$(generic_key)"
+}
+
+test_real_the_printed_fingerprint_committed_by_itself_with_the_flagged_file_staged_lets_the_change_pass() {
+    need_real_tools
+    new_repo rgfp || return 1
+    local fp
+    stage_file base.txt hello && gitx commit -q --no-verify -m base || return 1
+    stage_file "src/a b.txt" "$(builtin_line)" || return 1
+    commit_cap "blocked"
+    assert_rc 1 "betterleaks reports the built-in rule finding"
+    fp="$(guidance_fingerprint)" || fail "no fingerprint line in the output"
+    assert_eq "$fp" "src/a b.txt:generic-api-key:1" "the line the hook printed, nested path with a space"
+    stage_file .gitleaksignore "$fp" || return 1
+    commit_cap "the entry by itself" .gitleaksignore
+    assert_rc 0 "git commit <path> scans only the ignore file"
+    assert_eq "$(gitx diff --cached --name-only)" "src/a b.txt" "the flagged file is still staged"
+    commit_cap "the change"
+    assert_rc 0 "the change passes once the entry is at HEAD"
     assert_contains "$ERR" "using .gitleaksignore from HEAD" "announced"
     no_leak "$(generic_key)"
 }

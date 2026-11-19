@@ -33,7 +33,17 @@ Scenario catalog for validating the `LightspeedDMS/git-secret-guard` rollout: ho
 
 ### Legend for "Who covers it"
 
-Each row also says who is responsible for it. **Hook**: git-secret-guard stops it (or, for an Allow row, passes it) and an automated test pins that. **Hook gap**: a known hole the hook cannot close, pinned by a test or stated as a limit in [scan.md](scan.md#limits) or this catalog; the organisation's server-side scan or alerting must catch it. **Org**: entirely the organisation's job (endpoint protection, device management, the server-side gate, IT procedures). **Record**: a question to answer or a fact to log, not a control. **Undecided**: no test or document settles it yet. **N/A**: the scenario does not apply to this hook. A row with several parts names each. Most tests behind these values are listed in [Automated coverage](#automated-coverage); A01, A11, B01 and F08 also rest on `tests/scan/test_real.sh` and `tests/scan/test_exemptions_real.sh`, D22 on [platform-testing.md](platform-testing.md#github-desktops-bundled-git), F01–F03 on the `windows`, `windows-suite`, `macos-suite` and `suite` CI jobs, and F05 on `tests/platform/wsl-ci.sh`.
+| Value | What it means | What the organisation must do |
+|---|---|---|
+| **Hook** | git-secret-guard stops it on the developer machine (for an Allow row: lets it through), proven by an automated test | Nothing beyond keeping the hook installed |
+| **Hook gap** | A known hole the hook cannot close (the test or the docs show it, e.g. [scan.md](scan.md#limits)) | Catch it elsewhere: server-side secret scanning, push protection, alerting |
+| **Org** | Outside the hook entirely | Provide it: endpoint protection, device management, the server-side gate, IT procedures |
+| **Record** | A question to answer or a fact to log, not a control | Answer it and keep the record |
+| **Undecided** | No test or document settles it yet | Treat it as not covered until a test decides it |
+| **N/A** | Does not apply to this hook | Nothing |
+| **Several**, e.g. Hook (PEM); Undecided (`.ppk`) | The scenario has parts that are covered differently; each value names the part it applies to, in parentheses | Handle each part by its own value (the weakest part decides whether the scenario as a whole is covered) |
+
+Most tests behind these values are listed in [Automated coverage](#automated-coverage). A01, A11, B01 and F08 also rest on `tests/scan/test_real.sh` and `tests/scan/test_exemptions_real.sh`, D22 on [platform-testing.md](platform-testing.md#github-desktops-bundled-git), F01–F03 on the `windows`, `windows-suite`, `macos-suite` and `suite` CI jobs, and F05 on `tests/platform/wsl-ci.sh`.
 
 ---
 

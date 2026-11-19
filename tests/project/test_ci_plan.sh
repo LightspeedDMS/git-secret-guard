@@ -201,6 +201,31 @@ test_the_workflow_has_no_matrix_job_left_that_would_hide_suite_head() {
     esac
 }
 
+# ^ why rc 1 for a missing block or key and rc 2 for a failed awk, not an empty value compared as equal
+concurrency_value() {
+    local key="$1" block line rc=0
+    block="$(awk '/^concurrency:/ { inb = 1; next } inb && /^[^[:space:]]/ { exit } inb && /^[[:space:]]*#/ { next } inb && NF { print }' "$WORKFLOW")" || rc=$?
+    [ "$rc" -eq 0 ] || { printf 'cannot read %s (awk rc=%s)\n' "$WORKFLOW" "$rc" >&2; return 2; }
+    while IFS= read -r line; do
+        case "$line" in
+            "  $key: "*) printf '%s' "${line#"  $key: "}"; return 0 ;;
+        esac
+    done <<<"$block"
+    return 1
+}
+
+# ^ invariant main runs per commit and is never cancelled, other refs cancel superseded runs => two quick merges to main each get a full run
+test_the_workflow_runs_every_main_commit_and_cancels_only_superseded_runs_elsewhere() {
+    local want_group="tests-\${{ github.workflow }}-\${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}"
+    local want_cancel="\${{ github.ref != 'refs/heads/main' }}" got rc
+    got="$(concurrency_value group)" && rc=0 || rc=$?
+    [ "$rc" -eq 0 ] || { fail "tests.yml concurrency block has no group: key (rc=$rc)"; return 1; }
+    assert_eq "$got" "$want_group" "concurrency group"
+    got="$(concurrency_value cancel-in-progress)" && rc=0 || rc=$?
+    [ "$rc" -eq 0 ] || { fail "tests.yml concurrency block has no cancel-in-progress: key (rc=$rc)"; return 1; }
+    assert_eq "$got" "$want_cancel" "concurrency cancel-in-progress"
+}
+
 # ^ hazard the scan misses an action deeper than PIN_ACTION_MAX_DEPTH, a local action outside .github/actions, a symlink, a quoted or flow-mapping uses key
 pin_find() {
     local dir="$1" depth="$2" found rc=0

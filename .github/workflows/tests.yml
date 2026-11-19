@@ -10,8 +10,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: tests-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # One group per commit on main, so every merge gets a full run; one per ref elsewhere, where a newer run cancels the superseded one.
+  group: tests-${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   # Decides what the later jobs do. base_ref is the tree the head is compared with (empty on a push to the default branch).

@@ -230,7 +230,8 @@ than 1000 commits, `DCO_MAX_COMMITS`, is refused rather than cut short).
 2. Branch from `main`, keep the change focused, write commit messages that say why, not only what, and sign off every commit (see above).
 3. Run the suite before pushing and mention in the PR anything you could not run (for example macOS, or Windows).
 4. CI (`.github/workflows/tests.yml`) runs on every pull request, on a push to `main` or a `feat/**` branch, and by hand
-   (*Run workflow*, compared with the default branch). Its jobs:
+   (*Run workflow*, compared with the default branch). Every push to `main` (each merge) gets its own complete run, none is cancelled
+   by a later push (merges in quick succession run side by side); on a pull request or another branch a newer push cancels the run it supersedes. Its jobs:
    - `dco` (pull requests only): the sign-off check above.
    - `suite (head)`: the suite on Ubuntu 24.04 with git from the git-core PPA, mawk as `awk` and the pinned scanners, for your
      branch, one test file per runner core (`GSG_TEST_JOBS`). Only when it has a failure does `suite (base)` run the suite on the

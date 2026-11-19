@@ -26,6 +26,7 @@ test_building_the_signed_stand_in_leaves_no_certificate_and_no_key_behind() {
 # ^ invariant runs under wu_with_cert_lock; no other test file writes the certificate store or the key directory during the counts and the cache move
 stand_in_build_check() {
     local cache before after key
+    wu_need_user_key_store || return 1
     cache="$(wu_standin_cache)" || return 1
     wu_build_standin_unlocked || return 1
     before="$(wu_store_counts)"
@@ -76,6 +77,45 @@ test_the_certificate_lock_names_the_subshell_releases_on_exit_and_clears_a_pidle
     touch -t 201001010000 -- "$WU_CERT_LOCK" || return 1
     wu_with_cert_lock true || fail "an old lock without a pid file was not taken over" || return 1
     assert_no_file "$WU_CERT_LOCK" "taken over and released"
+}
+
+probe_answers() { printf '%s\n' "$PROBE_ANSWER"; }
+probe_fails() { return 3; }
+
+# ^ invariant key_store_check_with PROBE runs wu_need_user_key_store in a subshell, a skip ends only the subshell, and prints rc and skip reason or none
+key_store_check_with() {
+    local rc reason="none"
+    rm -f -- "$SANDBOX/.skip"
+    (WU_DPAPI_PROBE="$1" wu_need_user_key_store 2>"$SANDBOX/key-store.err")
+    rc=$?
+    if [ -f "$SANDBOX/.skip" ]; then reason="$(<"$SANDBOX/.skip")"; rm -f -- "$SANDBOX/.skip"; fi
+    printf '%s %s\n' "$rc" "$reason"
+}
+
+test_a_denied_user_dpapi_skips_the_test_with_the_key_based_ssh_reason() {
+    PROBE_ANSWER="denied"
+    assert_eq "$(key_store_check_with probe_answers)" \
+        "0 user DPAPI unavailable in this logon session (key-based SSH); the signed stand-in cannot be built" "denied skips with that reason"
+}
+
+test_a_working_user_dpapi_lets_the_test_go_on() {
+    PROBE_ANSWER=$'ok\r'
+    assert_eq "$(key_store_check_with probe_answers)" "0 none" "ok (with a CR) returns 0 without a skip"
+}
+
+test_any_other_dpapi_answer_or_a_failing_probe_fails_and_never_skips() {
+    local p out
+    for p in "probe_answers|error 0x8007000E" "probe_answers|whatever" $'probe_answers|ok\nextra' "probe_answers|" probe_fails probe_does_not_exist; do
+        PROBE_ANSWER="${p#*|}"
+        [ "$PROBE_ANSWER" != "$p" ] || PROBE_ANSWER=""
+        out="$(key_store_check_with "${p%%|*}")"
+        case "$out" in
+            "0 "*) fail "[$p] ended with rc 0 or a skip: [$out]"; return 1 ;;
+            *" none") ;;
+            *) fail "[$p] skipped: [$out]"; return 1 ;;
+        esac
+        assert_contains "$(<"$SANDBOX/key-store.err")" "user DPAPI" "[$p] says why on stderr"
+    done
 }
 
 test_the_certificate_sweep_removes_what_an_aborted_build_leaves() {

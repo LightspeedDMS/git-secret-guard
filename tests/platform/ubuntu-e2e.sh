@@ -82,7 +82,7 @@ check_has "$LOGS/tver.out" "$(pinned trufflehog)" "the installed trufflehog repo
 # shellcheck disable=SC2016
 run gver bash -c '"$1" version 2>&1' _ "$HOME/.local/bin/betterleaks"
 check_has "$LOGS/gver.out" "$(pinned betterleaks)" "the installed betterleaks reports the pin"
-# ^ coupled GSG_HOOK_EVENTS in lib/install/hookspath.sh; install writes exactly this ordered set (#119), --get alone returns the last value only (#140)
+# ^ coupled GSG_HOOK_EVENTS in lib/install/hookspath.sh; install writes exactly this ordered set, --get alone returns the last value only
 check_eq "$(git config --global --get-all hook.git-secret-guard.event | paste -sd, -)" pre-commit,commit-msg \
     "the pre-commit and commit-msg events are configured, in this order and nothing else"
 check_eq "$(git config --global --get hook.git-secret-guard.command)" "$HOME/.local/share/git-secret-guard/hooks/secret-scan" "with the installed hook"

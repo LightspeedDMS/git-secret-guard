@@ -7,7 +7,7 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/../support/lifecycle.sh"
 
 DEAD_PROXY=(HTTPS_PROXY=http://127.0.0.1:9 HTTP_PROXY=http://127.0.0.1:9 https_proxy=http://127.0.0.1:9 http_proxy=http://127.0.0.1:9)
 
-# ^ why an oracle, not a fixed answer; Windows seeds copies of the pinned binaries and install adopts those (#101), Linux seeds links, never adopted
+# ^ why an oracle, not a fixed answer; Windows seeds copies of the pinned binaries and install adopts those, Linux seeds links, never adopted
 # ^ invariant prints the seeded scanners, regular files only, whose SHA-256 is the lock's binary hash, space separated
 seeded_pinned_scanners() {
     local scn plat want got seeded=""

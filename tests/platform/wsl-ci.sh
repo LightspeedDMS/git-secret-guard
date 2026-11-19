@@ -5,7 +5,7 @@ set -u
 # ^ security the fake credential is built at runtime from fragments and never printed; every output is checked for its absence before any of it is shown
 # ^ coupled phases are prepare facts probe upgrade mount-for-user mntc installed-cli tests, one per step; WS, MAIN, LOGS and CONSENT come from the workflow
 
-# ^ external wsl.exe -e bash gives SHELL=bash, a bare name, and script -c failed on it (run 42280191940); a login shell has SHELL=/bin/bash
+# ^ external wsl.exe -e bash gives SHELL=bash, a bare name, and script -c failed on it; a login shell has SHELL=/bin/bash
 export SHELL=/bin/bash
 PHASE="${1:-}"
 WS="${WS:-}"
@@ -120,7 +120,7 @@ phase_facts() {
         printf 'tools: sudo=%s jq=%s setsid=%s timeout=%s add-apt-repository=%s\n' "$(command -v sudo)" "$(command -v jq)" "$(command -v setsid)" "$(command -v timeout)" "$(command -v add-apt-repository)"
         printf 'windows git on PATH: %s\n' "$(type -P git.exe || echo none)"
     } 2>&1 | tee "$LOGS/facts.log"
-    # ^ external script -c failed on WSL 1 with No such file or directory for its command (run 42278536933); the pty routes are probed here
+    # ^ external script -c failed on WSL 1 with No such file or directory for its command; the pty routes are probed here
     {
         printf 'script version: %s\n' "$(script --version 2>&1 | head -n 1)"
         printf 'SHELL=[%s] /bin/sh -> %s\n' "${SHELL:-}" "$(readlink -f /bin/sh)"
@@ -162,7 +162,7 @@ hang_snapshot() {
 }
 
 # ^ invariant typed_install ANSWERS LABEL CMD... runs CMD on a pty (script); each answer (backslash n splits them) is typed once the next prompt shows
-# ^ external run 42303388833 had strace show the install bash in read(0) at the takeover prompt for 240 s; the answer typed at the start never reached it
+# ^ external a run with strace showed the install bash in read(0) at the takeover prompt for 240 s; the answer typed at the start never reached it
 # ^ why typed when the prompt shows, not queued at the start; a person answers a prompt they see, and why the queued answer was lost is not established
 typed_install() {
     local answers="$1" label="$2" dir writer watcher a n=0 seen
@@ -186,7 +186,7 @@ typed_install() {
         exec sleep 3000
     } >"$dir/in" &
     writer=$!
-    # ^ external a typed run once sat 10 minutes and its log was silent on where; a process snapshot is taken every 60 s (run 42292067132)
+    # ^ external a typed run once sat 10 minutes and its log was silent on where; a process snapshot is taken every 60 s
     { for _ in $(seq 1 50); do sleep 60; hang_snapshot >>"$LOGS/$label-ps.log" 2>&1; done; } &
     watcher=$!
     RUN_STDIN="$dir/in" run "$label" timeout 3000 script -qefc "$*" /dev/null

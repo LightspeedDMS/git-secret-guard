@@ -3,7 +3,7 @@
 # ^ external mirrors betterleaks 1.9.0 => leaks exit --exit-code with a JSON array, clean exits 0 with [], fatal exits 1 without a report
 # ^ see test:test_real_betterleaks_exit_code_semantics_1_9_0
 set -u
-# ^ external macOS 12 has no /usr/bin/jq and a GUI PATH has none at all (#157); the harness passes the jq it resolved, a missing value fails loudly
+# ^ external macOS 12 has no /usr/bin/jq and a GUI PATH has none at all; the harness passes the jq it resolved, a missing value fails loudly
 jq="${STUB_JQ:?STUB_JQ names the jq the harness resolved (TEST_JQ in tests/support/lib.sh)}"
 marker="${STUB_MARKER:-NOMARKER}"
 [ -n "${STUB_LOG:-}" ] && printf 'betterleaks %s\n' "$*" >>"$STUB_LOG"
@@ -29,8 +29,14 @@ if [ -n "${STUB_LOG:-}" ]; then
 fi
 # ^ external the pre-flight (no --report-path) scans a probe holding a built-in-rule secret => exit --exit-code if the config keeps built-in rules, else 0
 # ^ why sense a "useDefault = true" line, not parse the TOML; only the real-betterleaks tests settle what a config means
+# ^ external the machine probe (doctor, install) runs "betterleaks --version" => a test needing it to match the pin sets STUB_VERSION to the pinned version
+if [ "${1:-}" = --version ] && [ -n "${STUB_VERSION:-}" ]; then
+    printf 'betterleaks version %s\n' "$STUB_VERSION"
+    exit 0
+fi
 if [ -z "$report" ]; then
-    if [ -n "${STUB_GL_PREFLIGHT_SLEEP:-}" ]; then exec sleep "$STUB_GL_PREFLIGHT_SLEEP"; fi
+    # ^ why only the "dir" call sleeps, not every call without a report path; the version probe has none either, and must not pay the pre-flight's sleep
+    if [ -n "${STUB_GL_PREFLIGHT_SLEEP:-}" ] && [ "${1:-}" = dir ]; then exec sleep "$STUB_GL_PREFLIGHT_SLEEP"; fi
     if [ -n "${STUB_GL_PREFLIGHT_ERROR:-}" ]; then printf '1:00AM FTL %s\n' "$STUB_GL_PREFLIGHT_ERROR" >&2; fi
     if [ -n "${STUB_LOG:-}" ] && [ -d "$scan_dir" ]; then
         while IFS= read -r f; do

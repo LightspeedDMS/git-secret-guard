@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ^ external real betterleaks reads lib/scan/betterleaks-rule.toml => the pii-* rules (#148) are judged by the binary, never by parsing the TOML
+# ^ external real betterleaks reads lib/scan/betterleaks-rule.toml => the pii-* rules are judged by the binary, never by parsing the TOML
 # ^ security every sample is built at run time from fragments, never a literal, never printed => no_leak asserts absence; see docs/scan.md#pii-rules
 # shellcheck source=tests/support/lib.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/../support/lib.sh"

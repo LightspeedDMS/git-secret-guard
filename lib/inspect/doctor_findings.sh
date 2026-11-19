@@ -541,7 +541,7 @@ doctor_recheck_repos() {
         fi
         doctor_classify_dir "$path"
         if [[ -z ${DR_REC_TREES[$path]:-} ]]; then continue; fi
-        # ^ hazard any number of recorded worktrees; a here-string of 64 KiB + 1 to 128 bytes hangs Git for Windows bash (#155) => split_lines
+        # ^ hazard any number of recorded worktrees; a here-string of 64 KiB + 1 to 128 bytes hangs Git for Windows bash => split_lines
         split_lines "${DR_REC_TREES[$path]}"
         trees=("${SPLIT_LINES[@]}")
         for tree in "${trees[@]}"; do

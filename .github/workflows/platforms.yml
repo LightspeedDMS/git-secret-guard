@@ -107,7 +107,7 @@ jobs:
         include:
           - { name: rocky, distro: rocky, args: "" }
           - { name: fedora, distro: fedora, args: "" }
-          # the "needs a real machine" items of #40 that a container can show (docs/platform-testing.md#ci-on-real-platforms)
+          # the "needs a real machine" items that a container can show (docs/platform-testing.md#ci-on-real-platforms)
           - { name: rocky-root, distro: rocky, args: "--phase upgrade-root" }
           - { name: rocky-password, distro: rocky, args: "--phase upgrade-password" }
           - { name: rocky-bump, distro: rocky, args: "--phase upgrade-bump" }
@@ -161,7 +161,7 @@ jobs:
           name: platform-unit
           path: ${{ runner.temp }}/logs
 
-  # #40: does a commit made by a git below 2.54 skip the scan? A real old git (built from the pinned tarball) and the git inside GitHub Desktop's .deb.
+  # Does a commit made by a git below 2.54 skip the scan? A real old git (built from the pinned tarball) and the git inside GitHub Desktop's .deb.
   old-git:
     if: inputs.only != 'unit'
     runs-on: ubuntu-24.04
@@ -213,7 +213,7 @@ jobs:
           name: old-git
           path: ${{ runner.temp }}/logs
 
-  # #40: Rocky 9 with SELinux enforcing, as a real VM. Hosted x64 runners expose /dev/kvm; without it rocky-vm.sh stops and says what TCG would cost.
+  # Rocky 9 with SELinux enforcing, as a real VM. Hosted x64 runners expose /dev/kvm; without it rocky-vm.sh stops and says what TCG would cost.
   rocky-vm:
     if: inputs.only != 'unit'
     runs-on: ubuntu-24.04
@@ -246,7 +246,7 @@ jobs:
           path: ${{ runner.temp }}/logs
 
 
-  # #30: the Git for Windows upgrade on a disposable windows-2025 runner (docs/platform-testing.md#ci-on-real-platforms). The script replaces Git for Windows with an old release first.
+  # The Git for Windows upgrade on a disposable windows-2025 runner (docs/platform-testing.md#ci-on-real-platforms). The script replaces Git for Windows with an old release first.
   windows:
     if: inputs.only != 'unit'
     runs-on: windows-2025

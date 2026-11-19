@@ -65,7 +65,7 @@ test_the_locale_charset_must_be_utf8_by_the_first_non_empty_variable() {
     assert_eq "$OUT" p "another charset"
 }
 
-# ^ hazard bash warns on stderr for an LC_ALL locale the host lacks, and the terminal-mode tests compare stderr (#159)
+# ^ hazard bash warns on stderr for an LC_ALL locale the host lacks, and the terminal-mode tests compare stderr
 # shellcheck disable=SC2016
 test_the_forced_terminal_locale_exists_on_this_host_and_turns_terminal_mode_on() {
     ui_force_terminal

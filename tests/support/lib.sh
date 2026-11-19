@@ -137,7 +137,7 @@ sandbox_create() {
         printf '#!/usr/bin/env bash\nexec %q -b "$@"\n' "$TEST_JQ_EXE" >"$TEST_JQ" || exit 2
         chmod 755 "$TEST_JQ" || exit 2
     fi
-    # ^ invariant the stand-ins keep the jq they used before (#157); on Windows the plain jq.exe of jqbin, never the -b wrapper TEST_JQ names there
+    # ^ invariant the stand-ins keep the jq they used before; on Windows the plain jq.exe of jqbin, never the -b wrapper TEST_JQ names there
     TEST_STUB_JQ="$TEST_JQ"
     if [ "$TEST_IS_WINDOWS" -eq 1 ]; then TEST_STUB_JQ="$SANDBOX/jqbin/jq.exe"; fi
     GSG_ENV+=(STUB_JQ="$TEST_STUB_JQ")
@@ -199,7 +199,7 @@ set_env() { EXTRA_ENV+=("$@"); }
 
 TEST_UTF8_LOCALE=""
 
-# ^ external bash warns on stderr for an LC_ALL locale the host lacks (Debian and Ubuntu images have only C.utf8); macOS has no C.UTF-8 (#159)
+# ^ external bash warns on stderr for an LC_ALL locale the host lacks (Debian and Ubuntu images have only C.utf8); macOS has no C.UTF-8
 # ^ invariant sets TEST_UTF8_LOCALE = a UTF-8 locale locale -a lists, in the order C, en_US, any other; rc 1 = the host lists none
 # ^ hazard run_file_tests runs every function named test_* as a test => a helper never starts with test_
 utf8_locale_pick() {
@@ -248,7 +248,7 @@ old_system_bash() {
     [ -x /bin/bash ] && /bin/bash -c '[ "${BASH_VERSINFO[0]}" -lt 4 ] || { [ "${BASH_VERSINFO[0]}" -eq 4 ] && [ "${BASH_VERSINFO[1]}" -lt 4 ]; }'
 }
 
-# ^ external macOS 12 has no realpath and no jq in /usr/bin or /bin (#157), Linux and macOS 26 have both; this directory holds every system tool except them
+# ^ external macOS 12 has no realpath and no jq in /usr/bin or /bin, Linux and macOS 26 have both; this directory holds every system tool except them
 # ^ why symlinks to the system directories, not a copy; the tools keep their real location and a run sees a bare system PATH minus realpath
 # ^ why a global, not a printed path; skip_test exits, and inside $(...) the exit would end the subshell only
 # shellcheck disable=SC2034

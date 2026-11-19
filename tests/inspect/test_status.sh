@@ -579,7 +579,7 @@ test_an_interrupt_during_the_hook_check_stops_status_with_130() {
     assert_eq "$(st_tmp_listing)" "" "SIGINT removed the throwaway repository"
 }
 
-# ^ external bash 5.3 (macOS) starts a procsub child with SIGINT ignored => git outlived Ctrl-C; Linux bashes hide it => the code shape is pinned; #68
+# ^ external bash 5.3 (macOS) starts a procsub child with SIGINT ignored => git outlived Ctrl-C; Linux bashes hide it => the code shape is pinned
 # ^ invariant behaviour = test:test_an_interrupt_during_the_hook_check_stops_status_with_130; here git stays a foreground command of hooklist_read on every bash
 test_the_hook_list_call_runs_in_the_foreground_not_in_a_process_substitution() {
     local body

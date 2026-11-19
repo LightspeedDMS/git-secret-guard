@@ -12,7 +12,7 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/autoupdate.sh"
 test_the_role_is_a_pure_function_of_the_two_paths() {
     local base="$SANDBOX/role"
     lc_begin || return 1
-    # ^ why a real repository, not an empty .git directory; under MSYS the owner is asked of git itself (#132)
+    # ^ why a real repository, not an empty .git directory; under MSYS the owner is asked of git itself
     rm -rf -- "$base" && mkdir -p -- "$base/file" "$base/none" "$base/foreign" && gitx init -q "$base/own" || return 1
     printf 'gitdir: elsewhere\n' >"$base/file/.git" || return 1
     ln -s /usr "$base/foreign/.git" || return 1
@@ -276,7 +276,7 @@ test_a_held_lock_or_a_bad_installed_version_is_skipped_and_nothing_changes() {
     au_control
 }
 
-# ^ hazard ln -s PID DIR made DIR/PID and let the run in, a second run did the same (#141) => two runs, both skipped
+# ^ hazard ln -s PID DIR made DIR/PID and let the run in, a second run did the same => two runs, both skipped
 test_a_directory_at_the_update_lock_path_is_skipped_as_locked_and_left_empty() {
     local run
     au_setup_with_release || return 1

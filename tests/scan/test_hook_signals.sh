@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ^ see doc:docs/scan.md#signals; a HUP or TERM sent to the hook's own pid must not wait for a foreground git call (#120)
+# ^ see doc:docs/scan.md#signals; a HUP or TERM sent to the hook's own pid must not wait for a foreground git call
 # shellcheck source=tests/support/lib.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/../support/lib.sh"
 
@@ -240,7 +240,7 @@ echo \"rc=\$?\"" || return 1
     kill_sleepers
 }
 
-# ^ hazard #134 bash's SIGINT handler updates PIPESTATUS in signal context during wait, a second trapped signal longjmps out of it, double free, SIGABRT
+# ^ hazard bash's SIGINT handler updates PIPESTATUS in signal context during wait, a second trapped signal longjmps out of it, double free, SIGABRT
 # ^ invariant the supervisor polls with a foreground sleep => a direct sleep child exists during the worker's run; the worker's own sleep is a grandchild
 SIG_POLL_WAIT_TICKS=30
 SIG_POLL_INTERVAL_S=0.1

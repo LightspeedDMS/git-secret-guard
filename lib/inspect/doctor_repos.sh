@@ -95,7 +95,7 @@ doctor_unreadable() {
     local -a dirs=() bad=()
     doctor_only_permission_denied "$DR_WORK/find.err" || return 1
     doctor_prune_args "$1"
-    # ^ why a foreground command and a file, not mapfile < <(find ...); async children start with SIGINT ignored => find outlived Ctrl-C; #71
+    # ^ why a foreground command and a file, not mapfile < <(find ...); async children start with SIGINT ignored => find outlived Ctrl-C
     LC_ALL=C find "$1" -maxdepth "$((GSG_DOCTOR_FIND_DEPTH - 1))" "${DR_PRUNE[@]}" -name node_modules -type d -prune -o -type d -print0 >"$DR_WORK/find2.out" 2>"$DR_WORK/find2.err"
     rc=$?
     if [ "$rc" -ne 0 ]; then doctor_only_permission_denied "$DR_WORK/find2.err" || return 1; fi
@@ -176,7 +176,7 @@ doctor_discover() {
     doctor_discover_reset
     for root in "${DR_ROOT_LIST[@]}"; do
         doctor_prune_args "$root"
-        # ^ why a foreground command and a file, not done < <(find ...); async children start with SIGINT ignored => find outlived Ctrl-C; #71
+        # ^ why a foreground command and a file, not done < <(find ...); async children start with SIGINT ignored => find outlived Ctrl-C
         LC_ALL=C find "$root" -maxdepth "$GSG_DOCTOR_FIND_DEPTH" "${DR_PRUNE[@]}" -name node_modules -type d -prune -o -name .git -prune -print0 >"$DR_WORK/find.out" 2>"$DR_WORK/find.err"
         rc=$?
         if [ "$rc" -ne 0 ] && doctor_unreadable "$root"; then rc=0; fi
@@ -412,7 +412,7 @@ doctor_check_worktrees() {
     local run="$1" key="$2" tree
     local -a trees=()
     doctor_repo_hook
-    # ^ hazard any number of linked worktrees; a here-string of 64 KiB + 1 to 128 bytes hangs Git for Windows bash (#155) => split_lines
+    # ^ hazard any number of linked worktrees; a here-string of 64 KiB + 1 to 128 bytes hangs Git for Windows bash => split_lines
     if [[ -n ${DR_LINKED[$key]:-} ]]; then
         split_lines "${DR_LINKED[$key]}"
         trees=("${SPLIT_LINES[@]}")

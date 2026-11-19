@@ -159,7 +159,7 @@ test_the_hold_applies_to_desktops_own_git_in_a_linking_run_only() {
     assert_eq "$OUT" "1 0" "a plain install holds nothing"
 }
 
-# ^ why counts, not time (#150); wrapped checkouts take about 3.7x the plain ones by construction, and a 3x plus 5 s ceiling failed on macOS CI by 65 ms
+# ^ why counts, not time; wrapped checkouts take about 3.7x the plain ones by construction, and a 3x plus 5 s ceiling failed on macOS CI by 65 ms
 # ^ invariant a checkout runs post-checkout and post-index-change; each starts one bash (the wrapper) and one git (rev-parse), and the scan never runs
 # ^ hazard only the bash shim (loop by path, hooks via PATH) and Desktop's git are counted; the layout test checks reference-transaction
 dg_count_summary() {

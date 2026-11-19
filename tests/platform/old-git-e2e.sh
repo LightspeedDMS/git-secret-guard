@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -u
-# ^ external measures whether a commit made by a git older than 2.54 is scanned (#40, GitHub Desktop's bundled git); the argument is the old git
+# ^ external measures whether a commit made by a git older than 2.54 is scanned (GitHub Desktop's bundled git); the argument is the old git
 # ^ security the fake credential is built at runtime from fragments and never printed; the output is checked for its absence before any of it is shown
 
 OLD_GIT="${1:-}"

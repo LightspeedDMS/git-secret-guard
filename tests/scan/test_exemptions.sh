@@ -442,7 +442,7 @@ test_patterns_without_glob_characters_never_need_the_probe_repository() {
     assert_contains "$ERR" "2 staged file(s) excluded" "count"
 }
 
-# ^ hazard Git for Windows bash 5.3 does not return on a here-string of 65,537 to 65,664 bytes (#155); the rows of the ignore file once went through one
+# ^ hazard Git for Windows bash 5.3 does not return on a here-string of 65,537 to 65,664 bytes; the rows of the ignore file once went through one
 # ^ invariant 100 rows "N<TAB>nope<TAB>././...nope", 321 "./" each and 375 on row 1 = 65,599 bytes, plus the newline a here-string adds = 65,600
 test_an_ignore_file_whose_rows_reach_64_kib_is_applied_without_hanging() {
     local i k dots

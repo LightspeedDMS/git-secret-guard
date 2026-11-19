@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2016
 set -u
-# ^ external macOS 12 has no /usr/bin/jq and a GUI PATH has none at all (#157); the harness passes the jq it resolved, a missing value fails loudly
+# ^ external macOS 12 has no /usr/bin/jq and a GUI PATH has none at all; the harness passes the jq it resolved, a missing value fails loudly
 jq="${STUB_JQ:?STUB_JQ names the jq the harness resolved (TEST_JQ in tests/support/lib.sh)}"
 marker="${STUB_MARKER:-NOMARKER}"
 [ -n "${STUB_LOG:-}" ] && printf 'trufflehog %s\n' "$*" >>"$STUB_LOG"

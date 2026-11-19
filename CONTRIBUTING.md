@@ -270,10 +270,9 @@ and `status` shows it). It follows [Semantic Versioning](https://semver.org/); w
 - **Bumping a scanner pin** in `tools.lock` also needs the SHA-256 of the binary inside each archive, as the fifth column of its row
   (`<tool> <version> <platform> <archive sha256> <binary sha256>`): download the archive, check the fourth column, extract the binary, `sha256sum` it.
   Install refuses an extracted binary that differs, and a kept scanner with that hash is adopted as install's own; a test fails on a scanner row without it.
-- **Docs, tests and CI only** keep the version: merged alone, they need no release. Tests read `VERSION`, never a literal. The first
-  tagged version is 0.2.0.
+- **Docs, tests and CI only** keep the version: merged alone, they need no release. Tests read `VERSION`, never a literal.
 - **After the release pull request is merged** its merge commit on `main` is tagged `v<VERSION>` (annotated,
-  `git tag -a v0.2.0 -m "v0.2.0"`) and the tag is pushed. A tag is never moved, replaced or deleted and re-created: a mistake gets the
+  `git tag -a v<VERSION> -m "v<VERSION>"`) and the tag is pushed. A tag is never moved, replaced or deleted and re-created: a mistake gets the
   next version.
 
 ## License

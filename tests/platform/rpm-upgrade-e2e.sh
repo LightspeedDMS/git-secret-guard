@@ -197,7 +197,7 @@ rocky_upgrade() {
     check "and no ~/.gitconfig was created by the write probe" test ! -e "$HOME/.gitconfig"
     check "and /usr/local/bin/git does not exist" test ! -e /usr/local/bin/git
     # ^ invariant the build starts without perl-interpreter => the plan installs it and the source builds with it, never with the perl metapackage
-    # ^ why rpm -e --nodeps, not dnf remove; dnf remove took the stock git-core out with perl-interpreter (run 42358458414), and the later checks need it
+    # ^ why rpm -e --nodeps, not dnf remove; dnf remove took the stock git-core out with perl-interpreter, and the later checks need it
     show "required by: $(rpm -q --whatrequires perl-interpreter 2>&1 | head -n 8 | tr '\n' ' ')"
     if rpm -q perl-interpreter >/dev/null 2>&1; then sudo rpm -e --nodeps perl-interpreter >/dev/null 2>&1 || true; fi
     show "before the build: $(rpm -q perl-interpreter 2>&1 | head -n 1); $(rpm -q perl 2>&1 | head -n 1)"
@@ -221,7 +221,7 @@ rocky_upgrade() {
     show "perl metapackage afterwards: $(rpm -q perl 2>&1 | head -n 1)"
     show "$(/usr/local/bin/git --version); PATH git: $(command -v git)"
     check "it comes first on PATH" test "$(command -v git)" = /usr/local/bin/git
-    check "the built git reads the system config from /etc (#90)" test "$(/usr/local/bin/git var GIT_CONFIG_SYSTEM)" = /etc/gitconfig
+    check "the built git reads the system config from /etc" test "$(/usr/local/bin/git var GIT_CONFIG_SYSTEM)" = /etc/gitconfig
     check "the RPM git-core is the same version" test "$(rpm -q git-core)" = "$PKG_BEFORE"
     check "rpm -V git-core reports nothing" rpm_clean
     check "/usr/bin is untouched" test "$(usrbin_sums)" = "$SUMS_BEFORE"

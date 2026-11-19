@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ^ coupled lib/scan/extract.sh:extract_lfs_objects; Git LFS pointers are followed to their object by content, never by .gitattributes (#98)
+# ^ coupled lib/scan/extract.sh:extract_lfs_objects; Git LFS pointers are followed to their object by content, never by .gitattributes
 # shellcheck source=tests/support/lib.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/../support/lib.sh"
 # shellcheck source=tests/scan/guidance_helpers.sh
@@ -501,12 +501,12 @@ test_real_git_lfs_rename_with_change_is_followed_and_a_pure_rename_adds_nothing(
     key="$(fake_aws_key)" || return 1
     [ -n "$key" ] || return 1
     gitx lfs install --local >/dev/null 2>&1 && gitx lfs track '*.dat' >/dev/null 2>&1 || return 1
-    # ^ why an old mtime, not a fresh file; an old file is stat-clean and never racy, git reads it every time (#103), the outcome is fixed
+    # ^ why an old mtime, not a fresh file; an old file is stat-clean and never racy, git reads it every time, the outcome is fixed
     gitx add .gitattributes && printf 'one\ntwo\nthree\n' >old.dat && touch -d '2 hours ago' old.dat && gitx add -- old.dat && gitx commit -q --no-verify -m base || return 1
     gitx mv old.dat same.dat || return 1
     commit_cap "pure rename"
     assert_rc 0 "a pure rename"
-    # ^ why exactly this line, not a pass line; the diff is between two trees (#103), the rename leaves the pointer unchanged and adds nothing
+    # ^ why exactly this line, not a pass line; the diff is between two trees, the rename leaves the pointer unchanged and adds nothing
     assert_eq "$ERR" "git-secret-guard: no added lines to scan" "a pure rename of an LFS file adds nothing"
     gitx mv same.dat moved.dat && printf 'one\ntwo\nthree\naws_key = %s\n' "$key" >moved.dat && gitx add -- moved.dat || return 1
     commit_cap "rename with change"

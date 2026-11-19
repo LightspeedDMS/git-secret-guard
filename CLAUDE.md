@@ -52,7 +52,8 @@ This file is an index: each topic states what must not break and links the doc h
   `.github/workflows/wsl.yml`: [platforms.md#wsl-windows-subsystem-for-linux](docs/platforms.md#wsl-windows-subsystem-for-linux).
 - **Commits:** DCO sign-off ([CONTRIBUTING.md#sign-your-commits-dco](CONTRIBUTING.md#sign-your-commits-dco)); feature and fix PRs never
   touch `VERSION`, a separate release PR (only `VERSION`, its description lists the merged PRs and the bump) raises it after the merges;
-  tag that PR's merge commit, never move a tag; docs write the version `<x.y.z>` ([CONTRIBUTING.md#versions](CONTRIBUTING.md#versions)).
+  tag that PR's merge commit, never move a tag; docs write the version `<x.y.z>` ([CONTRIBUTING.md#versions](CONTRIBUTING.md#versions));
+  the release steps, step by step: [agents.md#releases](docs/agents.md#releases).
 
 ## Which tests to run
 

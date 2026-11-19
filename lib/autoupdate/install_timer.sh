@@ -240,7 +240,7 @@ install_prepare_update() {
     if [ -n "$GSG_GIT" ]; then dir="${GSG_GIT%/*}"; fi
     if [ "${1:-}" = pre ]; then
         install_update_precheck "$dir" || return 1
-        # ^ order a state still unread is read here, state_read needs no git => the no-checkout refusal comes before the git offers (#129 AC4)
+        # ^ order a state still unread is read here, state_read needs no git => the no-checkout refusal comes before the git offers
         if [ -z "${ST_EXISTS:-}" ]; then state_read || return 1; fi
         if [ ! -e "$GSG_ROOT/.git" ] && [ -z "$ST_SOURCE_CHECKOUT" ]; then install_update_no_checkout || return 1; fi
         return 0

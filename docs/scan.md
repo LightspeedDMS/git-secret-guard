@@ -21,7 +21,7 @@ how to run the tests, and the limits of the scan. Exemptions have their own page
    install again ...`, and a `GNUBIN_DIR` that is not an absolute directory blocks with `GNUBIN_DIR in the settings file is
    not an absolute directory (...)`. **Everything
    else the hook runs is found through `PATH`**: `bash` itself on Linux (the `#!/usr/bin/env bash` shebang of the
-   hook), `git`, `awk`, `sed`, `cp`, `rm`, `mkdir`, `mktemp`, `find` and the other coreutils (not `realpath`: macOS 12 has none, the hook walks its own links with `readlink`, #157). Git prepends
+   hook), `git`, `awk`, `sed`, `cp`, `rm`, `mkdir`, `mktemp`, `find` and the other coreutils (not `realpath`: macOS 12 has none, the hook walks its own links with `readlink`). Git prepends
    its own exec-path to `PATH` when it runs a hook, which puts git's directory first; a `PATH` you control decides the
    rest. The shebang is not pinned to an absolute `bash`. On macOS the hook command names the recorded `BASH_BIN`
    instead. Child scripts (`lib/scan/run-scanner.sh`, the coverage re-check) run under the same bash binary as the hook
@@ -220,8 +220,8 @@ Skip once with `git commit --no-verify`; automation can disable only this hook w
 
 Ctrl-C (SIGINT), SIGHUP (a closed terminal) and SIGTERM stop a running hook at once, in any phase: a slow `git write-tree` or
 `git diff-tree`, the scanners, the message run's `git diff --cached`, the coverage re-check (one exception there, see
-**Ctrl-C** under [The coverage reminder](#the-coverage-reminder);
-[#120](https://github.com/LightspeedDMS/git-secret-guard/issues/120)). The hook exits 130, 129 or 143, so git aborts the
+**Ctrl-C** under [The coverage reminder](#the-coverage-reminder)).
+The hook exits 130, 129 or 143, so git aborts the
 commit. Before it exits, every process of the run gets TERM, then KILL if it is still running after a grace period (5 s for
 the scanners, 15 s for the scan as a whole), and the private temp dir with
 the added lines is removed; on Git for Windows the processes are stopped with `taskkill /T /F`. A signal sent to the hook's
@@ -277,7 +277,7 @@ A keyword on the line above does not count (`ssn:` then the number on the next l
 to a keyword); an SSN without dashes and without a keyword; phone numbers without a phone keyword; PII of other countries; card numbers
 and IBANs that fail their checksum.
 
-**Checksums (branch A of the spike on #148).** The `filter` key of a betterleaks rule is an expression (expr-lang) that drops a finding
+**Checksums.** The `filter` key of a betterleaks rule is an expression (expr-lang) that drops a finding
 when it is true. It computes the Luhn sum and the IBAN mod-97 without any network call, so a card or IBAN that is only shaped like one
 is **not** reported. Both filters first check the shape of the secret, because `betterleaks config check` runs each filter on a dummy value.
 
@@ -336,8 +336,8 @@ PII detection together with its own config can put the same rules into that conf
   (`test_real_catalog_d18_d19_d20_worktrees_submodules_and_new_repositories_are_covered`), and in the superproject the
   gitlink adds one line, `Subproject commit <id>`.
 - **Files tracked by Git LFS: the object is scanned, or the commit is blocked.** git commits the 3-line pointer of an
-  LFS-tracked file; the content sits in the LFS storage and goes to the server on push
-  ([#98](https://github.com/LightspeedDMS/git-secret-guard/issues/98)). The hook never runs `git-lfs`. A staged blob is a
+  LFS-tracked file; the content sits in the LFS storage and goes to the server on push.
+  The hook never runs `git-lfs`. A staged blob is a
   pointer when its content (under 1024 bytes, as git-lfs counts) is read **the way git-lfs 3.7.1 reads it**, whatever `.gitattributes`
   says; anything else is scanned as text. That is wider than the spec text: the blob is trimmed of Unicode white space, split at LF,
   a trailing CR dropped, empty lines skipped; the lines are `version` (one of `https://git-lfs.github.com/spec/v1`,
@@ -378,7 +378,7 @@ PII detection together with its own config can put the same rules into that conf
   or `binary` rule there hides the matching files. They are local, uncommitted, machine configuration that git offers
   no per-command switch for (the system file is root-owned and could not be exercised by a test). The diff is between
   two trees, so what is scanned is always the staged blob: `working-tree-encoding` and a clean filter cannot show the
-  scanner the work tree file instead ([#103](https://github.com/LightspeedDMS/git-secret-guard/issues/103), fixed in 0.3.5).
+  scanner the work tree file instead.
 - **Inherited git configuration cannot change the extraction.** `-c core.bigFileThreshold=100g` is pinned, because a
   lower threshold (`git -c core.bigFileThreshold=1 commit`, or the same key in the repository config) makes git treat
   every file as binary and show no added lines, so a token would commit with no output. The command-line pin wins over
@@ -449,7 +449,7 @@ Why the scan code is shaped this way; each point was probed on the pinned versio
   line: those lines are scan errors, and only their `msg` is printed (other fields can hold verifier URLs with the
   candidate). Findings exit 183. Exit 0 or 183 counts only with `{"msg":"finished scanning","chunks":N}`, `N >= 1`, so
   `/bin/true` as `TRUFFLEHOG_BIN` is an error. `tests/scan/test_real.sh` pins this and fails if a newer version changes it.
-- **No verification (#145).** trufflehog runs `--no-verification --no-update` with `--results=verified,unverified,unknown`.
+- **No verification.** trufflehog runs `--no-verification --no-update` with `--results=verified,unverified,unknown`.
   Measured on 3.99.2: with `--no-verification` every result has `Verified=false` and no `VerificationError`, and
   `--results` still filters, so the old `--results=verified,unknown` returns nothing at exit 0 (a silent pass); `unverified`
   must be listed. The scan makes no `connect`, `sendto` or `sendmsg` to a non-loopback address
@@ -476,7 +476,7 @@ Why the scan code is shaped this way; each point was probed on the pinned versio
   `Isolating rules` on the `--enable-rule` run. `betterleaks_write_ignore` adds the twins (bounded by
   `GSG_BETTERLEAKS_IGNORE_MAX_LINES`); `betterleaks_drop_pair_key_rows` drops the key-ID row of a pair. The stand-in tells
   the runs apart by `--enable-rule` (`STUB_GL_EXTRA_FINDINGS`, `STUB_GL_EXTRA_RC`).
-- **The PII rules (#148).** They sit after the AWS rule in `lib/scan/betterleaks-rule.toml`; the adapter code knows no `pii-` ID (rows
+- **The PII rules.** They sit after the AWS rule in `lib/scan/betterleaks-rule.toml`; the adapter code knows no `pii-` ID (rows
   pass through, `betterleaks_drop_pair_key_rows` drops only a key-ID row). Patterns that bite: RE2 has no lookaround, so a value is
   bounded by a class that excludes a longer run (`[^0-9\n-]`, `[^0-9A-Za-z\n]`) with `(?m)` and `\n` excluded, else a keyword or a
   number on the neighbouring line would match across the newline; the structure exclusions are alternations. The context rules use
@@ -503,7 +503,7 @@ Why the scan code is shaped this way; each point was probed on the pinned versio
   The awk unquotes C-quoted names, refuses `..`, `.`, empty components and absolute paths (exit 2), and dies on a hunk
   line that is not `+ - space \` or a diff that ends early. Its stderr goes through `_extract_clean_stderr` and its status
   comes from `PIPESTATUS` (`test_an_extraction_write_failure_blocks_with_a_message_about_extraction_and_keeps_the_awk_line`).
-- **The staged tree (#103).** Every diff of the hook (`_staged_git_diff`: the extraction, the exemption second pass,
+- **The staged tree.** Every diff of the hook (`_staged_git_diff`: the extraction, the exemption second pass,
   `staged_added_file_count`, and the `--raw -z` and `--numstat -z` of the LFS code) is
   `GIT_INDEX_FILE=<work dir>/no-index git --attr-source=<empty tree> ... diff-tree -r -M <HEAD tree> <staged tree>`, where
   `staged_trees_init` ran `git write-tree` once (the tree objects `git commit` writes next; the empty tree before the
@@ -522,7 +522,7 @@ Why the scan code is shaped this way; each point was probed on the pinned versio
   `_warn_if_union_covers_tree` and the probe repository's `diff --cached --name-only` in `scan_ignore_scope` only read
   names, never content (doctor shares them and is unchanged). Tests: `test_real_a_key_staged_through_working_tree_encoding_is_scanned_from_the_blob`,
   `test_real_a_clean_filter_that_adds_content_cannot_hide_it_from_the_scan`.
-- **Git LFS (#98).** `extract_lfs_objects` (`lib/scan/extract.sh`) runs after `exempt_extract_tree` and starts no git process per
+- **Git LFS.** `extract_lfs_objects` (`lib/scan/extract.sh`) runs after `exempt_extract_tree` and starts no git process per
   file (`test_small_plain_files_cost_no_git_process_per_file` counts runs with `GIT_TRACE`): `_lfs_staged_blobs` takes the
   regular files of one `diff-tree --raw -z --no-abbrev` (the extraction's flags) that have a scan file, so exclusions
   are honoured; `_lfs_find_pointers` asks one `git cat-file --batch-check` for the sizes and one `--batch` for the blobs of
@@ -541,7 +541,7 @@ Why the scan code is shaped this way; each point was probed on the pinned versio
   only consider blobs under 1024 bytes (probed: 1023 is listed and pushed, 1024, 1025 and 1036 are not; `test_only_blobs_under_1024_bytes_are_pointers`),
   while `git lfs pointer --check` reads the first 1024 bytes only, so it is the wrong oracle above 1023 and a pointer padded
   past that size passes `--check` but is neither pushed nor followed. A pure rename of an LFS file changes no pointer and
-  prints exactly `no added lines to scan` (it showed 1 file, 6 lines while git read the work tree file, [#103](https://github.com/LightspeedDMS/git-secret-guard/issues/103),
+  prints exactly `no added lines to scan` (it showed 1 file, 6 lines while git read the work tree file,
   see "The staged tree" above; the test sets an old mtime). `_lfs_storage_dir` takes `git config --type=path --get lfs.storage` (any scope, last wins),
   `_lfs_fetch_object` copies the object into the work dir and checks size and SHA-256 **on the copy**, then `mv` replaces
   the pointer's scan file. Counts: the pointer's added lines come from `diff-tree --numstat -z` (`_lfs_added_lines`), so
@@ -575,7 +575,7 @@ Why the scan code is shaped this way; each point was probed on the pinned versio
   `proc_stop_group` names each current `winpid` to `taskkill /T /F` (no grace period). A survivor keeps the work dir busy, so the staged lines stay on disk
   (`test_windows_only_an_interrupted_scan_leaves_no_native_process_and_no_work_dir`). The coverage reminder starts through plain `"$BASH"` there, because the settings hold no `SETSID_BIN`. Background jobs start with SIGINT ignored, so INT tests run
   git with `env --default-signal=INT`.
-- **The supervisor never blocks in `wait` (#134).** The test `test_a_hup_right_after_ctrl_c_leaves_no_work_dir_behind` (INT to the hook's group, HUP to its pid
+- **The supervisor never blocks in `wait`.** The test `test_a_hup_right_after_ctrl_c_leaves_no_work_dir_behind` (INT to the hook's group, HUP to its pid
   right after) failed about 0.27 % of runs on bash 5.3.15 (4 in 1460): the supervisor aborted with `free(): double free detected in tcache 2` (status 134)
   and left its worker, the worker's git and the work dir behind. Backtrace: `set_pipestatus_array`, called from `set_pipestatus_from_exit`, right after the
   `wait` builtin returned. Mechanism (bash source of 5.2 and 5.3, reproduced on 5.3.15 only): while bash blocks in `wait`, its SIGINT handler
@@ -589,13 +589,13 @@ Why the scan code is shaped this way; each point was probed on the pinned versio
   `sleep` ends the poll and falls through to the blocking `wait` (the old behaviour, no spin); past the cap the `wait` blocks as before. The worker's own
   `wait "$tpid"` in `run_scanners` is left alone: it only ever receives the supervisor's single TERM. The race is sub-microsecond, so no test can fail
   before the fix reliably; `test_the_supervisor_polls_with_a_foreground_sleep_never_a_blocking_wait` pins the design (a direct `sleep` child of the supervisor).
-- **Supervisor and worker (#120).** A HUP or TERM sent to the hook's own pid used to wait for the foreground git it was running: bash runs a trap
+- **Supervisor and worker.** A HUP or TERM sent to the hook's own pid used to wait for the foreground git it was running: bash runs a trap
   only after its foreground child returns. Measured on bash 5.3: a plain foreground command, a `$(...)` and a pipeline all delay the trap by the
   whole run of the child, while `wait` and a `read` builtin are interrupted at once. The foreground calls are many (`write-tree`, `diff-tree`,
   `ls-tree`, `cat-file`, the pipelines into `lib/scan/extract.awk`, the `$(...)` captures of `lib/scan/extract.sh`, `lib/scan/exempt.sh` and
   `lib/core/message.sh`, the betterleaks pre-flight), so the fix is one place: `hooks/secret-scan` without `GSG_SCAN_WORKER` calls `proc_supervise`, which
   starts the worker as a unit (`proc_start_group`: `setsid` on Linux and macOS, a plain background job on Windows; the worker unsets the variable at once
-  so the doctor re-check and the scanners never inherit it) and only polls it with a foreground `sleep` (#134, the bullet above). Its HUP, INT and TERM traps exit 129, 130 and 143,
+  so the doctor re-check and the scanners never inherit it) and only polls it with a foreground `sleep` (the bullet above). Its HUP, INT and TERM traps exit 129, 130 and 143,
   and its EXIT trap `proc_supervise_stop` calls `proc_stop_worker`. A signal that arrives before the pid is recorded (between the `&` and the
   `printf -v`) only sets `SUP_SIGNAL`; it is acted on right after the start (`test_a_signal_before_the_worker_pid_is_recorded_still_stops_the_worker`
   holds the record with a `printf` function). On Linux and macOS the stop is `proc_stop_group` (TERM to the worker's group, so its git, awk and the
@@ -656,8 +656,9 @@ Why the scan code is shaped this way; each point was probed on the pinned versio
   `brew.failon`, `brew.nopopulate`); `gsg` runs the CLI under `env -i`; also `lc_make_fixtures`/`lc_use_fixtures`,
   `lc_path_without TOOL`, `lc_git_wrapper '<sh condition>'` and `lc_real_lookup` with `gitreal`. Doctor (`tests/support/doctor.sh`):
   `dr_begin`, `dr_repo NAME`, `doctor`. Stand-ins: betterleaks without `--report-path` is the pre-flight
-  (`STUB_GL_PREFLIGHT_RC`, `STUB_GL_PREFLIGHT_ERROR`, `STUB_GL_PREFLIGHT_SLEEP`); only real-betterleaks tests settle what a
-  config means; timing assertions allow one extra sleep for the `--version` probe. `tests/fixtures/husky/h` is husky
+  (`STUB_GL_PREFLIGHT_RC`, `STUB_GL_PREFLIGHT_ERROR`, `STUB_GL_PREFLIGHT_SLEEP`, which delays only the `dir` call); only
+  real-betterleaks tests settle what a config means; `STUB_VERSION` makes `--version` answer that version (the pin, for a test
+  whose machine section must be clean), and without it `--version` prints nothing. `tests/fixtures/husky/h` is husky
   9.1.7's real `h` (MIT, verbatim). `tests/coverage.sh` measures shell lines through xtrace (not `lib/scan/extract.awk`).
 
 ### The commit-msg event

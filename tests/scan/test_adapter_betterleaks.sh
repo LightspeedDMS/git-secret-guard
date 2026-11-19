@@ -336,7 +336,7 @@ test_a_key_pair_is_reported_once_the_key_id_row_is_dropped_on_the_same_line() {
 $(tab betterleaks aws-access-token match src/a.txt 3)" "one row for the pair, the lone ID on another line stays"
 }
 
-# ^ invariant the keyword rules of the context rules carry skipReport => they never reach the report; validate (live API) appears nowhere (#145)
+# ^ invariant the keyword rules of the context rules carry skipReport => they never reach the report; validate (live API) appears nowhere
 test_the_generated_config_holds_the_pii_rules_and_hides_their_keyword_rules() {
     prepare piiconf
     run_adapter betterleaks "$SCAN" "$OUTD"

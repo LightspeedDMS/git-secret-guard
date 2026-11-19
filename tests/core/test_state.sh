@@ -86,7 +86,7 @@ EOF
     assert_contains "$ERR" "too long to be ours" "says why"
 }
 
-# ^ why a cap per line, not only per file; the tools_* values go through here-strings, and Git for Windows bash hangs at 64 KiB + 1 to 128 bytes (#155)
+# ^ why a cap per line, not only per file; the tools_* values go through here-strings, and Git for Windows bash hangs at 64 KiB + 1 to 128 bytes
 test_state_read_refuses_a_line_longer_than_8192_characters() {
     local f="$SANDBOX/st-state/git-secret-guard/state" head words
     state_dir_env || return 1

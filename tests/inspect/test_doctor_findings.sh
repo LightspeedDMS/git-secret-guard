@@ -177,7 +177,7 @@ test_recheck_of_a_repository_that_no_longer_exists_drops_it_and_says_so_once() {
     assert_empty "$(rec_body)" "empty record"
 }
 
-# ^ hazard Git for Windows bash 5.3 does not return on a here-string of 65,537 to 65,664 bytes (#155); a repository's recorded worktrees once went through one
+# ^ hazard Git for Windows bash 5.3 does not return on a here-string of 65,537 to 65,664 bytes; a repository's recorded worktrees once went through one
 # ^ invariant 656 gone worktrees of 99 characters joined by newlines = 65,599 bytes, 65,600 with the newline a here-string adds
 test_a_recheck_of_64_kib_of_recorded_worktrees_finishes() {
     local i pad
@@ -391,7 +391,7 @@ test_a_lock_held_by_a_live_process_is_waited_for_then_refused() {
     [ -L "$LC_STATE/findings.lock" ] || fail "the other holder's lock is not ours to remove"
 }
 
-# ^ why a directory is refused, not entered; ln -s PID DIR creates DIR/PID and succeeds, two runs would both think they hold the lock (#141)
+# ^ why a directory is refused, not entered; ln -s PID DIR creates DIR/PID and succeeds, two runs would both think they hold the lock
 test_a_directory_at_the_lock_path_is_refused_and_left_empty() {
     local lock
     dr_begin && dr_repo off || return 1

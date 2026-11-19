@@ -567,7 +567,7 @@ test_the_mount_check_names_a_mount_point_that_is_mounted_twice() {
     no_leak "secret-root"
 }
 
-# ^ external the 17 entries of /dev (depth <= 4) in an unmodified rootless podman 5 container; probed under CONTAINERS_CONF
+# ^ external the 16 entries of /dev (depth <= 4) in an unmodified rootless podman 5 container; probed under CONTAINERS_CONF
 # ^ see doc:docs/platform-testing.md#what-the-platform-run-enforces
 dev_baseline() {
     local name
@@ -584,7 +584,7 @@ test_the_device_check_lists_entries_of_dev_outside_the_baseline_and_fails_closed
     local d="$SANDBOX/dev"
     dev_baseline "$d" || return 1
     container_fn isolation_stray_devices "$d"
-    assert_rc 0 "the 17 entries of an unmodified container /dev are accepted"
+    assert_rc 0 "the 16 entries of an unmodified container /dev are accepted"
     assert_empty "$OUT" "nothing is named"
     : >"$d/pts/3" || return 1
     container_fn isolation_stray_devices "$d"
@@ -633,6 +633,25 @@ test_the_device_check_checks_a_mqueue_directory_it_cannot_open_by_stat_instead_o
     assert_rc 1 "a symlink to a host directory"
     assert_contains "$OUT" "mqueue (symbolic link 777)" "named"
     no_leak "$SANDBOX"
+}
+
+# ^ external bash may reap a process substitution child before wait "$!" and answer 127; a wait function answering 127 stands in for the race (#1)
+# ^ invariant the stand-in find lists for real and exits 1 only when called with -prune (the listing, not the mqueue check)
+# shellcheck disable=SC2016
+test_the_device_check_takes_the_status_of_find_not_of_wait() {
+    local d="$SANDBOX/dev5" fake="$SANDBOX/fakefind"
+    dev_baseline "$d" || return 1
+    run_cap env -i PATH="/usr/local/bin:/usr/bin:/bin" bash -c 'source "$1"; wait() { return 127; }; isolation_stray_devices "$2"' _ \
+        "$GSG_PROJECT/tests/platform/ubuntu-container.sh" "$d"
+    assert_rc 0 "a wait that reports the child as reaped does not make a successful listing fail"
+    assert_empty "$OUT" "nothing is named"
+    mkdir -p -- "$fake" || return 1
+    printf '%s\n' '#!/bin/bash' 'PATH=/usr/local/bin:/usr/bin:/bin' 'find "$@"' 'rc=$?' \
+        'case " $* " in *" -prune "*) exit 1 ;; esac' 'exit "$rc"' >"$fake/find" && chmod +x "$fake/find" || return 1
+    run_cap env -i PATH="$fake:/usr/local/bin:/usr/bin:/bin" bash -c 'source "$1"; isolation_stray_devices "$2"' _ \
+        "$GSG_PROJECT/tests/platform/ubuntu-container.sh" "$d"
+    assert_rc 2 "a listing whose find exits 1 is not an empty list"
+    assert_contains "$ERR" "cannot list all of" "and says so"
 }
 
 test_the_device_check_fails_closed_on_an_unreadable_subdirectory_and_stops_at_500_entries() {
@@ -868,7 +887,7 @@ test_the_entry_script_runs_by_the_path_the_readme_documents() {
 }
 
 
-# ^ invariant the real-machine phases of story #40 are fixed names; any other word after upgrade- is refused, a typo starts nothing
+# ^ invariant the real-machine phases of the upgrade E2E are fixed names; any other word after upgrade- is refused, a typo starts nothing
 test_the_container_script_accepts_the_real_machine_phases_and_nothing_else() {
     local ph
     for ph in upgrade upgrade-root upgrade-password upgrade-bump upgrade-old upgrade-takeover upgrade-offline; do
@@ -883,7 +902,7 @@ test_the_container_script_accepts_the_real_machine_phases_and_nothing_else() {
     done
 }
 
-# ^ external Debian 13 has no software-properties-common (add-apt-repository); the prepare phase of the default run failed on it (run 42252845651)
+# ^ external Debian 13 has no software-properties-common (add-apt-repository); the prepare phase of the default run failed on it
 # shellcheck disable=SC2016
 test_the_prepare_phase_asks_for_software_properties_common_on_ubuntu_only() {
     local id

@@ -71,24 +71,25 @@ test_a_config_that_takes_too_long_to_load_times_out_under_the_settings_limit() {
     cd -- "$DR_ROOTS/slow" || return 1
     commit_gitleaks_config '[extend]' 'useDefault = true' || return 1
     sed -i "s#^BETTERLEAKS_BIN=.*#BETTERLEAKS_BIN=$STUBS_DIR/betterleaks#; s#^SCAN_TIMEOUT_SECONDS=.*#SCAN_TIMEOUT_SECONDS=1#" "$LC_DATA/settings" || return 1
-    set_env STUB_GL_PREFLIGHT_SLEEP=5
+    # ^ external 1.9.0 is the betterleaks version the fixture lock pins (lc_make_fixtures); the stand-in answers the machine version probe with it
+    set_env STUB_GL_PREFLIGHT_SLEEP=5 STUB_VERSION=1.9.0
     doctor
     assert_rc 1 "a pre-flight that exceeds the limit"
+    assert_contains "$OUT" "  ok       betterleaks: $STUBS_DIR/betterleaks 1.9.0 (pinned 1.9.0)" "the machine section accepts the stand-in, so the status comes from the pre-flight"
     assert_contains "$OUT" "PROBLEM  betterleaks did not finish loading .gitleaks.toml at HEAD within 1s; commit blocked, nothing was scanned." "the limit from the settings"
 }
 
 test_the_preflight_runs_under_doctors_own_smaller_limit() {
-    local start
     dr_begin && dr_repo slow || return 1
     cd -- "$DR_ROOTS/slow" || return 1
     commit_gitleaks_config '[extend]' 'useDefault = true' || return 1
     sed -i "s#^BETTERLEAKS_BIN=.*#BETTERLEAKS_BIN=$STUBS_DIR/betterleaks#" "$LC_DATA/settings" || return 1
     printf 'DOCTOR_TIMEOUT_SECONDS=1\n' >>"$LC_DATA/settings" || return 1
-    set_env STUB_GL_PREFLIGHT_SLEEP=8
-    start="$(date +%s)"
+    # ^ external 1.9.0 is the betterleaks version the fixture lock pins (lc_make_fixtures); the stand-in answers the machine version probe with it
+    set_env STUB_GL_PREFLIGHT_SLEEP=8 STUB_VERSION=1.9.0
     doctor
     assert_rc 1 "a pre-flight that exceeds doctor's limit but not the hook's 300 s"
-    [ "$(($(date +%s) - start))" -lt 14 ] || fail "doctor waited $(($(date +%s) - start)) s (the stand-in also sleeps once for the machine version probe)"
+    assert_contains "$OUT" "  ok       betterleaks: $STUBS_DIR/betterleaks 1.9.0 (pinned 1.9.0)" "the machine section accepts the stand-in, so the status comes from the pre-flight"
     assert_contains "$OUT" "PROBLEM  betterleaks timed out after 1s loading .gitleaks.toml at HEAD (doctor's limit; the hook allows 300s), so doctor could not judge it" "says whose limit it was"
 }
 

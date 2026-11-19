@@ -1,5 +1,5 @@
 # shellcheck shell=bash disable=SC2153,SC2034
-# ^ coupled CLI-only library, sourced after lib/platform/winupdate.sh; the Windows adapter of the updater (#132), one hourly Task Scheduler task of this user
+# ^ coupled CLI-only library, sourced after lib/platform/winupdate.sh; the Windows adapter of the updater, one hourly Task Scheduler task of this user
 # ^ invariant nothing here runs off Windows; install_timer, uninstall and autoupdate_report call it only when tools_is_windows holds
 # ^ security schtasks comes from the settings file after install (SCHTASKS_BIN), never from PATH; MSYS_NO_PATHCONV=1 keeps /Create from being a path
 

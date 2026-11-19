@@ -37,7 +37,7 @@ test_install_with_timer_writes_the_units_and_enables_the_timer_through_the_recor
     timer_begin || return 1
     gsg install --with-timer
     assert_rc 0 "install --with-timer"
-    assert_eq "$(systemctl_log)" "--user enable --now $TIMER" "exactly one systemctl call, the one the story names"
+    assert_eq "$(systemctl_log)" "--user enable --now $TIMER" "exactly one systemctl call, the timer enable"
     assert_eq "$(sed -n 1p "$(unit_dir)/$SERVICE")" "$MARKER_LINE" "the service carries the marker"
     assert_contains "$(<"$(unit_dir)/$SERVICE")" 'Type=oneshot' "a one-shot service"
     assert_contains "$(<"$(unit_dir)/$SERVICE")" "ExecStart=\"$LC_DATA/bin/git-secret-guard\" doctor" "it runs doctor from the installed copy"

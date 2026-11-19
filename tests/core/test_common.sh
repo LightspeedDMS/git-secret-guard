@@ -22,7 +22,7 @@ test_trunc_text_marks_a_cut_and_leaves_a_fitting_value_alone() {
     assert_eq "$OUT" "[abc…][abc][ab][]" "longer is cut and marked, equal and shorter are whole"
 }
 
-# ^ hazard Git for Windows bash 5.3 does not return on a here-string of 65,537 to 65,664 bytes (#155) => these runs have a timeout, 124 = hung
+# ^ hazard Git for Windows bash 5.3 does not return on a here-string of 65,537 to 65,664 bytes => these runs have a timeout, 124 = hung
 # shellcheck disable=SC2016
 in_common_bounded() {
     run_cap "$TEST_TIMEOUT" -k 5 60 env -i "${GSG_ENV[@]}" "${EXTRA_ENV[@]}" bash -c 'set -u; source "$1/lib/core/common.sh"; eval "$2"' _ "$SHARE" "$1"

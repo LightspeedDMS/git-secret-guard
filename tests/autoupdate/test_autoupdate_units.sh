@@ -8,7 +8,7 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/../support/autoupdate_units.sh"
 # shellcheck source=tests/support/gitup.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/../support/gitup.sh"
 
-# ^ external Windows has no systemd => install --auto-update is refused there until its own story
+# ^ external Windows has no systemd => these units are Linux-only; the Windows task is tests/autoupdate/test_autoupdate_schtasks.sh
 if [ "$TEST_IS_WINDOWS" -eq 1 ]; then FILE_SKIP_REASON="systemd user units, Windows has no systemd"; fi
 
 test_install_auto_update_records_the_checkout_and_enables_the_update_timer() {
@@ -553,10 +553,13 @@ test_auto_update_without_any_checkout_is_refused_before_a_git_upgrade() {
 
 # ^ invariant puts first on PATH a timeout that cuts every "--foreground -k GRACE LIMIT" call to one second and passes every other call on unchanged
 # ^ coupled install finds this file with type -P and bounds its user-manager probe with it (lib/autoupdate/install_timer.sh)
+# ^ invariant each cut call is logged to $SANDBOX/timeout.log (the command it wraps) before timeout starts => the log never depends on the wrapped command being fast
+# ^ why log in the shim, not only in the stand-in; the first run of a freshly written script can take a second or more on a Mac, and the one-second limit may end it before it writes
 # shellcheck disable=SC2016
 au_short_timeout() {
-    printf '#!/bin/sh\nif [ "$1" = --foreground ] && [ "$2" = -k ]; then shift 4; exec %s --foreground -k 1 1 "$@"; fi\nexec %s "$@"\n' \
-        "$TEST_TIMEOUT" "$TEST_TIMEOUT" >"$SANDBOX/pathbin/timeout" || return 1
+    : >"$SANDBOX/timeout.log" || return 1
+    printf '#!/bin/sh\nif [ "$1" = --foreground ] && [ "$2" = -k ]; then shift 4; printf "%%s\\n" "$*" >>"%s/timeout.log"; exec %s --foreground -k 1 1 "$@"; fi\nexec %s "$@"\n' \
+        "$SANDBOX" "$TEST_TIMEOUT" "$TEST_TIMEOUT" >"$SANDBOX/pathbin/timeout" || return 1
     chmod 755 "$SANDBOX/pathbin/timeout"
 }
 
@@ -569,7 +572,8 @@ test_a_user_manager_that_never_answers_is_refused_before_any_change() {
     assert_contains "$ERR" "systemd user manager" "says what cannot be reached"
     assert_contains "$ERR" "gave no answer within" "and that the probe ran out of time"
     assert_contains "$ERR" "nothing was changed" "with the claim"
-    assert_eq "$(systemctl_log)" "$PROBE_CALL" "only the probe ran"
+    assert_eq "$(timeout_log)" "$SANDBOX/pathbin/systemctl $PROBE_CALL" "the probe, and nothing else, ran under the cut timeout"
+    assert_eq "$(systemctl_log | grep -vxF -- "$PROBE_CALL")" "" "systemctl ran nothing but the probe (it may be cut before it logs)"
     assert_nothing_installed "a manager that hangs"
     assert_no_file "$(unit_dir)" "no unit directory"
 }

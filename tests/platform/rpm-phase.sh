@@ -32,7 +32,7 @@ rpm_prepare_machine() {
 }
 
 # ^ external the shadow file of the RHEL images is mode 000; under rootless podman on the hosted runner PAM cannot open it as root, and sudo fails
-# ^ why mode 0400 for the root owner, not the setuid bit on unix_chkpwd or file capabilities; only this made sudo work in the probe (run 42260761407)
+# ^ why mode 0400 for the root owner, not the setuid bit on unix_chkpwd or file capabilities; only this made sudo work in the probe
 rpm_fix_shadow() {
     step "let root, the owner of /etc/shadow, read it without a capability" 60 chmod 0400 /etc/shadow || return 1
     printf '        | /etc/shadow is now %s\n' "$(stat -c %A /etc/shadow)"

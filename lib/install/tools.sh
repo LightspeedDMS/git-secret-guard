@@ -206,7 +206,7 @@ tools_extract_binary() {
 
 # ^ external trufflehog prints "trufflehog 3.99.2", betterleaks prints "1.9.0" (version) or "betterleaks version 1.9.0" (--version); probed
 # ^ external jq prints "jq-1.8.2", with CRLF from the native jq.exe (probed) => the carriage return would stick to the word
-# ^ why only the first GSG_VERSION_OUTPUT_MAX characters, not all; any binary can sit at the path, and a here-string of 64 KiB + 1 to 128 bytes hangs (#155)
+# ^ why only the first GSG_VERSION_OUTPUT_MAX characters, not all; any binary can sit at the path, and a here-string of 64 KiB + 1 to 128 bytes hangs
 tools_version_matches() {
     local output="${1//$'\r'/}" pinned="$2" word
     local -a words=()

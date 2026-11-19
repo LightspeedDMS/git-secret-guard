@@ -220,7 +220,7 @@ test_the_runner_verifies_the_digest_again_and_starts_the_installer_with_the_sile
     wu_prepare_handoff machine || return 1
     wu_runner "$WU_STATE_HANDOFF"
     assert_rc 0 "the runner finished"
-    assert_eq "$(wu_installer_log)" "/VERYSILENT /NORESTART /NOCANCEL /SP-" "the installer was started once with exactly the story's flags"
+    assert_eq "$(wu_installer_log)" "/VERYSILENT /NORESTART /NOCANCEL /SP-" "the installer was started once with exactly the silent flags"
     assert_contains "$OUT" "verified" "the digest check is reported"
 }
 
@@ -235,7 +235,7 @@ test_a_tampered_installer_never_runs_when_it_is_swapped_after_the_download_was_v
     assert_eq "$(wu_installer_log)" "" "the installer never ran"
 }
 
-# ^ external a Git Bash process holding Git files made the silent installer wait 15 minutes with no output (run 42270993343); winget failed at once
+# ^ external a Git Bash process holding Git files made the silent installer wait 15 minutes with no output; winget failed at once
 test_a_program_running_from_the_git_directory_stops_the_runner_before_anything_starts() {
     local gd="$SANDBOX/heldgit" pid
     wu_need_windows_runner
@@ -360,7 +360,7 @@ test_the_cmd_front_end_runs_the_verified_installer_after_bash_has_ended_and_then
     assert_contains "$OUT" "git upgrade plan for this windows system" "the plan was printed first"
     assert_contains "$OUT" "must be finished outside this process" "bash stopped for the hand-off"
     assert_contains "$OUT" "verified" "the runner checked the digest again"
-    assert_eq "$(wu_installer_log)" "/VERYSILENT /NORESTART /NOCANCEL /SP-" "the installer ran once, with the story's flags"
+    assert_eq "$(wu_installer_log)" "/VERYSILENT /NORESTART /NOCANCEL /SP-" "the installer ran once, with the silent flags"
     assert_contains "$OUT" "second run done: install --upgrade-git" "the command ran again with its own arguments"
     assert_contains "$OUT" "upgraded=1" "the run after the hand-off knows that git was upgraded just before"
     assert_no_file "$WU_DIR/home/AppData/Local/git-secret-guard/git-upgrade/handoff.txt" "the hand-off was consumed"
@@ -607,7 +607,7 @@ test_the_runner_reads_no_environment_variable() {
     assert_eq "$(grep -c 'gsg-signer git-for-windows' "$GSG_PROJECT/tools.lock")" 1 "the signer is data in tools.lock next to the digest row"
 }
 
-# ^ external PowerShell 5.1 started from PowerShell 7 inherits its PSModulePath and cannot load the Security module (run 42264892011)
+# ^ external PowerShell 5.1 started from PowerShell 7 inherits its PSModulePath and cannot load the Security module
 test_the_runner_resets_the_module_path_before_the_first_cmdlet_that_loads_a_module() {
     local r="$GSG_PROJECT/bin/gsg-gitup.ps1" reset first
     reset="$(grep -n "SetEnvironmentVariable('PSModulePath'" "$r" | head -n 1 | cut -d: -f1)"
@@ -798,7 +798,7 @@ test_real_the_pinned_installer_passes_every_production_check_and_is_never_starte
     assert_rc "$want_rc" "the production runner, lock, signer and status accept the real asset (installed here: [${installed:-none}])"
     assert_contains "$OUT" "SHA-256 and signature of Git-$ver-64-bit.exe verified" "all checks passed, before the version check"
     if [ "$want_rc" -eq 0 ]; then
-        assert_contains "$(<"$WU_DIR/verbs.log")" "args=/VERYSILENT /NORESTART /NOCANCEL /SP-" "the start line was reached with the story's flags, and replaced by a stand-in"
+        assert_contains "$(<"$WU_DIR/verbs.log")" "args=/VERYSILENT /NORESTART /NOCANCEL /SP-" "the start line was reached with the silent flags, and replaced by a stand-in"
     elif [ "$want_rc" -eq 19 ]; then
         assert_contains "$ERR" "programs of" "this harness runs from the install directory, and the runner names its programs"
         assert_no_file "$WU_DIR/verbs.log" "and never reached the start"

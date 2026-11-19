@@ -93,7 +93,7 @@ _head_blob_failed() {
     EXEMPT_GIT_ERR="$REPLY"
 }
 
-# ^ why top magic, not the story's plain :(exclude,glob); without it git aborts on "/x" and "../x", and relative patterns would depend on the cwd
+# ^ why top magic, not a plain :(exclude,glob); without it git aborts on "/x" and "../x", and relative patterns would depend on the cwd
 # ^ coupled the pathspec form with lib/scan/extract.sh callers; the hook, the counts and the probe must all build it here
 scan_ignore_pathspec() {
     printf ':(exclude,top,glob)%s' "$1"
@@ -140,7 +140,7 @@ _load_ignore_file() {
 
 # ^ invariant appends one exclude pathspec per row to GSG_EXCLUDES (caller resets it) and prints catch-all and union warnings; rc 1 = probe or rows file failed
 # ^ coupled with lib/inspect/doctor_repos.sh:doctor_repo_ignore; the hook and doctor must judge the same rows the same way
-# ^ hazard 1,000 lines of any length; a here-string of 64 KiB + 1 to 128 bytes hangs Git for Windows bash (#155) => <probe>.rows in the work dir
+# ^ hazard 1,000 lines of any length; a here-string of 64 KiB + 1 to 128 bytes hangs Git for Windows bash => <probe>.rows in the work dir
 exempt_warn_rows() {
     local probe="$1" rows="$2" n pat orig
     GSG_WHOLE_WARNED=0

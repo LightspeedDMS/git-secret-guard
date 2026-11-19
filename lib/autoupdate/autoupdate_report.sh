@@ -1,5 +1,5 @@
 # shellcheck shell=bash disable=SC2153,SC2034
-# ^ coupled status and doctor report the updater (#130); loaded by bin/git-secret-guard after lib/autoupdate/autoupdate.sh, never by the hook
+# ^ coupled status and doctor report the updater; loaded by bin/git-secret-guard after lib/autoupdate/autoupdate.sh, never by the hook
 # ^ invariant the state, the update record, the unit files, plist, wrapper and linger file are read as data; no manager (systemctl, launchctl, schtasks) is run
 # ^ invariant status lines are information only; doctor's findings follow the rules of docs/doctor.md, an empty source_checkout gives none
 
@@ -63,7 +63,7 @@ autoupdate_report_job() {
         AR_JOB_FILES=("$LJ_PLIST")
         AR_JOB_SEE="see: $LJ_LOG" AR_JOB_READ=autoupdate_report_plist_seconds
     elif tools_is_windows; then
-        # ^ invariant Windows runs an hourly task nothing can change (#132); the wrapper with its marker is all the evidence, schtasks is never run
+        # ^ invariant Windows runs an hourly task nothing can change; the wrapper with its marker is all the evidence, schtasks is never run
         AR_JOB_FILE="$GSG_UPDATE_TASK_CMD" AR_JOB_KEY=schedule AR_JOB_MARKER="$GSG_SCHTASKS_MARKER"
         AR_JOB_FILES=("$GSG_UPDATE_TASK_CMD")
         AR_JOB_SEE="see: $GSG_UPDATE_LOG" AR_JOB_READ=autoupdate_report_task_seconds
@@ -85,7 +85,7 @@ autoupdate_report_is_ours() {
     fi
 }
 
-# ^ invariant sets REPLY = the interval of the Windows task, fixed at one hour (#132); the wrapper being ours is the whole evidence
+# ^ invariant sets REPLY = the interval of the Windows task, fixed at one hour; the wrapper being ours is the whole evidence
 autoupdate_report_task_seconds() {
     REPLY="$GSG_UPDATE_INTERVAL_SECONDS"
 }

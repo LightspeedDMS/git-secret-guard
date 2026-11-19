@@ -1,8 +1,8 @@
 # git-secret-guard: project notes
 
 Bash only (no Python/Node). A git config hook (`hook.git-secret-guard.*`, git >= 2.54, events `pre-commit` and `commit-msg`) runs trufflehog and
-betterleaks on the lines each commit adds and on its message; `bin/git-secret-guard` installs it. Issues: GitHub LightspeedDMS/git-secret-guard
-(epics #1, #8). This file is an index: each topic states what must not break and links the doc holding the detail. Read that doc's
+betterleaks on the lines each commit adds and on its message; `bin/git-secret-guard` installs it. Issues: GitHub LightspeedDMS/git-secret-guard.
+This file is an index: each topic states what must not break and links the doc holding the detail. Read that doc's
 **Maintainer notes** before changing the area, and put new internals there, not here.
 
 ## Where things are
@@ -44,7 +44,7 @@ betterleaks on the lines each commit adds and on its message; `bin/git-secret-gu
 - **Never `wait "$!"` on a process substitution:** bash may have reaped the child already (`wait: pid N is not a child of this shell`, status
   127; macOS CI, `hp_records`). Run the command in the foreground into a file and take `$?`.
 - **Never feed a value that can reach 64 KiB through `<<<` or a here-doc:** Git for Windows bash 5.3 does not return on one of 65,537 to 65,664
-  bytes (only a timeout ends it; #155); pipe it, use a file or `split_lines`. In `hooks/`, `bin/` and `lib/` each one is listed with its bound
+  bytes (only a timeout ends it); pipe it, use a file or `split_lines`. In `hooks/`, `bin/` and `lib/` each one is listed with its bound
   in `tests/herestring-bounded.list` (a new one fails `test_quality.sh`): [platforms.md#maintainer-notes](docs/platforms.md#maintainer-notes).
 - **git >= 2.54**, older git ignores config hooks silently. Tests use `GSG_TEST_GIT` (Linux default `/usr/local/bin/git`; set it where that
   path does not exist). Config hooks run before the hookdir hook, both run, either failing blocks, whatever `core.hooksPath` says.
@@ -69,11 +69,11 @@ betterleaks on the lines each commit adds and on its message; `bin/git-secret-gu
 ## Invariants a "simplification" breaks (the link holds the why and the tests)
 
 - **Scanners** are pinned per version (trufflehog exit 0 needs `chunks >= 1`; betterleaks `--exit-code 42`, `WRN skipping` = error);
-  **no verification (#145):** trufflehog runs `--no-verification` and its `--results` must list `unverified` (else a silent pass), the result
+  **no verification:** trufflehog runs `--no-verification` and its `--results` must list `unverified` (else a silent pass), the result
   label is always `match`, and both scanners run with the dead proxy of `scanner_dead_proxy_env` set only in their subshell:
   [scan.md#maintainer-notes](docs/scan.md#maintainer-notes). Our `aws-access-key-id`
   rule always runs, a second `--enable-rule` run when HEAD has a config: [scan.md#limits](docs/scan.md#limits).
-- **PII rules (#148):** `pii-*` rules in `lib/scan/betterleaks-rule.toml`, offline (Luhn and mod-97 are rule `filter` expressions, never the
+- **PII rules:** `pii-*` rules in `lib/scan/betterleaks-rule.toml`, offline (Luhn and mod-97 are rule `filter` expressions, never the
   `validate` key); a HEAD `.gitleaks.toml` turns them off; samples in tests and docs are built from fragments, never written as a literal,
   and a new rule means scanning the tree with that rule file too: [scan.md#pii-rules](docs/scan.md#pii-rules).
 - **Output:** a clean commit prints one pass line, then the coverage reminder only after `REMINDER_READY=1`; the commit's exit status
@@ -88,17 +88,17 @@ betterleaks on the lines each commit adds and on its message; `bin/git-secret-gu
   is judged by betterleaks' behaviour, never by parsing TOML: [exemptions.md#maintainer-notes](docs/exemptions.md#maintainer-notes).
 - **Extraction:** added line N stays at line N (never count scan-tree lines); fixed diff flags and `-c` pins (new keys into
   `tests/scan/test_inherited_config.sh`): [scan.md#maintainer-notes](docs/scan.md#maintainer-notes). Every diff is `diff-tree -M` of `write-tree` against
-  HEAD with `GIT_INDEX_FILE` missing (`staged_trees_init`), never `diff --cached` (git reads the work tree file, #103); tests use `touch -d` old
+  HEAD with `GIT_INDEX_FILE` missing (`staged_trees_init`), never `diff --cached` (git reads the work tree file); tests use `touch -d` old
   mtimes. Pathspecs `:(exclude,top,glob)` with two diffs, `GIT_NO_REPLACE_OBJECTS=1`, the `GIT_*_PATHSPECS` unset:
   [exemptions.md](docs/exemptions.md) (table and maintainer notes).
-- **Git LFS (#98):** the hook never runs git-lfs; a pointer is known by content exactly as git-lfs decodes it, never by `.gitattributes`;
+- **Git LFS:** the hook never runs git-lfs; a pointer is known by content exactly as git-lfs decodes it, never by `.gitattributes`;
   the object comes from git config only (never `.lfsconfig`), size and SHA-256 are checked on the scanned copy, and every failure or `ext-`
   pointer blocks; no git process per file: [scan.md#maintainer-notes](docs/scan.md#maintainer-notes).
 - **Signals:** scanners and the reminder run in their own group (`lib/core/proc.sh`); `cleanup` kills, waits, then removes the work dir; adapters
   keep `timeout --foreground`, doctor's git shim omits it; a git or find that Ctrl-C must stop never runs inside `< <(...)` (bash 5.3).
-  **The hook is a supervisor plus a worker (#120):** bash runs a trap only after its foreground child (`$(...)`, a pipeline, any git) returns, only `wait`
+  **The hook is a supervisor plus a worker:** bash runs a trap only after its foreground child (`$(...)`, a pipeline, any git) returns, only `wait`
   is interrupted, so `hooks/secret-scan` starts itself as a unit (`proc_supervise`, `GSG_SCAN_WORKER=1`, dropped by the worker) and only polls it
-  with a foreground `sleep`, never blocking in `wait` while the worker runs (#134). Its HUP/INT/TERM traps `exit`;
+  with a foreground `sleep`, never blocking in `wait` while the worker runs. Its HUP/INT/TERM traps `exit`;
   the EXIT trap runs `proc_stop_worker` (TERM to the group; on Windows TERM first, then taskkill of the descendants, so the worker's `cleanup`
   runs; a "Terminated" job line may follow a stop, no SIGPIPE cuts it: gawk ignores it and reports a false "diff ended inside a hunk"). The supervisor
   loads only common.sh, proc.sh, the settings and the setsid check, anything else fails through to the worker's checks. A signal before the pid is recorded
@@ -110,25 +110,25 @@ betterleaks on the lines each commit adds and on its message; `bin/git-secret-gu
 - **One verdict, git's:** `status` and doctor share `hooklist_probe_line` (a bare repo written by hand, never `git init`; one `git hook list` per
   event of `GSG_HOOK_EVENTS`, `pre-commit` and `commit-msg`); `status` exits 1 on any `MISMATCH`/`MISSING`, also a missing or disabled `commit-msg`;
   `install` writes the exact two-event set and leaves a set that is already exact untouched: [install.md#maintainer-notes](docs/install.md#maintainer-notes).
-- **Auto-update** (#129 Linux, #131 macOS, #132 Windows; `lib/autoupdate/autoupdate.sh`, units
+- **Auto-update** (Linux, macOS and Windows; `lib/autoupdate/autoupdate.sh`, units
   `lib/autoupdate/install_timer.sh`, LaunchAgent `lib/platform/launchd.sh`):
   only the checkout's owner fetches (tags never forced) and fast-forwards, to the peeled commit of the newest valid tag, never past it; every user
   installs from a `git archive` export of the tag by a foreground child `install` without flags, nothing is sourced after it; a doubtful case is a
   recorded skip (exit 0); "needs install" = newer than the state's version or the share's `VERSION`; the lock lets in only its holder's child:
   [install.md](docs/install.md#auto-update---auto-update-and-update) ([maintainer notes](docs/autoupdate-maintainer.md)).
-  **Windows (#132; `lib/platform/schtasks.sh`, `lib/platform/winupdate.sh`):** an hourly Task Scheduler task runs a `.cmd` wrapper in the state dir (never in
+  **Windows (`lib/platform/schtasks.sh`, `lib/platform/winupdate.sh`):** an hourly Task Scheduler task runs a `.cmd` wrapper in the state dir (never in
   the share; it sets HOME and the XDG variables of the install); `update` `exec`s a private copy of the share first (a running script or cwd
   pins the share dir); the role is git's ownership probe (`[ -O ]` is true for any owner under MSYS); the fetch has no `setsid`,
   `GCM_INTERACTIVE=never` is exported and `MSYS_NO_PATHCONV` unset; the lock reads `/proc/<pid>/ppid` (MSYS `ps` has no `-o`);
   status and doctor run no `schtasks`; run.sh uses the recording `lc_schtasks_standin`, never a real task.
-- **Severity icons (#139):** the plain output of `status` (new format), `doctor`, the hook and the lifecycle commands is byte-stable; icons and escape
+- **Severity icons:** the plain output of `status` (new format), `doctor`, the hook and the lifecycle commands is byte-stable; icons and escape
   sequences exist only in terminal mode and only in the `ui_*` helpers of `lib/core/common.sh`; `status_line` counts PROBLEM and WARNING lines (the hook-listing
   subshell returns its count); the hook starts `doctor --recheck` without `CLICOLOR_FORCE`:
   [install.md](docs/install.md#sections-levels-and-the-summary), [doctor.md#maintainer-notes](docs/doctor.md#maintainer-notes).
 - **Doctor** exits 1 only for a PROBLEM, runs nothing a repository configures, never prints a hook `command`/`event` value; the findings
   record is data, merged under the lock: [doctor.md#maintainer-notes](docs/doctor.md#maintainer-notes).
 - **macOS:** `/bin/bash` 3.2 cannot parse the libs (bootstrap re-exec, two loop bounds); every install refusal uses `brew_unchanged_text`;
-  `hooks/secret-scan` and `bin/git-secret-guard` find their location with `cd -P` plus plain `readlink`, never `realpath` (none on macOS 12, #157).
+  `hooks/secret-scan` and `bin/git-secret-guard` find their location with `cd -P` plus plain `readlink`, never `realpath` (none on macOS 12).
   **Windows:** three path forms, compare in one (`cygpath -m -l`); no process groups: [platforms.md#maintainer-notes](docs/platforms.md#maintainer-notes).
 - **Git upgrade** (`lib/gitup/gitup*.sh`): one module file plus one registry line, only `other` still reserved
   ([CONTRIBUTING.md#adding-an-os-module](CONTRIBUTING.md#adding-an-os-module)); privileged tools only through `gitup_system_bin`, the printed
@@ -136,8 +136,8 @@ betterleaks on the lines each commit adds and on its message; `bin/git-secret-gu
   the installer: [install.md#maintainer-notes-git-upgrade](docs/install.md#maintainer-notes-git-upgrade).
 - **SmartGit:** only the `executable:` lines of a recorded `preferences.yml`, never re-serialised YAML; the Flatpak's four steps are one unit,
   each recorded before it acts. Per settings root only the newest set-up major is live; an older one is left over (info, no exit status, never
-  edited) unless an install has exactly that major (#88): [smartgit.md](docs/smartgit.md).
-- **GitHub Desktop link** (#73, `lib/integrations/desktop/desktop_git*.sh`,
+  edited) unless an install has exactly that major: [smartgit.md](docs/smartgit.md).
+- **GitHub Desktop link** (`lib/integrations/desktop/desktop_git*.sh`,
   body `lib/integrations/desktop/desktop-chain.sh`): Desktop's renderer resets `LOCAL_GIT_DIRECTORY`, so only `core.hooksPath` in
   `GIT_CONFIG_PARAMETERS` (never `GIT_CONFIG_COUNT`: Desktop's default branch sets its own, the preview branch appends) reaches its git 2.45. Order: wrappers,
   check of both branches with Desktop's git, launcher last; wrappers are links to one shared file (one bash, one git call, no `reference-transaction` one);

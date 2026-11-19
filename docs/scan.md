@@ -656,8 +656,9 @@ Why the scan code is shaped this way; each point was probed on the pinned versio
   `brew.failon`, `brew.nopopulate`); `gsg` runs the CLI under `env -i`; also `lc_make_fixtures`/`lc_use_fixtures`,
   `lc_path_without TOOL`, `lc_git_wrapper '<sh condition>'` and `lc_real_lookup` with `gitreal`. Doctor (`tests/support/doctor.sh`):
   `dr_begin`, `dr_repo NAME`, `doctor`. Stand-ins: betterleaks without `--report-path` is the pre-flight
-  (`STUB_GL_PREFLIGHT_RC`, `STUB_GL_PREFLIGHT_ERROR`, `STUB_GL_PREFLIGHT_SLEEP`); only real-betterleaks tests settle what a
-  config means; timing assertions allow one extra sleep for the `--version` probe. `tests/fixtures/husky/h` is husky
+  (`STUB_GL_PREFLIGHT_RC`, `STUB_GL_PREFLIGHT_ERROR`, `STUB_GL_PREFLIGHT_SLEEP`, which delays only the `dir` call); only
+  real-betterleaks tests settle what a config means; `STUB_VERSION` makes `--version` answer that version (the pin, for a test
+  whose machine section must be clean), and without it `--version` prints nothing. `tests/fixtures/husky/h` is husky
   9.1.7's real `h` (MIT, verbatim). `tests/coverage.sh` measures shell lines through xtrace (not `lib/scan/extract.awk`).
 
 ### The commit-msg event

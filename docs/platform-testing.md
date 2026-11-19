@@ -123,6 +123,9 @@ launchd, the container launchers), a single test through [`tests/windows-skips.l
 list to see exactly what is not covered on Windows. Add to it only what truly cannot apply, with the reason; a failure
 that could be a bug gets fixed.
 
+The gitup tests that build the signed stand-in (a certificate with a key) skip with "user DPAPI unavailable in this logon session
+(key-based SSH)" where user DPAPI is denied, because a key-based SSH logon has no password; they run in a credentialed session such as the hosted runner.
+
 `tests/platform/test_windows.sh` tests the Windows branches through a faked `uname`, so a change that breaks them also fails on Linux.
 
 ### Real scenarios and where each one runs

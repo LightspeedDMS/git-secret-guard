@@ -182,6 +182,38 @@ wu_need_windows_runner() {
     if ! "$TEST_SYSTEM32/fltmc.exe" >/dev/null 2>&1; then skip_test "this prompt is not elevated, a machine-wide run would show a UAC prompt"; fi
 }
 
+# ^ invariant wu_dpapi_probe makes one user-scope DPAPI Protect call and prints ok, denied (HResult 0x80070005 in the exception chain) or error and the HResult
+# ^ why user scope DPAPI, not machine scope; a key-based SSH logon is a network logon without a password and user DPAPI is denied there
+wu_dpapi_probe() {
+    "$TEST_SYSTEM32/WindowsPowerShell/v1.0/powershell.exe" -NoProfile -Command '
+        Add-Type -AssemblyName System.Security
+        try { [void][Security.Cryptography.ProtectedData]::Protect([byte[]](1, 2, 3), $null, "CurrentUser"); "ok" }
+        catch {
+            $e = $_.Exception; $h = $e.HResult; $denied = $false
+            while ($null -ne $e) { $h = $e.HResult; if ($h -eq -2147024891) { $denied = $true }; $e = $e.InnerException }
+            if ($denied) { "denied" } else { "error 0x{0:X8}" -f $h }
+        }'
+}
+
+# ^ invariant wu_need_user_key_store skips the test only when user DPAPI is denied; any other answer or a failing probe is a failure, never a skip
+# ^ coupled WU_DPAPI_PROBE is a test seam, it names the command answering in place of wu_dpapi_probe
+wu_need_user_key_store() {
+    local probe="${WU_DPAPI_PROBE:-wu_dpapi_probe}" answer
+    answer="$("$probe")" || {
+        printf 'user DPAPI probe failed (%s)\n' "$probe" >&2
+        return 1
+    }
+    answer="${answer%$'\r'}"
+    case "$answer" in
+        ok) return 0 ;;
+        denied) skip_test "user DPAPI unavailable in this logon session (key-based SSH); the signed stand-in cannot be built" ;;
+        *)
+            printf 'user DPAPI probe gave an unexpected answer [%s]\n' "${answer:0:80}" >&2
+            return 1
+            ;;
+    esac
+}
+
 # ^ invariant removes the test signer certificates (subject and issuer equal) from stores My and CA with their keys; nothing else in a store is touched
 wu_sweep_signer_certs() {
     GSG_SUBJECT="$WU_SIGNER" "$TEST_SYSTEM32/WindowsPowerShell/v1.0/powershell.exe" -NoProfile -Command '
@@ -204,8 +236,10 @@ WU_PS_KEY_NAME='function Get-KeyName($c) {
 # ^ invariant wu_plant_signer_cert KEYLOG plants one certificate with a key as an aborted build leaves it and writes the name of its key file to KEYLOG
 wu_plant_signer_cert() {
     [ -n "${1:-}" ] || return 1
+    wu_need_user_key_store || return 1
     GSG_KEYLOG="$1" GSG_SUBJECT="$WU_SIGNER" "$TEST_SYSTEM32/WindowsPowerShell/v1.0/powershell.exe" -NoProfile -Command "$WU_PS_KEY_NAME"'
-        $c = New-SelfSignedCertificate -Type CodeSigningCert -Subject $env:GSG_SUBJECT -CertStoreLocation Cert:\CurrentUser\My -NotAfter (Get-Date).AddYears(10)
+        $ErrorActionPreference = "Stop"
+        $c = New-SelfSignedCertificate -Type CodeSigningCert -Subject $env:GSG_SUBJECT -CertStoreLocation Cert:\CurrentUser\My -NotAfter (Get-Date).AddYears(10) -ErrorAction Stop
         [IO.File]::WriteAllText($env:GSG_KEYLOG, (Get-KeyName $c))'
 }
 
@@ -313,6 +347,7 @@ wu_build_standin_unlocked() {
     cache="$(wu_standin_cache)" || return 1
     mkdir -p -- "$out" "$cache" || return 1
     if [ ! -f "$cache/standin.exe" ] || [ ! -f "$cache/standin-unsigned.exe" ]; then
+        wu_need_user_key_store || return 1
         printf '%s\n' "$WU_STANDIN_SRC" >"$out/standin.cs" || return 1
         GSG_SRC="$(cygpath -w "$out/standin.cs")" GSG_OUT="$(cygpath -w "$out/standin-unsigned.exe")" "$ps" -NoProfile -Command \
             'Add-Type -TypeDefinition (Get-Content -Raw -LiteralPath $env:GSG_SRC) -OutputAssembly $env:GSG_OUT -OutputType ConsoleApplication' >"$out/build.log" 2>&1 || {
@@ -325,9 +360,11 @@ wu_build_standin_unlocked() {
             return 1
         }
         # ^ why the key file name is recorded, not the files of the Keys directory counted; every process of the user writes there
+        # ^ external Windows PowerShell 5.1 -Command ends only the statement on -ErrorAction Stop and exits 0, the preference ends the script and exits 1
         GSG_KEYLOG="$(cygpath -w "$out/key.name")" GSG_OUT="$(cygpath -w "$out/standin.exe")" GSG_SUBJECT="$WU_SIGNER" "$ps" -NoProfile -Command "$WU_PS_KEY_NAME"'
+            $ErrorActionPreference = "Stop"
             $s = $env:GSG_SUBJECT
-            $c = New-SelfSignedCertificate -Type CodeSigningCert -Subject $s -CertStoreLocation Cert:\CurrentUser\My -NotAfter (Get-Date).AddYears(10)
+            $c = New-SelfSignedCertificate -Type CodeSigningCert -Subject $s -CertStoreLocation Cert:\CurrentUser\My -NotAfter (Get-Date).AddYears(10) -ErrorAction Stop
             try {
                 [IO.File]::WriteAllText($env:GSG_KEYLOG, (Get-KeyName $c))
                 Set-AuthenticodeSignature -FilePath $env:GSG_OUT -Certificate $c | Out-Null

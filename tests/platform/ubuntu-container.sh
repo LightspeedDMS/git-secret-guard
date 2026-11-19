@@ -326,15 +326,20 @@ isolation_mqueue_check() {
 isolation_stray_devices() {
     local -a entries=()
     local -A withheld=()
-    local entry stray=0 rc
+    local entry stray=0 rc=0 listing
     if [ ! -d "$1" ] || [ ! -r "$1" ]; then
         printf 'isolation_stray_devices: cannot list %s\n' "${1//[^A-Za-z0-9_\/.-]/?}" >&2
         return 2
     fi
     # ^ why prune mqueue and check it by isolation_mqueue_check, not one find over all of it; podman 6 on SELinux makes find fail inside /dev/mqueue
-    mapfile -d '' -t -n $((ISOLATION_MAX_DEV_ENTRIES + 1)) entries < <(find "$1" -mindepth 1 -maxdepth "$ISOLATION_DEV_DEPTH" -path "$1/mqueue" -prune -o -printf '%P\0' 2>/dev/null)
-    wait "$!"
-    rc=$?
+    # ^ why a foreground find into a file, not a process substitution; bash may reap the child before wait "$!" => status 127, a false "cannot list"
+    listing="$(mktemp)" || rc=2
+    if [ "$rc" -eq 0 ]; then
+        find "$1" -mindepth 1 -maxdepth "$ISOLATION_DEV_DEPTH" -path "$1/mqueue" -prune -o -printf '%P\0' >"$listing" 2>/dev/null
+        rc=$?
+        mapfile -d '' -t -n $((ISOLATION_MAX_DEV_ENTRIES + 1)) entries <"$listing" || rc=2
+        rm -f -- "$listing"
+    fi
     if [ "${#entries[@]}" -gt "$ISOLATION_MAX_DEV_ENTRIES" ]; then
         printf '<more than %s /dev entries>\n' "$ISOLATION_MAX_DEV_ENTRIES"
         return 1

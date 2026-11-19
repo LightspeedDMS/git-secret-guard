@@ -16,6 +16,32 @@ releases and finishing. Where [CONTRIBUTING.md](../CONTRIBUTING.md) already says
 
 - Feature, fix, docs, test and CI pull requests never touch `VERSION`; a release is a separate pull request that changes only `VERSION`,
   its merge commit is tagged, and a tag is never moved: [CONTRIBUTING.md#versions](../CONTRIBUTING.md#versions).
+- **A tag is a deploy.** Auto-update moves every install that follows a checkout to the newest released tag within the hour
+  ([install.md](install.md#auto-update---auto-update-and-update)). A tag goes only on a commit whose `main` CI is green.
+- **The steps:**
+  1. Nothing meant for this release is still open: `gh pr list --state open`, `gh issue list --state open`.
+  2. `main` CI is green on the commit you release: `gh run list --workflow tests.yml --branch main --event push --limit 3`. A run shown
+     `cancelled` was superseded by a later push (merges in quick succession cancel the earlier runs, and the README badge shows red
+     until the latest run finishes): wait for the latest one, never tag on a cancelled or failed run.
+  3. The pull requests merged since the last tag:
+     `git log --merges --format='%s' "$(git describe --tags --abbrev=0 origin/main)"..origin/main` (no tag yet: every merge).
+  4. Choose the bump by [CONTRIBUTING.md#versions](../CONTRIBUTING.md#versions); docs, tests and CI alone need no release.
+  5. Branch `release/<x.y.z>` from `origin/main`, change only `VERSION`, commit `Release <x.y.z>` signed off, open the pull request
+     `Release <x.y.z>`: its description lists the merged pull requests (number and title) and the bump with its reason. Watch its checks.
+  6. After it is merged: `git fetch origin`, then tag its merge commit and push the tag:
+     `git tag -a v<x.y.z> -m "v<x.y.z>" <merge commit> && git push origin v<x.y.z>`; check with `git ls-remote --tags origin v<x.y.z>`
+     that the tag peels to that merge commit.
+  7. A wrong tag is never moved, deleted or re-created: the fix is the next version.
+
+## Repository settings (maintainers)
+
+- `main` is protected: no force push, no deletion; required checks `suite (head)`, `windows-suite`, `macos-suite`, `windows`,
+  `Analyze (actions)`, `macos-list-complete`, `docs` and `compare` (a skipped job counts as passed). Pull requests are merged by a person.
+- **A check is required only after it was seen reporting on a pull request.** A required check that never reports blocks every pull
+  request with all other checks green ("Expected — Waiting for status to be reported"). Read a blocked pull request's
+  `mergeStateStatus` and the check names on its head commit before suspecting the code.
+- CodeQL runs as GitHub's default setup for the language `actions` (the workflows); its language is set explicitly: enabled on an
+  empty repository, it detects none and never runs.
 
 ## Running the tests
 
@@ -76,6 +102,11 @@ without bottles builds from source for a long time, or `dnf`/`apt-get` as root; 
   tool vendor's credit status: say "the Windows test machine", "an Intel Mac test machine", "a measurement script (not shipped)".
 - **GitHub text follows the same rule as files:** issue and pull request bodies, comments and commit messages are public too.
   Private notes and reports outside the repository may hold those details; nothing committed or posted may.
+- **Commit messages carry no session or tool trailers** besides `Co-Authored-By` (no `Claude-Session:` link or the like), and the author
+  and the sign-off use the same identity as the rest of the history. A merged commit stays in the history for good.
+- **Read before you commit, push or post:** every changed line, every new file whole, the commit message and the pull request or
+  issue text, for these details and for secrets. The hook's scanners catch only known secret formats; a host name, a person's
+  address or a pasted log passes them. Anything doubtful goes to the maintainer before it is committed.
 
 ## Pull requests you open
 

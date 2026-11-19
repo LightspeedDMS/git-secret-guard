@@ -32,6 +32,23 @@ test_real_a_token_in_dash_m_blocks_the_commit_and_the_value_is_never_printed() {
     if has_head; then fail "a commit was created"; fi
 }
 
+test_real_the_message_guidance_is_printed_and_both_markers_on_the_token_line_make_the_commit_pass() {
+    begin_real guide || return 1
+    local marks="trufflehog:ignore betterleaks:allow"
+    printf 'fix: rotate\n\nthe old credential was\n%s\n' "$(token_line)" >"$SANDBOX/msg-guide"
+    stage_file src/app.txt "clean content" || return 1
+    run_cap gitx commit -q -F "$SANDBOX/msg-guide"
+    assert_message_blocked "-F" 4
+    assert_contains "$ERR" "(trufflehog: trufflehog:ignore, betterleaks: betterleaks:allow). The marker stays in the commit message." "the message guidance"
+    assert_not_contains "$ERR" ".secret-scan-ignore" "no path exemption for a message"
+    assert_not_contains "$ERR" ".gitleaksignore" "no fingerprint file"
+    assert_not_contains "$ERR" "COMMIT_EDITMSG" "no internal file name"
+    printf 'fix: rotate\n\nthe old credential was\n%s %s\n' "$(token_line)" "$marks" >"$SANDBOX/msg-guide2"
+    run_cap gitx commit -q -F "$SANDBOX/msg-guide2"
+    assert_rc 0 "both markers on the token line of the message pass"
+    no_leak "$(fake_github_token)"
+}
+
 test_real_a_token_in_dash_f_blocks_on_its_line() {
     begin_real dashf || return 1
     printf 'fix: rotate\n\nthe old credential was\n%s\n' "$(token_line)" >"$SANDBOX/msg-f"

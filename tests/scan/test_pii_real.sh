@@ -3,6 +3,8 @@
 # ^ security every sample is built at run time from fragments, never a literal, never printed => no_leak asserts absence; see docs/scan.md#pii-rules
 # shellcheck source=tests/support/lib.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/../support/lib.sh"
+# shellcheck source=tests/scan/guidance_helpers.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/guidance_helpers.sh"
 
 PII_EXCERPT=400
 # ^ why published sample parts, not random ones; they pass every structure check of pii-us-ssn and each negative case varies one part
@@ -122,6 +124,25 @@ luhn_complete() {
 }
 # ^ invariant luhn_break NUMBER has the same shape and fails Luhn, the last digit moves by one
 luhn_break() { printf '%s%s' "${1%?}" $(((${1: -1} + 1) % 10)); }
+
+test_real_pii_a_card_finding_prints_the_betterleaks_only_guidance_and_its_marker_passes() {
+    need_real_tools
+    new_repo pguide || return 1
+    local card marker
+    card="$(luhn_complete 4 16)"
+    stage_file tests/cards.txt "ok" "card $card" || return 1
+    commit_cap "blocked"
+    assert_rc 1 "the card blocks"
+    assert_contains "$ERR" $'       betterleaks: betterleaks:allow\n' "only the betterleaks marker"
+    assert_not_contains "$ERR" "trufflehog" "trufflehog is not named"
+    assert_contains "$ERR" $'       tests/cards.txt:pii-credit-card:2\n' "the exact fingerprint line of the row"
+    marker="$(guidance_marker)" || fail "no marker line in the output"
+    assert_eq "$marker" "betterleaks:allow" "the marker, as printed"
+    stage_file tests/cards.txt "ok" "card $card $marker" || return 1
+    commit_cap "marked"
+    assert_rc 0 "the printed marker passes in the same commit"
+    no_leak "$card"
+}
 
 test_real_pii_card_numbers_block_when_luhn_valid_and_nothing_else_does() {
     need_real_tools

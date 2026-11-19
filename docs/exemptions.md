@@ -75,8 +75,7 @@ Verified with the real trufflehog 3.99.2 and betterleaks 1.9.0
 | `gitleaks:allow` or `betterleaks:allow` | **still reports** | silent | blocked by trufflehog |
 | both tools' markers, in either order, after any comment prefix (`# trufflehog:ignore gitleaks:allow`) | silent | silent | succeeds |
 
-betterleaks honours both of its markers natively, `gitleaks:allow` (so markers written for the previous scanner keep
-working) and `betterleaks:allow`. The marker must be on the **same line** as the value; a marker on the line above
+betterleaks honours both of its markers natively, `gitleaks:allow` and `betterleaks:allow`. The marker must be on the **same line** as the value; a marker on the line above
 mutes nothing. A secret that only one of the tools detects needs only that tool's marker.
 
 ## Accepting a PII false positive

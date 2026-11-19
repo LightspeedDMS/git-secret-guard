@@ -93,6 +93,49 @@ report_reminder_failed() {
     printf '%s: coverage re-check failed (%s); run %s doctor\n' "$GSG_NAME" "$1" "$GSG_NAME" >&2
 }
 
+GSG_REPORT_MAX_FINGERPRINTS=10
+
+# ^ invariant $1 = the sorted rows file, $2 = "" or message; prints fixed words and the scanner, rule, file and line fields of the rows, never a value
+# ^ invariant at most GSG_REPORT_MAX_FINGERPRINTS fingerprint lines and one "... and N more" line; no icon, no escape sequence; --no-verify is printed after
+# ^ why skip, not guess, the fingerprint when the line is "?", the path has "?" or "\", or it is a root ignore file; the row may not match betterleaks
+_report_guidance() {
+    awk -F'\t' -v mode="${2:-}" -v max_fp="$GSG_REPORT_MAX_FINGERPRINTS" '
+        $1 == "trufflehog" { tf = 1 }
+        $1 == "betterleaks" {
+            bl = 1
+            if ($5 == "?" || index($4, "?") || index($4, "\\") || $4 == ".gitleaksignore" || $4 == ".betterleaksignore") next
+            if (listed < max_fp) { listed++; fp[listed] = $4 ":" $2 ":" $5 } else { more++ }
+        }
+        END {
+            print "What to do:"
+            if (mode == "message") {
+                print "  1. Write the message again without the value, and rotate a real credential."
+                print "  2. A false positive that must stay in the message: put the marker of every scanner that reports the line on that same line"
+                print "     (trufflehog: trufflehog:ignore, betterleaks: betterleaks:allow). The marker stays in the commit message."
+            } else {
+                print "  1. A real credential: remove it from the change and rotate it. Nothing below is for a real credential."
+                print "  2. A false positive or a test value, one line: put the marker of every scanner that reports the line on that same line."
+                if (tf && bl) print "       trufflehog: trufflehog:ignore    betterleaks: betterleaks:allow    both: trufflehog:ignore betterleaks:allow"
+                else if (tf) print "       trufflehog: trufflehog:ignore"
+                else print "       betterleaks: betterleaks:allow"
+                print "     A marker works in this commit."
+                step = 3
+                if (listed > 0) {
+                    print "  3. A betterleaks finding on a line that cannot hold a marker: add its line to .gitleaksignore at the repository root:"
+                    for (i = 1; i <= listed; i++) print "       " fp[i]
+                    if (more > 0) print "       ... and " more " more (<path>:<rule>:<line> of each betterleaks row above)"
+                    step = 4
+                }
+                print "  " step ". A whole path of test data: add \"<glob>  # <reason>\" to .secret-scan-ignore at the repository root."
+                if (tf) print "     trufflehog has no per-finding file: its finding on a line that cannot hold a marker needs this step."
+                if (listed > 0) print "  .gitleaksignore and .secret-scan-ignore are read from the last commit, never from the commit being made:"
+                else print "  .secret-scan-ignore is read from the last commit, never from the commit being made:"
+                print "  commit the entry by itself first (git add <file> && git commit -m \"<message>\" <file>), then commit this change."
+            }
+            print "An automated agent asks its user before adding an exemption or using --no-verify."
+        }' "$1" >&2
+}
+
 report_results() {
     local work="${1:-}" rows errs n heading="in lines this commit adds" shown=""
     case "${2:-}" in
@@ -129,6 +172,7 @@ report_results() {
         printf '%s%s: %s potential secret(s) %s:\n' "$REPLY" "$GSG_NAME" "$n" "$heading" >&2
         awk -F'\t' -v shown="$shown" '{ printf "  %-11s %s (%s)  %s:%s\n", $1, $2, $3, (shown != "" ? shown : $4), $5 }' "$rows" >&2
         printf '  (values are not shown; remove them and rotate any real credential)\n' >&2
+        _report_guidance "$rows" "${2:-}" || return 1
     fi
     if [ -s "$errs" ] || [ -s "$rows" ]; then
         return 1

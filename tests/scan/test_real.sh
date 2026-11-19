@@ -2,6 +2,8 @@
 # ^ external trufflehog runs --no-verification => a pattern match is a match, with or without network; see docs/scan.md#limits
 # shellcheck source=tests/support/lib.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/../support/lib.sh"
+# shellcheck source=tests/scan/guidance_helpers.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/guidance_helpers.sh"
 
 DEAD_PROXY=(HTTPS_PROXY=http://127.0.0.1:9 HTTP_PROXY=http://127.0.0.1:9 https_proxy=http://127.0.0.1:9 http_proxy=http://127.0.0.1:9)
 
@@ -580,6 +582,73 @@ test_real_a_commit_whose_index_cannot_be_written_as_a_tree_is_blocked() {
     assert_contains "$ERR" "nothing was scanned" "the block says nothing was scanned"
     assert_contains "$ERR" "git write-tree failed" "the message names the failing step"
     if gitx rev-parse -q --verify HEAD >/dev/null 2>&1; then fail "a commit was created"; fi
+}
+
+test_real_the_printed_both_marker_applied_as_printed_makes_the_same_commit_pass() {
+    need_real_tools
+    new_repo rgboth || return 1
+    local marker
+    stage_file c.txt "x" "token = \"$(fake_github_token)\"" || return 1
+    commit_cap "blocked"
+    assert_rc 1 "both scanners report line 2"
+    assert_contains "$ERR" "       trufflehog: trufflehog:ignore    betterleaks: betterleaks:allow    both: trufflehog:ignore betterleaks:allow" "step 2 names both markers"
+    marker="$(guidance_marker)" || fail "the marker line is not in the output"
+    assert_eq "$marker" "trufflehog:ignore betterleaks:allow" "the both form, as printed"
+    stage_file c.txt "x" "token = \"$(fake_github_token)\" $marker" || return 1
+    commit_cap "marked"
+    assert_rc 0 "the printed markers pass in the same commit"
+    no_leak "$(fake_github_token)"
+}
+
+test_real_a_trufflehog_only_finding_gets_its_marker_and_the_path_step_and_both_work_as_printed() {
+    need_real_tools
+    new_repo rgtf || return 1
+    local marker
+    stage_file node_modules/x/t.txt "token = \"$(fake_github_token)\"" || return 1
+    commit_cap "blocked"
+    assert_rc 1 "trufflehog alone reports a path betterleaks allowlists"
+    assert_contains "$ERR" $'       trufflehog: trufflehog:ignore\n' "only the trufflehog marker is named"
+    assert_not_contains "$ERR" "betterleaks:allow" "no betterleaks marker"
+    assert_not_contains "$ERR" ".gitleaksignore" "no fingerprint file"
+    assert_contains "$ERR" $'  3. A whole path of test data: add "<glob>  # <reason>" to .secret-scan-ignore at the repository root.\n     trufflehog has no per-finding file' "the path step is the second remedy"
+    marker="$(guidance_marker)" || fail "the marker line is not in the output"
+    assert_eq "$marker" "trufflehog:ignore" "the marker, as printed"
+    stage_file node_modules/x/t.txt "token = \"$(fake_github_token)\" $marker" || return 1
+    commit_cap "marked"
+    assert_rc 0 "the printed marker passes in the same commit"
+    new_repo rgtfp || return 1
+    stage_file base.txt hello && gitx commit -q --no-verify -m base || return 1
+    stage_file node_modules/x/t.txt "token = \"$(fake_github_token)\"" || return 1
+    commit_cap "blocked again"
+    assert_rc 1 "blocked before the entry"
+    stage_file .secret-scan-ignore 'node_modules/**  # test data' || return 1
+    commit_cap "the entry by itself" .secret-scan-ignore
+    assert_rc 0 "the entry in the printed format commits by itself, the flagged file stays staged"
+    assert_eq "$(gitx diff --cached --name-only)" "node_modules/x/t.txt" "the flagged file is still staged"
+    commit_cap "covered"
+    assert_rc 0 "the path step passes once the entry is committed"
+    no_leak "$(fake_github_token)"
+}
+
+# ^ invariant rows_of SCANNER FILE counts the report rows of one scanner for one file in ERR
+rows_of() { grep -c -E "^  $1 +[A-Za-z0-9-]+ \(match\)  $2:" <<<"$ERR" || true; }
+
+# ^ invariant measured with trufflehog 3.99.2 and betterleaks 1.9.0; a scanner version merging the repeats changes the counts and fails this test
+test_real_a_value_repeated_in_one_file_is_reported_per_line_until_each_line_has_its_markers() {
+    need_real_tools
+    new_repo rgrep || return 1
+    local tok marks="trufflehog:ignore betterleaks:allow"
+    tok="$(fake_github_token)"
+    stage_file r.txt "token = \"$tok\"" "token = \"$tok\"" || return 1
+    commit_cap "twice"
+    assert_rc 1 "blocked"
+    assert_eq "$(rows_of trufflehog r.txt)$(rows_of betterleaks r.txt)" 22 "before: each scanner reports both lines"
+    stage_file r.txt "token = \"$tok\" $marks" "token = \"$tok\"" || return 1
+    commit_cap "first line marked"
+    assert_rc 1 "the second line still blocks"
+    assert_eq "$(rows_of trufflehog r.txt)$(rows_of betterleaks r.txt)" 11 "after: one row each, for line 2 only"
+    assert_contains "$ERR" "  trufflehog  Github (match)  r.txt:2" "trufflehog names line 2"
+    no_leak "$tok"
 }
 
 run_file_tests

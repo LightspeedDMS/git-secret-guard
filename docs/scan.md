@@ -60,8 +60,33 @@ git-secret-guard: 2 potential secret(s) in lines this commit adds:
   betterleaks github-pat (match)  c.txt:2
   trufflehog  Github (match)  c.txt:2
   (values are not shown; remove them and rotate any real credential)
+What to do:
+  1. A real credential: remove it from the change and rotate it. Nothing below is for a real credential.
+  2. A false positive or a test value, one line: put the marker of every scanner that reports the line on that same line.
+       trufflehog: trufflehog:ignore    betterleaks: betterleaks:allow    both: trufflehog:ignore betterleaks:allow
+     A marker works in this commit.
+  3. A betterleaks finding on a line that cannot hold a marker: add its line to .gitleaksignore at the repository root:
+       c.txt:github-pat:2
+  4. A whole path of test data: add "<glob>  # <reason>" to .secret-scan-ignore at the repository root.
+     trufflehog has no per-finding file: its finding on a line that cannot hold a marker needs this step.
+  .gitleaksignore and .secret-scan-ignore are read from the last commit, never from the commit being made:
+  commit the entry by itself first (git add <file> && git commit -m "<message>" <file>), then commit this change.
+An automated agent asks its user before adding an exemption or using --no-verify.
 To bypass this check for one commit: git commit --no-verify
 ```
+
+   The guidance (`report_results`, `lib/scan/report.sh`) is built from the scanner, rule, file and line of the rows and fixed text,
+   in one awk run, and never reads a value. Step 2 names only the scanners that have a row (`trufflehog: trufflehog:ignore` alone
+   for a trufflehog-only block, `betterleaks: betterleaks:allow` alone for a betterleaks-only one, the `both:` form when each has a
+   row). Step 3 lists one fingerprint per betterleaks row, at most 10, then `... and N more (<path>:<rule>:<line> of each
+   betterleaks row above)`. No fingerprint is printed for a row whose line is `?`, whose file holds `?` or `\`, or whose file is a
+   root `.gitleaksignore` or `.betterleaksignore` (scanned under another name, so the row may not show the path betterleaks
+   matches); when every betterleaks row is left out, or none exists, step 3 is not printed, the path step is numbered 3 and the
+   closing sentence starts with `.secret-scan-ignore`. The path step never builds a pattern from a path (a git glob pathspec).
+   `git commit <path>` gives the hook a temporary index, so the printed command scans and commits only the entry file and leaves
+   the flagged file staged (`test_real_the_printed_fingerprint_committed_by_itself_with_the_flagged_file_staged_lets_the_change_pass`).
+   The icon and the colour stay on the heading; no guidance line has either. A "nothing was scanned" block prints no guidance.
+   If the awk run fails, `report_results` returns 1 after the rows, so the commit stays blocked.
 
    A scanner error prints `git-secret-guard: a scanner did not complete, so the commit is blocked:` and one indented line
    per error (`trufflehog: timed out after 300s; the scan did not complete`, `betterleaks: scan failed (exit <n>)`, ...); the
@@ -117,8 +142,18 @@ git-secret-guard: 2 potential secret(s) in the commit message:
   betterleaks github-pat (match)  commit message:3
   trufflehog  Github (match)  commit message:3
   (values are not shown; remove them and rotate any real credential)
+What to do:
+  1. Write the message again without the value, and rotate a real credential.
+  2. A false positive that must stay in the message: put the marker of every scanner that reports the line on that same line
+     (trufflehog: trufflehog:ignore, betterleaks: betterleaks:allow). The marker stays in the commit message.
+An automated agent asks its user before adding an exemption or using --no-verify.
 To bypass this check for one commit: git commit --no-verify
 ```
+
+  The four guidance lines are fixed text and never name `.secret-scan-ignore`, `.gitleaksignore` or `COMMIT_EDITMSG` (a path
+  exemption does not apply to a message, and a fingerprint would mute that rule on that line of every later message). Inline
+  markers apply to a message like to any scanned line: `trufflehog:ignore` and `betterleaks:allow` on the line of the value
+  silence the tools (`test_real_the_message_guidance_is_printed_and_both_markers_on_the_token_line_make_the_commit_pass`).
 
   An empty message file is not scanned. A run with more than one argument blocks with `the commit-msg run needs exactly one
   argument, the message file, and got N; nothing was scanned.`, a message file that is missing or unreadable with `cannot read

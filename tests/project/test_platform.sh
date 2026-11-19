@@ -567,7 +567,7 @@ test_the_mount_check_names_a_mount_point_that_is_mounted_twice() {
     no_leak "secret-root"
 }
 
-# ^ external the 17 entries of /dev (depth <= 4) in an unmodified rootless podman 5 container; probed under CONTAINERS_CONF
+# ^ external the 16 entries of /dev (depth <= 4) in an unmodified rootless podman 5 container; probed under CONTAINERS_CONF
 # ^ see doc:docs/platform-testing.md#what-the-platform-run-enforces
 dev_baseline() {
     local name
@@ -584,7 +584,7 @@ test_the_device_check_lists_entries_of_dev_outside_the_baseline_and_fails_closed
     local d="$SANDBOX/dev"
     dev_baseline "$d" || return 1
     container_fn isolation_stray_devices "$d"
-    assert_rc 0 "the 17 entries of an unmodified container /dev are accepted"
+    assert_rc 0 "the 16 entries of an unmodified container /dev are accepted"
     assert_empty "$OUT" "nothing is named"
     : >"$d/pts/3" || return 1
     container_fn isolation_stray_devices "$d"

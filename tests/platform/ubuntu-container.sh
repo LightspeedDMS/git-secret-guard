@@ -290,7 +290,7 @@ isolation_stray_mounts() {
     [ "$stray" -eq 0 ]
 }
 
-# ^ external the 17 entries of /dev to depth 4 in an unmodified rootless podman 5 container under CONTAINERS_CONF
+# ^ external the 16 entries of /dev to depth 4 in an unmodified rootless podman 5 container under CONTAINERS_CONF
 # ^ see doc:docs/platform-testing.md#what-the-platform-run-enforces
 ISOLATION_ALLOWED_DEV=" core fd full mqueue null ptmx pts pts/ptmx random shm stderr stdin stdout tty urandom zero "
 ISOLATION_MAX_DEV_ENTRIES=500

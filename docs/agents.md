@@ -20,9 +20,10 @@ releases and finishing. Where [CONTRIBUTING.md](../CONTRIBUTING.md) already says
   ([install.md](install.md#auto-update---auto-update-and-update)). A tag goes only on a commit whose `main` CI is green.
 - **The steps:**
   1. Nothing meant for this release is still open: `gh pr list --state open`, `gh issue list --state open`.
-  2. `main` CI is green on the commit you release: `gh run list --workflow tests.yml --branch main --event push --limit 3`. A run shown
-     `cancelled` was superseded by a later push (merges in quick succession cancel the earlier runs, and the README badge shows red
-     until the latest run finishes): wait for the latest one, never tag on a cancelled or failed run.
+  2. `main` CI is green on the commit you release: `gh run list --workflow tests.yml --branch main --event push --limit 3`. Every
+     push to `main` gets its own complete run, never cancelled by a later one; a run shown `cancelled` was cancelled by hand or hit a job
+     timeout (only a branch or pull request run is cancelled by a newer push): look at why, rerun it, and never tag on a cancelled,
+     failed or unfinished run.
   3. The pull requests merged since the last tag:
      `git log --merges --format='%s' "$(git describe --tags --abbrev=0 origin/main)"..origin/main` (no tag yet: every merge).
   4. Choose the bump by [CONTRIBUTING.md#versions](../CONTRIBUTING.md#versions); docs, tests and CI alone need no release.

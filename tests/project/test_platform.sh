@@ -635,6 +635,25 @@ test_the_device_check_checks_a_mqueue_directory_it_cannot_open_by_stat_instead_o
     no_leak "$SANDBOX"
 }
 
+# ^ external bash may reap a process substitution child before wait "$!" and answer 127; a wait function answering 127 stands in for the race (#1)
+# ^ invariant the stand-in find lists for real and exits 1 only when called with -prune (the listing, not the mqueue check)
+# shellcheck disable=SC2016
+test_the_device_check_takes_the_status_of_find_not_of_wait() {
+    local d="$SANDBOX/dev5" fake="$SANDBOX/fakefind"
+    dev_baseline "$d" || return 1
+    run_cap env -i PATH="/usr/local/bin:/usr/bin:/bin" bash -c 'source "$1"; wait() { return 127; }; isolation_stray_devices "$2"' _ \
+        "$GSG_PROJECT/tests/platform/ubuntu-container.sh" "$d"
+    assert_rc 0 "a wait that reports the child as reaped does not make a successful listing fail"
+    assert_empty "$OUT" "nothing is named"
+    mkdir -p -- "$fake" || return 1
+    printf '%s\n' '#!/bin/bash' 'PATH=/usr/local/bin:/usr/bin:/bin' 'find "$@"' 'rc=$?' \
+        'case " $* " in *" -prune "*) exit 1 ;; esac' 'exit "$rc"' >"$fake/find" && chmod +x "$fake/find" || return 1
+    run_cap env -i PATH="$fake:/usr/local/bin:/usr/bin:/bin" bash -c 'source "$1"; isolation_stray_devices "$2"' _ \
+        "$GSG_PROJECT/tests/platform/ubuntu-container.sh" "$d"
+    assert_rc 2 "a listing whose find exits 1 is not an empty list"
+    assert_contains "$ERR" "cannot list all of" "and says so"
+}
+
 test_the_device_check_fails_closed_on_an_unreadable_subdirectory_and_stops_at_500_entries() {
     local d="$SANDBOX/dev3" i
     dev_baseline "$d" || return 1

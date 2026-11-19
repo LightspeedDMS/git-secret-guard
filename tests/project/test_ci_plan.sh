@@ -195,4 +195,26 @@ test_the_workflow_has_no_matrix_job_left_that_would_hide_suite_head() {
     esac
 }
 
+# ^ invariant an external action is pinned by full commit SHA with a release-tag comment (shape only), one SHA per repo => a moved tag cannot change CI
+test_every_external_action_is_pinned_by_full_sha_with_a_release_tag_comment_and_one_sha_per_repo() {
+    local uses line rest pin='^([^:]+:[0-9]+):[[:space:]-]*uses:[[:space:]]+([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)@([0-9a-f]{40}) # v[0-9]+\.[0-9]+\.[0-9]+$' localuse='^[[:space:]-]*uses:[[:space:]]+\./' pairs="" split rc=0
+    uses="$(cd -- "$GSG_PROJECT" && LC_ALL=C grep -n -H -E -e '^[[:space:]-]*uses:[[:space:]]' .github/workflows/*.yml .github/actions/*/action.yml)" || rc=$?
+    case "$rc" in
+        0) ;;
+        *) fail "cannot scan the workflows for uses: lines (grep rc=$rc)"; return 1 ;;
+    esac
+    while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        rest="${line#*:*:}"
+        [[ "$rest" =~ $localuse ]] && continue
+        if [[ "$line" =~ $pin ]]; then
+            pairs="$pairs${BASH_REMATCH[2]} ${BASH_REMATCH[3]}"$'\n'
+        else
+            fail "not pinned as owner/repo@<40 hex> # vX.Y.Z: $line"
+        fi
+    done <<<"$uses"
+    split="$(printf '%s' "$pairs" | sort -u | cut -d' ' -f1 | sort | uniq -d)" || { fail "cannot compare the pins per repo"; return 1; }
+    assert_empty "$split" "every repo is pinned to a single SHA"
+}
+
 run_file_tests

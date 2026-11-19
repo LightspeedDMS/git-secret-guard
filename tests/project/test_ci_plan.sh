@@ -5,6 +5,12 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/../support/lib.sh"
 DOCS_ONLY="$GSG_PROJECT/.github/scripts/docs-only.sh"
 DOCS_TESTS="$GSG_PROJECT/.github/scripts/docs-tests.sh"
 WORKFLOW="$GSG_PROJECT/.github/workflows/tests.yml"
+# ^ why a depth of 8 bounds the search for nested actions, not an unbounded find
+PIN_ACTION_MAX_DEPTH=8
+# ^ why a depth of 1 for workflows, not a recursive search; GitHub ignores a workflow in a subfolder
+PIN_WORKFLOW_DEPTH=1
+PIN_TREE_SHA="3d3c42e5aac5ba805825da76410c181273ba90b1"
+PIN_TREE_UPLOAD_SHA="cf430e030ddbb5b0abf93d22962f4752f3646cd9"
 
 docs_only() { run_cap bash "$DOCS_ONLY" "$1"; }
 
@@ -195,26 +201,93 @@ test_the_workflow_has_no_matrix_job_left_that_would_hide_suite_head() {
     esac
 }
 
+# ^ hazard the scan misses an action deeper than PIN_ACTION_MAX_DEPTH, a local action outside .github/actions, a symlink, a quoted or flow-mapping uses key
+pin_find() {
+    local dir="$1" depth="$2" found rc=0
+    shift 2
+    [ -d "$dir" ] || return 0
+    found="$(find "$dir" -maxdepth "$depth" -type f \( "$@" \))" || rc=$?
+    [ "$rc" -eq 0 ] || { printf 'find failed in %s (rc=%s)\n' "$dir" "$rc" >&2; return 2; }
+    printf '%s\n' "$found"
+}
+
+many_values() { printf '%s' "$1" | sort -u | cut -d' ' -f1 | sort | uniq -d; }
+
+# ^ why one problem per line with rc 1 and rc 2 for a failed scan, not a bare pass or fail, with a scratch tree proving each kind
+pin_problems() {
+    local root="$1" files f uses line text pin='^[[:space:]-]*uses:[[:space:]]+([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)@([0-9a-f]{40}) # (v[0-9]+\.[0-9]+\.[0-9]+)$' localuse='^[[:space:]-]*uses:[[:space:]]+\./' pairs="" tags="" dup out="" rc
+    files="$(pin_find "$root/.github/workflows" "$PIN_WORKFLOW_DEPTH" -name '*.yml' -o -name '*.yaml')" || return 2
+    files="$files"$'\n'"$(pin_find "$root/.github/actions" "$PIN_ACTION_MAX_DEPTH" -name action.yml -o -name action.yaml)" || return 2
+    [ -n "${files//$'\n'/}" ] || { printf 'no workflow or action file under %s\n' "$root" >&2; return 2; }
+    while IFS= read -r f; do
+        [ -n "$f" ] || continue
+        rc=0
+        uses="$(LC_ALL=C grep -n -E -e '^[[:space:]-]*uses:[[:space:]]' -- "$f")" || rc=$?
+        case "$rc" in
+            0 | 1) ;;
+            *) printf 'cannot scan %s for uses: lines (grep rc=%s)\n' "$f" "$rc" >&2; return 2 ;;
+        esac
+        while IFS= read -r line; do
+            [ -n "$line" ] || continue
+            text="${line#*:}"
+            [[ "$text" =~ $localuse ]] && continue
+            if [[ "$text" =~ $pin ]]; then
+                pairs="$pairs${BASH_REMATCH[1]} ${BASH_REMATCH[2]}"$'\n'
+                tags="$tags${BASH_REMATCH[2]} ${BASH_REMATCH[3]}"$'\n'
+            else
+                out="${out}not pinned as owner/repo@<40 hex> # vX.Y.Z: ${f#"$root"/}:${line%%:*}:$text"$'\n'
+            fi
+        done <<<"$uses"
+    done <<<"$files"
+    dup="$(many_values "$pairs")" || { printf 'cannot compare the pins per repo\n' >&2; return 2; }
+    [ -z "$dup" ] || out="${out}more than one SHA for: $dup"$'\n'
+    dup="$(many_values "$tags")" || { printf 'cannot compare the tags per SHA\n' >&2; return 2; }
+    [ -z "$dup" ] || out="${out}more than one tag for SHA: $dup"$'\n'
+    printf '%s' "$out"
+    [ -z "$out" ]
+}
+
 # ^ invariant an external action is pinned by full commit SHA with a release-tag comment (shape only), one SHA per repo => a moved tag cannot change CI
 test_every_external_action_is_pinned_by_full_sha_with_a_release_tag_comment_and_one_sha_per_repo() {
-    local uses line rest pin='^([^:]+:[0-9]+):[[:space:]-]*uses:[[:space:]]+([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)@([0-9a-f]{40}) # v[0-9]+\.[0-9]+\.[0-9]+$' localuse='^[[:space:]-]*uses:[[:space:]]+\./' pairs="" split rc=0
-    uses="$(cd -- "$GSG_PROJECT" && LC_ALL=C grep -n -H -E -e '^[[:space:]-]*uses:[[:space:]]' .github/workflows/*.yml .github/actions/*/action.yml)" || rc=$?
-    case "$rc" in
-        0) ;;
-        *) fail "cannot scan the workflows for uses: lines (grep rc=$rc)"; return 1 ;;
-    esac
-    while IFS= read -r line; do
-        [ -n "$line" ] || continue
-        rest="${line#*:*:}"
-        [[ "$rest" =~ $localuse ]] && continue
-        if [[ "$line" =~ $pin ]]; then
-            pairs="$pairs${BASH_REMATCH[2]} ${BASH_REMATCH[3]}"$'\n'
-        else
-            fail "not pinned as owner/repo@<40 hex> # vX.Y.Z: $line"
-        fi
-    done <<<"$uses"
-    split="$(printf '%s' "$pairs" | sort -u | cut -d' ' -f1 | sort | uniq -d)" || { fail "cannot compare the pins per repo"; return 1; }
-    assert_empty "$split" "every repo is pinned to a single SHA"
+    run_cap pin_problems "$GSG_PROJECT"
+    assert_rc 0 "the real workflows and actions"
+    assert_empty "$OUT" "no unpinned or inconsistent action"
+}
+
+# ^ why one builder with a single broken file per test, not a hand-made tree in every test
+mk_pin_tree() {
+    local root="$1" in_yaml="$2" in_action_yaml="$3"
+    mkdir -p "$root/.github/workflows" "$root/.github/actions/a/b" &&
+        printf 'steps:\n  - uses: actions/checkout@%s # v7.0.1\n  - uses: ./.github/actions/a/b\n' "$PIN_TREE_SHA" >"$root/.github/workflows/ok.yml" &&
+        printf 'runs:\n  steps:\n    - uses: actions/upload-artifact@%s # v7.0.2\n' "$PIN_TREE_UPLOAD_SHA" >"$root/.github/actions/a/b/action.yml" &&
+        printf '%s' "$in_yaml" >"$root/.github/workflows/extra.yaml" &&
+        printf '%s' "$in_action_yaml" >"$root/.github/actions/a/b/action.yaml"
+}
+
+test_the_pin_scan_accepts_a_clean_tree() {
+    mk_pin_tree "$SANDBOX/t" '' '' || { fail "fixture setup failed"; return 1; }
+    run_cap pin_problems "$SANDBOX/t"
+    assert_rc 0 "a clean tree"
+    assert_empty "$OUT" "nothing flagged"
+}
+
+test_the_pin_scan_flags_a_yaml_workflow_and_a_nested_action_pinned_by_tag() {
+    mk_pin_tree "$SANDBOX/t" '  - uses: actions/checkout@v4
+' '    - uses: actions/checkout@v4
+' || { fail "fixture setup failed"; return 1; }
+    run_cap pin_problems "$SANDBOX/t"
+    assert_rc 1 "tags instead of SHAs"
+    assert_contains "$OUT" ".github/workflows/extra.yaml:1:" "the .yaml workflow is named with its line"
+    assert_contains "$OUT" ".github/actions/a/b/action.yaml:1:" "the nested action.yaml is named with its line"
+}
+
+# ^ invariant one commit SHA carries one tag comment in every file => a stale comment cannot name a release the SHA is not
+test_the_pin_scan_flags_one_sha_carrying_two_tags() {
+    mk_pin_tree "$SANDBOX/t" "  - uses: actions/checkout@$PIN_TREE_SHA # v7.0.0
+" '' || { fail "fixture setup failed"; return 1; }
+    run_cap pin_problems "$SANDBOX/t"
+    assert_rc 1 "the same SHA under v7.0.1 in ok.yml and v7.0.0 in extra.yaml"
+    assert_contains "$OUT" "more than one tag for SHA: $PIN_TREE_SHA" "the tag-conflict problem names the SHA"
 }
 
 run_file_tests

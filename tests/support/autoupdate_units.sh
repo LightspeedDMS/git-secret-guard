@@ -15,7 +15,10 @@ AU_HOLDER=""
 AU_CO=""
 
 unit_dir() { printf '%s' "$LC_HOME/.config/systemd/user"; }
-systemctl_log() { if [ -f "$SANDBOX/systemctl.log" ]; then cat -- "$SANDBOX/systemctl.log"; fi; }
+# ^ invariant au_log NAME prints $SANDBOX/NAME.log, nothing when the stand-in never got far enough to write it
+au_log() { if [ -f "$SANDBOX/$1.log" ]; then cat -- "$SANDBOX/$1.log"; fi; }
+systemctl_log() { au_log systemctl; }
+timeout_log() { au_log timeout; }
 au_reset_systemctl_log() { : >"$SANDBOX/systemctl.log"; }
 # ^ invariant au_fail_systemctl WORD makes the stand-in fail every call whose arguments hold WORD
 au_fail_systemctl() { printf '%s' "$1" >"$SANDBOX/systemctl.fail"; }

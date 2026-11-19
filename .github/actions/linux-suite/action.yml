@@ -1,0 +1,129 @@
+name: Linux suite
+description: Runs the test suite (all of it, or only the files that read the project's Markdown) on Ubuntu 24.04 and uploads the log and the bypass catalog. The caller checks out first.
+
+inputs:
+  target:
+    description: head, base or docs; names the log (log-<target>) and decides whether a failing suite fails the job (docs does, head and base leave that to the compare job)
+    required: true
+  dir:
+    description: The tree to test, relative to the workspace
+    default: .
+  select:
+    description: all, or docs (only the files that .github/scripts/docs-tests.sh lists)
+    default: all
+
+outputs:
+  failed:
+    description: true when tests/run.sh exited nonzero, else false
+    value: ${{ steps.run.outputs.failed }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install the prerequisites of docs/platforms.md
+      shell: bash
+      run: |
+        sudo add-apt-repository -y ppa:git-core/ppa
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends git jq curl ca-certificates gawk mawk dbus systemd pre-commit pipx
+        sudo update-alternatives --set awk /usr/bin/mawk
+        pipx install shellcheck-py==0.11.0.1
+        echo "$HOME/.local/bin" >>"$GITHUB_PATH"
+
+    - name: Check the tool versions the suite needs
+      shell: bash
+      run: |
+        git --version
+        read -r major minor < <(git --version | sed -E 's/^git version ([0-9]+)\.([0-9]+).*/\1 \2/')
+        if [ "$major" -lt 2 ] || { [ "$major" -eq 2 ] && [ "$minor" -lt 54 ]; }; then
+          echo "::error::git >= 2.54 is required and the PPA has not reached it; build it from source as docs/platforms.md describes"
+          exit 1
+        fi
+        echo "GSG_TEST_GIT=$(command -v git)" >>"$GITHUB_ENV"
+        # pipx links its apps into PIPX_BIN_DIR, which the runner image sets (not ~/.local/bin); a gate on any other version skips, which proves nothing
+        bin_dir="$(pipx environment --value PIPX_BIN_DIR)" || { echo "::error::pipx environment failed"; exit 1; }
+        sc="$bin_dir/shellcheck"
+        [ -x "$sc" ] || { echo "::error::shellcheck is not at $sc after pipx install"; exit 1; }
+        sc_ver="$("$sc" --version | sed -n 's/^version: //p')" || { echo "::error::$sc --version failed"; exit 1; }
+        [ "$sc_ver" = 0.11.0 ] || { echo "::error::$sc is version [$sc_ver], the gate is pinned to 0.11.0"; exit 1; }
+        echo "GSG_TEST_SHELLCHECK=$sc" >>"$GITHUB_ENV"
+        echo "shellcheck $sc_ver at $sc"
+        awk --version 2>&1 | head -1 || true
+
+    # Tests that need the real scanners skip without them. The global hook is removed again: the suite builds its own sandboxes.
+    - name: Install the pinned scanners
+      continue-on-error: true
+      shell: bash
+      working-directory: ${{ inputs.dir }}
+      run: |
+        bin/git-secret-guard install
+        git config --global --unset-all hook.git-secret-guard.event || true
+        git config --global --unset-all hook.git-secret-guard.command || true
+
+    # head and base never fail here: the compare job decides, so a failure that is already on the base is not a regression.
+    # docs fails on any failure, there is nothing to compare it with.
+    - name: Run the suite
+      id: run
+      shell: bash
+      working-directory: ${{ inputs.dir }}
+      env:
+        TARGET: ${{ inputs.target }}
+        SELECT: ${{ inputs.select }}
+        GSG_TEST_FILE_TIMEOUT: "900"
+      run: |
+        set -u
+        set -o pipefail
+        # the files are run in parallel, one process per core (tests/run.sh GSG_TEST_JOBS)
+        jobs="$(nproc)" || { echo "::error::nproc failed"; exit 1; }
+        case "$jobs" in '' | 0* | *[!0-9]*) echo "::error::nproc printed [$jobs], not a positive integer"; exit 1 ;; esac
+        export GSG_TEST_JOBS="$jobs"
+        # The install step puts betterleaks in ~/.local/bin; without this the real-betterleaks tests look under linuxbrew and skip.
+        export GSG_TEST_BETTERLEAKS="$HOME/.local/bin/betterleaks"
+        # tests/scan/test_bypass_catalog.sh appends one row per catalog scenario (docs/bypass-detection-scenarios.md) here
+        export GSG_CATALOG_REPORT="$RUNNER_TEMP/catalog-$TARGET.tsv"
+        files=()
+        case "$SELECT" in
+          all) ;;
+          docs)
+            list="$(bash .github/scripts/docs-tests.sh)" || { echo "::error::docs-tests.sh failed"; exit 1; }
+            mapfile -t files <<<"$list"
+            if [ "${#files[@]}" -eq 0 ]; then echo "::error::docs-tests.sh listed no test files"; exit 1; fi
+            ;;
+          *) echo "::error::select must be all or docs, got [$SELECT]"; exit 1 ;;
+        esac
+        rc=0
+        tests/run.sh "${files[@]}" 2>&1 | tee "$RUNNER_TEMP/$TARGET.log" || rc=$?
+        if [ "$rc" -eq 0 ]; then failed=false; else failed=true; fi
+        echo "failed=$failed" >>"$GITHUB_OUTPUT"
+        if [ "$TARGET" = docs ]; then exit "$rc"; fi
+        exit 0
+
+    - name: Catalog results table
+      if: always() && inputs.target == 'head'
+      shell: bash
+      env:
+        TARGET: ${{ inputs.target }}
+      run: |
+        f="$RUNNER_TEMP/catalog-$TARGET.tsv"
+        [ -s "$f" ] || { echo "no catalog report (scanners missing?)" >>"$GITHUB_STEP_SUMMARY"; exit 0; }
+        {
+          echo "### Bypass catalog"
+          echo
+          echo "| ID | Expected | Actual | Verdict | UTC |"
+          echo "|---|---|---|---|---|"
+          tail -n +2 "$f" | awk -F'\t' '{ printf "| %s | %s | %s | %s | %s |\n", $1, $2, $3, $4, $5 }'
+        } >>"$GITHUB_STEP_SUMMARY"
+
+    - uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: log-${{ inputs.target }}
+        path: ${{ runner.temp }}/${{ inputs.target }}.log
+        if-no-files-found: error
+
+    - uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: catalog-${{ inputs.target }}
+        path: ${{ runner.temp }}/catalog-${{ inputs.target }}.tsv
+        if-no-files-found: ignore

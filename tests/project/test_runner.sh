@@ -1,0 +1,163 @@
+#!/usr/bin/env bash
+# shellcheck source=tests/support/lib.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/../support/lib.sh"
+
+# ^ why a copy of run.sh over tiny test files, not the real suite; the runner's file selection is what is under test, and a real run takes hours
+# ^ invariant rt_make builds $SANDBOX/rt/tests with the real run.sh, a fetch stub returning 0 and one tiny test file per path given
+# ^ why SC2016 is off here; the $(...) in the printf format is expanded by the generated test file, not by this function
+# shellcheck disable=SC2016
+rt_make() {
+    local root="$SANDBOX/rt" path
+    rm -rf -- "$root"
+    mkdir -p -- "$root/tests" || return 1
+    cp -- "$GSG_PROJECT/tests/run.sh" "$root/tests/run.sh" || return 1
+    printf '#!/usr/bin/env bash\nexit 0\n' >"$root/tests/fetch-test-tools.sh" || return 1
+    chmod 755 "$root/tests/run.sh" "$root/tests/fetch-test-tools.sh" || return 1
+    for path in "$@"; do
+        mkdir -p -- "$root/tests/${path%/*}" || return 1
+        printf '#!/usr/bin/env bash\nprintf "PASS    %%s::test_one\\n" "$(basename -- "${BASH_SOURCE[0]}" .sh)"\n' >"$root/tests/$path" || return 1
+    done
+}
+
+# ^ invariant rt_run ARG... runs the copied runner from the fake project root, the way a developer or run.cmd does
+rt_run() {
+    cd -- "$SANDBOX/rt" || return 1
+    run_cap env -i "${GSG_ENV[@]}" bash tests/run.sh "$@"
+    cd -- "$SANDBOX" || return 1
+}
+
+# ^ invariant rt_ran prints the base names of the PASS lines in $OUT, in the order they ran, on one line
+rt_ran() {
+    local line out=""
+    while IFS= read -r line; do
+        case "$line" in "PASS    "*) line="${line#PASS    }"; out="$out${out:+ }${line%%::*}" ;; esac
+    done <<<"$OUT"
+    printf '%s' "$out"
+}
+
+RT_TREE=(core/test_b.sh scan/test_a.sh scan/test_c.sh integrations/smartgit/test_d.sh integrations/desktop/test_e.sh deep/x/y/test_z.sh empty/README.md)
+
+test_no_argument_runs_every_test_file_one_and_two_levels_down_ordered_by_base_name() {
+    rt_make "${RT_TREE[@]}" || return 1
+    rt_run
+    assert_rc 0 "no argument"
+    assert_eq "$(rt_ran)" "test_a test_b test_c test_d test_e" "base-name order across folders and depths"
+    assert_contains "$OUT" "SUMMARY: 5 passed, 0 failed, 0 skipped (total 5)" "five files, the one three levels down is not listed"
+}
+
+test_a_folder_argument_runs_exactly_the_files_of_that_folder() {
+    rt_make "${RT_TREE[@]}" || return 1
+    rt_run tests/scan
+    assert_rc 0 "folder argument"
+    assert_eq "$(rt_ran)" "test_a test_c" "only tests/scan"
+    rt_run tests/scan/
+    assert_eq "$(rt_ran)" "test_a test_c" "a trailing slash is the same folder"
+}
+
+test_a_nested_folder_argument_runs_the_files_one_level_below_ordered_by_base_name() {
+    rt_make "${RT_TREE[@]}" || return 1
+    rt_run tests/integrations
+    assert_rc 0 "nested folder"
+    assert_eq "$(rt_ran)" "test_d test_e" "smartgit and desktop, by base name not by folder"
+    rt_run tests/integrations/smartgit
+    assert_eq "$(rt_ran)" "test_d" "the leaf folder alone"
+}
+
+test_the_tests_folder_argument_runs_the_same_list_as_no_argument() {
+    local arg
+    rt_make "${RT_TREE[@]}" || return 1
+    for arg in tests tests/ ./tests "tests\\"; do
+        rt_run "$arg"
+        assert_rc 0 "argument $arg"
+        assert_eq "$(rt_ran)" "test_a test_b test_c test_d test_e" "argument $arg: the files two folders down are included"
+    done
+}
+
+test_a_file_argument_runs_that_file_only() {
+    rt_make "${RT_TREE[@]}" || return 1
+    rt_run tests/scan/test_c.sh
+    assert_rc 0 "file argument"
+    assert_eq "$(rt_ran)" "test_c" "one file"
+    rt_run tests/core/test_b.sh tests/scan/test_a.sh
+    assert_eq "$(rt_ran)" "test_b test_a" "several arguments keep the order given"
+}
+
+test_a_backslash_path_as_run_cmd_passes_it_runs_the_file_and_the_folder() {
+    rt_make "${RT_TREE[@]}" || return 1
+    rt_run 'tests\scan\test_a.sh'
+    assert_rc 0 "backslash file"
+    assert_eq "$(rt_ran)" "test_a" "the file named with backslashes"
+    rt_run 'tests\integrations'
+    assert_rc 0 "backslash folder"
+    assert_eq "$(rt_ran)" "test_d test_e" "the folder named with a backslash"
+}
+
+test_a_bad_argument_fails_by_name_and_runs_nothing() {
+    rt_make "${RT_TREE[@]}" || return 1
+    rt_run tests/scan tests/nope
+    assert_rc 1 "bad argument"
+    assert_contains "$OUT" "FAIL" "reports a failure"
+    assert_contains "$OUT" "tests/nope" "names the argument"
+    assert_empty "$(rt_ran)" "the good argument before it did not run either"
+    assert_not_contains "$OUT" "SUMMARY" "no test ran"
+}
+
+test_a_folder_without_a_test_file_fails_naming_the_folder() {
+    rt_make "${RT_TREE[@]}" || return 1
+    rt_run tests/empty
+    assert_rc 1 "empty folder"
+    assert_contains "$OUT" "FAIL    no test files found in tests/empty" "names the folder"
+    assert_empty "$(rt_ran)" "nothing ran"
+}
+
+RUNNER="$GSG_PROJECT/tests/run.sh"
+RUNNER_BOUND_SECONDS=60
+# ^ external the parallel mode needs ps -o and kill; Git Bash has no ps -o and run.sh would fetch the Windows tools
+RUNNER_PARALLEL_WINDOWS_REASON="the runner's parallel mode is checked on Linux and macOS here; Windows has its own run"
+
+# ^ why a fixture is a file run with bash, not a function; the runner starts each test file as its own process
+# ^ invariant takes NAME BODY pairs, writes $SANDBOX/fx/NAME for each, reports a setup failure itself; rc 1 = none written
+runner_fixtures() {
+    mkdir -p "$SANDBOX/fx" "$SANDBOX/tmp" || { fail "fixture setup failed: mkdir"; return 1; }
+    while [ "$#" -ge 2 ]; do
+        printf '%s\n' "$2" >"$SANDBOX/fx/$1" || { fail "fixture setup failed: $1"; return 1; }
+        shift 2
+    done
+}
+
+# ^ invariant runs run.sh with the job count on the files, bounded; a runner waiting forever fails here with exit 124
+runner_run() {
+    local jobs="$1"
+    shift
+    run_cap timeout "$RUNNER_BOUND_SECONDS" env GSG_TEST_JOBS="$jobs" TMPDIR="$SANDBOX/tmp" bash "$RUNNER" "$@"
+}
+
+test_parallel_mode_prints_what_serial_mode_prints_for_normal_files() {
+    local serial
+    if [ "$TEST_IS_WINDOWS" -eq 1 ]; then skip_test "$RUNNER_PARALLEL_WINDOWS_REASON"; fi
+    runner_fixtures test_a.sh "printf 'PASS    a::one\nSKIPPED a::two (why)\n'" \
+        test_b.sh "printf 'PASS    b::one\nFAIL    b::two (test status 1)\n'; exit 1" || return 1
+    runner_run 1 "$SANDBOX/fx/test_a.sh" "$SANDBOX/fx/test_b.sh"
+    serial="$OUT"
+    assert_rc 1 "serial run with a failing file"
+    runner_run 2 "$SANDBOX/fx/test_a.sh" "$SANDBOX/fx/test_b.sh"
+    assert_rc 1 "parallel run with a failing file"
+    assert_eq "$OUT" "$serial" "the parallel output is the serial output"
+    assert_contains "$OUT" "SUMMARY: 2 passed, 1 failed, 1 skipped (total 4)" "counts"
+}
+
+# ^ why the fixture kills its own worker, not a fault injected into run.sh; the real subshell dies as in a crash and writes no exit status
+# ^ invariant the process chain is worker subshell, timeout, this file; the grandparent is the worker, never run.sh itself
+# shellcheck disable=SC2016
+test_parallel_mode_reports_a_file_whose_worker_died_instead_of_waiting_forever() {
+    if [ "$TEST_IS_WINDOWS" -eq 1 ]; then skip_test "$RUNNER_PARALLEL_WINDOWS_REASON"; fi
+    runner_fixtures test_dies.sh 'printf "PASS    dies::one\n"; kill -9 "$(ps -o ppid= -p "$PPID" | tr -d " ")"' \
+        test_fine.sh "printf 'PASS    fine::one\n'" || return 1
+    runner_run 2 "$SANDBOX/fx/test_dies.sh" "$SANDBOX/fx/test_fine.sh"
+    assert_rc 1 "a dead worker fails the run (124 means the runner waited forever)"
+    assert_contains "$OUT" "FAIL    test_dies.sh produced no exit status (its worker died)" "the dead worker is named"
+    assert_contains "$OUT" "PASS    fine::one" "the other file is still shown"
+    assert_contains "$OUT" "SUMMARY: 1 passed, 1 failed, 0 skipped (total 2)" "the dead file is one failure"
+}
+
+run_file_tests

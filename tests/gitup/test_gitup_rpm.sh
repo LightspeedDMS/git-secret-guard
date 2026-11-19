@@ -1,0 +1,532 @@
+#!/usr/bin/env bash
+# shellcheck source=tests/support/lib.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/../support/lib.sh"
+# shellcheck source=tests/support/lifecycle.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/../support/lifecycle.sh"
+# shellcheck source=tests/support/gitup.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/../support/gitup.sh"
+
+# ^ external the RPM module is Linux package-manager code; macOS and Windows have their own modules and test files
+if [ "$TEST_IS_WINDOWS" -eq 1 ]; then FILE_SKIP_REASON="Linux package manager flows"; fi
+
+gu_nothing_changed_on_the_machine() {
+    assert_no_file "$LC_STATE" "$1: no state"
+    assert_eq "$(find "$GU_ROOT/usr/local" ! -type d | wc -l)" 0 "$1: nothing below the sandbox /usr/local"
+    assert_eq "$(find "$SANDBOX/tmp" -maxdepth 1 -name 'gsg-git-build.*' | wc -l)" 0 "$1: no build directory left"
+}
+
+test_a_rocky_machine_with_an_old_git_builds_the_pinned_source_when_the_user_accepts() {
+    gu_rpm_setup || return 1
+    gsg_pty $'y\n' install
+    assert_rc 0 "yes at the prompt"
+    assert_contains "$OUT" "route: source" "the plan names the source route"
+    assert_contains "$OUT" "git 2.56.0" "and the pinned version"
+    assert_contains "$OUT" "git-2.56.0.tar.xz" "and the tarball"
+    assert_contains "$OUT" "env -i with PATH=" "and the clean build environment"
+    assert_contains "$OUT" "the build uses about 570 MB of disk, 800 MB must be free; several minutes" "the plan tells the build size and the free space it requires (#109)"
+    assert_contains "$OUT$ERR" "the build uses about 570 MB of disk, several minutes" "the progress line says the 570 MB is what the build uses (#109)"
+    assert_contains "$OUT" "as root: $SANDBOX/pathbin/dnf install -y gcc make perl-interpreter" "and the dependency command with the full path of the dnf root will run"
+    assert_contains "$OUT" "/cp -dR --remove-destination --preserve=timestamps,links" "and the copy, which replaces an existing file instead of writing through a link"
+    assert_contains "$(gu_log)" "make -C" "make ran"
+    assert_contains "$(gu_log)" "prefix=$GU_ROOT/usr/local NO_RUST=1 NO_TCLTK=1 NO_GETTEXT=1 USE_LIBPCRE2=1" "with the proven flags and the prefix"
+    assert_contains "$(gu_log)" "INSTALL_SYMLINKS=1" "git installs its siblings as symlinks, so no hard link ties bin/git to libexec"
+    assert_contains "$(gu_log)" "DESTDIR=" "into a stage directory"
+    assert_eq "$(grep '^make ' <<<"$(gu_log)" | grep -cF " sysconfdir=$GU_ROOT/etc INSTALL_SYMLINKS=1 ")" 2 "the compile and the install both read the system config from /etc, as the distribution's git does (#90)"
+    assert_contains "$OUT" "make prefix=$GU_ROOT/usr/local NO_RUST=1 NO_TCLTK=1 NO_GETTEXT=1 USE_LIBPCRE2=1 sysconfdir=$GU_ROOT/etc INSTALL_SYMLINKS=1" "and the plan prints the make words it runs"
+    assert_eq "$("$GU_ROOT/usr/local/bin/git" --version)" "git version 2.56.0" "git is built into /usr/local"
+    assert_file "$LC_STATE/state" "install ran to the end"
+    assert_eq "$(find "$SANDBOX/tmp" -maxdepth 1 -name 'gsg-git-build.*' | wc -l)" 0 "the build directory is gone"
+    assert_not_contains "$(gu_log)" "query-stdin-is-a-terminal" "no repository query read the terminal"
+}
+
+test_the_flag_gives_consent_up_front_for_the_source_route() {
+    gu_rpm_setup || return 1
+    gsg install --upgrade-git </dev/null
+    assert_rc 0 "install --upgrade-git without a terminal"
+    assert_not_contains "$OUT$ERR" "[y/N]" "no prompt"
+    assert_eq "$("$GU_ROOT/usr/local/bin/git" --version)" "git version 2.56.0" "built"
+}
+
+test_a_machine_whose_repositories_offer_a_new_enough_git_is_upgraded_through_dnf_with_no_build() {
+    gu_rpm_setup || return 1
+    printf '2.55.0\n' >"$SANDBOX/dnf.candidate"
+    printf '2.55.0' >"$SANDBOX/dnf.upgrade_to"
+    gsg install --upgrade-git </dev/null
+    assert_rc 0 "package route"
+    assert_contains "$OUT" "route: package" "the plan names the package route"
+    assert_contains "$(gu_log)" "dnf install -y --disablerepo=* --enablerepo=baseos git-core" "dnf installed git-core"
+    assert_not_contains "$(gu_log)" "make -C" "no build ran"
+    assert_eq "$(pathbin_git_version)" "git version 2.55.0" "git is the repository's"
+}
+
+pathbin_git_version() { "$SANDBOX/pathbin/git" --version; }
+
+# ^ external dnf 5 answers already installed to dnf install of an older installed package; dnf 4 upgrades it (Fedora 44, run 42257678269)
+test_an_old_package_git_is_upgraded_with_dnf_upgrade_because_dnf_install_leaves_it_alone() {
+    gu_rpm_setup || return 1
+    printf '2.55.0\n' >"$SANDBOX/dnf.candidate"
+    printf '2.55.0' >"$SANDBOX/dnf.upgrade_to"
+    printf 'git-core-2.47.0-1.fc41.x86_64\n' >"$SANDBOX/rpm.nevra"
+    gsg install --upgrade-git </dev/null
+    assert_rc 0 "package route with an installed old git-core"
+    assert_contains "$OUT" "as root: $SANDBOX/pathbin/dnf upgrade -y --disablerepo=* --enablerepo=baseos git-core" "the plan says upgrade"
+    check_plan_matches_log "$OUT" "the package route over an installed git-core"
+    assert_contains "$(gu_log)" "dnf upgrade -y --disablerepo=* --enablerepo=baseos git-core" "and dnf upgraded git-core"
+    assert_not_contains "$(gu_log)" "dnf install -y --disablerepo=* --enablerepo=baseos git-core" "dnf install is not used on an installed package"
+    assert_eq "$(pathbin_git_version)" "git version 2.55.0" "git is the repository's"
+}
+
+test_a_missing_git_core_is_installed_with_dnf_install() {
+    gu_rpm_setup || return 1
+    printf '2.55.0\n' >"$SANDBOX/dnf.candidate"
+    printf '2.55.0' >"$SANDBOX/dnf.upgrade_to"
+    gsg install --upgrade-git </dev/null
+    assert_rc 0 "package route without git-core installed"
+    assert_contains "$OUT" "as root: $SANDBOX/pathbin/dnf install -y --disablerepo=* --enablerepo=baseos git-core" "the plan says install"
+    assert_not_contains "$(gu_log)" "dnf upgrade -y --disablerepo=* --enablerepo=baseos git-core" "and upgrade is not used"
+}
+
+test_the_repository_query_is_read_only_bounded_and_never_answers_a_prompt() {
+    gu_rpm_setup || return 1
+    printf '2.55.0\n' >"$SANDBOX/dnf.candidate"
+    gsg install </dev/null
+    assert_rc 1 "no consent"
+    assert_contains "$(gu_log)" "dnf --assumeno -q repoquery --latest-limit=1 --queryformat %{version}\\n git-core" "the exact query"
+    assert_not_contains "$(grep repoquery "$SANDBOX/gitup.log")" " -y" "the query never says yes"
+}
+
+# ^ invariant story 28 changed on purpose => an unread repository no longer decides the route; the readable ones do, root excludes it
+test_an_unread_repository_is_excluded_and_the_readable_ones_decide_the_package_route() {
+    gu_rpm_setup || return 1
+    printf 'baseos\nacli\n' >"$SANDBOX/dnf.repos"
+    printf 'acli' >"$SANDBOX/dnf.badrepo"
+    printf '2.55.0\n' >"$SANDBOX/dnf.candidate.baseos"
+    printf '2.55.0' >"$SANDBOX/dnf.upgrade_to"
+    gsg install --upgrade-git </dev/null
+    assert_rc 0 "the package route runs"
+    assert_contains "$OUT$ERR" "repository acli could not be read" "the failing repository is named"
+    assert_not_contains "$OUT$ERR" "repository baseos could not be read" "and the good one is not"
+    assert_contains "$OUT" "route: package" "the readable repository decides"
+    assert_contains "$OUT" "-y --disablerepo=* --enablerepo=baseos git-core" "root enables only the repository that was read"
+    assert_not_contains "$OUT" "--enablerepo=acli" "and not the unread one"
+    assert_contains "$(gu_log)" "--disablerepo=* --enablerepo=acli" "each repository was queried alone"
+    assert_not_contains "$(grep -E 'repoquery|repolist' "$SANDBOX/gitup.log")" " -y" "no key was imported by a query"
+    check_plan_matches_log "$OUT" "the package plan with --disablerepo"
+}
+
+# ^ external dnf 4.14 skips a repo file the user cannot read, with no error => it is missing from the user repolist, only an allow list keeps root off it
+test_root_enables_only_the_repositories_the_plan_read_even_when_the_whole_query_succeeds() {
+    gu_rpm_setup || return 1
+    printf 'baseos\nappstream\n' >"$SANDBOX/dnf.repos"
+    printf '2.55.0\n' >"$SANDBOX/dnf.candidate"
+    printf '2.55.0' >"$SANDBOX/dnf.upgrade_to"
+    gsg install --upgrade-git </dev/null
+    assert_rc 0 "the package route runs"
+    assert_contains "$OUT" "-y --disablerepo=* --enablerepo=baseos --enablerepo=appstream git-core" "the exact root command"
+    assert_contains "$OUT" "only the repositories read are enabled for root (baseos, appstream)" "the plan says so plainly"
+    check_plan_matches_log "$OUT" "the allow-list command"
+    assert_contains "$(gu_log)" "--disablerepo=* --enablerepo=baseos --enablerepo=appstream git-core" "and root ran it"
+}
+
+test_a_package_route_without_a_readable_repository_list_is_incomplete_and_goes_to_source() {
+    gu_rpm_setup || return 1
+    printf '2.55.0\n' >"$SANDBOX/dnf.candidate"
+    printf 'repolist' >"$SANDBOX/dnf.fail"
+    gsg install </dev/null
+    assert_contains "$OUT" "route: source (the check of the repositories was incomplete, so the package route is not trusted)" "no list, no allow list, no package route"
+    assert_not_contains "$OUT" "route: package" "and no root command with an open repository set"
+}
+
+test_readable_repositories_that_offer_only_an_old_git_send_the_route_to_source_and_the_unread_one_is_not_considered() {
+    gu_rpm_setup || return 1
+    printf 'baseos\nacli\n' >"$SANDBOX/dnf.repos"
+    printf 'acli' >"$SANDBOX/dnf.badrepo"
+    printf '2.52.0\n' >"$SANDBOX/dnf.candidate.baseos"
+    gsg install </dev/null
+    assert_contains "$OUT" "route: source (the repositories that could be read offer 2.52.0, not 2.54 or newer)" "what the readable ones offer"
+    assert_contains "$OUT" "repository acli could not be read by this unprivileged query" "the unread one is named"
+    assert_contains "$OUT" "(not considered for the route)" "and said not to be considered"
+}
+
+test_an_incomplete_check_keeps_the_source_route_whatever_a_readable_repository_offers() {
+    local mode
+    for mode in nolist nothing; do
+        gu_rpm_setup || return 1
+        printf 'baseos\nacli\n' >"$SANDBOX/dnf.repos"
+        printf '2.55.0\n' >"$SANDBOX/dnf.candidate.baseos"
+        printf 'acli' >"$SANDBOX/dnf.badrepo"
+        if [ "$mode" = nolist ]; then printf 'repolist' >"$SANDBOX/dnf.fail"; else printf 'acli\n' >"$SANDBOX/dnf.repos"; fi
+        gsg install </dev/null
+        assert_contains "$OUT" "route: source (the check of the repositories was incomplete, so the package route is not trusted)" "[$mode] source"
+        assert_not_contains "$OUT" "route: package" "[$mode] no package route"
+    done
+}
+
+# ^ invariant the query runs unprivileged => a failing repository is not called broken; dnf key-import chatter stays out, its Error line stays
+test_the_failed_repository_line_says_the_user_could_not_read_it_and_keeps_dnfs_chatter_out() {
+    gu_rpm_setup || return 1
+    printf 'baseos\nacli\n' >"$SANDBOX/dnf.repos"
+    printf 'acli' >"$SANDBOX/dnf.badrepo"
+    gsg install </dev/null
+    assert_contains "$OUT$ERR" "repository acli could not be read by this unprivileged query" "named, and not called broken"
+    assert_contains "$OUT$ERR" "a repository that works for root can fail here, so this does not mean it is broken" "says why it proves nothing"
+    assert_contains "$OUT$ERR" "dnf said: Error: Failed to download metadata for repo 'acli'" "a real dnf error is kept"
+    assert_not_contains "$OUT$ERR" "Importing GPG key" "no key import text"
+    assert_not_contains "$OUT$ERR" "Userid" "and no key owner"
+    assert_not_contains "$OUT$ERR" "needs a key that is not imported" "the old guess is gone"
+    assert_not_contains "$(gu_log)" "sudo" "no privileged command ran before consent"
+}
+
+test_a_signal_during_the_query_leaves_no_dnf_text_in_tmpdir() {
+    local pid
+    gu_rpm_setup || return 1
+    printf 'slow' >"$SANDBOX/dnf.hang"
+    printf 'baseos\nslow\n' >"$SANDBOX/dnf.repos"
+    env -i "${LC_ENV[@]}" "${EXTRA_ENV[@]}" "$GSG_PROJECT/bin/git-secret-guard" install </dev/null >/dev/null 2>&1 &
+    pid=$!
+    sleep 3
+    assert_eq "$(find "$SANDBOX/tmp" -maxdepth 1 -name 'gsg-dnf*' | wc -l)" 0 "no file with dnf's output exists during the query"
+    kill -TERM "$pid" 2>/dev/null
+    wait "$pid" 2>/dev/null
+    assert_eq "$(find "$SANDBOX/tmp" -maxdepth 1 -name 'gsg-dnf*' | wc -l)" 0 "and none after the signal"
+}
+
+test_the_build_needs_perl_interpreter_and_not_the_perl_metapackage() {
+    gu_rpm_setup || return 1
+    gsg install </dev/null
+    assert_contains "$OUT" " gcc make perl-interpreter xz tar " "the interpreter is named"
+    assert_not_contains "$OUT" " make perl xz" "and the metapackage that pulls 141 packages is not"
+}
+
+test_installed_build_dependencies_are_left_out_of_the_install_line() {
+    gu_rpm_setup || return 1
+    printf 'gcc\nmake\ntar\nxz\n' >"$SANDBOX/rpm.installed"
+    gsg install --upgrade-git </dev/null
+    assert_contains "$OUT" "dnf install -y perl-interpreter openssl-devel" "only what is missing is installed"
+    assert_not_contains "$OUT" "install -y gcc" "an installed name is not repeated, so dnf cannot upgrade it by name"
+    check_plan_matches_log "$OUT" "the reduced dependency line"
+}
+
+test_a_machine_with_every_build_dependency_runs_no_dependency_install() {
+    gu_rpm_setup || return 1
+    printf 'gcc\nmake\nperl-interpreter\nxz\ntar\nopenssl-devel\nzlib-devel\nlibcurl-devel\nexpat-devel\npcre2-devel\nperl-ExtUtils-MakeMaker\n' >"$SANDBOX/rpm.installed"
+    gsg install --upgrade-git </dev/null
+    assert_rc 0 "the build runs"
+    assert_not_contains "$(gu_log)" "dnf install -y" "no dependency install"
+    assert_contains "$OUT" "every build dependency is installed" "and the plan says so"
+}
+
+test_the_plan_states_the_effect_of_the_dependency_install_with_counts_from_a_dry_run() {
+    gu_rpm_setup || return 1
+    printf 'Install  141 Packages\nUpgrade   10 Packages\n' >"$SANDBOX/dnf.summary"
+    gsg install </dev/null
+    assert_contains "$OUT" "dnf may upgrade packages that are already installed" "the warning"
+    assert_contains "$OUT" "dry run (--assumeno): Install  141 Packages; Upgrade   10 Packages" "with the counts"
+    assert_contains "$(gu_log)" "--assumeno install gcc make perl-interpreter" "the dry run asks for the missing names, without -q (dnf 4 hides its table under -q)"
+    assert_not_contains "$(gu_log)" "sudo" "and runs without privileges"
+}
+
+test_the_plan_says_so_when_the_dry_run_cannot_count() {
+    gu_rpm_setup || return 1
+    gsg install </dev/null
+    assert_contains "$OUT" "dnf may upgrade packages that are already installed" "the warning stays"
+    assert_contains "$OUT" "the size was not counted: dnf refuses a dry run of install to a user who is not root" "and the real cause is named"
+    assert_not_contains "$OUT" "superuser privileges" "dnf's own refusal text is not shown"
+}
+
+test_a_dry_run_that_times_out_is_not_called_a_privilege_problem() {
+    gu_rpm_setup || return 1
+    set_env GSG_GITUP_QUERY_TIMEOUT=1
+    printf 'x' >"$SANDBOX/dnf.install.hang"
+    gsg install </dev/null
+    assert_contains "$OUT" "the size was not counted: the dry run timed out after 1s" "the cause is the timeout"
+    assert_not_contains "$OUT" "not root" "and not the user"
+}
+
+test_apply_runs_the_dependency_list_of_the_plan_even_when_rpm_answers_differently_afterwards() {
+    gu_rpm_setup || return 1
+    printf 'gcc\nmake\nperl-interpreter\nxz\ntar\nopenssl-devel\nzlib-devel\nlibcurl-devel\nexpat-devel\npcre2-devel\n' >"$SANDBOX/rpm.installed"
+    printf 'x' >"$SANDBOX/dnf.flip"
+    gsg install --upgrade-git </dev/null
+    assert_rc 0 "the build runs"
+    assert_contains "$OUT" "dnf install -y perl-ExtUtils-MakeMaker" "the plan lists the one missing name"
+    assert_contains "$(gu_log)" "dnf install -y perl-ExtUtils-MakeMaker" "root ran exactly that line"
+    assert_not_contains "$(gu_log)" "dnf install -y gcc" "and not the full list after rpm started failing"
+    check_plan_matches_log "$OUT" "the plan and the log"
+}
+
+test_the_key_note_matches_what_the_plan_runs_as_root() {
+    gu_rpm_setup || return 1
+    printf 'gcc\nmake\nperl-interpreter\nxz\ntar\nopenssl-devel\nzlib-devel\nlibcurl-devel\nexpat-devel\npcre2-devel\nperl-ExtUtils-MakeMaker\n' >"$SANDBOX/rpm.installed"
+    gsg install </dev/null
+    assert_contains "$OUT" "no dnf install runs in this plan, so no repository signing key can be imported by it" "no install, no key"
+    assert_not_contains "$OUT" "imported by this step" "and no claim about a step that does not run"
+    gu_rpm_setup || return 1
+    printf '2.55.0\n' >"$SANDBOX/dnf.candidate"
+    gsg install </dev/null
+    assert_contains "$OUT" "imported by this install (only the repositories the plan read are enabled)" "the package route carries its own note"
+}
+
+test_a_repository_that_hangs_ends_within_the_timeout_and_is_named() {
+    gu_rpm_setup || return 1
+    printf 'baseos\nslow\n' >"$SANDBOX/dnf.repos"
+    printf 'slow' >"$SANDBOX/dnf.hang"
+    SECONDS=0
+    gsg install </dev/null
+    assert_rc 1 "no consent"
+    assert_contains "$OUT$ERR" "repository slow could not be read" "the hanging repository is named"
+    [ "$SECONDS" -lt 40 ] || fail "the plan took $SECONDS seconds"
+}
+
+test_a_new_git_in_usr_local_that_is_not_first_on_path_gets_the_path_fix_and_nothing_is_rebuilt() {
+    gu_rpm_setup || return 1
+    gu_old_build 2.56.0 || return 1
+    set_env PATH="$SANDBOX/pathbin:$GU_ROOT/usr/local/bin:$TEST_BASE_PATH"
+    gsg install --upgrade-git </dev/null
+    assert_rc 1 "a new git is not first on PATH"
+    assert_contains "$ERR" "put $GU_ROOT/usr/local/bin first on PATH, for example: export PATH=\"$GU_ROOT/usr/local/bin:\$PATH\"" "the exact fix"
+    assert_not_contains "$(gu_log)" "make " "nothing was rebuilt"
+    assert_no_file "$LC_HOME/.bashrc" "no profile edited"
+}
+
+test_a_tampered_tarball_stops_before_any_dependency_install_or_build() {
+    gu_rpm_setup || return 1
+    printf 'tampered\n' >"$LC_FIX/git-2.56.0.tar.xz" || return 1
+    gsg install --upgrade-git </dev/null
+    assert_rc 1 "tarball does not match its digest"
+    assert_contains "$ERR" "SHA-256 mismatch for git-2.56.0.tar.xz" "the digest check fired"
+    assert_contains "$ERR" "nothing was changed" "and the message says nothing had changed"
+    assert_not_contains "$(gu_log)" "dnf install" "no dependency install"
+    assert_not_contains "$(gu_log)" "make -C" "no build"
+    gu_nothing_changed_on_the_machine "tampered download"
+}
+
+test_a_failed_build_leaves_a_working_git_cleans_up_and_a_rerun_finishes() {
+    gu_rpm_setup || return 1
+    : >"$SANDBOX/make.fail"
+    gsg install --upgrade-git </dev/null
+    assert_rc 1 "make fails"
+    assert_contains "$ERR" "the git upgrade failed" "says so"
+    assert_contains "$ERR" "build dependencies" "and what had changed by then"
+    assert_eq "$(pathbin_git_version)" "git version 2.52.0" "the old git still works"
+    gu_nothing_changed_on_the_machine "failed build"
+    rm -f -- "$SANDBOX/make.fail"
+    gsg install --upgrade-git </dev/null
+    assert_rc 0 "a rerun finishes"
+    assert_eq "$("$GU_ROOT/usr/local/bin/git" --version)" "git version 2.56.0" "git is built"
+}
+
+test_an_interrupt_during_the_build_removes_the_build_directory() {
+    local pid n=0
+    gu_rpm_setup || return 1
+    : >"$SANDBOX/make.hang"
+    (setsid env --default-signal=INT env -i "${LC_ENV[@]}" "${EXTRA_ENV[@]}" "$GSG_PROJECT/bin/git-secret-guard" install --upgrade-git \
+        >"$SANDBOX/int.out" 2>&1 </dev/null & echo $! >"$SANDBOX/int.pid")
+    pid="$(<"$SANDBOX/int.pid")"
+    while [ ! -f "$SANDBOX/make.started" ] && [ "$n" -lt 100 ]; do
+        sleep 0.2
+        n=$((n + 1))
+    done
+    assert_file "$SANDBOX/make.started" "the build started"
+    kill -INT -- "-$pid" 2>/dev/null
+    n=0
+    while kill -0 "$pid" 2>/dev/null && [ "$n" -lt 100 ]; do
+        sleep 0.2
+        n=$((n + 1))
+    done
+    assert_eq "$(kill -0 "$pid" 2>/dev/null && echo alive || echo gone)" gone "install ended"
+    assert_eq "$(pathbin_git_version)" "git version 2.52.0" "the old git still works"
+    gu_nothing_changed_on_the_machine "interrupted build"
+}
+
+test_homebrew_first_on_path_cannot_reach_the_build() {
+    gu_rpm_setup || return 1
+    mkdir -p "$SANDBOX/brewbin" && printf '#!/bin/sh\necho poisoned\nexit 1\n' >"$SANDBOX/brewbin/gcc" && chmod 755 "$SANDBOX/brewbin/gcc" || return 1
+    set_env PATH="$SANDBOX/brewbin:$GU_ROOT/usr/local/bin:$SANDBOX/pathbin:$TEST_BASE_PATH"
+    gsg install --upgrade-git </dev/null
+    assert_rc 0 "the build ran"
+    assert_contains "$(<"$SANDBOX/make.env")" "PATH=$SANDBOX/pathbin:/usr/bin:/bin" "the build PATH is the fixed one"
+    assert_not_contains "$(<"$SANDBOX/make.env")" "brewbin" "and Homebrew's directory is not in it"
+    assert_not_contains "$(<"$SANDBOX/make.env")" "XDG_" "no XDG variable reached make"
+    assert_not_contains "$(<"$SANDBOX/make.env")" "GSG_" "no GSG variable reached make"
+    assert_not_contains "$(<"$SANDBOX/make.env")" "GIT_" "no GIT variable reached make"
+}
+
+test_a_built_binary_that_links_against_homebrew_or_a_missing_library_is_refused_before_the_copy() {
+    local line
+    for line in '	libz.so.1 => /home/linuxbrew/.linuxbrew/lib/libz.so.1 (0x1)' '	libpcre2-8.so.0 => not found'; do
+        gu_rpm_setup || return 1
+        printf '%s\n' "$line" >"$SANDBOX/ldd.out"
+        gsg install --upgrade-git </dev/null
+        assert_rc 1 "ldd says [$line]"
+        assert_contains "$ERR" "git-secret-guard: the built git" "the check names the built binary"
+        assert_not_contains "$(gu_log)" "cp -dR" "nothing was copied for [$line]"
+        assert_eq "$(find "$GU_ROOT/usr/local" -type f | wc -l)" 0 "nothing below /usr/local for [$line]"
+    done
+}
+
+test_a_foreign_file_where_the_stage_would_write_is_never_overwritten() {
+    gu_rpm_setup || return 1
+    printf 'mine\n' >"$GU_ROOT/usr/local/bin/git-shell" || return 1
+    gsg install --upgrade-git </dev/null
+    assert_rc 1 "a foreign git-shell"
+    assert_contains "$ERR" "$GU_ROOT/usr/local/bin/git-shell" "the path is named"
+    assert_contains "$ERR" "not listed in any MANIFEST" "and why"
+    assert_not_contains "$(gu_log)" "cp -dR" "nothing was copied"
+    assert_eq "$(<"$GU_ROOT/usr/local/bin/git-shell")" mine "the file is untouched"
+}
+
+test_the_manifest_lists_every_installed_file_and_git_help_can_find_the_man_pages() {
+    local doc
+    gu_rpm_setup || return 1
+    gsg install --upgrade-git </dev/null
+    assert_rc 0 "source route"
+    doc="$GU_ROOT/usr/local/share/doc/git-2.56.0-local/MANIFEST"
+    assert_file "$doc" "the MANIFEST"
+    assert_contains "$(<"$doc")" "$GU_ROOT/usr/local/bin/git" "lists git"
+    assert_contains "$(<"$doc")" "$GU_ROOT/usr/local/share/man/man1/git.1" "and the unpacked man page"
+    assert_eq "$(find "$GU_ROOT/usr/local" ! -type d ! -path "$doc" | LC_ALL=C sort)" "$(LC_ALL=C sort "$doc")" "every installed file, and only those"
+    assert_file "$GU_ROOT/usr/local/share/man/man1/git.1" "the man pages are unpacked"
+}
+
+test_too_little_free_space_refuses_before_anything_changes() {
+    gu_rpm_setup || return 1
+    printf '1000' >"$SANDBOX/df.avail"
+    gsg install --upgrade-git </dev/null
+    assert_rc 1 "no room to build"
+    assert_contains "$ERR" "needs at least 800 MB of free disk space" "says how much"
+    assert_contains "$ERR" "the build needs" "names the build as the subject"
+    assert_contains "$ERR" "TMPDIR moves the build directory" "and the advice that can help"
+    assert_contains "$ERR" "nothing was changed" "and that nothing changed"
+    assert_not_contains "$(gu_log)" "dnf install" "no dependency install"
+}
+
+# ^ why only the prefix short, not the build directory; the message must name the install location, as TMPDIR cannot move /usr/local (#114)
+test_too_little_free_space_in_the_install_prefix_names_the_prefix() {
+    gu_rpm_setup || return 1
+    printf '122880 %s\n10485760 %s\n' "$GU_ROOT/usr/local" "$SANDBOX/tmp" >"$SANDBOX/df.avail.dirs"
+    gsg install --upgrade-git </dev/null
+    assert_rc 1 "no room in the prefix"
+    assert_contains "$ERR" "installing git needs at least 300 MB of free disk space in $GU_ROOT/usr/local and 120 MB is free; free some space there" "names the install location"
+    assert_not_contains "$ERR" "TMPDIR" "TMPDIR cannot move the prefix"
+    assert_not_contains "$ERR" "the build needs" "the build is not the subject"
+    assert_contains "$ERR" "nothing was changed" "and that nothing changed"
+    assert_not_contains "$(gu_log)" "dnf install" "no dependency install"
+}
+
+# ^ why 716800 KB, not 1000; 700 MB is above the 570 MB build estimate and below the 800 MB threshold (#109)
+test_free_space_between_the_estimate_and_the_threshold_names_the_threshold() {
+    gu_rpm_setup || return 1
+    printf '716800' >"$SANDBOX/df.avail"
+    gsg install --upgrade-git </dev/null
+    assert_rc 1 "700 MB is below the threshold"
+    assert_contains "$ERR" "needs at least 800 MB of free disk space" "names the threshold"
+    assert_contains "$ERR" "and 700 MB is free" "and the room"
+    assert_not_contains "$ERR" "570" "the build estimate is not the number the check uses"
+    assert_not_contains "$(gu_log)" "dnf install" "no dependency install"
+}
+
+test_a_machine_without_dnf_or_curl_has_no_route_and_says_why() {
+    gu_rpm_setup || return 1
+    rm -f -- "$SANDBOX/pathbin/dnf" || return 1
+    set_env GSG_GITUP_BUILD_PATH="$SANDBOX/pathbin"
+    gsg install --upgrade-git </dev/null
+    assert_rc 1 "no dnf"
+    assert_contains "$OUT$ERR" "dnf was not found" "says why"
+    assert_contains "$ERR" "config-based hooks need git >= 2.54, install refused" "today's refusal follows"
+    gu_rpm_setup || return 1
+    lc_path_without curl || return 1
+    set_env PATH="$GU_ROOT/usr/local/bin:$SANDBOX/pathfarm-curl"
+    gsg install --upgrade-git </dev/null
+    assert_rc 1 "no curl"
+    assert_contains "$ERR" "curl is required to download" "names curl"
+    assert_not_contains "$(gu_log)" "dnf install" "before any dependency install"
+}
+
+test_a_rerun_after_the_upgrade_downloads_nothing_and_runs_no_privileged_command() {
+    gu_rpm_setup || return 1
+    gsg install --upgrade-git </dev/null
+    assert_rc 0 "first run"
+    rm -f -- "$SANDBOX/gitup.log" "$LC_FIX"/git-*.tar.xz
+    gsg install --upgrade-git </dev/null
+    assert_rc 0 "second run, with the flag"
+    assert_no_file "$SANDBOX/gitup.log" "no sudo, dnf or make call"
+    gsg_pty $'\n' install
+    assert_rc 0 "second run in a terminal"
+    assert_not_contains "$OUT" "[y/N]" "no prompt"
+}
+
+test_a_pin_bump_is_offered_and_replaces_the_old_build_and_its_obsolete_files() {
+    gu_rpm_setup || return 1
+    gu_old_build 2.55.0 || return 1
+    gsg install --upgrade-git </dev/null
+    assert_rc 0 "install --upgrade-git over an older build of ours"
+    assert_eq "$("$GU_ROOT/usr/local/bin/git" --version)" "git version 2.56.0" "the new build replaced it"
+    assert_file "$GU_ROOT/usr/local/share/doc/git-2.56.0-local/MANIFEST" "a new MANIFEST was saved"
+    assert_no_file "$GU_ROOT/usr/local/share/man/man1/obsolete.1" "a file the new version no longer ships is removed"
+    assert_no_file "$GU_ROOT/usr/local/share/doc/git-2.55.0-local" "and so is the old MANIFEST directory"
+}
+
+# ^ hazard cp onto an existing symlink writes through it; a later pin shipping a builtin as a program would overwrite the link target
+test_a_rebuild_replaces_a_symlink_of_the_old_build_and_never_writes_through_it() {
+    local b victim_before
+    gu_rpm_setup || return 1
+    gu_old_build 2.55.0 || return 1
+    b="$GU_ROOT/usr/local/bin"
+    mv -- "$b/git-shell" "$b/git-shell.victim" && ln -s git-shell.victim "$b/git-shell" || return 1
+    victim_before="$(<"$b/git-shell.victim")"
+    gsg install --upgrade-git </dev/null
+    assert_rc 0 "install --upgrade-git over a build whose git-shell is a symlink"
+    if [ -L "$b/git-shell" ]; then fail "git-shell is still a symlink"; fi
+    assert_eq "$(<"$b/git-shell.victim")" "$victim_before" "the file the old link pointed at was not written"
+    assert_eq "$("$b/git" --version)" "git version 2.56.0" "the new build is in place"
+}
+
+# ^ invariant rc 1 of the refresh plan = nothing stale, install goes on; an unbuildable plan is rc 2, and --upgrade-git refuses
+# shellcheck disable=SC2016
+test_a_stale_build_whose_make_words_are_refused_gives_rc_2_not_nothing_stale() {
+    gu_rpm_setup || return 1
+    gu_old_build 2.55.0 || return 1
+    gu_run 'source "$GSG_ROOT/lib/gitup/gitup_rpm.sh" || exit 9; gitup_paths || exit 9; GITUP_CLASS=rpm; INSTALL_TIMEOUT_BIN="$(type -P timeout)"
+        GSG_GIT="$GITUP_PREFIX/bin/git"
+        gitup_source_takeover_blocks() { GITUP_SYSCONFDIR=""; return 1; }
+        gitup_source_plan_refresh gitup_rpm_prepare >/dev/null; exit $?'
+    assert_rc 2 "a stale build whose plan cannot be built is stale but not doable, never nothing to do"
+    assert_contains "$ERR" "GITUP_SYSCONFDIR is empty" "and the reason is on stderr"
+}
+
+test_declining_a_pin_bump_changes_nothing_and_install_continues() {
+    gu_rpm_setup || return 1
+    gu_old_build 2.55.0 || return 1
+    gsg_pty $'\n' install
+    assert_rc 0 "Enter at the prompt"
+    assert_contains "$OUT" "older than the git this version pins" "the offer was made"
+    assert_eq "$("$GU_ROOT/usr/local/bin/git" --version)" "git version 2.55.0" "git is unchanged"
+    assert_file "$GU_ROOT/usr/local/share/man/man1/obsolete.1" "nothing was removed"
+    assert_file "$LC_STATE/state" "install continued"
+    gsg install </dev/null
+    assert_rc 0 "no terminal and no flag"
+    assert_contains "$OUT$ERR" "--upgrade-git" "names the flag"
+    assert_eq "$("$GU_ROOT/usr/local/bin/git" --version)" "git version 2.55.0" "git is still unchanged"
+}
+
+test_a_git_newer_than_the_pin_is_left_alone() {
+    gu_rpm_setup || return 1
+    gu_old_build 2.57.0 || return 1
+    gsg install --upgrade-git </dev/null
+    assert_rc 0 "newer than the pin"
+    assert_not_contains "$OUT$ERR" "pins" "no offer"
+    assert_no_file "$SANDBOX/gitup.log" "no privileged command"
+}
+
+test_a_build_that_is_not_ours_is_never_offered_a_rebuild() {
+    gu_rpm_setup || return 1
+    gu_old_build 2.55.0 || return 1
+    rm -rf -- "$GU_ROOT/usr/local/share/doc" || return 1
+    gsg install --upgrade-git </dev/null
+    assert_rc 0 "an older git in /usr/local without a MANIFEST of ours"
+    assert_not_contains "$OUT$ERR" "pins" "no offer"
+    assert_eq "$("$GU_ROOT/usr/local/bin/git" --version)" "git version 2.55.0" "git is untouched"
+}
+
+run_file_tests

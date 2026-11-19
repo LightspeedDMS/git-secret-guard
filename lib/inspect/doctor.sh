@@ -1,0 +1,506 @@
+# shellcheck shell=bash disable=SC2153,SC2034
+
+DR_PROBLEMS=0
+DR_WARNINGS=0
+DR_REPO_TOTAL=0
+DR_REPO_COVERED=0
+DR_WORK=""
+DR_BETTERLEAKS_OK=0
+DR_TIMEOUT_OK=0
+DR_LIMIT=""
+GSG_DOCTOR_TIMEOUT_DEFAULT=30
+DR_RECHECK=0
+# ^ invariant 1 = the run has no --roots and searches $HOME, on macOS without ~/Library and ~/.Trash; --roots sets it to 0 and searches exactly what it names
+DR_DEFAULT_ROOTS=0
+DR_REC_NEW=()
+
+# ^ invariant every machine line goes through here => severity is counted once and control characters never reach the terminal
+# ^ invariant a machine PROBLEM is also queued as a record line; in recheck mode nothing is printed here, the open items are printed together afterwards
+doctor_machine_line() {
+    local text="${2//[[:cntrl:]]/?}"
+    case "$1" in
+        PROBLEM)
+            DR_PROBLEMS=$((DR_PROBLEMS + 1))
+            DR_REC_NEW+=("machine"$'\t'"$text")
+            ;;
+        WARNING) DR_WARNINGS=$((DR_WARNINGS + 1)) ;;
+    esac
+    if [ "$DR_RECHECK" -ne 1 ]; then
+        ui_mark 1 "$1"
+        printf '  %s %s\n' "$REPLY" "$text"
+    fi
+}
+
+# ^ external a git config -z record = "key NL value"; a valueless key is just "key" and its value is empty, never the key
+# ^ invariant sets REC_KEY and REC_VALUE
+doctor_split_record() {
+    REC_KEY="${1%%$'\n'*}"
+    REC_VALUE=""
+    if [[ $1 == *$'\n'* ]]; then REC_VALUE="${1#*$'\n'}"; fi
+}
+
+# shellcheck disable=SC2329
+doctor_cleanup() {
+    # ^ invariant rm -rf only on the absolute mktemp directory this run made
+    if [ -n "$DR_WORK" ] && [ "${DR_WORK#/}" != "$DR_WORK" ]; then rm -rf -- "$DR_WORK"; fi
+    # ^ invariant DR_REC_TMP is the one temp file this run made beside the record; the lock is released only when this process holds it
+    if [ -n "$DR_REC_TMP" ] && ! rm -f -- "$DR_REC_TMP"; then
+        printf '%s: cannot remove %s\n' "$GSG_NAME" "$DR_REC_TMP" >&2
+    fi
+    doctor_rec_unlock
+}
+
+# ^ security pathspec and replace-object variables are dropped or pinned before any HEAD read => an inherited setting cannot change what is judged
+# ^ security the repository-local GIT_* variables are unset => GIT_DIR from a calling hook cannot point every check at one repository
+# ^ invariant GIT_OPTIONAL_LOCKS=0 => no git command run here refreshes an index
+doctor_start() {
+    local v vars
+    DR_WORK="$(mktemp -d)" || {
+        printf '%s: cannot create a temp directory\n' "$GSG_NAME" >&2
+        return 1
+    }
+    trap doctor_cleanup EXIT
+    trap 'exit 129' HUP
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    unset GIT_LITERAL_PATHSPECS GIT_GLOB_PATHSPECS GIT_NOGLOB_PATHSPECS GIT_ICASE_PATHSPECS
+    vars="$("$GSG_GIT" rev-parse --local-env-vars 2>"$DR_WORK/start.err")" || {
+        first_message "$DR_WORK/start.err"
+        printf '%s: git cannot start the checks (%s)\n' "$GSG_NAME" "${REPLY//[[:cntrl:]]/?}" >&2
+        return 1
+    }
+    while IFS= read -r v; do
+        if [ -n "$v" ]; then unset "$v"; fi
+    done <<<"$vars"
+    # ^ security doctor reads other people's repositories => no command their config names may run and no remote may be contacted
+    # ^ hazard fsmonitor runs on index reads, a partial clone fetches missing blobs from its promisor; test:test_doctor_runs_no_command_a_repository_configures
+    # ^ external GIT_CONFIG_COUNT is command scope, beats repository config and must follow the unset loop; the hook never loads this file
+    export GIT_NO_REPLACE_OBJECTS=1 GIT_OPTIONAL_LOCKS=0 GIT_NO_LAZY_FETCH=1
+    export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0=false
+}
+
+doctor_require_git() {
+    local ver
+    lifecycle_require_git || return 1
+    if ! install_git_is_new_enough "$GSG_GIT"; then
+        ver="$(install_git_version "$GSG_GIT")" || ver="of unknown version"
+        printf '%s: the git on PATH (%s) is git %s; doctor needs git >= 2.54 to see config-based hooks\n' "$GSG_NAME" "$(gitup_display_path "$GSG_GIT")" "$ver" >&2
+        return 1
+    fi
+}
+
+# ^ invariant sets DR_ROOT_LIST = absolute real paths of existing directories; a missing one is a doctor error, never skipped
+doctor_resolve_roots() {
+    local root
+    DR_ROOT_LIST=()
+    DR_DEFAULT_ROOTS=0
+    if [ "$#" -eq 0 ]; then
+        DR_DEFAULT_ROOTS=1
+        set -- "$HOME"
+        if [ ! -d "$1" ]; then
+            printf '%s: default root %s is not a directory; pass --roots DIR\n' "$GSG_NAME" "$1" >&2
+            return 1
+        fi
+    fi
+    for root in "$@"; do
+        if [ ! -d "$root" ]; then
+            printf '%s: root %s is not a directory\n' "$GSG_NAME" "${root//[[:cntrl:]]/?}" >&2
+            return 1
+        fi
+        DR_ROOT_LIST+=("$(realpath -- "$root")") || return 1
+    done
+}
+
+doctor_check_state() {
+    if ! state_read 2>"$DR_WORK/state.err"; then
+        first_message "$DR_WORK/state.err"
+        doctor_machine_line PROBLEM "state: $REPLY"
+        return 0
+    fi
+    if [ "$ST_EXISTS" -ne 1 ]; then
+        doctor_machine_line PROBLEM "installed: not installed (no state file at $GSG_STATE_FILE); run git-secret-guard install"
+        return 0
+    fi
+    doctor_machine_line ok "installed: version $ST_VERSION (state $GSG_STATE_FILE)"
+    doctor_check_state_records
+}
+
+# ^ invariant a tools_placed word = <tool>:<sha256> of a managed tool; two hashes for one tool = an unfinished install
+# ^ invariant a tools_replaced word is <tool>.gsg-replaced-<UTC stamp>:<sha256>, the same shape uninstall_restore_replaced accepts
+doctor_check_state_records() {
+    local w tool hash aside sha flagged=0 placed_n=0 replaced_n=0
+    local -a words=() hs=()
+    local -A hashes=()
+    read -r -a words <<<"$ST_TOOLS"
+    for w in "${words[@]}"; do
+        if [[ " ${GSG_STATE_TOOL_NAMES[*]} " != *" $w "* ]]; then
+            trunc_text "$w" 80
+            doctor_machine_line PROBLEM "state: tools_installed_by_us names [$REPLY], not a tool install manages"
+            flagged=1
+        fi
+    done
+    read -r -a words <<<"$ST_PLACED"
+    for w in "${words[@]}"; do
+        if [[ $w =~ ^([a-z][a-z0-9-]*):([0-9a-f]{64})$ ]] && [[ " ${GSG_STATE_TOOL_NAMES[*]} " == *" ${BASH_REMATCH[1]} "* ]]; then
+            tool="${BASH_REMATCH[1]}" hash="${BASH_REMATCH[2]}"
+            if [[ " ${hashes[$tool]:-} " != *" $hash "* ]]; then
+                hashes[$tool]+="${hashes[$tool]:+ }$hash"
+                placed_n=$((placed_n + 1))
+            fi
+        else
+            trunc_text "$w" 80
+            doctor_machine_line PROBLEM "state: tools_placed entry [$REPLY] is invalid (want <tool>:<sha256>)"
+            flagged=1
+        fi
+    done
+    for tool in "${GSG_TOOL_NAMES[@]}"; do
+        read -r -a hs <<<"${hashes[$tool]:-}"
+        if [ "${#hs[@]}" -gt 1 ]; then
+            doctor_machine_line WARNING "state: tools_placed holds ${#hs[@]} hashes for $tool, an install did not finish placing it; run git-secret-guard install again"
+            flagged=1
+        fi
+    done
+    read -r -a words <<<"$ST_REPLACED"
+    for w in "${words[@]}"; do
+        aside="${w%:*}" sha="${w##*:}" tool="${aside%%.gsg-replaced-*}"
+        if [[ $w != *:* ]] || [[ ! $aside =~ $GSG_ASIDE_RE ]] || [[ ! $sha =~ ^[0-9a-f]{64}$ ]] || [[ " ${GSG_STATE_TOOL_NAMES[*]} " != *" $tool "* ]]; then
+            trunc_text "$w" 80
+            doctor_machine_line PROBLEM "state: tools_replaced entry [$REPLY] is invalid"
+            flagged=1
+        elif [ ! -e "$GSG_BIN_DIR/$aside" ] && [ ! -L "$GSG_BIN_DIR/$aside" ]; then
+            doctor_machine_line WARNING "state: tools_replaced records $aside but $GSG_BIN_DIR/$aside is missing; a rerun of install drops a record of a move that never happened, otherwise your original cannot be restored"
+            flagged=1
+        else
+            replaced_n=$((replaced_n + 1))
+        fi
+    done
+    if [ "$flagged" -eq 0 ]; then
+        doctor_machine_line ok "state records: $placed_n placed hash(es), $replaced_n original(s) moved aside"
+    fi
+}
+
+# ^ security a configured value is never printed, only count, origin and matches => a global command can hold a token and the timer logs this output
+# ^ invariant sets REPLY = "has N value(s) (scope file; ...), K of them <label>"
+doctor_values_text() {
+    local n="$1" ok="$2" src="$3" label="$4" noun=values
+    if [ "$n" -eq 1 ]; then noun=value; fi
+    REPLY="has $n $noun ($src), $ok of them $label"
+}
+
+# ^ invariant the verdict comes from hooklist_probe_line, the reader status shares; the value scan only locates the setting git blamed
+# ^ invariant rc 1 = a PROBLEM was printed; an absent hook or a failed step add one only when no config-shape problem explains it (arg 1 = 1)
+doctor_hook_verdict() {
+    local prior="$1" res kind step rc msg bad=0
+    hooklist_bind_timeout
+    res="$(hooklist_probe_line "$DR_WORK")"
+    HL_BOUND=()
+    IFS=$'\t' read -r kind step rc msg <<<"$res"
+    if [ "$kind" = ok ]; then
+        # ^ invariant on ok the two fields after the kind are the pre-commit and commit-msg statuses (hooklist_probe_line)
+        doctor_hook_event pre-commit "$step" "$prior" "commits are not scanned" || bad=1
+        # ^ why skip a repeated disable, not print it twice; hook.git-secret-guard.enabled=false switches both events off and one line says so
+        if ! { [ "$step" = disabled ] && [ "$rc" = disabled ]; }; then
+            doctor_hook_event commit-msg "$rc" "$prior" "commit messages are not scanned" || bad=1
+        fi
+        return "$bad"
+    fi
+    if [ "$kind" != fail ]; then step="hook probe" rc="?" msg="no answer"; fi
+    if doctor_hook_locate valueless; then return 1; fi
+    if [ "$prior" -eq 0 ]; then doctor_machine_line PROBLEM "hook: git $step failed with exit $rc${msg:+: $msg}; commits may be blocked or unscanned until it works"; return 1; fi
+    return 0
+}
+
+# ^ invariant args = event, its status from git's listing, the config-shape flag, what it means; rc 1 = a PROBLEM was printed
+doctor_hook_event() {
+    local event="$1" listed="$2" prior="$3" meaning="$4" want
+    case "$listed" in
+        effective) return 0 ;;
+        disabled) want=hook.git-secret-guard.enabled ;;
+        event-disabled) want="hook.$event.enabled" ;;
+        *)
+            if [ "$prior" -eq 0 ]; then doctor_machine_line PROBLEM "hook: git-secret-guard is not in git hook list $event, so $meaning; run git-secret-guard install"; return 1; fi
+            return 0
+            ;;
+    esac
+    if doctor_hook_locate "$want"; then return 1; fi
+    doctor_machine_line PROBLEM "hook: git reports the hook disabled; the setting could not be located (find it with: git config --show-origin --get-all $want)"
+    return 1
+}
+
+# ^ invariant location only, git already said the hook is off or failed; rc 0 = at least one PROBLEM line named a setting, rc 1 = nothing was located
+doctor_hook_locate() {
+    local want="$1" i origin value printed=0 effect
+    if hp_hook_enabled_scan; then
+        for i in "${!HP_EN_KIND[@]}"; do
+            if [ "${HP_EN_KEY[$i]}" != "$want" ] && [ "${HP_EN_KIND[$i]}" != valueless ]; then continue; fi
+            origin="${HP_EN_ORIGIN[$i]#file:}"
+            origin="${origin//[^[:print:]]/?}"
+            value="${HP_EN_VALUE[$i]//[^[:print:]]/?}"
+            trunc_text "$value" 40
+            value="$REPLY"
+            case "${HP_EN_KIND[$i]}" in
+                valueless) doctor_machine_line PROBLEM "hook: ${HP_EN_KEY[$i]} has no value in the ${HP_EN_SCOPE[$i]} config ($origin); git commands fail until it is removed" ;;
+                unjudged) doctor_machine_line PROBLEM "hook: git reports the hook disabled; the setting could not be located (the boolean probe failed: $value)" ;;
+                *)
+                    effect="switches the hook off everywhere; remove it"
+                    if [ "${HP_EN_KEY[$i]}" = hook.commit-msg.enabled ]; then effect="disables the commit-msg event: commit messages are not scanned (lines still are); remove it"; fi
+                    doctor_machine_line PROBLEM "hook: ${HP_EN_KEY[$i]}=$value in the ${HP_EN_SCOPE[$i]} config ($origin) $effect"
+                    ;;
+            esac
+            printed=1
+        done
+    fi
+    [ "$printed" -eq 1 ]
+}
+
+# ^ external git config --show-scope --show-origin -z --get-regexp = "scope NUL origin NUL key NL value NUL" (probed on git 2.56)
+# ^ why -C /, not the current directory; the machine view must not include a repository's local config
+doctor_check_hook_config() {
+    local rc i scope origin value want="$DR_HOOK_CMD" hookfile="$GSG_SHARE/hooks/secret-scan" bad=0 msg
+    local ev_n=0 ev_ok=0 ev_src="" ev_lines=0 ev_msg=0 cmd_n=0 cmd_ok=0 cmd_src=""
+    hp_records -C / config --show-scope --show-origin -z --get-regexp '^hook\.git-secret-guard\.'
+    rc=$?
+    if [ "$rc" -gt 1 ]; then
+        doctor_machine_line PROBLEM "hook: cannot read the git config (git config exit $rc${GSG_HP_ERR:+: $GSG_HP_ERR})"
+        return 0
+    fi
+    for ((i = 0; i + 2 < ${#GSG_HP_OUT[@]}; i += 3)); do
+        scope="${GSG_HP_OUT[i]}"
+        origin="${GSG_HP_OUT[i + 1]}"
+        doctor_split_record "${GSG_HP_OUT[i + 2]}"
+        value="$REC_VALUE"
+        case "$REC_KEY" in
+            hook.git-secret-guard.event)
+                ev_n=$((ev_n + 1))
+                ev_src+="${ev_src:+; }$scope ${origin#file:}"
+                if [ "$value" = pre-commit ]; then ev_lines=$((ev_lines + 1)); fi
+                if [ "$value" = commit-msg ]; then ev_msg=$((ev_msg + 1)); fi
+                ;;
+            hook.git-secret-guard.command)
+                cmd_n=$((cmd_n + 1))
+                cmd_src+="${cmd_src:+; }$scope ${origin#file:}"
+                if [ "$value" = "$want" ]; then cmd_ok=$((cmd_ok + 1)); fi
+                ;;
+        esac
+    done
+    # ^ why distinct wanted events, not matching values; two pre-commit values are one wanted event and one duplicate
+    if [ "$ev_lines" -gt 0 ]; then ev_ok=$((ev_ok + 1)); fi
+    if [ "$ev_msg" -gt 0 ]; then ev_ok=$((ev_ok + 1)); fi
+    if [ "$ev_n" -eq 0 ]; then
+        doctor_machine_line PROBLEM "hook: hook.git-secret-guard.event is [unset], want exactly [pre-commit, commit-msg]; run git-secret-guard install"
+        bad=1
+    elif [ "$ev_n" -ne 2 ] || [ "$ev_lines" -ne 1 ] || [ "$ev_msg" -ne 1 ]; then
+        doctor_values_text "$ev_n" "$ev_ok" "$ev_src" "wanted events"
+        doctor_machine_line PROBLEM "hook: hook.git-secret-guard.event $REPLY, want exactly two, pre-commit and commit-msg; run git-secret-guard install"
+        bad=1
+    fi
+    if [ "$cmd_n" -eq 0 ]; then
+        doctor_machine_line PROBLEM "hook: hook.git-secret-guard.command is [unset], want exactly [$want]; run git-secret-guard install"
+        bad=1
+    elif [ "$cmd_n" -ne 1 ] || [ "$cmd_ok" -ne 1 ]; then
+        doctor_values_text "$cmd_n" "$cmd_ok" "$cmd_src" "the installed hook"
+        doctor_machine_line PROBLEM "hook: hook.git-secret-guard.command $REPLY, want exactly one, the installed hook [$want]; run git-secret-guard install"
+        bad=1
+    elif msg="$(tool_unusable "hook command" "$hookfile")"; then
+        doctor_machine_line PROBLEM "hook: $msg; run git-secret-guard install"
+        bad=1
+    fi
+    doctor_hook_verdict "$bad" || bad=1
+    if [ "$bad" -eq 0 ]; then
+        doctor_machine_line ok "hook: hook.git-secret-guard.event=pre-commit and commit-msg, command=$want (executable)"
+    fi
+}
+
+# ^ invariant prints the version tools.lock pins for this platform; rc 1 when there is no row
+doctor_pinned() {
+    local plat row
+    GSG_OS="$(uname -s)" && GSG_ARCH="$(uname -m)" || return 1
+    plat="$(tools_platform_key "$1" "$GSG_OS" "$GSG_ARCH" 2>/dev/null)" || return 1
+    row="$(tools_lock_lookup "$(tools_lock_path)" "$1" "$plat" 2>/dev/null)" || return 1
+    printf '%s' "${row%% *}"
+}
+
+doctor_check_tools() {
+    local tool bin msg pinned timeout_ok=0
+    DR_BETTERLEAKS_OK=0 DR_TIMEOUT_OK=0 DR_LIMIT=""
+    if ! load_settings "$GSG_SHARE/settings" 2>"$DR_WORK/settings.err"; then
+        first_message "$DR_WORK/settings.err"
+        doctor_machine_line PROBLEM "settings: ${REPLY:-$GSG_SHARE/settings is invalid}; run git-secret-guard install"
+        return 0
+    fi
+    if ! tool_unusable timeout "$(settings_tool_bin timeout)" >/dev/null; then timeout_ok=1; fi
+    DR_TIMEOUT_OK="$timeout_ok"
+    # ^ invariant DR_LIMIT = seconds per git call and per betterleaks pre-flight, empty = invalid setting; the shim also needs DR_TIMEOUT_OK=1 or runs no git
+    DR_LIMIT="${DOCTOR_TIMEOUT_SECONDS-$GSG_DOCTOR_TIMEOUT_DEFAULT}"
+    if [[ ! $DR_LIMIT =~ ^[1-9][0-9]{0,5}$ ]]; then
+        trunc_text "$DR_LIMIT" 40
+        doctor_machine_line PROBLEM "settings: DOCTOR_TIMEOUT_SECONDS must be a positive integer, got [$REPLY]; fix or remove it in $GSG_SHARE/settings"
+        DR_LIMIT=""
+    fi
+    for tool in "${GSG_TOOL_NAMES[@]}"; do
+        bin="$(settings_tool_bin "$tool")"
+        if msg="$(tool_unusable "$tool" "$bin")"; then
+            doctor_machine_line PROBLEM "$tool: $msg; run git-secret-guard install"
+        elif [ "$timeout_ok" -ne 1 ]; then
+            doctor_machine_line PROBLEM "$tool: $bin version not checked, timeout is unusable"
+        elif ! pinned="$(doctor_pinned "$tool")"; then
+            doctor_machine_line PROBLEM "$tool: tools.lock has no pinned version for this platform"
+        elif tools_probe_version "$bin" "$pinned" "$TIMEOUT_BIN"; then
+            doctor_machine_line ok "$tool: $bin $TOOL_FOUND (pinned $pinned)"
+        else
+            doctor_machine_line PROBLEM "$tool: $bin reports $TOOL_FOUND, the pin is $pinned; run git-secret-guard install"
+        fi
+    done
+    for tool in jq "$(gsg_proc_tool_name)" timeout; do
+        bin="$(settings_tool_bin "$tool")"
+        if msg="$(tool_unusable "$tool" "$bin")"; then
+            doctor_machine_line PROBLEM "$tool: $msg; run git-secret-guard install"
+        else
+            doctor_machine_line ok "$tool: $bin"
+        fi
+    done
+    if [ -n "${BASH_BIN:-}" ]; then
+        if msg="$(tool_unusable bash "$BASH_BIN")"; then
+            doctor_machine_line PROBLEM "bash: $msg; run git-secret-guard install"
+        elif ! brew_bash_ok "$BASH_BIN"; then
+            doctor_machine_line PROBLEM "bash: $BASH_BIN is older than bash $BREW_BASH_MIN_MAJOR.$BREW_BASH_MIN_MINOR; run git-secret-guard install"
+        else
+            doctor_machine_line ok "bash: $BASH_BIN"
+        fi
+    fi
+    if [ "$timeout_ok" -eq 1 ] && [ -n "$DR_LIMIT" ] && ! tool_unusable betterleaks "$BETTERLEAKS_BIN" >/dev/null; then DR_BETTERLEAKS_OK=1; fi
+}
+
+# ^ invariant read-only; launchctl is judged like the hook's tools and never run, a doctor started by launchd itself cannot fail on the domain
+doctor_check_agent() {
+    local msg bin bad=0
+    if [ ! -e "$GSG_AGENT_PLIST" ] && [ ! -L "$GSG_AGENT_PLIST" ]; then
+        doctor_machine_line PROBLEM "timer: $GSG_AGENT_PLIST is missing; run git-secret-guard install --with-timer"
+        bad=1
+    elif ! launchd_plist_is_ours "$GSG_AGENT_PLIST"; then
+        doctor_machine_line PROBLEM "timer: $GSG_AGENT_PLIST was not written by git-secret-guard; move it away and run git-secret-guard install --with-timer"
+        bad=1
+    fi
+    bin="$(settings_tool_bin launchctl)"
+    if msg="$(tool_unusable launchctl "$bin")"; then
+        doctor_machine_line PROBLEM "launchctl: $msg; run git-secret-guard install --with-timer"
+        bad=1
+    fi
+    if [ "$bad" -eq 0 ]; then
+        doctor_machine_line ok "timer: $GSG_AGENT_PLIST is in place; launchctl $bin"
+    fi
+}
+
+# ^ invariant read-only; systemctl is judged like the hook's tools and never run, a run inside the user manager cannot fail on a bus
+doctor_check_timer() {
+    local unit path msg bin bad=0
+    if [ "$ST_EXISTS" -ne 1 ] || [ "$ST_TIMER" != yes ]; then return 0; fi
+    if brew_is_macos; then
+        doctor_check_agent
+        return 0
+    fi
+    for unit in "$GSG_TIMER_UNIT" "$GSG_SERVICE_UNIT"; do
+        path="$GSG_UNIT_DIR/$unit"
+        if [ ! -e "$path" ] && [ ! -L "$path" ]; then
+            doctor_machine_line PROBLEM "timer: $path is missing; run git-secret-guard install --with-timer"
+            bad=1
+        elif ! timer_unit_is_ours "$path"; then
+            doctor_machine_line PROBLEM "timer: $path was not written by git-secret-guard; move it away and run git-secret-guard install --with-timer"
+            bad=1
+        fi
+    done
+    bin="$(settings_tool_bin systemctl)"
+    if msg="$(tool_unusable systemctl "$bin")"; then
+        doctor_machine_line PROBLEM "systemctl: $msg; run git-secret-guard install --with-timer"
+        bad=1
+    fi
+    if [ "$bad" -eq 0 ]; then
+        doctor_machine_line ok "timer: $GSG_TIMER_UNIT and $GSG_SERVICE_UNIT are in $GSG_UNIT_DIR; systemctl $bin"
+    fi
+}
+
+doctor_check_hooks_path() {
+    local i found=0
+    lifecycle_read_hooks_path || return 1
+    for i in "${!GSG_HP_OWN[@]}"; do
+        doctor_machine_line PROBLEM "core.hooksPath: [${GSG_HP_OWN[$i]}] is still set in ${GSG_HP_FILE#file:}; remove it (git config --global --unset-all core.hooksPath)"
+        found=1
+    done
+    for i in "${!GSG_HP_FOREIGN_FILE[@]}"; do
+        doctor_machine_line PROBLEM "core.hooksPath: [${GSG_HP_FOREIGN_VALUE[$i]}] is set in ${GSG_HP_FOREIGN_FILE[$i]}; remove it there"
+        found=1
+    done
+    if [ "$found" -eq 0 ]; then doctor_machine_line ok "core.hooksPath: no global value"; fi
+}
+
+doctor_check_git() {
+    local i cand ver
+    install_collect_gits
+    for i in "${!GSG_GIT_CANDIDATES[@]}"; do
+        cand="${GSG_GIT_CANDIDATES[$i]}"
+        if desktop_git_covers "$cand"; then continue; fi
+        ver="$(install_git_version "$cand")" || ver=""
+        if [ -n "$ver" ] && install_git_is_new_enough "$cand"; then
+            doctor_machine_line ok "git: $(gitup_display_path "$cand") $ver"
+        elif install_git_is_bundled "$cand"; then
+            doctor_machine_line WARNING "git: $(gitup_display_path "$cand") is git ${ver:-of unknown version}; $(install_old_git_effect "$cand")"
+        else
+            doctor_machine_line WARNING "git: $(gitup_display_path "$cand") is git ${ver:-of unknown version}; it ignores config-based hooks without any message, so commits made with it are NOT scanned"
+        fi
+    done
+}
+
+# ^ invariant a takeover undone by something else (RPM files back, dnf entry gone) leaves commits through /usr/bin/git unscanned => a PROBLEM
+doctor_check_system_git() {
+    if ! gitup_system_git_state; then return 0; fi
+    case "$GITUP_TK_STATE" in
+        active) doctor_machine_line ok "system git takeover: $GITUP_TK_TEXT" ;;
+        none) ;;
+        *) doctor_machine_line PROBLEM "system git takeover: $GITUP_TK_TEXT" ;;
+    esac
+}
+
+# ^ invariant an interrupted source copy (MANIFEST.partial) is a WARNING with its next step, never a PROBLEM
+doctor_check_unfinished_copy() {
+    if gitup_source_unfinished_copy; then doctor_machine_line WARNING "git build: $REPLY"; fi
+}
+
+doctor_summary() {
+    ui_worst "$DR_PROBLEMS" "$DR_WARNINGS"
+    ui_prefix 1 "$REPLY"
+    printf '%ssummary: %s repos, %s covered\n' "$REPLY" "$DR_REPO_TOTAL" "$DR_REPO_COVERED"
+    if [ "$DR_WARNINGS" -gt 0 ]; then
+        printf 'warnings: %s (listed above, they do not change the exit status)\n' "$DR_WARNINGS"
+    fi
+}
+
+# ^ invariant the machine phase of a full run and of a recheck; the git listing has only ok and WARNING lines, recheck skips it
+doctor_machine_checks() {
+    doctor_check_state
+    doctor_check_hook_config
+    doctor_check_tools
+    doctor_check_timer
+    doctor_check_hooks_path || return 1
+    doctor_check_system_git
+    smartgit_doctor_lines
+    desktop_git_doctor_lines || return 1
+    autoupdate_doctor_lines || return 1
+    doctor_check_unfinished_copy
+    if [ "$DR_RECHECK" -ne 1 ]; then doctor_check_git; fi
+}
+
+# ^ invariant exit 0 = no PROBLEM line, 1 = at least one, 2 = doctor could not run or could not write its record; WARNING and info never change the status
+doctor_run() {
+    paths_init || return 2
+    lifecycle_note_global_config
+    doctor_require_git || return 2
+    doctor_resolve_roots "$@" || return 2
+    doctor_start || return 2
+    DR_HOOK_CMD="$(hook_command_text "$GSG_SHARE" "$(share_recorded_bash "$GSG_SHARE")")" || return 2
+    printf 'machine:\n'
+    doctor_machine_checks || return 2
+    doctor_repos || return 2
+    doctor_summary
+    doctor_rec_save_full || return 2
+    [ "$DR_PROBLEMS" -eq 0 ]
+}

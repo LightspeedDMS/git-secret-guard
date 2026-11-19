@@ -1,0 +1,39 @@
+# Here-strings (<<<) and here-docs allowed in hooks/, bin/ and lib/, read by tests/project/test_quality.sh. Format: path, then its tokens (the operator
+# and the word after it, as tests/herestring-tokens.awk prints them), once per use. Git for Windows bash 5.3 never returns on a here-string or here-doc of
+# 65,537 to 65,664 bytes (#155): a value listed here is bounded well below 64 KiB, or that line never runs on Windows. Anything else goes through
+# a pipe, a file or split_lines (lib/core/common.sh). Why each one is bounded: docs/platforms.md#maintainer-notes.
+
+# fixed by git or by us: git rev-parse --local-env-vars, one ls-tree or diff --raw record, the probe repo listing, a pointer <= 1023 bytes,
+# one probe line (its message cut at 200); doctor's ST_* as in the state group below; $tail runs only with a BSD realpath (macOS)
+hooks/secret-scan <<<"$vars"
+lib/scan/exempt.sh <<<"$entry" <<<"$listing" <<<"$vars"
+lib/scan/extract.sh <<<"$REPLY" <<<"${meta#:}"
+lib/install/hookspath.sh <<<"$tail" <<<"$vars"
+lib/inspect/doctor.sh <<<"$ST_PLACED" <<<"$ST_REPLACED" <<<"$ST_TOOLS" <<<"$res" <<<"$vars" <<<"${hashes[$tool]:-}"
+lib/inspect/status.sh <<<"$res"
+
+# cut on purpose (GSG_MSG_WORDS_MAX, GSG_VERSION_OUTPUT_MAX), four numbers, a pid list, a cksum line, our own lock line
+lib/core/common.sh <<<"${line:0:GSG_MSG_WORDS_MAX}"
+lib/core/message.sh <<<"$meta"
+lib/core/proc.sh <<<"${kids[$p]:-}"
+lib/install/tools.sh <<<"$line" <<<"${output:0:GSG_VERSION_OUTPUT_MAX}"
+lib/integrations/smartgit/smartgit_offer.sh <<<"$out"
+
+# state words: state_read refuses a line longer than GSG_STATE_LINE_MAX (8192) characters
+lib/install/install.sh <<<"$1" <<<"$ST_PLACED"
+lib/install/install_tools.sh <<<"$(install_placed_hashes <<<"$ST_PLACED" <<<"$ST_REPLACED" <<<"$ST_REPLACED"
+lib/install/uninstall.sh <<<"$2" <<<"$ST_PLACED" <<<"$ST_REPLACED" <<<"$ST_TOOLS"
+
+# Windows too, written by an installer or the user's own environment: one registry key, a ;-separated directory list (32,767 characters at most)
+lib/gitup/gitup_windows.sh <<<"$out"
+lib/integrations/smartgit/smartgit.sh <<<"$GSG_SMARTGIT_INSTALL_DIRS" <<<"$out")"
+
+# never on Windows: Linux or macOS package managers, GitHub Desktop and Flatpak on Linux, versions and PATH of the git upgrade
+lib/gitup/gitup.sh <<<"$1" <<<"$2" <<<"$GITUP_SYSTEM_PATH" <<<"$stat_out"
+lib/gitup/gitup_apt.sh <<<"$armor" <<<"$line" <<<"$out" <<<"$out"
+lib/gitup/gitup_rpm.sh <<<"$1" <<<"$1" <<<"$listing" <<<"$listing" <<<"$out"
+lib/gitup/gitup_source.sh <<<"$1" <<<"$listing"
+lib/gitup/gitup_takeover.sh <<<"$all" <<<"$line" <<<"$listing" <<<"$listing" <<<"$out" <<<"$stat_out"
+lib/integrations/desktop/desktop_git_check.sh <<<"$names"
+lib/integrations/smartgit/smartgit_flatpak.sh <<'EOF' <<<"$SGF_SHOW" <<<"$SGF_SHOW" <<<"$out"
+lib/platform/brew.sh <<<"$1"

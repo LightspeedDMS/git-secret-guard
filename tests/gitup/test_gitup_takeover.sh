@@ -1,0 +1,350 @@
+#!/usr/bin/env bash
+# shellcheck source=tests/support/lib.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/../support/lib.sh"
+# shellcheck source=tests/support/lifecycle.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/../support/lifecycle.sh"
+# shellcheck source=tests/support/gitup.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/../support/gitup.sh"
+
+# ^ external the takeover is RPM package-manager code; macOS and Windows have no system git of this kind
+if [ "$TEST_IS_WINDOWS" -eq 1 ]; then FILE_SKIP_REASON="Linux package manager flows"; fi
+
+gu_no_symlinks() {
+    local n
+    for n in "${GU_TK_NAMES[@]}"; do
+        if [ -L "$GU_ROOT/usr/bin/$n" ] && [[ $(readlink "$GU_ROOT/usr/bin/$n") == "$GU_ROOT/usr/local/"* ]]; then return 1; fi
+    done
+}
+
+test_taking_over_the_system_git_points_usr_bin_at_usr_local_and_keeps_the_rpm() {
+    local n sum
+    gu_tk_start || return 1
+    sum="$(sha256sum "$GU_ROOT/usr/bin/git")"
+    gsg install --take-over-system-git </dev/null
+    assert_rc 0 "install --take-over-system-git"
+    gu_all_symlinks || fail "the six files are not symlinks into /usr/local/bin"
+    assert_eq "$("$GU_ROOT/usr/bin/git" --version)" "git version 2.56.0" "/usr/bin/git is the new git"
+    for n in "${GU_TK_NAMES[@]}"; do assert_file "$GU_TK_DIR/orig/$n" "the saved original of $n"; done
+    assert_eq "$(sha256sum "$GU_TK_DIR/orig/git" | cut -d' ' -f1)" "${sum%% *}" "the saved git is the original, byte for byte"
+    assert_contains "$(gu_conf)" "excludepkgs=git git-core git-core-doc perl-Git" "dnf skips every package built from the same source RPM"
+    assert_contains "$(gu_conf)" "# git-secret-guard: takeover" "behind a marker comment"
+    assert_contains "$(gu_conf)" "tsflags=nodocs" "and the rest of dnf.conf is kept"
+    assert_not_contains "$(gu_log)" "rpm -e" "no package was erased"
+    assert_not_contains "$(gu_log)" "dnf remove" "and none was removed"
+    assert_not_contains "$ERR" "warning: $GU_ROOT/usr/bin/git" "the installer no longer warns about /usr/bin/git"
+    assert_contains "$(gu_log)" "restorecon" "labels were restored"
+}
+
+test_the_takeover_is_offered_on_any_install_and_declining_changes_nothing() {
+    gu_tk_start || return 1
+    gsg_pty $'\n' install
+    assert_rc 0 "Enter at the takeover prompt"
+    assert_contains "$OUT" "Take over $GU_ROOT/usr/bin/git" "the offer names the file"
+    assert_contains "$OUT" "[y/N]" "and defaults to No"
+    gu_no_symlinks || fail "something in /usr/bin changed"
+    assert_eq "$(gu_hashes)" "$GU_BEFORE" "the originals are untouched"
+    assert_eq "$(gu_conf)" "$GU_CONF_BEFORE" "no dnf config was written"
+    assert_file "$LC_STATE/state" "install continued"
+    assert_not_contains "$(gu_log)" "make " "the build of ours was used as it is, with no rebuild"
+    gsg install </dev/null
+    assert_rc 0 "no terminal and no flag"
+    assert_not_contains "$OUT$ERR" "[y/N]" "no prompt"
+    assert_contains "$OUT" "--take-over-system-git" "the flag is named"
+    assert_eq "$(gu_hashes)" "$GU_BEFORE" "still untouched"
+    assert_eq "$(gu_conf)" "$GU_CONF_BEFORE" "still no dnf config"
+}
+
+# ^ invariant display only; the identity of the git (realpath, dedupe, takeover target) is never rewritten
+# shellcheck disable=SC2016
+test_a_path_below_a_bin_link_is_shown_below_usr_bin_and_other_paths_are_not_touched() {
+    local r="$SANDBOX/r"
+    gu_rpm_setup || return 1
+    mkdir -p -- "$r/usr/bin" "$r/usr/sbin" "$r/opt" "$r/other/bin" || return 1
+    ln -s usr/bin "$r/bin" && ln -s usr/sbin "$r/sbin" || return 1
+    gu_run 'GITUP_ROOT="$1"; for p in "$1/bin/git" "$1/sbin/x" "$1/usr/bin/git" "$1/other/bin/git" "$1/binx/git"; do gitup_display_path "$p"; echo; done' "$r"
+    assert_eq "$OUT" "$r/usr/bin/git
+$r/usr/sbin/x
+$r/usr/bin/git
+$r/other/bin/git
+$r/binx/git" "only a path below a link that points into usr is rewritten"
+    rm -f -- "$r/bin" && mkdir -p -- "$r/bin" || return 1
+    gu_run 'GITUP_ROOT="$1"; gitup_display_path "$1/bin/git"' "$r"
+    assert_eq "$OUT" "$r/bin/git" "a real /bin directory keeps its name"
+}
+
+test_the_takeover_prompt_and_warning_name_usr_bin_git_when_bin_is_a_link() {
+    gu_tk_start || return 1
+    rm -rf -- "${GU_ROOT:?}/bin" || return 1
+    ln -s usr/bin "$GU_ROOT/bin" || return 1
+    set_env PATH="$GU_ROOT/usr/local/bin:$GU_ROOT/bin:$SANDBOX/pathbin:$TEST_BASE_PATH"
+    gsg_pty $'\n' install
+    assert_contains "$OUT" "Take over $GU_ROOT/usr/bin/git with the plan above" "the prompt"
+    assert_contains "$OUT" "$GU_ROOT/usr/bin/git was left as it is" "the decline line"
+    assert_not_contains "$OUT$ERR" "$GU_ROOT/bin/git" "the link spelling appears nowhere"
+}
+
+test_answering_yes_at_the_takeover_prompt_takes_over() {
+    gu_tk_start || return 1
+    gsg_pty $'y\n' install
+    assert_rc 0 "yes"
+    gu_all_symlinks || fail "the six files are not symlinks"
+}
+
+# ^ external with INSTALL_SYMLINKS=1 git installs its bin and libexec entries as symlinks to git; stat -c %a on such a link says 777, the target decides
+test_the_takeover_accepts_siblings_that_are_symlinks_to_git_and_refuses_one_that_leaves_the_prefix() {
+    local n
+    gu_tk_start || return 1
+    for n in git-receive-pack git-upload-archive git-upload-pack; do
+        mv -- "$GU_ROOT/usr/local/bin/$n" "$GU_ROOT/usr/local/bin/$n.real" && ln -s "$n.real" "$GU_ROOT/usr/local/bin/$n" || return 1
+    done
+    gsg install --take-over-system-git </dev/null
+    assert_rc 0 "the three siblings are relative symlinks to git"
+    gu_all_symlinks || fail "the six files are not symlinks"
+    gu_tk_start || return 1
+    rm -f -- "$GU_ROOT/usr/local/bin/git-upload-pack" && ln -s /bin/sh "$GU_ROOT/usr/local/bin/git-upload-pack" || return 1
+    gsg install --take-over-system-git </dev/null
+    assert_rc 1 "a sibling that points out of the prefix"
+    assert_contains "$ERR" "the system git takeover was refused" "refused"
+    gu_untouched "sibling out of the prefix"
+}
+
+
+# ^ invariant every libexec entry, a symlink included, is judged by its target; inside the prefix, trusted owner, no group or other write bit
+test_the_takeover_judges_the_targets_of_libexec_symlinks_like_any_other_file() {
+    local d case_name
+    for case_name in good writable outside; do
+        gu_tk_start || return 1
+        d="$GU_ROOT/usr/local/libexec/git-core"
+        mkdir -p -- "$d" || return 1
+        case "$case_name" in
+            good) ln -s ../../bin/git "$d/git-merge" || return 1 ;;
+            writable) cp -- "$GU_ROOT/usr/local/bin/git-shell" "$GU_ROOT/usr/local/bin/loose" && chmod 775 "$GU_ROOT/usr/local/bin/loose" && ln -s ../../bin/loose "$d/git-merge" || return 1 ;;
+            outside) ln -s /bin/sh "$d/git-merge" || return 1 ;;
+        esac
+        gsg install --take-over-system-git </dev/null
+        if [ "$case_name" = good ]; then
+            assert_rc 0 "a libexec symlink to git [$case_name]"
+        else
+            assert_rc 1 "a libexec symlink to a bad target [$case_name]"
+            assert_contains "$ERR" "the system git takeover was refused" "refused [$case_name]"
+            gu_untouched "libexec link [$case_name]"
+        fi
+    done
+}
+
+# ^ invariant a chain of links is judged hop by hop; a hop outside the prefix refuses it even when the last target is inside
+test_the_takeover_refuses_a_link_chain_that_leaves_the_prefix_on_the_way() {
+    local d case_name
+    for case_name in hop dotdot2 dotdot3; do
+        gu_tk_start || return 1
+        d="$GU_ROOT/usr/local/libexec/git-core"
+        mkdir -p -- "$d" "$SANDBOX/outside" || return 1
+        case "$case_name" in
+            hop) ln -s "$GU_ROOT/usr/local/bin/git" "$SANDBOX/outside/hop" && ln -s "$SANDBOX/outside/hop" "$d/git-merge" || return 1 ;;
+            dotdot2) ln -s ../.. "$d/git-merge" || return 1 ;;
+            dotdot3) ln -s ../../.. "$d/git-merge" || return 1 ;;
+        esac
+        gsg install --take-over-system-git </dev/null
+        assert_rc 1 "a link that ends outside the prefix or on it [$case_name]"
+        assert_contains "$ERR" "the system git takeover was refused" "refused [$case_name]"
+        gu_untouched "link chain [$case_name]"
+    done
+}
+
+# ^ invariant the owner of a link itself is judged; gitup_trusted_uid is overridden in a scratch shell, no root needed
+# shellcheck disable=SC2016
+test_the_owner_of_a_link_is_judged_and_not_only_the_owner_of_its_target() {
+    local p="$SANDBOX/prefix"
+    gu_rpm_setup || return 1
+    mkdir -p -- "$p/bin" || return 1
+    : >"$p/bin/real" && chmod 755 "$p/bin/real" && ln -s real "$p/bin/lnk" || return 1
+    gu_run 'source "$GSG_ROOT/lib/gitup/gitup_rpm.sh" || exit 9; GITUP_PREFIX="$1"; gitup_trusted_uid() { id -u; }
+        gitup_tk_check_owner "$1/bin/lnk"; echo "mine rc=$?"
+        gitup_trusted_uid() { echo 12345; }
+        gitup_tk_check_owner "$1/bin/lnk"; echo "other rc=$? reason=$GITUP_REASON"' "$p"
+    assert_contains "$OUT" "mine rc=0" "a link and a target of the trusted user pass"
+    assert_contains "$OUT" "other rc=1" "another trusted user refuses them"
+    assert_contains "$OUT" "the link " "and the refusal names the link, the first thing it judges"
+}
+
+# ^ security a link name with a control character is shown with a question mark in the refusal
+test_a_refusal_for_a_libexec_link_never_prints_its_control_characters() {
+    local d name=$'evil\001name'
+    gu_tk_start || return 1
+    d="$GU_ROOT/usr/local/libexec/git-core"
+    mkdir -p -- "$d" || return 1
+    ln -s /bin/sh "$d/$name" || return 1
+    gsg install --take-over-system-git </dev/null
+    assert_rc 1 "a link out of the prefix"
+    assert_not_contains "$ERR" $'\001' "no control character reaches the terminal"
+    assert_contains "$ERR" "evil?name" "it is shown with a question mark"
+}
+
+test_the_takeover_states_its_cost_before_asking() {
+    gu_tk_start || return 1
+    gsg install </dev/null
+    assert_contains "$OUT" "dnf stops updating git" "dnf stops"
+    assert_contains "$OUT" "pin bump in tools.lock and install --upgrade-git" "updates need a pin bump"
+    assert_contains "$OUT" "rpm -V will report these" "rpm -V"
+    assert_contains "$OUT" "git-secret-guard restore-system-git" "and how to undo it"
+}
+
+test_the_takeover_refuses_an_unsafe_target_and_changes_nothing() {
+    local case_name
+    for case_name in writable no-manifest homebrew sibling-missing; do
+        gu_tk_start || return 1
+        case "$case_name" in
+            writable) chmod 775 "$GU_ROOT/usr/local/bin/git" ;;
+            no-manifest) rm -f -- "$GU_ROOT"/usr/local/share/doc/git-2.56.0-local/MANIFEST ;;
+            homebrew) printf '\tlibz.so.1 => /home/linuxbrew/.linuxbrew/lib/libz.so.1 (0x1)\n' >"$SANDBOX/ldd.out" ;;
+            sibling-missing) rm -f -- "$GU_ROOT/usr/local/bin/git-shell" ;;
+        esac
+        gsg install --take-over-system-git </dev/null
+        assert_rc 1 "unsafe target [$case_name]"
+        assert_contains "$ERR" "the system git takeover was refused" "refused [$case_name]"
+        gu_untouched "unsafe target [$case_name]"
+    done
+    gu_tk_start || return 1
+    chmod 775 "$GU_ROOT/usr/local/bin/git"
+    gsg install --take-over-system-git </dev/null
+    assert_contains "$ERR" "writable by group or others" "the writable reason"
+    gu_tk_start || return 1
+    rm -f -- "$GU_ROOT"/usr/local/share/doc/git-2.56.0-local/MANIFEST
+    gsg install --take-over-system-git </dev/null
+    assert_contains "$ERR" "not listed in any MANIFEST of ours" "the MANIFEST reason"
+}
+
+test_a_system_git_that_is_already_new_enough_has_nothing_to_take_over() {
+    gu_tk_start || return 1
+    # shellcheck disable=SC2016
+    printf '#!/bin/sh\nif [ "$1" = --version ]; then echo "git version 2.55.0"; exit 0; fi\n' >"$GU_ROOT/usr/bin/git" || return 1
+    gsg install --take-over-system-git </dev/null
+    assert_rc 0 "the package route already gave a new git"
+    assert_contains "$OUT" "nothing to take over" "says so"
+    gu_no_symlinks || fail "nothing should have changed"
+}
+
+test_a_rerun_of_the_takeover_changes_no_file_and_no_config() {
+    local rec_before
+    gu_tk_start || return 1
+    gsg install --take-over-system-git </dev/null
+    assert_rc 0 "first takeover"
+    rec_before="$(cat "$GU_TK_DIR/record")$(gu_hashes)$(gu_conf)"
+    gsg install --take-over-system-git </dev/null
+    assert_rc 0 "second takeover"
+    assert_contains "$OUT" "nothing to take over" "says so"
+    assert_eq "$(cat "$GU_TK_DIR/record")$(gu_hashes)$(gu_conf)" "$rec_before" "the record, the links and the config are unchanged"
+}
+
+test_a_takeover_that_fails_at_any_step_puts_every_original_back() {
+    local row text skip
+    for row in 'install -m 644|0' 'cp -a|0' 'cp -a|3' 'install -m 644|1' 'ln -s|1' 'mv -T|0' 'mv -T|2' 'mv -T|5' 'verify|0'; do
+        text="${row%|*}" skip="${row#*|}"
+        gu_tk_start || return 1
+        if [ "$text" = verify ]; then
+            : >"$SANDBOX/newgit.broken"
+        else
+            printf '%s' "$text" >"$SANDBOX/sudo.failon"
+            printf '%s' "$skip" >"$SANDBOX/sudo.skip"
+        fi
+        gsg install --take-over-system-git </dev/null
+        assert_rc 1 "failure at [$row]"
+        assert_contains "$ERR" "the system git takeover failed" "says so for [$row]"
+        gu_untouched "failure at [$row]"
+    done
+}
+
+test_restore_system_git_puts_the_originals_back_without_dnf_or_the_network() {
+    gu_tk_start || return 1
+    gsg install --take-over-system-git </dev/null
+    assert_rc 0 "takeover"
+    rm -f -- "$SANDBOX/gitup.log"
+    lc_path_without dnf || return 1
+    set_env PATH="$GU_ROOT/usr/local/bin:$SANDBOX/pathfarm-dnf"
+    gsg restore-system-git </dev/null
+    assert_rc 0 "restore-system-git"
+    gu_untouched "restore"
+    assert_not_contains "$(gu_log)" "dnf " "dnf was never called"
+    gsg restore-system-git </dev/null
+    assert_rc 0 "a second restore"
+    assert_contains "$OUT" "nothing to restore" "says so"
+}
+
+test_uninstall_stops_while_a_takeover_is_active_and_keep_system_git_lets_it_finish() {
+    local before
+    gu_tk_start || return 1
+    gsg install --take-over-system-git </dev/null
+    assert_rc 0 "takeover"
+    before="$(gu_hashes)"
+    gsg uninstall </dev/null
+    assert_rc 1 "uninstall with a takeover active"
+    assert_contains "$ERR" "restore-system-git" "names the restore command"
+    assert_contains "$ERR" "uninstall --keep-system-git" "and the other choice"
+    assert_file "$LC_STATE/state" "nothing was uninstalled"
+    gsg uninstall --keep-system-git </dev/null
+    assert_rc 0 "uninstall --keep-system-git"
+    assert_no_file "$LC_STATE/state" "uninstall finished"
+    assert_eq "$(gu_hashes)" "$before" "the takeover stays"
+    assert_contains "$OUT" "$GU_TK_DIR/orig" "it prints where the originals are"
+    assert_contains "$OUT" "cp" "and how to put them back by hand"
+}
+
+test_a_takeover_undone_by_something_else_is_reported_and_applied_again_on_request() {
+    local n
+    gu_tk_start || return 1
+    gsg install --take-over-system-git </dev/null
+    assert_rc 0 "takeover"
+    for n in "${GU_TK_NAMES[@]}"; do cp -a --remove-destination -- "$GU_TK_DIR/orig/$n" "$GU_ROOT/usr/bin/$n" || return 1; done
+    printf '%s\n' "$GU_CONF_BEFORE" >"$GU_ROOT/etc/dnf/dnf.conf" || return 1
+    gsg status
+    assert_contains "$OUT" "system git takeover" "status has a line for it"
+    assert_contains "$OUT" "no longer scanned" "and says commits through /usr/bin/git are no longer scanned"
+    assert_contains "$OUT" "install --take-over-system-git" "with the fix"
+    assert_rc 1 "status counts it as a problem"
+    mkdir -p "$SANDBOX/no-roots" || return 1
+    gsg doctor --roots "$SANDBOX/no-roots"
+    assert_contains "$OUT" "PROBLEM  system git takeover" "doctor reports a problem"
+    gsg install --take-over-system-git </dev/null
+    assert_rc 0 "applied again"
+    gu_all_symlinks || fail "the takeover is back"
+}
+
+test_a_new_rpm_version_over_the_saved_originals_is_said_not_overwritten_silently() {
+    local n
+    gu_tk_start || return 1
+    gsg install --take-over-system-git </dev/null
+    for n in "${GU_TK_NAMES[@]}"; do
+        # shellcheck disable=SC2016
+        printf '#!/bin/sh\nif [ "$1" = --version ]; then echo "git version 2.53.0"; exit 0; fi\necho "rpm 2.53 %s"\n' "$n" >"$SANDBOX/new-$n" || return 1
+        chmod 755 "$SANDBOX/new-$n" || return 1
+        cp -a --remove-destination -- "$SANDBOX/new-$n" "$GU_ROOT/usr/bin/$n" || return 1
+    done
+    printf '%s\n' "$GU_CONF_BEFORE" >"$GU_ROOT/etc/dnf/dnf.conf" || return 1
+    gsg install --take-over-system-git </dev/null
+    assert_rc 0 "applied again over a newer RPM"
+    assert_contains "$OUT" "saved originals" "the output says the saved originals differ"
+    assert_contains "$OUT" "replaced" "and were replaced"
+    assert_contains "$(<"$GU_TK_DIR/orig/git")" "rpm 2.53" "the new RPM file is the saved one now"
+}
+
+test_restoring_an_undone_takeover_leaves_the_rpm_files_alone_and_cleans_up() {
+    local n
+    gu_tk_start || return 1
+    gsg install --take-over-system-git </dev/null
+    for n in "${GU_TK_NAMES[@]}"; do cp -a --remove-destination -- "$GU_TK_DIR/orig/$n" "$GU_ROOT/usr/bin/$n" || return 1; done
+    gsg restore-system-git </dev/null
+    assert_rc 0 "restore after the RPM put its files back"
+    gu_untouched "restore of an undone takeover"
+}
+
+test_the_takeover_exists_only_for_classes_whose_module_provides_it() {
+    lc_begin && gu_old_git 2.56.0 && gu_os_release 'ID=ubuntu' || return 1
+    gsg install --take-over-system-git </dev/null
+    assert_rc 1 "ubuntu has no takeover"
+    assert_contains "$ERR" "--take-over-system-git is not available on a system of class ubuntu" "says why"
+    gsg restore-system-git </dev/null
+    assert_rc 0 "restore on a system without takeover"
+    assert_contains "$OUT" "nothing to restore" "says so"
+}
+
+run_file_tests

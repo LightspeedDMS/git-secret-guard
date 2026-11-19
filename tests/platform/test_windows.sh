@@ -1,0 +1,482 @@
+#!/usr/bin/env bash
+# shellcheck source=tests/support/lib.sh disable=SC2016
+source "$(dirname -- "${BASH_SOURCE[0]}")/../support/lib.sh"
+
+# ^ why a uname function, not lc_begin; lc_begin needs setsid, this file also has to run on Git for Windows itself
+WIN_PRELUDE='set -u
+GSG_ROOT="$1"
+GSG_NAME=git-secret-guard
+GSG_UNINSTALL_ACTIONS=0
+uname() { if [ "${1:-}" = -m ]; then echo x86_64; else echo MINGW64_NT-10.0-26200; fi; }
+for lib in platform/brew core/common core/state install/tools install/hookspath scan/exempt autoupdate/timer platform/launchd platform/wsl install/install install/install_cmd install/install_tools install/uninstall inspect/status inspect/doctor inspect/doctor_repos inspect/doctor_findings core/proc integrations/desktop/desktop_git integrations/desktop/desktop_git_check integrations/desktop/desktop_git_report; do
+    source "$1/lib/$lib.sh" || exit 9
+done
+shift
+'
+
+win() {
+    local code="$1"
+    shift
+    run_cap env -i "${GSG_ENV[@]}" "${EXTRA_ENV[@]}" bash -c "$WIN_PRELUDE$code" _ "$GSG_PROJECT" "$@"
+    OUT="$(<"$SANDBOX/.out")"
+    ERR="$(<"$SANDBOX/.err")"
+}
+
+sha_of() { sha256sum -- "$1" | cut -d' ' -f1; }
+
+test_the_jq_asset_is_named_and_located_like_the_jqlang_release() {
+    win 'tools_platform_key jq MINGW64_NT-10.0-26200 x86_64'
+    assert_eq "$OUT" windows_amd64 "platform key"
+    win 'tools_tarball_name jq 1.8.2 windows_amd64'
+    assert_eq "$OUT" jq-windows-amd64.exe "asset name"
+    win 'tools_release_url jq 1.8.2 windows_amd64'
+    assert_eq "$OUT" https://github.com/jqlang/jq/releases/download/jq-1.8.2/jq-windows-amd64.exe "tag is jq-<version>"
+    win 'tools_release_url betterleaks 1.9.0 windows_x64'
+    assert_eq "$OUT" https://github.com/betterleaks/betterleaks/releases/download/v1.9.0/betterleaks_1.9.0_windows_x64.zip "scanners keep the v tag"
+}
+
+test_the_lock_has_a_jq_row_for_windows_only() {
+    win 'tools_lock_lookup "$GSG_ROOT/tools.lock" jq windows_amd64'
+    assert_rc 0 "windows row"
+    assert_contains "$OUT" "1.8.2 " "the pinned version"
+    win 'tools_lock_lookup "$GSG_ROOT/tools.lock" jq linux_amd64'
+    assert_rc 1 "no linux row, jq stays a prerequisite there"
+}
+
+test_the_jq_version_text_matches_with_its_crlf_and_only_as_a_whole_word() {
+    win 'tools_version_matches "$1" 1.8.2' $'jq-1.8.2\r\n'
+    assert_rc 0 "native jq.exe output"
+    win 'tools_version_matches "$1" 1.8.2' 'jq-1.8.20'
+    assert_rc 1 "a longer version"
+    win 'tools_version_matches "$1" 1.8.2' 'notjq-1.8.2'
+    assert_rc 1 "another name"
+}
+
+test_the_bare_jq_executable_is_copied_not_unpacked() {
+    mkdir -p "$SANDBOX/dl" "$SANDBOX/out" || return 1
+    printf 'bytes\n' >"$SANDBOX/dl/jq-windows-amd64.exe" || return 1
+    win 'tools_extract_binary "$1" jq "$2"' "$SANDBOX/dl/jq-windows-amd64.exe" "$SANDBOX/out"
+    assert_rc 0 "copied"
+    assert_eq "$(<"$SANDBOX/out/jq.exe")" bytes "the same bytes, under the .exe name"
+    [ -x "$SANDBOX/out/jq.exe" ] || fail "jq.exe is executable"
+}
+
+test_a_missing_jq_is_no_refusal_on_windows_and_asks_for_a_download() {
+    local bin="$SANDBOX/only"
+    mkdir -p "$bin" || return 1
+    printf '#!/bin/sh\n' >"$bin/taskkill" && printf '#!/bin/sh\n' >"$bin/timeout" || return 1
+    chmod 755 "$bin/taskkill" "$bin/timeout" || return 1
+    win 'PATH="$1"; GSG_SHARE=/s; install_resolve_bins; echo "rc=$? jq=[$INSTALL_JQ_BIN]"; install_downloads_needed; echo "needed=$?"' "$bin"
+    assert_contains "$OUT" "rc=0 jq=[]" "not counted as missing"
+    assert_contains "$OUT" "needed=0" "curl is then required"
+    assert_empty "$ERR" "no hint is printed"
+}
+
+test_jq_is_managed_only_when_absent_or_already_ours() {
+    local show='install_manage_jq; echo "[${GSG_TOOL_NAMES[*]}] [$INSTALL_JQ_BIN] [$INSTALL_JQ_WRAPPER]"'
+    local base='GSG_BIN_DIR=/b GSG_SHARE=/s INSTALL_JQ_WRAPPER=""'
+    win "$base INSTALL_JQ_BIN=/u/jq ST_PLACED=''; INSTALL_JQ_WRAPPER=/s/jq; $show"
+    assert_eq "$OUT" "[trufflehog betterleaks] [/u/jq] [/s/jq]" "a jq of the user's stays in use"
+    win "$base INSTALL_JQ_BIN='' ST_PLACED=''; $show"
+    assert_eq "$OUT" "[trufflehog betterleaks jq] [/b/jq.exe] [/s/jq]" "none on PATH"
+    win "$base INSTALL_JQ_BIN=/b/jq ST_PLACED='trufflehog:aa jq:bb'; $show"
+    assert_eq "$OUT" "[trufflehog betterleaks jq] [/b/jq.exe] [/s/jq]" "a recorded one stays managed on a rerun"
+    win "uname() { echo Linux; }; $base INSTALL_JQ_BIN='' ST_PLACED=''; $show"
+    assert_eq "$OUT" "[trufflehog betterleaks] [] []" "other platforms never manage it"
+}
+
+# ^ why a lock of its own, not the product's; the pinned jq.exe is a download, a test file cannot have its hash
+jq_adopt_lock() {
+    local file="$1" ver="$2" sha="$3"
+    grep -v '^jq ' "$GSG_PROJECT/tools.lock" >"$file" || return 1
+    printf 'jq %s windows_amd64 %s\n' "$ver" "$sha" >>"$file"
+}
+
+# ^ why a script, not bytes; plan_tools runs the file with --version
+jq_adopt_file() {
+    local file="$1" ver="$2"
+    printf '#!/usr/bin/env bash\necho jq-%s\n' "$ver" >"$file" && chmod 755 "$file"
+}
+
+JQ_ADOPT_ENV='GSG_OS=MINGW64_NT-10.0-26200 GSG_ARCH=x86_64 GSG_NAME=git-secret-guard GSG_SHARE=/s ST_REPLACED="" ST_TOOLS="" INSTALL_TIMEOUT_BIN=$(type -P timeout)'
+
+# ^ why the whole chain, not hand-set variables; a hand-set ST_TOOLS hid a state never listing the adopted jq
+# ^ order manage, plan and write before read and uninstall_tools => the sequence install and uninstall --remove-tools run in one shell
+jq_adopt_chain() {
+    local bin="$1" lock="$2" jqbin="$3"
+    win "$JQ_ADOPT_ENV"' GSG_TOOLS_LOCK="$2" GSG_BIN_DIR="$1" INSTALL_JQ_BIN="$3" ST_PLACED="" GSG_STATE_DIR="$1/st" GSG_STATE_FILE="$1/st/state"
+GSG_TOOL_NEWSHA=("" "" "") ST_BACKUP="" ST_PREV_SET=no GSG_PREV_SET=no INSTALL_TIMER=0 INSTALL_AUTO_UPDATE=no INSTALL_SOURCE_CHECKOUT=""
+install_manage_jq; install_plan_lock && install_plan_tools; echo "names=[${GSG_TOOL_NAMES[*]}] need=${GSG_TOOL_NEED[2]} aside=[${GSG_TOOL_ASIDE[2]}] wrapper=[$INSTALL_JQ_WRAPPER]"
+state_make_dir && install_write_state final && state_read && echo "tools=[$ST_TOOLS] placed=[$ST_PLACED]"
+UN_HANDLED=" "; uninstall_read_placed && uninstall_tools' "$bin" "$lock" "$jqbin"
+}
+
+test_a_jq_left_by_an_earlier_install_is_adopted_and_recorded() {
+    local bin="$SANDBOX/adopt" sha
+    mkdir -p "$bin" && jq_adopt_file "$bin/jq.exe" 1.8.2 || return 1
+    sha="$(sha_of "$bin/jq.exe")"
+    jq_adopt_lock "$SANDBOX/lock1" 1.8.2 "$sha" || return 1
+    jq_adopt_chain "$bin" "$SANDBOX/lock1" "$bin/jq.exe"
+    assert_contains "$OUT" "names=[trufflehog betterleaks jq] need=0 aside=[] wrapper=[/s/jq]" "managed, kept in place, JQ_BIN stays the wrapper"
+    assert_contains "$OUT" "jq] placed=[" "tools_installed_by_us lists it"
+    assert_contains "$OUT" "jq:$sha]" "tools_placed lists it"
+    assert_no_file "$bin/jq.exe" "uninstall --remove-tools removes it"
+}
+
+test_a_jq_at_the_pin_is_adopted_when_the_install_dir_is_not_on_path() {
+    local bin="$SANDBOX/nopath" sha
+    mkdir -p "$bin" && jq_adopt_file "$bin/jq.exe" 1.8.2 || return 1
+    sha="$(sha_of "$bin/jq.exe")"
+    jq_adopt_lock "$SANDBOX/lock2" 1.8.2 "$sha" || return 1
+    jq_adopt_chain "$bin" "$SANDBOX/lock2" ""
+    assert_contains "$OUT" "need=0 aside=[]" "kept in place"
+    assert_contains "$OUT" "jq] placed=[" "tools_installed_by_us lists it although no jq was found on PATH"
+    assert_contains "$OUT" "jq:$sha]" "tools_placed lists it"
+    assert_no_file "$bin/jq.exe" "uninstall --remove-tools removes it"
+}
+
+test_an_adopted_jq_is_replaced_in_place_on_a_pin_bump() {
+    local bin="$SANDBOX/bump" sha new
+    mkdir -p "$bin" && jq_adopt_file "$bin/jq.exe" 1.8.2 || return 1
+    sha="$(sha_of "$bin/jq.exe")"
+    new="$(printf 'other\n' | sha256sum | cut -d' ' -f1)"
+    jq_adopt_lock "$SANDBOX/lock-old" 1.8.2 "$sha" && jq_adopt_lock "$SANDBOX/lock-new" 1.8.3 "$new" || return 1
+    win "$JQ_ADOPT_ENV"' GSG_BIN_DIR="$1" INSTALL_JQ_BIN="$1/jq.exe" ST_PLACED=""
+GSG_TOOLS_LOCK="$2" install_manage_jq
+GSG_TOOLS_LOCK="$3" install_plan_lock && install_plan_tools; echo "need=${GSG_TOOL_NEED[2]} aside=[${GSG_TOOL_ASIDE[2]}] placed=[$ST_PLACED]"' "$bin" "$SANDBOX/lock-old" "$SANDBOX/lock-new"
+    assert_contains "$OUT" "need=1 aside=[] placed=[jq:$sha]" "a new pin replaces it in place, nothing is moved aside"
+}
+
+test_a_jq_with_another_hash_at_the_install_path_is_never_adopted() {
+    local bin="$SANDBOX/theirs" sha
+    mkdir -p "$bin" && jq_adopt_file "$bin/jq.exe" 1.8.2 || return 1
+    sha="$(printf 'not this file\n' | sha256sum | cut -d' ' -f1)"
+    jq_adopt_lock "$SANDBOX/lock-x" 1.8.2 "$sha" || return 1
+    win "$JQ_ADOPT_ENV"' GSG_TOOLS_LOCK="$2" GSG_BIN_DIR="$1" INSTALL_JQ_BIN="$1/jq.exe" ST_PLACED=""
+install_manage_jq; echo "[${GSG_TOOL_NAMES[*]}] [$INSTALL_JQ_BIN] [$ST_PLACED]"' "$bin" "$SANDBOX/lock-x"
+    assert_eq "$OUT" "[trufflehog betterleaks] [$bin/jq.exe] []" "used as it is, no record"
+    win 'GSG_BIN_DIR="$1" ST_EXISTS=1 ST_TOOLS="" UN_HANDLED=" " ST_PLACED=""
+uninstall_read_placed && uninstall_tools' "$bin"
+    assert_file "$bin/jq.exe" "and never removed"
+}
+
+test_a_jq_elsewhere_on_path_is_never_adopted() {
+    local bin="$SANDBOX/else" other="$SANDBOX/else-other" sha
+    mkdir -p "$bin" "$other" && jq_adopt_file "$other/jq.exe" 1.8.2 || return 1
+    sha="$(sha_of "$other/jq.exe")"
+    jq_adopt_lock "$SANDBOX/lock-e" 1.8.2 "$sha" || return 1
+    cp -- "$other/jq.exe" "$bin/jq.exe" || return 1
+    win "$JQ_ADOPT_ENV"' GSG_TOOLS_LOCK="$3" GSG_BIN_DIR="$1" INSTALL_JQ_BIN="$2/jq.exe" ST_PLACED=""
+install_manage_jq; echo "[${GSG_TOOL_NAMES[*]}] [$ST_PLACED]"' "$bin" "$other" "$SANDBOX/lock-e"
+    assert_eq "$OUT" "[trufflehog betterleaks] []" "same bytes, another directory: the user's"
+}
+
+test_a_link_at_the_install_path_is_never_adopted() {
+    local bin="$SANDBOX/link" other="$SANDBOX/link-other" sha
+    mkdir -p "$bin" "$other" && jq_adopt_file "$other/jq.exe" 1.8.2 || return 1
+    sha="$(sha_of "$other/jq.exe")"
+    jq_adopt_lock "$SANDBOX/lock-e" 1.8.2 "$sha" || return 1
+    ln -s -- "$other/jq.exe" "$bin/jq.exe" 2>/dev/null && [ -L "$bin/jq.exe" ] || skip_test "this platform makes no symlinks"
+    win "$JQ_ADOPT_ENV"' GSG_TOOLS_LOCK="$3" GSG_BIN_DIR="$1" INSTALL_JQ_BIN="$1/jq.exe" ST_PLACED=""
+install_manage_jq; echo "[${GSG_TOOL_NAMES[*]}] [$ST_PLACED]"' "$bin" "$other" "$SANDBOX/lock-e"
+    assert_eq "$OUT" "[trufflehog betterleaks] []" "a link is not adopted"
+}
+
+# ^ why a lock of its own, not the product's; the real scanner binaries are downloads, a test file cannot have their hashes
+scanner_adopt_lock() {
+    local file="$1" sha="$2"
+    grep -v -e '^trufflehog .* windows_amd64 ' "$GSG_PROJECT/tools.lock" >"$file" || return 1
+    printf 'trufflehog 3.99.2 windows_amd64 %s %s\n' "$(printf '0%.0s' {1..64})" "$sha" >>"$file"
+}
+
+SCANNER_ADOPT_ENV='GSG_OS=MINGW64_NT-10.0-26200 GSG_ARCH=x86_64 GSG_NAME=git-secret-guard ST_TOOLS="" ST_PLACED=""'
+
+test_a_scanner_exe_kept_by_an_earlier_install_is_adopted_through_the_windows_names() {
+    local bin="$SANDBOX/sc" sha
+    mkdir -p "$bin" && printf 'binary\n' >"$bin/trufflehog.exe" && printf 'other\n' >"$bin/betterleaks.exe" || return 1
+    sha="$(sha_of "$bin/trufflehog.exe")"
+    scanner_adopt_lock "$SANDBOX/lock-sc" "$sha" || return 1
+    win "$SCANNER_ADOPT_ENV"' GSG_TOOLS_LOCK="$2" GSG_BIN_DIR="$1"
+install_adopt_scanners; echo "tools=[$ST_TOOLS] placed=[$ST_PLACED]"' "$bin" "$SANDBOX/lock-sc"
+    assert_eq "$OUT" "tools=[trufflehog] placed=[trufflehog:$sha]" "the .exe is adopted; betterleaks holds other bytes than its row names stays unrecorded"
+}
+
+test_a_scanner_exe_with_another_hash_or_a_recorded_hash_is_left_alone_on_windows() {
+    local bin="$SANDBOX/sc2" sha
+    mkdir -p "$bin" && printf 'binary\n' >"$bin/trufflehog.exe" || return 1
+    sha="$(printf 'not this\n' | sha256sum | cut -d' ' -f1)"
+    scanner_adopt_lock "$SANDBOX/lock-sc2" "$sha" || return 1
+    win "$SCANNER_ADOPT_ENV"' GSG_TOOLS_LOCK="$2" GSG_BIN_DIR="$1"
+install_adopt_scanners; echo "tools=[$ST_TOOLS] placed=[$ST_PLACED]"' "$bin" "$SANDBOX/lock-sc2"
+    assert_eq "$OUT" "tools=[] placed=[]" "another hash: the user's"
+    sha="$(sha_of "$bin/trufflehog.exe")"
+    scanner_adopt_lock "$SANDBOX/lock-sc3" "$sha" || return 1
+    win "$SCANNER_ADOPT_ENV"' GSG_TOOLS_LOCK="$2" GSG_BIN_DIR="$1"
+ST_PLACED="trufflehog:abc"; install_adopt_scanners; echo "tools=[$ST_TOOLS] placed=[$ST_PLACED]"' "$bin" "$SANDBOX/lock-sc3"
+    assert_eq "$OUT" "tools=[] placed=[trufflehog:abc]" "a hash already in the state is not second-guessed"
+}
+
+test_a_managed_jq_writes_no_version_key_to_the_settings() {
+    win 'GSG_BIN_DIR=/b GSG_TOOL_NAMES+=(jq) GSG_TOOL_VER=(1 2 3) INSTALL_JQ_BIN=/b/jq.exe INSTALL_JQ_WRAPPER=/s/jq
+INSTALL_TIMEOUT_BIN=/t INSTALL_BASH_BIN="" INSTALL_GNUBIN_DIR="" INSTALL_TIMER_BIN=""
+install_write_settings "$1" && cat -- "$1"' "$SANDBOX/settings"
+    assert_rc 0 "settings written"
+    assert_contains "$OUT" "JQ_BIN=/s/jq" "the wrapper"
+    assert_contains "$OUT" "BETTERLEAKS_VERSION=2" "the scanners keep theirs"
+    assert_not_contains "$OUT" "JQ_VERSION" "the load_settings unset list has no such key"
+}
+
+test_uninstall_removes_the_exe_it_placed_and_keeps_another() {
+    local bin="$SANDBOX/bin" sha
+    mkdir -p "$bin" || return 1
+    printf 'ours\n' >"$bin/jq.exe" && printf 'theirs\n' >"$bin/trufflehog.exe" || return 1
+    sha="$(sha_of "$bin/jq.exe")"
+    win 'GSG_BIN_DIR="$1" ST_EXISTS=1 ST_TOOLS="jq trufflehog" UN_HANDLED=" " ST_PLACED="jq:$2 trufflehog:$2"
+uninstall_read_placed && uninstall_tools' "$bin" "$sha"
+    assert_rc 0 "uninstall_tools"
+    assert_no_file "$bin/jq.exe" "the file install placed goes"
+    assert_file "$bin/trufflehog.exe" "a file with another hash stays"
+    assert_contains "$ERR" "$bin/trufflehog.exe is not the file install put there" "and is named with its real name"
+}
+
+test_uninstall_restores_a_moved_aside_original_onto_the_exe_name() {
+    local bin="$SANDBOX/bin-restore" aside=jq.gsg-replaced-20260101T000000Z sha
+    mkdir -p "$bin" || return 1
+    printf 'ours\n' >"$bin/jq.exe" && printf 'original\n' >"$bin/$aside" || return 1
+    sha="$(sha_of "$bin/jq.exe")"
+    win 'GSG_BIN_DIR="$1" ST_PLACED="jq:$3" ST_REPLACED="$2:$3"
+uninstall_read_placed && uninstall_restore_replaced' "$bin" "$aside" "$sha"
+    assert_rc 0 "restored"
+    assert_eq "$(<"$bin/jq.exe")" original "the original is back under jq.exe"
+    assert_eq "$(ls -- "$bin")" jq.exe "never under the bare name"
+}
+
+test_uninstall_removes_the_cli_wrapper_and_keeps_any_other_file() {
+    local bin="$SANDBOX/bin-cli"
+    mkdir -p "$bin" || return 1
+    win 'GSG_BIN_DIR="$1" GSG_SHARE=/s; install_cli_wrapper_text >"$1/git-secret-guard" && uninstall_cli_link' "$bin"
+    assert_rc 0 "removed"
+    assert_no_file "$bin/git-secret-guard" "install's wrapper goes"
+    printf 'mine\n' >"$bin/git-secret-guard" || return 1
+    win 'GSG_BIN_DIR="$1" GSG_SHARE=/s; uninstall_cli_link' "$bin"
+    assert_file "$bin/git-secret-guard" "a file of the user's stays"
+    assert_contains "$ERR" "is not the link install created" "and says so"
+}
+
+CMD_CYGPATH='cygpath() { case "$1:$2" in -w:/) printf "%s\n" "C:\\Program Files\\Git\\" ;; -w:*) printf "%s\n" "C:\\U\\100%\\share" ;; -m:*) printf "%s\n" "C:/U/100%/share" ;; esac; }'
+
+test_the_cmd_wrapper_runs_gits_login_bash_and_deletes_itself_when_the_share_is_gone() {
+    win "$CMD_CYGPATH; GSG_SHARE=/c/U/share; install_cli_cmd_text"
+    assert_rc 0 "written"
+    assert_contains "$OUT" '"C:\Program Files\Git\bin\bash.exe" "C:/U/100%%/share/bin/git-secret-guard" %*' "bin\\bash.exe sets up PATH, and a percent sign is doubled"
+    assert_contains "$OUT" 'if not exist "C:\U\100%%\share\bin\git-secret-guard" (goto) 2>nul & del "%~f0"' "self delete"
+    assert_contains "$OUT" 'exit /b %GSG_RC%' "the exit code survives"
+    assert_contains "$OUT" 'if "%GSG_RC%"=="3" if defined GSG_HANDOFF if exist "%GSG_HANDOFF%" goto :handoff' "exit 3 plus a hand-off file runs the upgrade runner"
+    assert_contains "$OUT" '-File "C:\U\100%%\share\bin\gsg-gitup.ps1" "%GSG_HANDOFF%"' "the runner of the share dir, with a doubled percent sign"
+    assert_contains "$OUT" 'set "GSG_HANDOFF=%LocalAppData%\git-secret-guard\git-upgrade\handoff.txt"' "the place bash is told to use"
+    assert_contains "$OUT" $'@echo off\r\n' "CRLF"
+}
+
+test_uninstall_removes_the_cmd_wrapper_unless_it_is_the_one_running() {
+    local bin="$SANDBOX/bin-cmd" setup="$CMD_CYGPATH; GSG_SHARE=/c/U/share GSG_BIN_DIR=\"\$1\""
+    mkdir -p "$bin" || return 1
+    win "$setup; install_cli_cmd_text >\"\$1/git-secret-guard.cmd\" && install_cli_cmd_is_ours \"\$1/git-secret-guard.cmd\"" "$bin"
+    assert_rc 0 "a written wrapper counts as ours"
+    win "$setup; GSG_CMD_ENTRY='C:\\x.cmd' uninstall_cli_cmd" "$bin"
+    assert_file "$bin/git-secret-guard.cmd" "the running wrapper is left to delete itself"
+    assert_contains "$OUT" "removes itself" "and says so"
+    win "$setup; uninstall_cli_cmd" "$bin"
+    assert_no_file "$bin/git-secret-guard.cmd" "from Git Bash it is removed"
+    printf '@echo off\r\nrem mine\r\n' >"$bin/git-secret-guard.cmd" || return 1
+    win "$setup; uninstall_cli_cmd" "$bin"
+    assert_file "$bin/git-secret-guard.cmd" "a file of the user's stays"
+    assert_contains "$ERR" "is not the wrapper install created" "and is named"
+}
+
+test_install_refuses_a_cmd_file_it_did_not_write() {
+    local bin="$SANDBOX/bin-refuse"
+    mkdir -p "$bin" || return 1
+    printf '@echo off\r\nrem mine\r\n' >"$bin/git-secret-guard.cmd" || return 1
+    win 'GSG_BIN_DIR="$1"; install_check_cli_link' "$bin"
+    assert_rc 1 "refused before anything changes"
+    assert_contains "$ERR" "git-secret-guard.cmd exists and is not the wrapper install writes" "says why"
+}
+
+test_every_batch_file_is_crlf_and_every_entry_point_has_one() {
+    local f
+    for f in bin/gsg-bash.cmd bin/git-secret-guard.cmd tests/run.cmd; do
+        assert_file "$GSG_PROJECT/$f" "$f ships"
+        assert_eq "$(grep -c $'\r$' "$GSG_PROJECT/$f")" "$(wc -l <"$GSG_PROJECT/$f")" "$f has CRLF on every line"
+    done
+    assert_contains "$(<"$GSG_PROJECT/.gitattributes")" "*.cmd text eol=crlf" "and keeps it in every checkout"
+}
+
+test_the_findings_lock_is_taken_although_its_target_does_not_exist() {
+    win 'GSG_FINDINGS_LOCK="$1/findings.lock"; doctor_rec_try_lock; echo "first=$?"; readlink -- "$GSG_FINDINGS_LOCK"; echo "$$"; doctor_rec_try_lock; echo "second=$?"' "$SANDBOX"
+    local -a got=()
+    mapfile -t got <<<"$OUT"
+    assert_eq "${got[0]:-}" first=0 "the lock is taken"
+    assert_eq "${got[1]:-}" "${got[2]:-}" "and names its holder"
+    assert_eq "${got[3]:-}" second=1 "a second attempt is refused"
+}
+
+test_a_repository_is_recognised_when_git_answers_in_windows_form() {
+    local setup='cygpath() { printf "C:/Users/me/repo\n"; }; fakegit() { printf "%s\n" "$FAKE_TOP"; }; GSG_GIT=fakegit DR_WORK="$1"'
+    win "$setup; FAKE_TOP=C:/Users/me/repo; doctor_resolves_here /c/Users/me/repo C:/Users/me/repo/.git" "$SANDBOX"
+    assert_rc 0 "the top level, in the form of git"
+    win "$setup; FAKE_TOP=C:/Users/me; doctor_resolves_here /c/Users/me/repo C:/Users/me/.git" "$SANDBOX"
+    assert_rc 1 "an empty .git makes git answer for the parent"
+    assert_contains "$(<"$SANDBOX/rev.err")" "git resolves it to C:/Users/me" "and the message names it"
+}
+
+test_a_config_origin_has_one_spelling_whatever_form_git_printed() {
+    win 'cygpath() { printf "/c/repo/.git/config\n"; }; doctor_origin_text file:C:/repo/.git/config; printf "%s\n" "$REPLY"'
+    assert_eq "$OUT" /c/repo/.git/config "a drive letter is an absolute path, not relative to the cwd"
+    win 'cd /usr && doctor_origin_text file:.git/config; printf "%s\n" "$REPLY"'
+    assert_eq "$OUT" /usr/.git/config "a relative origin still joins the cwd"
+}
+
+test_a_hooks_path_git_expands_to_a_drive_letter_is_absolute() {
+    mkdir -p "$SANDBOX/hp" || return 1
+    win 'cygpath() { printf "%s\n" "$HP_DIR"; }; fakegit() { printf "C:/hooks\n"; }; GSG_GIT=fakegit HP_DIR="$1"
+GSG_PREV_SET=yes GSG_PREV="~/hooks" GSG_HOOKS_DIR_SEEN=""; install_resolve_hooks_dir; echo "rc=$? dir=[$GSG_PREV_DIR]"' "$SANDBOX/hp"
+    assert_contains "$OUT" "rc=0" "not refused as relative"
+    assert_not_contains "$ERR" "is relative" "no such message"
+}
+
+test_a_drive_letter_path_from_native_git_or_a_windows_user_becomes_posix() {
+    win 'cygpath() { printf "/c/state\n"; }; printf "%s|%s|%s" "$(gsg_posix_path "C:/state")" "$(gsg_posix_path "C:\state")" "$(gsg_posix_path /already/posix)"'
+    assert_eq "$OUT" '/c/state|/c/state|/already/posix' "every spelling gives one form"
+    win 'cygpath() { printf "/c/state\n"; }; XDG_STATE_HOME=C:/state; state_dir_path'
+    assert_eq "$OUT" /c/state/git-secret-guard "the hook finds the record when native git handed it the variable"
+    win 'cygpath() { printf "/c/data\n"; }; HOME=/h XDG_DATA_HOME="C:\data"; paths_init; echo "rc=$? $GSG_SHARE"'
+    assert_eq "$OUT" "rc=0 /c/data/git-secret-guard" "install accepts what a Windows user types"
+    win 'uname() { echo Linux; }; gsg_posix_path "C:/state"'
+    assert_eq "$OUT" "C:/state" "elsewhere it is an ordinary relative name"
+}
+
+test_an_install_from_the_installed_copy_never_renames_the_directory_it_runs_from() {
+    local share="$SANDBOX/share-copy"
+    mkdir -p "$share" || return 1
+    printf 'old\n' >"$share/settings" || return 1
+    win 'GSG_ROOT="$1" GSG_SHARE="$1" GSG_BIN_DIR=/b GSG_TOOL_VER=(1 2) INSTALL_JQ_BIN=/b/jq.exe INSTALL_JQ_WRAPPER="$1/jq"
+INSTALL_TIMEOUT_BIN=/t INSTALL_BASH_BIN="" INSTALL_GNUBIN_DIR="" INSTALL_TIMER_BIN=""; install_copy_share; echo "rc=$?"' "$share"
+    assert_contains "$OUT" "rc=0" "no rename is attempted"
+    assert_contains "$(<"$share/settings")" "JQ_BIN=" "the settings are rewritten in place"
+    assert_file "$share/jq" "and so is the jq wrapper"
+    assert_eq "$(find "$SANDBOX" -maxdepth 1 -name 'share-copy.*' | wc -l)" 0 "nothing is left beside it"
+}
+
+test_the_lock_wait_on_windows_ends_before_a_live_holder_counts_as_old() {
+    win 'echo "$GSG_FINDINGS_LOCK_WAIT_SECONDS_WINDOWS $GSG_FINDINGS_LOCK_MAX_AGE_MIN"'
+    local seconds minutes
+    read -r seconds minutes <<<"$OUT"
+    assert_eq "$((seconds < minutes * 60))" 1 "the wait stops before the lock of a live holder counts as old"
+    assert_eq "$((seconds >= 30))" 1 "and leaves a queued run the same time as the 300 attempts elsewhere"
+    win 'GSG_FINDINGS_LOCK="$1/findings.lock" GSG_FINDINGS_LOCK_WAIT_SECONDS_WINDOWS=0; sleep 300 & h=$!; MSYS=winsymlinks:sys ln -s "$h" "$GSG_FINDINGS_LOCK"; doctor_rec_lock; rc=$?; kill "$h"; echo "rc=$rc"' "$SANDBOX"
+    assert_contains "$OUT" "rc=1" "once the time is up the lock is refused"
+}
+
+test_the_reminder_starts_without_setsid_on_windows() {
+    assert_not_contains "$(<"$GSG_PROJECT/hooks/secret-scan")" 'exec "$SETSID_BIN"' "SETSID_BIN is not in the Windows settings and the hook runs under set -u"
+}
+
+test_the_process_tree_follows_msys_parents_and_the_current_windows_pids() {
+    local t="$SANDBOX/proctable" row pid ppid win
+    for row in 10:1:1000 11:10:1100 12:11:1200 13:12:1300 20:1:2000 21:20:2100 30:10:notanumber; do
+        IFS=: read -r pid ppid win <<<"$row"
+        mkdir -p "$t/$pid" && printf '%s\n' "$ppid" >"$t/$pid/ppid" && printf '%s\n' "$win" >"$t/$pid/winpid" || return 1
+    done
+    mkdir -p "$t/40" || return 1
+    win 'proc_windows_tree 10 "$1"' "$t"
+    assert_eq "$OUT" $'1000\n1100\n1200\n1300' "the runner and each descendant, nothing of another tree, nothing unreadable"
+    win 'proc_windows_tree 99 "$1"' "$t"
+    assert_empty "$OUT" "a pid that is gone names nothing"
+}
+
+# ^ invariant arg 1 = 1 when the fake table gives the worker a descendant (Windows pid 6000); the worker is a real bash with a TERM trap, taskkill a recorder
+# ^ why the worker starts inside the win script, not in the test; only a child can be waited for, a zombie of another shell still answers kill -0
+stop_worker_on_windows() {
+    local t="$SANDBOX/proctable" child=""
+    rm -rf -- "$t" "$SANDBOX/taskkill.log" "$SANDBOX/trap.out" "$SANDBOX/child.pid"
+    # ^ why the recorder waits before it looks, not a direct check; the trap has run at the check only when TERM went to the worker before taskkill ran
+    printf '#!/bin/sh\nsleep 0.3\nif [ -e %q ]; then t=yes; else t=no; fi\necho "$@ trap-ran-before=$t" >>%q\n' "$SANDBOX/trap.out" "$SANDBOX/taskkill.log" >"$SANDBOX/taskkill" || return 1
+    # ^ invariant mode 3 = the worker's cleanup takes 6 s, longer than the 5 s the stop used to give it before a force-kill
+    local slow=""
+    if [ "$1" = 3 ]; then slow="sleep 6; "; fi
+    printf '#!/usr/bin/env bash\ntrap '"'"'%secho trap-ran >"$1"; exit 143'"'"' TERM\nsleep 30 &\necho $! >"$2"\nwait\n' "$slow" >"$SANDBOX/worker.sh" || return 1
+    chmod 755 "$SANDBOX/taskkill" "$SANDBOX/worker.sh" || return 1
+    win '"$BASH" "$3" "$4" "$5" & w=$!
+        for ((i = 0; i < 50; i++)); do if [ -s "$5" ]; then break; fi; sleep 0.1; done
+        mkdir -p "$1/$w" && echo 1 >"$1/$w/ppid" || exit 1
+        if [ "$6" != 2 ]; then echo 5000 >"$1/$w/winpid" || exit 1; fi
+        if [ "$6" != 0 ]; then mkdir -p "$1/6000" && echo "$w" >"$1/6000/ppid" && echo 6000 >"$1/6000/winpid" || exit 1; fi
+        TASKKILL_BIN="$2" proc_stop_worker "$w" "$w" "$1"
+        echo "rc=$?"
+        if kill -0 "$w" 2>/dev/null; then echo alive; fi' \
+        "$t" "$SANDBOX/taskkill" "$SANDBOX/worker.sh" "$SANDBOX/trap.out" "$SANDBOX/child.pid" "$1"
+    if [ -s "$SANDBOX/child.pid" ]; then child="$(<"$SANDBOX/child.pid")"; kill "$child" 2>/dev/null; fi
+    return 0
+}
+
+test_stopping_a_worker_on_windows_ends_its_descendants_first_and_lets_its_trap_run() {
+    stop_worker_on_windows 1
+    assert_contains "$OUT" "rc=0" "the stop succeeds"
+    assert_not_contains "$OUT" alive "the worker is gone"
+    assert_eq "$(<"$SANDBOX/taskkill.log")" "/T /F /PID 6000 trap-ran-before=yes" "TERM goes to the worker first; only the descendant is killed, never the worker"
+    assert_contains "$(<"$SANDBOX/trap.out")" trap-ran "the worker's TERM trap ran"
+}
+
+# ^ why 6 s, not instant; the worker's cleanup stops scanner groups for up to one grace period, a force-kill sooner loses the work dir
+test_stopping_a_worker_on_windows_waits_for_a_slow_cleanup_before_any_force_kill() {
+    stop_worker_on_windows 3
+    assert_contains "$OUT" "rc=0" "the stop succeeds"
+    assert_not_contains "$OUT" alive "the worker is gone"
+    assert_contains "$(<"$SANDBOX/trap.out")" trap-ran "the worker finished its cleanup before it was force-killed"
+}
+
+# ^ invariant mode 2 = no winpid for the worker in the table; a tree kill could take the worker itself and skip its cleanup
+test_stopping_a_worker_on_windows_that_has_no_windows_pid_never_runs_taskkill() {
+    stop_worker_on_windows 2
+    assert_contains "$OUT" "rc=0" "the stop succeeds"
+    assert_not_contains "$OUT" alive "the worker is gone"
+    assert_no_file "$SANDBOX/taskkill.log" "taskkill never ran"
+    assert_contains "$(<"$SANDBOX/trap.out")" trap-ran "TERM alone ran the worker's trap"
+}
+
+test_stopping_a_worker_on_windows_without_descendants_runs_no_taskkill() {
+    stop_worker_on_windows 0
+    assert_contains "$OUT" "rc=0" "the stop succeeds"
+    assert_not_contains "$OUT" alive "the worker is gone"
+    assert_no_file "$SANDBOX/taskkill.log" "taskkill never ran"
+    assert_contains "$(<"$SANDBOX/trap.out")" trap-ran "the worker's TERM trap ran"
+}
+
+ping_count() { "$TEST_SYSTEM32/tasklist.exe" //FI "IMAGENAME eq PING.EXE" 2>/dev/null | grep -c -i 'ping\.exe'; }
+
+test_windows_only_an_interrupted_scan_leaves_no_native_process_and_no_work_dir() {
+    [ "$TEST_IS_WINDOWS" -eq 1 ] || skip_test "needs native Windows processes"
+    local stub="$SANDBOX/ping-scanner" i pid commit_pid
+    printf '#!/usr/bin/env bash\n%q -n 90 127.0.0.1 >/dev/null\n' "$TEST_SYSTEM32/PING.EXE" >"$stub" || return 1
+    chmod 755 "$stub" || return 1
+    write_settings "$stub" "$stub" "$TEST_JQ"
+    new_repo interrupted && stage_file a.txt one || return 1
+    gitx commit -q -m interrupted >"$SANDBOX/.interrupted" 2>&1 &
+    commit_pid=$!
+    for ((i = 0; i < 90; i++)); do
+        if [ "$(ping_count)" -ge 2 ]; then break; fi
+        sleep 1
+    done
+    assert_eq "$(ping_count)" 2 "both scanners run a native process"
+    # ^ why the hook process with no hook process as parent, not the first line; the worker also holds the path, TERM must go to the supervisor
+    pid="$(ps -ef | awk -v p="${SANDBOX##*/}/share/hooks/secret-scan" 'index($0, p) && $0 !~ /awk/ { seen[$2] = 1; par[$2] = $3 } END { for (i in seen) if (!(par[i] in seen)) print i }' | head -n 1)"
+    [ -n "$pid" ] || fail "the hook process was found"
+    kill -TERM "$pid" || return 1
+    wait "$commit_pid"
+    assert_eq "$?" 1 "the commit is blocked"
+    assert_eq "$(ping_count)" 0 "no native process outlives the hook"
+    assert_empty "$(find "$TEST_WORK_BASE" -mindepth 1 -maxdepth 1 2>/dev/null)" "the work dir holding the staged lines is gone"
+    assert_not_contains "$(<"$SANDBOX/.interrupted")" "could not remove the temporary scan directory" "and the hook says nothing about it"
+}
+
+run_file_tests

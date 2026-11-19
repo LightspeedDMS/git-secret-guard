@@ -1,0 +1,357 @@
+name: tests
+
+on:
+  pull_request:
+  push:
+    branches: [main, 'feat/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Decides what the later jobs do. base_ref is the tree the head is compared with (empty on a push to the default branch).
+  # docs_only is true for a pull request that changes Markdown files only (.github/scripts/docs-only.sh): the platform suites are skipped
+  # and the docs job runs the test files that read the Markdown. A skipped job counts as passed for branch protection.
+  plan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      docs_only: ${{ steps.p.outputs.docs_only }}
+      base_ref: ${{ steps.p.outputs.base_ref }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - id: p
+        env:
+          EVENT: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          # a pull request compares the head with its base; a manual run and a push to a feature branch with the default branch
+          # (no free-text ref: a ref typed by the dispatcher would be checked out and run with the default branch's privileges)
+          if [ "$EVENT" = pull_request ]; then
+            base_ref="$PR_BASE"
+          elif [ "$EVENT" = workflow_dispatch ] || [ "$REF_NAME" != "$DEFAULT_BRANCH" ]; then
+            base_ref="$DEFAULT_BRANCH"
+          else
+            base_ref=""
+          fi
+          # a git failure fails the step; the suite jobs still run then (fail closed)
+          docs_only=false
+          if [ "$EVENT" = pull_request ]; then
+            git diff --name-only --no-renames "$PR_BASE...$PR_HEAD" >"$RUNNER_TEMP/changed-paths.txt" || { echo "::error::git diff of the pull request failed"; exit 1; }
+            rc=0
+            bash .github/scripts/docs-only.sh "$RUNNER_TEMP/changed-paths.txt" || rc=$?
+            case "$rc" in
+              0) docs_only=true ;;
+              1) ;;
+              *) echo "::error::docs-only.sh failed with status $rc"; exit 1 ;;
+            esac
+          fi
+          echo "docs_only=$docs_only" >>"$GITHUB_OUTPUT"
+          echo "base_ref=$base_ref" >>"$GITHUB_OUTPUT"
+
+  # Developer Certificate of Origin (DCO.txt): every commit of the pull request, merge commits aside, carries a Signed-off-by line equal to its author.
+  dco:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Check the sign-offs
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          # the base branch's copy of the script judges the pull request, so a change to the check cannot pass itself;
+          # the checked-out copy runs only when the base has none yet (the pull request that adds the script)
+          if git cat-file -e "$PR_BASE:.github/scripts/check-dco.sh" 2>/dev/null; then
+            git show "$PR_BASE:.github/scripts/check-dco.sh" | bash -s -- "$PR_BASE" "$PR_HEAD"
+          else
+            bash .github/scripts/check-dco.sh "$PR_BASE" "$PR_HEAD"
+          fi
+
+  # The supported platform (docs/platforms.md): Ubuntu 24.04 with a git from the git-core PPA.
+  # The steps are the composite action .github/actions/linux-suite; the test files run in parallel, one process per core.
+  # The head always runs (unless the change is docs only, see plan). If plan itself failed the suite still runs: fail closed.
+  suite-head:
+    name: suite (head)
+    needs: plan
+    if: ${{ !cancelled() && needs.plan.outputs.docs_only != 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    outputs:
+      failed: ${{ steps.suite.outputs.failed }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - id: suite
+        uses: ./.github/actions/linux-suite
+        with:
+          target: head
+
+  # The base runs only when the head failed, so a failure that exists already is not blamed on the change. A green head makes the base pointless.
+  # A head job that fails before the tests ran (setup, no `failed` output) leaves the base skipped: there is no head log to compare with, and the job itself is red.
+  suite-base:
+    name: suite (base)
+    needs: [plan, suite-head]
+    if: ${{ !cancelled() && needs.plan.outputs.base_ref != '' && needs.suite-head.outputs.failed == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      # the head first: the composite action comes from it, the base may not have it
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha || github.event.repository.default_branch }}
+          path: base-tree
+      - uses: ./.github/actions/linux-suite
+        with:
+          target: base
+          dir: base-tree
+
+  # A pull request that changes Markdown files only (plan.docs_only): just the test files that read the project's Markdown.
+  docs:
+    name: docs
+    needs: plan
+    if: needs.plan.outputs.docs_only == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: ./.github/actions/linux-suite
+        with:
+          target: docs
+          select: docs
+
+  compare:
+    needs: [plan, suite-head, suite-base]
+    if: ${{ !cancelled() && needs.suite-head.result != 'skipped' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: logs
+          pattern: log-*
+          merge-multiple: true
+      - name: Compare the head with the base
+        run: |
+          base=""
+          if [ -f logs/base.log ]; then base=logs/base.log; fi
+          bash .github/scripts/compare-test-logs.sh logs/head.log "$base"
+
+  # The suite on Windows, through the front end a Windows developer uses. Tests that cannot apply there are listed with a reason in tests/windows-skips.list.
+  windows-suite:
+    # A pull request and main only: one run of this job takes about 40 minutes, and a push to a feature branch with a PR would run it twice.
+    # Skipped for a docs-only pull request (plan); a failed plan still runs it.
+    needs: plan
+    if: ${{ !cancelled() && needs.plan.outputs.docs_only != 'true' && (github.event_name != 'push' || github.ref == 'refs/heads/main') }}
+    runs-on: windows-2025
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run the suite
+        shell: cmd
+        env:
+          GSG_TEST_FILE_TIMEOUT: "1800"
+        run: tests\run.cmd
+
+  # The suite on a real Mac (arm64, Homebrew). Tests that need macOS skip everywhere else; tests/macos-only.list names them and the last step fails the job unless each one PASSED.
+  macos-suite:
+    # A pull request and main only, and not for a docs-only pull request, like windows-suite.
+    needs: plan
+    if: ${{ !cancelled() && needs.plan.outputs.docs_only != 'true' && (github.event_name != 'push' || github.ref == 'refs/heads/main') }}
+    runs-on: macos-26
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the prerequisites of docs/platforms.md
+        run: brew install bash coreutils util-linux jq
+
+      # tests/support/lib.sh defaults GSG_TEST_GIT to /usr/bin/git on macOS; a git below 2.54 ignores hook.<name>.command and would commit a leak unscanned.
+      - name: Choose the git and print the versions
+        run: |
+          prefix="$(brew --prefix)"
+          chosen=""
+          for cand in /usr/bin/git "$prefix/bin/git"; do
+            if [ ! -x "$cand" ]; then echo "$cand: not present"; continue; fi
+            ver="$("$cand" --version)"
+            echo "$cand: $ver"
+            if [ -z "$chosen" ] && [[ $ver =~ ^git\ version\ ([0-9]+)\.([0-9]+) ]]; then
+              if [ "${BASH_REMATCH[1]}" -gt 2 ] || { [ "${BASH_REMATCH[1]}" -eq 2 ] && [ "${BASH_REMATCH[2]}" -ge 54 ]; }; then chosen="$cand"; fi
+            fi
+          done
+          if [ -z "$chosen" ]; then
+            echo "::error::no git >= 2.54 on this image (/usr/bin/git or $prefix/bin/git)"
+            exit 1
+          fi
+          echo "GSG_TEST_GIT=$chosen" >>"$GITHUB_ENV"
+          {
+            echo "image: ${ImageOS:-?} ${ImageVersion:-?}"
+            echo "macOS: $(sw_vers -productVersion) $(sw_vers -buildVersion), $(uname -m)"
+            echo "tests use git: $chosen ($("$chosen" --version))"
+            echo "bash (Homebrew): $("$prefix/bin/bash" --version | head -1)"
+            echo "bash (system): $(/bin/bash --version | head -1)"
+            echo "awk (/usr/bin/awk): $(/usr/bin/awk --version 2>&1 | head -1)"
+            echo "jq: $(jq --version)"
+            echo "brew: $(brew --version | head -1)"
+            echo "plutil: $(command -v plutil || echo none)"
+          } | tee "$RUNNER_TEMP/macos-versions.txt"
+          cat "$RUNNER_TEMP/macos-versions.txt" >>"$GITHUB_STEP_SUMMARY"
+
+      # The real-scanner tests read the pinned binaries from this cache (tests/support/lib.sh), never brew's latest release.
+      # GitHub release downloads sometimes answer 504 for minutes; the script skips what it has and verifies every download against tools.lock, so a retry is safe.
+      - name: Fetch the pinned scanners
+        run: |
+          prefix="$(brew --prefix)"
+          PATH="$prefix/bin:$prefix/opt/coreutils/libexec/gnubin:$PATH"
+          delay=20
+          for attempt in 1 2 3 4; do
+            if "$prefix/bin/bash" tests/fetch-test-tools.sh; then exit 0; fi
+            if [ "$attempt" -lt 4 ]; then
+              echo "fetch attempt $attempt of 4 failed; trying again in ${delay}s"
+              sleep "$delay"
+              delay=$((delay * 2))
+            fi
+          done
+          echo "::error::the pinned scanners could not be fetched in 4 attempts (see the curl error above; a release download answering 5xx is an upstream outage)"
+          exit 1
+
+      # A failing suite fails this step; the later steps still run (if: !cancelled()) so the log is kept and the macOS-only tests are judged.
+      - name: Run the suite
+        env:
+          GSG_TEST_FILE_TIMEOUT: "1800"
+        run: |
+          set -o pipefail
+          # the files are run in parallel, one process per core (tests/run.sh GSG_TEST_JOBS)
+          jobs="$(sysctl -n hw.ncpu)" || { echo "::error::sysctl hw.ncpu failed"; exit 1; }
+          case "$jobs" in '' | 0* | *[!0-9]*) echo "::error::hw.ncpu is [$jobs], not a positive integer"; exit 1 ;; esac
+          export GSG_TEST_JOBS="$jobs"
+          date -u +'start %H:%M:%S' | tee "$RUNNER_TEMP/macos.log"
+          rc=0
+          "$(brew --prefix)/bin/bash" tests/run.sh 2>&1 | tee -a "$RUNNER_TEMP/macos.log" || rc=$?
+          date -u +'end   %H:%M:%S' | tee -a "$RUNNER_TEMP/macos.log"
+          exit "$rc"
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: macos-log
+          path: |
+            ${{ runner.temp }}/macos.log
+            ${{ runner.temp }}/macos-versions.txt
+          if-no-files-found: error
+
+      # A job that skips the macOS-only tests proves nothing: each name in the list must be a PASS line of the log.
+      - name: The macOS-only tests passed
+        if: ${{ !cancelled() }}
+        run: bash .github/scripts/check-macos-tests.sh tests/macos-only.list "$RUNNER_TEMP/macos.log"
+
+  # A Mac-only test that is not in tests/macos-only.list escapes the gate above. This job reads the Linux head log of `suite-head` (skip reasons) and the Mac log (PASS lines) and names such tests.
+  macos-list-complete:
+    needs: [suite-head, macos-suite]
+    if: ${{ !cancelled() && needs.macos-suite.result != 'skipped' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: logs
+          pattern: '*log*'
+          merge-multiple: true
+      - name: Every Mac-only test is in tests/macos-only.list
+        run: bash .github/scripts/check-macos-unlisted.sh tests/macos-only.list logs/macos.log logs/head.log
+
+  # Proves on a clean Windows machine what a user does: install, a leak is blocked, a clean commit passes, no leftovers, uninstall leaves nothing.
+  windows:
+    runs-on: windows-2025
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prerequisites (git >= 2.54; install downloads jq when the image has none)
+        shell: bash
+        run: |
+          git --version
+          read -r major minor < <(git --version | sed -E 's/^git version ([0-9]+)\.([0-9]+).*/\1 \2/')
+          if [ "$major" -lt 2 ] || { [ "$major" -eq 2 ] && [ "$minor" -lt 54 ]; }; then
+            echo "::error::git >= 2.54 is required; this runner image has $major.$minor"
+            exit 1
+          fi
+
+      - name: Install
+        shell: bash
+        run: bin/git-secret-guard install
+
+      - name: Status
+        shell: bash
+        run: bin/git-secret-guard status
+
+      - name: The installed command works from PowerShell and cmd
+        shell: pwsh
+        run: |
+          $env:Path = "$HOME\.local\bin;$env:Path"
+          git-secret-guard status
+          if ($LASTEXITCODE -ne 0) { throw 'git-secret-guard status failed from PowerShell' }
+          cmd /c "git-secret-guard version"
+          if ($LASTEXITCODE -ne 0) { throw 'git-secret-guard version failed from cmd' }
+
+      - name: A leaked token is blocked by the hook, through PowerShell git
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP 'gsg-e2e'
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          Set-Location $dir
+          git init -q
+          git config user.email ci@example.com
+          git config user.name ci
+          $r = -join ((48..57) + (65..90) + (97..122) | Get-Random -Count 36 | ForEach-Object { [char]$_ })
+          ('token = ghp_' + $r) | Set-Content leak.txt
+          git add leak.txt
+          $out = git commit -m 'must be blocked' 2>&1 | Out-String
+          Write-Host $out
+          if ($LASTEXITCODE -eq 0) { throw 'the commit with a leaked token was NOT blocked' }
+          if ($out -notmatch 'github-pat') { throw 'the commit was blocked, but not by the expected finding' }
+          # the step wrapper exits with the last native exit code; the blocked commit was the expected outcome
+          $global:LASTEXITCODE = 0
+
+      - name: A clean commit passes and nothing is left behind
+        shell: pwsh
+        run: |
+          Set-Location (Join-Path $env:RUNNER_TEMP 'gsg-e2e')
+          git reset -q
+          'hello' | Set-Content ok.txt
+          git add ok.txt
+          git commit -m 'clean'
+          if ($LASTEXITCODE -ne 0) { throw 'a clean commit was blocked' }
+          $left = Get-ChildItem (Join-Path $HOME '.tmp') -Filter 'git-secret-guard.*' -ErrorAction SilentlyContinue
+          if ($left) { throw "scan directories were left behind: $($left.FullName -join ', ')" }
+      - name: Uninstall from PowerShell leaves nothing behind
+        shell: pwsh
+        run: |
+          $env:Path = "$HOME\.local\bin;$env:Path"
+          git-secret-guard uninstall --remove-tools
+          if ($LASTEXITCODE -ne 0) { throw 'uninstall failed' }
+          $left = Get-ChildItem (Join-Path $HOME '.local\bin') -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^(git-secret-guard|trufflehog|betterleaks)' }
+          if ($left) { throw "uninstall left files behind: $($left.Name -join ', ')" }

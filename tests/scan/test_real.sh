@@ -1,0 +1,585 @@
+#!/usr/bin/env bash
+# ^ external trufflehog runs --no-verification => a pattern match is a match, with or without network; see docs/scan.md#limits
+# shellcheck source=tests/support/lib.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/../support/lib.sh"
+
+DEAD_PROXY=(HTTPS_PROXY=http://127.0.0.1:9 HTTP_PROXY=http://127.0.0.1:9 https_proxy=http://127.0.0.1:9 http_proxy=http://127.0.0.1:9)
+
+need_real_tools() {
+    [ -x "$REAL_TRUFFLEHOG" ] || skip_test "trufflehog not found at $REAL_TRUFFLEHOG"
+    [ -x "$REAL_BETTERLEAKS" ] || skip_test "betterleaks not found at $REAL_BETTERLEAKS"
+    use_real_tools
+}
+make_key_tree() {
+    mkdir -p -- "$1/src" && printf 'x\ny\nz\naws_key = "%s"\n' "$(fake_aws_key)" >"$1/src/a.txt"
+}
+make_token_tree() {
+    mkdir -p -- "$1/src" && printf 'x\ntoken = "%s"\n' "$(fake_github_token)" >"$1/src/a.txt"
+}
+GL_COMMON=(--report-format json --no-banner --no-color)
+
+# ^ why the cached real binary, not the oracle of the e2e test; a wrong fifth column leaves the oracle empty on both sides, a silent pass
+# ^ invariant prints "<pinned version> <lock binary hash> <sha256 of the file>" for a tool, or "none" when the file does not report the pinned version
+real_pin_probe() {
+    bash -c 'source "$1/lib/core/common.sh" && source "$1/lib/install/tools.sh" || exit 1
+plat="$(tools_platform_key "$2" "$(uname -s)" "$(uname -m)")" || exit 1
+row="$(tools_lock_lookup "$1/tools.lock" "$2" "$plat")" || exit 1
+if ! tools_has_version "$3" "${row%% *}" timeout; then echo none; exit 0; fi
+printf "%s %s %s\n" "${row%% *}" "$(tools_lock_binary_sha "$1/tools.lock" "$2" "$plat")" "$(sha256sum -- "$3" | cut -d" " -f1)"' _ "$GSG_PROJECT" "$1" "$2"
+}
+
+test_real_the_cached_scanners_hash_to_the_binary_hash_in_the_lock() {
+    local tool bin probe checked=0 want got
+    for tool in trufflehog betterleaks; do
+        bin="$REAL_TRUFFLEHOG"
+        if [ "$tool" = betterleaks ]; then bin="$REAL_BETTERLEAKS"; fi
+        [ -x "$bin" ] || continue
+        probe="$(real_pin_probe "$tool" "$bin")" || {
+            fail "could not read the lock row for $tool"
+            return 1
+        }
+        if [ "$probe" = none ]; then continue; fi
+        read -r _ want got <<<"$probe"
+        assert_eq "$got" "$want" "$tool: the file at the pinned version has the lock's binary SHA-256 (fix the fifth column of its row)"
+        checked=$((checked + 1))
+    done
+    if [ "$checked" -eq 0 ]; then skip_test "no real scanner at the pinned version was found ($REAL_TRUFFLEHOG, $REAL_BETTERLEAKS)"; fi
+}
+
+test_real_clean_diff_passes_quietly_with_both_tools() {
+    need_real_tools
+    new_repo realclean || return 1
+    stage_file src/app.txt "hello world" "nothing secret here"
+    commit_cap "clean"
+    assert_rc 0 commit
+    assert_empty "$OUT" "stdout stays empty"
+    assert_pass_line_only "$ERR" "only the pass line is printed on success"
+}
+
+test_real_betterleaks_catches_a_fake_key_and_the_value_is_absent_from_the_output() {
+    need_real_tools
+    new_repo realkey || return 1
+    stage_file f.txt one two "key = \"$(fake_aws_key)\""
+    commit_cap "leak"
+    assert_rc 1 "blocked"
+    assert_contains "$ERR" "betterleaks" scanner
+    assert_contains "$ERR" "aws-access-key-id" "detector: our rule, since 1.9.0 reports a key ID only with its secret nearby"
+    assert_contains "$ERR" "(match)" "the one honest label"
+    assert_contains "$ERR" "f.txt:3" "real file and line"
+    assert_contains "$ERR" "git commit --no-verify" "bypass hint"
+    local key
+    key="$(fake_aws_key)"
+    no_leak "$key"
+    no_leak "${key:4}"
+}
+
+test_real_trufflehog_match_blocks_without_the_value() {
+    need_real_tools
+    new_repo realtf || return 1
+    stage_file f.txt one "token = \"$(fake_github_token)\""
+    commit_cap "leak"
+    assert_rc 1 "blocked"
+    assert_contains "$ERR" "trufflehog" scanner
+    assert_contains "$ERR" "Github" detector
+    assert_contains "$ERR" "(match)" "the one honest label"
+    assert_not_contains "$ERR" "(unknown)" "nothing claims a verification status"
+    assert_not_contains "$ERR" "(verified)" "nothing claims a verification status"
+    assert_contains "$ERR" "f.txt:2" "real file and line"
+    local token
+    token="$(fake_github_token)"
+    no_leak "$token"
+    no_leak "${token:4}"
+}
+
+# ^ invariant the environment holds no proxy variable and no network is needed => a pattern match decides, as with the dead proxy of the old tests
+test_real_a_fake_token_blocks_with_no_proxy_variable_set_at_all() {
+    need_real_tools
+    local pv
+    new_repo realnoproxy || return 1
+    for pv in HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy; do
+        if [ -n "$(env -i "${GSG_ENV[@]}" "${EXTRA_ENV[@]}" bash -c "printf %s \"\${$pv:-}\"")" ]; then fail "the test environment already sets $pv"; return 1; fi
+    done
+    stage_file f.txt "token = \"$(fake_github_token)\""
+    commit_cap "leak"
+    assert_rc 1 "blocked without any proxy configured"
+    [[ "$ERR" =~ trufflehog\ +Github\ \(match\)\ +f\.txt:1 ]] || fail "trufflehog row missing: ${ERR:0:400}"
+    no_leak "$(fake_github_token)"
+}
+
+# ^ external strace -f follows the scanners the hook starts; a "connect(" line with AF_INET/AF_INET6 and a non-loopback address is an outbound connection
+# ^ invariant a skip names its reason => no strace or no ptrace permission leaves the zero-connect claim unproven on this host
+test_real_a_hook_scan_makes_no_connect_to_a_non_loopback_address() {
+    need_real_tools
+    command -v strace >/dev/null 2>&1 || skip_test "strace is not installed: the zero-connect claim is not proven on this host"
+    strace -o /dev/null -e trace=none true 2>/dev/null || skip_test "strace cannot trace here (ptrace is not allowed): the zero-connect claim is not proven on this host"
+    local trace="$SANDBOX/connects.trace" outbound
+    new_repo realstrace || return 1
+    stage_file f.txt "token = \"$(fake_github_token)\"" "key = \"$(fake_aws_key)\""
+    run_cap env -i "${GSG_ENV[@]}" "${EXTRA_ENV[@]}" strace -f -qq -e trace=connect,sendto,sendmsg -o "$trace" "$GIT" commit -q -m leak
+    assert_rc 1 "the commit is blocked under strace"
+    [[ "$ERR" =~ trufflehog\ +Github\ \(match\) ]] || { fail "trufflehog did not report under strace: ${ERR:0:400}"; return 1; }
+    [[ "$ERR" =~ betterleaks\ +[a-z-]+\ \(match\) ]] || { fail "betterleaks did not report under strace: ${ERR:0:400}"; return 1; }
+    [ -s "$trace" ] || { fail "strace wrote no trace: the check proved nothing"; return 1; }
+    outbound="$(grep -E 'sa_family=AF_INET6?, ' "$trace" | grep -vE 'sin_addr=inet_addr\("127\.|inet_pton\(AF_INET6, "(::1|::ffff:127\.[0-9.]+)"' || true)"
+    assert_empty "$outbound" "no connect to a non-loopback address by git, the hook or either scanner"
+    no_leak "$(fake_github_token)"
+    no_leak "$(fake_aws_key)"
+}
+
+test_real_line_numbers_survive_a_20000_line_sparse_file() {
+    need_real_tools
+    new_repo realbig || return 1
+    yes '' | head -n 20000 >big.txt
+    gitx add big.txt && gitx commit -q --no-verify -m base
+    printf 'token = "%s"\n' "$(fake_github_token)" >>big.txt
+    gitx add big.txt
+    commit_cap "leak"
+    assert_rc 1 "blocked"
+    [[ "$ERR" =~ trufflehog\ +Github\ \(match\)\ +big\.txt:20001 ]] || fail "trufflehog row for line 20001 missing: ${ERR:0:400}"
+    [[ "$ERR" =~ betterleaks\ +github-pat\ \(match\)\ +big\.txt:20001 ]] || fail "betterleaks row for line 20001 missing: ${ERR:0:400}"
+    no_leak "$(fake_github_token)"
+}
+
+test_real_betterleaks_fingerprints_are_repo_relative() {
+    need_real_tools
+    local scan="$SANDBOX/scan-fp" out="$SANDBOX/out-fp"
+    make_key_tree "$scan"
+    run_adapter betterleaks "$scan" "$out"
+    assert_eq "$("$TEST_JQ" -r '.[0].Fingerprint' "$out/betterleaks.json")" "src/a.txt:aws-access-key-id:4" "fingerprint form for .gitleaksignore"
+    assert_eq "$(cut -f1,2,3,4,5 "$out/betterleaks.rows")" "$(printf 'betterleaks\taws-access-key-id\tmatch\tsrc/a.txt\t4')" "row"
+    assert_empty "$(<"$out/betterleaks.errors")" "leak status is not an error"
+}
+
+test_real_betterleaks_exit_code_semantics_1_9_0() {
+    need_real_tools
+    local d="$SANDBOX/gl-semantics"
+    mkdir -p -- "$d/clean" "$d/leak"
+    printf 'nothing\n' >"$d/clean/c.txt"
+    make_key_tree "$d/leak"
+    printf '[extend]\nuseDefault = true\n' >"$d/c.toml"
+
+    run_cap "$REAL_BETTERLEAKS" dir "$d/clean" --config "$d/c.toml" "${GL_COMMON[@]}" --report-path "$d/r-clean.json" --exit-code 42
+    assert_rc 0 "clean scan exits 0"
+    assert_eq "$(<"$d/r-clean.json")" "[]" "clean scan still writes an empty array"
+
+    run_cap "$REAL_BETTERLEAKS" dir "$d/leak" --config "$d/c.toml" --redact "${GL_COMMON[@]}" --report-path "$d/r-leak.json" --exit-code 42
+    assert_rc 42 "leaks exit with --exit-code"
+    assert_eq "$("$TEST_JQ" length "$d/r-leak.json")" 1 "one finding in the report"
+    assert_eq "$("$TEST_JQ" -r '.[0].Secret' "$d/r-leak.json")" REDACTED "--redact hides the value in the report"
+
+    run_cap "$REAL_BETTERLEAKS" dir "$d/leak" --config "$d/c.toml" --redact "${GL_COMMON[@]}" --report-path "$d/r-default.json"
+    assert_rc 1 "default leak status is 1 ..."
+    run_cap "$REAL_BETTERLEAKS" dir "$d/clean" --config "$d/missing.toml" "${GL_COMMON[@]}" --report-path "$d/r-fatal.json" --exit-code 42
+    assert_rc 1 "... and a fatal error is 1 as well, hence the distinct --exit-code"
+    assert_no_file "$d/r-fatal.json" "fatal error writes no report"
+
+    run_cap "$REAL_BETTERLEAKS" dir "$d/does-not-exist" --config "$d/c.toml" "${GL_COMMON[@]}" --report-path "$d/r-missing.json" --exit-code 42
+    assert_rc 0 "a missing target is skipped with exit 0"
+    assert_contains "$ERR" "skipping" "only a WRN line says so"
+}
+
+test_real_betterleaks_fatal_config_error_shows_its_message_words_in_the_adapter_errors() {
+    need_real_tools
+    local scan="$SANDBOX/scan-gl-fatal" out="$SANDBOX/out-gl-fatal"
+    make_key_tree "$scan"
+    mkdir -p -- "$out"
+    printf '[[rules]]\nid = "x"\n' >"$out/repo-gitleaks.toml"
+    run_adapter betterleaks "$scan" "$out"
+    assert_contains "$(<"$out/betterleaks.errors")" "betterleaks: scan failed (exit 1)" "the exit status is reported"
+    assert_contains "$(<"$out/betterleaks.errors")" "betterleaks: unable to load config" "and so are betterleaks' message words"
+    assert_not_contains "$(<"$out/betterleaks.errors")" $'\e' "colour codes are removed (FTL lines are coloured even with --no-color)"
+    assert_not_contains "$(<"$out/betterleaks.errors")" "regex=" "no structured field is printed"
+}
+
+test_real_betterleaks_unreadable_input_exits_clean_but_the_adapter_reports_it() {
+    need_real_tools
+    local scan="$SANDBOX/scan-gl-unreadable" out="$SANDBOX/out-gl-unreadable"
+    make_key_tree "$scan"
+    printf 'hidden\n' >"$scan/src/locked.txt" && chmod 000 "$scan/src/locked.txt"
+    run_adapter betterleaks "$scan" "$out"
+    assert_contains "$(<"$out/betterleaks.errors")" "betterleaks: skipping file: permission denied" "unreadable input is an error"
+    assert_contains "$(<"$out/betterleaks.rows")" "aws-access-key-id" "the readable file is still reported"
+}
+
+test_real_trufflehog_lesson_3_unreadable_input_exits_0_yet_the_adapter_errors() {
+    need_real_tools
+    local scan="$SANDBOX/scan-tf-unreadable" out="$SANDBOX/out-tf-unreadable"
+    mkdir -p -- "$scan/src" "$out"
+    printf 'hidden\n' >"$scan/src/locked.txt" && chmod 000 "$scan/src/locked.txt"
+    run_cap "$REAL_TRUFFLEHOG" filesystem "$scan" --results=verified,unverified,unknown --fail --fail-on-scan-errors --no-verification --no-update --json --no-color
+    local direct_rc="$RC"
+    if [ "$direct_rc" -ne 0 ]; then fail "trufflehog changed: exit $direct_rc on unreadable input (3.99.2 exits 0); revisit the error-log detection"; fi
+    run_adapter trufflehog "$scan" "$out"
+    assert_contains "$(<"$out/trufflehog.errors")" "error scanning file" "error-level log line becomes an error (direct status was $direct_rc)"
+    assert_not_contains "$(<"$out/trufflehog.errors")" "locked.txt" "only the msg field, no structured path"
+}
+
+test_real_trufflehog_a_pattern_match_is_one_match_row_without_any_proxy() {
+    need_real_tools
+    local scan="$SANDBOX/scan-tf-match" out="$SANDBOX/out-tf-match"
+    make_token_tree "$scan"
+    run_adapter trufflehog "$scan" "$out"
+    assert_eq "$(<"$out/trufflehog.rows")" "$(printf 'trufflehog\tGithub\tmatch\tsrc/a.txt\t2')" "row"
+    assert_empty "$(<"$out/trufflehog.errors")" "findings status is not an error"
+}
+
+# ^ invariant a fake credential the vendor would reject still blocks, with network access too => the scan never asks the vendor
+test_real_a_fake_credential_blocks_even_with_network_access() {
+    need_real_tools
+    command -v curl >/dev/null 2>&1 || skip_test "curl is not available to probe the network"
+    timeout 6 curl -sS -o /dev/null https://api.github.com 2>/dev/null || skip_test "offline: this test is about a host that has network access"
+    local scan="$SANDBOX/scan-tf-online" out="$SANDBOX/out-tf-online"
+    make_token_tree "$scan"
+    run_adapter trufflehog "$scan" "$out"
+    assert_eq "$(<"$out/trufflehog.rows")" "$(printf 'trufflehog\tGithub\tmatch\tsrc/a.txt\t2')" "a fake credential is reported whatever the vendor would say"
+    assert_empty "$(<"$out/trufflehog.errors")" "no error"
+}
+
+test_real_committed_gitleaks_config_and_ignore_cannot_mute_the_scan() {
+    need_real_tools
+    new_repo realmute || return 1
+    stage_file .gitleaks.toml '[allowlist]' "paths = ['''.*''']"
+    stage_file .gitleaksignore "k.txt:aws-access-token:1" "src/k.txt:aws-access-token:1" "*"
+    stage_file k.txt "key = \"$(fake_aws_key)\""
+    commit_cap "mute attempt"
+    assert_rc 1 "still blocked"
+    assert_contains "$ERR" "k.txt:1" "finding reported"
+    no_leak "$(fake_aws_key)"
+}
+
+test_real_committed_gitattributes_cannot_mute_either_scanner() {
+    need_real_tools
+    local n=0 attrs
+    for attrs in '* -diff' '*.txt binary'; do
+        n=$((n + 1))
+        new_repo "realattr$n" || return 1
+        printf '%s\n' "$attrs" >.gitattributes
+        gitx add .gitattributes
+        stage_file config.txt "key = \"$(fake_aws_key)\""
+        commit_cap "attribute mute attempt"
+        assert_rc 1 "still blocked with [$attrs]"
+        assert_contains "$ERR" "config.txt:1" "finding reported with [$attrs]"
+        no_leak "$(fake_aws_key)"
+    done
+}
+
+test_real_betterleaks_default_path_allowlist_hides_a_key_id_but_trufflehog_still_covers_its_own_kinds() {
+    need_real_tools
+    local n=0 path
+    for path in node_modules/x/k.txt package-lock.json assets/logo.svg go.sum vendor/github.com/x/k.txt docs/notes.pdf; do
+        n=$((n + 1))
+        new_repo "realallow$n" || return 1
+        stage_file "$path" "key = \"$(fake_aws_key)\""
+        commit_cap "allowlisted"
+        assert_rc 0 "documented limit: betterleaks' default allowlist skips $path; an AWS key ID alone is seen by betterleaks only"
+    done
+    new_repo realallowctl || return 1
+    stage_file src/k.txt "key = \"$(fake_aws_key)\""
+    commit_cap "control"
+    assert_rc 1 "control: the same key at a normal path is blocked"
+    new_repo realallowtf || return 1
+    stage_file node_modules/x/t.txt "token = \"$(fake_github_token)\""
+    commit_cap "trufflehog kind"
+    assert_rc 1 "trufflehog has no such allowlist and blocks under node_modules/"
+    assert_contains "$ERR" "trufflehog" scanner
+    assert_contains "$ERR" "node_modules/x/t.txt:1" "file and line"
+}
+
+test_real_utf16_and_nul_byte_files_commit_unscanned_a_documented_limit() {
+    need_real_tools
+    command -v iconv >/dev/null 2>&1 || skip_test "iconv is not available"
+    new_repo realutf16 || return 1
+    printf 'key = "%s"\n' "$(fake_aws_key)" | iconv -f UTF-8 -t UTF-16LE >windows.txt
+    printf 'key = "%s"\n\000' "$(fake_aws_key)" >nulbyte.txt
+    printf 'key = "%s"\n' "$(fake_aws_key)" | iconv -f UTF-8 -t UTF-16 >bom.txt
+    gitx add windows.txt nulbyte.txt bom.txt
+    commit_cap "binary-looking text"
+    assert_rc 0 "documented limit: git treats UTF-16 and NUL-containing text as binary, so nothing is scanned"
+    assert_empty "$OUT" "nothing on stdout"
+    assert_eq "$ERR" "git-secret-guard: no added lines to scan" "git sees a binary file, so the hook says there was nothing to scan"
+}
+
+test_real_service_environment_scans_with_both_real_tools() {
+    need_real_tools
+    new_repo realsvc || return 1
+    service_prepare
+    service_env
+    stage_file a.txt "plain text"
+    run_cap env -i "${SVC_ENV[@]}" git commit -q -m clean
+    assert_rc 0 "clean commit in the service environment"
+    stage_file b.txt "key = \"$(fake_aws_key)\""
+    run_cap env -i "${SVC_ENV[@]}" git commit -q -m leak
+    assert_rc 1 "finding blocks in the service environment"
+    assert_contains "$ERR" "b.txt:1" "decided by the finding"
+    assert_not_contains "$ERR" "not executable" "no environment error"
+    no_leak "$(fake_aws_key)"
+}
+
+# ^ invariant bl_direct DIR REPORT ARGS runs the real betterleaks on DIR with default rules, a dead proxy and the adapter's flags; sets RC
+bl_direct() {
+    local dir="$1" report="$2"
+    shift 2
+    printf '[extend]\nuseDefault = true\n' >"$SANDBOX/bl-default.toml"
+    run_cap env -C "$dir" "${DEAD_PROXY[@]}" "$REAL_BETTERLEAKS" dir . --config "$SANDBOX/bl-default.toml" --redact "${GL_COMMON[@]}" \
+        --report-path "$report" --exit-code 42 "$@"
+}
+
+test_real_betterleaks_version_text_and_validation_off_by_default_1_9_0() {
+    need_real_tools
+    local d="$SANDBOX/bl-pin"
+    run_cap "$REAL_BETTERLEAKS" --version
+    assert_eq "$OUT" "betterleaks version 1.9.0" "the version text tools_version_matches reads"
+    mkdir -p -- "$d" && printf 'token = "%s"\n' "$(fake_github_token)" >"$d/f.txt"
+    bl_direct "$d" "$d.json"
+    assert_rc 42 "a finding"
+    assert_eq "$("$TEST_JQ" -r '.[0].ValidationStatus' "$d.json")" null "validation is not attempted unless asked for"
+    bl_direct "$d" "$d.json" --validation
+    assert_eq "$("$TEST_JQ" -r '.[0].ValidationStatus' "$d.json")" error "with --validation the dead proxy turns it into an error: the flag is what reaches the network"
+}
+
+test_real_aws_access_token_needs_the_secret_key_within_5_lines_so_our_rule_covers_a_lone_id() {
+    need_real_tools
+    local lone="$SANDBOX/bl-lone" pair="$SANDBOX/bl-pair" secret key
+    secret="$(fake_aws_secret)" key="$(fake_aws_key)"
+    mkdir -p -- "$lone" "$pair" && printf '%s\n' "$key" >"$lone/f.txt" && printf '%s\nsecret_access_key = "%s"\n' "$key" "$secret" >"$pair/f.txt" || return 1
+    bl_direct "$lone" "$lone.json"
+    assert_rc 0 "betterleaks alone reports a lone key ID as nothing"
+    bl_direct "$pair" "$pair.json"
+    assert_rc 42 "a key with its secret within 5 lines is reported"
+    assert_eq "$("$TEST_JQ" -r '.[0].RuleID' "$pair.json")" aws-access-token "by the built-in composite rule"
+    run_adapter betterleaks "$lone" "$SANDBOX/out-lone"
+    assert_eq "$(cut -f1,2,3,4,5 "$SANDBOX/out-lone/betterleaks.rows")" "$(printf 'betterleaks\taws-access-key-id\tmatch\tf.txt\t1')" "our rule reports the lone ID"
+    run_adapter betterleaks "$pair" "$SANDBOX/out-pair"
+    assert_eq "$(cut -f1,2,3,4,5 "$SANDBOX/out-pair/betterleaks.rows")" "$(printf 'betterleaks\taws-access-token\tmatch\tf.txt\t1')" "a pair is reported once, as aws-access-token"
+    no_leak "$key"
+    no_leak "$secret"
+    assert_not_contains "$(<"$SANDBOX/out-pair/betterleaks.rows")$(<"$SANDBOX/out-pair/betterleaks.errors")" "$secret" "the adapter never writes the secret"
+}
+
+# ^ invariant report_where REPORT prints "file:line" of every finding, sorted and comma separated
+report_where() { "$TEST_JQ" -r '[.[] | "\(.File):\(.StartLine)"] | sort | join(",")' "$1"; }
+
+test_real_betterleaks_reads_root_ignore_files_and_configs_on_its_own_1_9_0() {
+    need_real_tools
+    local d="$SANDBOX/bl-root" ign="$SANDBOX/bl-ign" allow cfg
+    allow="$(printf '[extend]\nuseDefault = true\n[allowlist]\npaths = [%sf\\.txt%s]\n' "'''" "'''")"
+    mkdir -p -- "$d/sub" "$ign" && printf 'token = "%s"\n' "$(fake_github_token)" | tee "$d/f.txt" >"$d/sub/f.txt" || return 1
+    bl_direct "$d" "$d.json"
+    assert_eq "$(report_where "$d.json")" "f.txt:1,sub/f.txt:1" "baseline: both files are reported"
+    printf 'f.txt:github-pat:1\n' >"$d/.gitleaksignore" || return 1
+    bl_direct "$d" "$d.json" --gitleaks-ignore-path "$ign"
+    assert_eq "$(report_where "$d.json")" "sub/f.txt:1" "a root .gitleaksignore mutes its fingerprint whatever --gitleaks-ignore-path says"
+    mv -- "$d/.gitleaksignore" "$d/.betterleaksignore" || return 1
+    bl_direct "$d" "$d.json" --gitleaks-ignore-path "$ign"
+    assert_eq "$(report_where "$d.json")" "sub/f.txt:1" "and so does a root .betterleaksignore"
+    rm -f -- "$d/.betterleaksignore" && printf 'sub/f.txt:github-pat:1\n' >"$d/sub/.gitleaksignore" || return 1
+    bl_direct "$d" "$d.json"
+    assert_eq "$(report_where "$d.json")" "f.txt:1,sub/f.txt:1" "a nested ignore file is not read"
+    rm -f -- "$d/sub/.gitleaksignore" && printf 'f.txt:github-pat:1\n' >"$ign/.gitleaksignore" || return 1
+    bl_direct "$d" "$d.json" --gitleaks-ignore-path "$ign"
+    assert_eq "$(report_where "$d.json")" "sub/f.txt:1" "--gitleaks-ignore-path DIR reads DIR/.gitleaksignore"
+    for cfg in .gitleaks.toml .betterleaks.toml; do
+        printf '%s\n' "$allow" >"$d/$cfg" || return 1
+        run_cap env -C "$d" "$REAL_BETTERLEAKS" dir . --redact "${GL_COMMON[@]}" --report-path "$d.json" --exit-code 42
+        assert_rc 0 "a root $cfg is loaded when there is no --config"
+        bl_direct "$d" "$d.json"
+        assert_rc 42 "an explicit --config wins over a root $cfg"
+        rm -f -- "$d/$cfg" || return 1
+    done
+}
+
+test_real_betterleaks_inline_markers_and_config_precedence_1_9_0() {
+    need_real_tools
+    local d="$SANDBOX/bl-marks" tok allow_all
+    tok="$(fake_github_token)"
+    allow_all="$(printf '[extend]\nuseDefault = true\n[allowlist]\npaths = [%s(?s).*%s]\n' "'''" "'''")"
+    mkdir -p -- "$d" && printf 'a = "%s" # gitleaks:allow\nb = "%s" # betterleaks:allow\nc = "%s"\n' "$tok" "$tok" "$tok" >"$d/f.txt" || return 1
+    bl_direct "$d" "$d.json"
+    assert_eq "$(report_where "$d.json")" "f.txt:3" "both markers mute their own line only"
+    bl_direct "$d" "$d.json" --ignore-gitleaks-allow
+    assert_eq "$(report_where "$d.json")" "f.txt:1,f.txt:2,f.txt:3" "--ignore-gitleaks-allow turns both off"
+    printf '%s\n' "$allow_all" >"$SANDBOX/bl-env.toml" || return 1
+    run_cap env -C "$d" BETTERLEAKS_CONFIG="$SANDBOX/bl-env.toml" GITLEAKS_CONFIG="$SANDBOX/bl-env.toml" BETTERLEAKS_CONFIG_TOML="$allow_all" \
+        "$REAL_BETTERLEAKS" dir . --config "$SANDBOX/bl-default.toml" --redact "${GL_COMMON[@]}" --report-path "$d.json" --exit-code 42
+    assert_rc 42 "an environment config never beats --config"
+}
+
+# ^ invariant repo_with_config NAME VARIANT builds a fresh repo whose HEAD holds .gitleaks.toml as VARIANT says
+# ^ invariant none = no config at HEAD; permissive = built-in rules extended; builtins_off = an allowlist over every path and no [extend]
+repo_with_config() {
+    new_repo "$1" || return 1
+    case "$2" in
+        none) return 0 ;;
+        permissive) stage_file .gitleaks.toml '[extend]' 'useDefault = true' ;;
+        builtins_off) stage_file .gitleaks.toml '[allowlist]' "paths = ['''(?s).*''']" ;;
+        *) return 1 ;;
+    esac
+    gitx commit -q --no-verify -m config
+}
+
+test_real_a_lone_aws_key_id_blocks_with_and_without_a_repo_config() {
+    need_real_tools
+    local n=0 variant
+    for variant in none permissive builtins_off; do
+        n=$((n + 1))
+        repo_with_config "reallone$n" "$variant" || return 1
+        stage_file k.txt "$(fake_aws_key)"
+        commit_cap "lone id"
+        assert_rc 1 "blocked with repo config [$variant]: a repository cannot switch our rule off"
+        assert_contains "$ERR" "aws-access-key-id" "the rule of ours [$variant]"
+        assert_contains "$ERR" "k.txt:1" "file and line [$variant]"
+        no_leak "$(fake_aws_key)"
+    done
+}
+
+test_real_a_key_pair_blocks_once_as_aws_access_token() {
+    need_real_tools
+    local secret
+    secret="$(fake_aws_secret)"
+    new_repo realpair || return 1
+    stage_file k.txt "$(fake_aws_key)" "secret_access_key = \"$secret\""
+    commit_cap "pair"
+    assert_rc 1 "blocked"
+    assert_contains "$ERR" "aws-access-token" "the built-in composite rule"
+    assert_not_contains "$ERR" "aws-access-key-id" "one finding for the pair, not two"
+    no_leak "$(fake_aws_key)"
+    no_leak "$secret"
+}
+
+test_real_an_inline_marker_and_a_head_fingerprint_mute_the_lone_aws_key_id() {
+    need_real_tools
+    local n=0 variant
+    for variant in none permissive; do
+        n=$((n + 1))
+        repo_with_config "realmuteA$n" "$variant" || return 1
+        stage_file k.txt "id = \"$(fake_aws_key)\" # gitleaks:allow"
+        commit_cap "marker"
+        assert_rc 0 "the inline marker mutes it [$variant]"
+        repo_with_config "realmuteB$n" "$variant" || return 1
+        stage_file .gitleaksignore 'k.txt:aws-access-key-id:1' && gitx commit -q --no-verify -m ignore || return 1
+        stage_file k.txt "$(fake_aws_key)"
+        commit_cap "fingerprint"
+        assert_rc 0 "the HEAD .gitleaksignore fingerprint mutes it [$variant]"
+        stage_file m.txt "$(fake_aws_key)"
+        commit_cap "other line"
+        assert_rc 1 "a lone ID in a file the fingerprint does not name still blocks [$variant]"
+    done
+}
+
+test_real_our_aws_rule_reports_a_lone_normal_id_and_passes_the_documented_example_and_a_placeholder() {
+    need_real_tools
+    local d="$SANDBOX/bl-idshapes" out="$SANDBOX/out-idshapes"
+    mkdir -p -- "$d" || return 1
+    printf '%s%s%s\n' "AKI" "A" "IOSFODNN7EXAMPLE" >"$d/example.txt" || return 1
+    printf '%s%s\n' "AKIA" "AAAAAAAAAAAAAAAA" >"$d/low.txt" || return 1
+    printf '%s%s\n' "A3TX" "Q7XK2MWB4HZ5NR3T" >"$d/a3t.txt" || return 1
+    printf '%s\n' "$(fake_aws_key)" >"$d/akia.txt" || return 1
+    run_adapter betterleaks "$d" "$out"
+    assert_eq "$(cut -f2,4,5 "$out/betterleaks.rows" | LC_ALL=C sort)" "$(printf 'aws-access-key-id\ta3t.txt\t1\naws-access-key-id\takia.txt\t1')" \
+        "the documented example ID and a low-entropy placeholder pass, an A3T ID and a normal lone ID are reported"
+    assert_empty "$(<"$out/betterleaks.errors")" "no error"
+}
+
+test_real_a_lone_aws_key_id_under_a_skipped_path_passes_with_and_without_a_repo_config() {
+    need_real_tools
+    local n=0 variant
+    for variant in none permissive; do
+        n=$((n + 1))
+        repo_with_config "realskip$n" "$variant" || return 1
+        stage_file node_modules/x/k.txt "$(fake_aws_key)"
+        commit_cap "skipped path"
+        assert_rc 0 "[$variant] node_modules/ is covered by the default skip list for our rule in both cases"
+        no_leak "$(fake_aws_key)"
+    done
+}
+
+# ^ why touch -d 2 hours ago, not a fresh file; a racy file makes git read the blob by luck, a stat-clean one made it read the work tree (#103)
+test_real_a_key_staged_through_working_tree_encoding_is_scanned_from_the_blob() {
+    need_real_tools
+    command -v iconv >/dev/null 2>&1 || skip_test "iconv is not installed"
+    new_repo realenc || return 1
+    local key
+    key="$(fake_aws_key)" || return 1
+    printf '*.txt working-tree-encoding=UTF-16LE\n' >.gitattributes && gitx add .gitattributes && gitx commit -q --no-verify -m attrs || return 1
+    printf 'aws_key = "%s"\n' "$key" | iconv -t UTF-16LE >conf.txt && touch -d '2 hours ago' conf.txt || return 1
+    gitx add -- conf.txt || return 1
+    [[ "$(gitx cat-file -p :conf.txt)" == *"$key"* ]] || fail "the staged blob does not hold the key in UTF-8"
+    commit_cap "encoded"
+    assert_rc 1 "blocked: the blob holds the key, the UTF-16 work tree file is not what is committed"
+    assert_contains "$ERR" "conf.txt:1" "the line of the staged blob"
+    no_leak "$key"
+}
+
+# ^ invariant args = repo name and the git commit arguments; HEAD holds a UTF-16 conf.txt, the old-mtime work tree copy has a key only in the blob
+real_encoded_key_case() {
+    local name="$1" key
+    shift
+    need_real_tools
+    command -v iconv >/dev/null 2>&1 || skip_test "iconv is not installed"
+    key="$(fake_aws_key)" || return 1
+    new_repo "$name" || return 1
+    printf '*.txt working-tree-encoding=UTF-16LE\n' >.gitattributes && printf 'clean line\n' | iconv -t UTF-16LE >conf.txt || return 1
+    gitx add .gitattributes conf.txt && gitx commit -q --no-verify -m base || return 1
+    printf 'clean line\naws_key = "%s"\n' "$key" | iconv -t UTF-16LE >conf.txt && touch -d '2 hours ago' conf.txt || return 1
+    if [ "${1:-}" != -a ]; then gitx add -- conf.txt || return 1; fi
+    run_cap gitx commit -q -m x "$@"
+    assert_rc 1 "blocked in this commit mode"
+    assert_contains "$ERR" "conf.txt:2" "the line of the staged blob"
+    no_leak "$key"
+    if [ "$(gitx rev-list --count HEAD)" != 1 ]; then fail "a commit was created"; fi
+}
+
+test_real_commit_a_scans_the_blob_of_a_stat_clean_encoded_file() {
+    real_encoded_key_case realenc-a -a
+}
+
+test_real_a_partial_commit_scans_the_blob_of_a_stat_clean_encoded_file() {
+    real_encoded_key_case realenc-p -- conf.txt
+}
+
+test_real_a_partial_commit_scans_the_temporary_index_not_the_real_one() {
+    need_real_tools
+    new_repo realtmpidx || return 1
+    local key
+    key="$(fake_aws_key)" || return 1
+    printf 'b0\n' >b.txt && gitx add b.txt && gitx commit -q --no-verify -m base || return 1
+    printf 'aws_key = "%s"\n' "$key" >a.key && gitx add a.key && printf 'b1\n' >b.txt || return 1
+    commit_cap "partial" -- b.txt
+    assert_rc 0 "the key staged in a.key is not part of this commit"
+    no_leak "$key"
+    if gitx cat-file -e HEAD:a.key 2>/dev/null; then fail "a.key was committed"; fi
+    if gitx diff --cached --quiet -- a.key; then fail "a.key is no longer staged"; fi
+}
+
+test_real_a_clean_filter_that_adds_content_cannot_hide_it_from_the_scan() {
+    need_real_tools
+    new_repo realfilter || return 1
+    local key
+    key="$(fake_aws_key)" || return 1
+    printf 'aws_key = "%s"\n' "$key" >"$SANDBOX/filter-extra" || return 1
+    gitx config filter.adder.clean "cat - $(git_path "$SANDBOX/filter-extra")" || return 1
+    printf '*.txt filter=adder\n' >.gitattributes && gitx add .gitattributes && gitx commit -q --no-verify -m attrs || return 1
+    printf 'plain text\n' >f.txt && touch -d '2 hours ago' f.txt || return 1
+    gitx add -- f.txt || return 1
+    [[ "$(gitx cat-file -p :f.txt)" == *"$key"* ]] || fail "the filter did not put the key into the staged blob"
+    commit_cap "filtered"
+    assert_rc 1 "blocked: the staged blob holds what the filter added"
+    assert_contains "$ERR" "f.txt:2" "the added line of the blob"
+    no_leak "$key"
+}
+
+test_real_a_commit_whose_index_cannot_be_written_as_a_tree_is_blocked() {
+    need_real_tools
+    new_repo realtree || return 1
+    stage_file f.txt "one" "two" || return 1
+    local sha
+    sha="$(gitx rev-parse :f.txt)" || return 1
+    rm -f -- ".git/objects/${sha:0:2}/${sha:2}" || return 1
+    commit_cap "no blob"
+    assert_rc 1 "blocked"
+    assert_contains "$ERR" "nothing was scanned" "the block says nothing was scanned"
+    assert_contains "$ERR" "git write-tree failed" "the message names the failing step"
+    if gitx rev-parse -q --verify HEAD >/dev/null 2>&1; then fail "a commit was created"; fi
+}
+
+run_file_tests

@@ -245,15 +245,22 @@ install_record_bash() {
         printf '%s: %s; the hook command must name the bash it runs under\n' "$GSG_NAME" "$why" >&2
         return 1
     fi
+    # ^ why only on Windows, not everywhere; the jq wrapper's shebang names this bash there, and a shebang holds no whitespace, only a short path
+    if tools_is_windows && why="$(shebang_unusable "$b")"; then
+        printf '%s: the bash running install (%s) cannot be used: a shebang cannot hold it (%s); run install with a bash at a shorter path without spaces\n' \
+            "$GSG_NAME" "${b//[^[:print:]]/?}" "$why" >&2
+        return 1
+    fi
     INSTALL_BASH_BIN="$b"
 }
 
 # ^ external a native jq.exe writes CRLF unless given -b => rows end in a carriage return; on Windows JQ_BIN is this wrapper adding -b
 # ^ security the wrapper holds the absolute jq path found at install time, quoted with printf %q => it never looks jq up on PATH
 install_write_jq_wrapper() {
-    local file="$1" real="$2"
+    local file="$1" real="$2" shell="$3"
     {
-        printf '#!/usr/bin/env bash\n'
+        # ^ why the recorded bash in the shebang, not env bash; env takes the first bash on PATH => a stand-in runs every jq call of the hook (#28, #31)
+        printf '#!%s\n' "$shell"
         printf 'exec %q -b "$@"\n' "$real"
     } >"$file" || return 1
     chmod 755 -- "$file"
@@ -449,7 +456,7 @@ install_copy_share() {
     # ^ external Windows refuses to rename a directory with a running script in it (probed) => from the installed copy only generated files change
     if install_pins_running_script && [ "$GSG_ROOT" -ef "$GSG_SHARE" ]; then
         install_write_settings "$GSG_SHARE/settings.new" && mv -T -f -- "$GSG_SHARE/settings.new" "$GSG_SHARE/settings" || return 1
-        if [ -n "${INSTALL_JQ_WRAPPER:-}" ]; then install_write_jq_wrapper "$GSG_SHARE/jq" "$INSTALL_JQ_BIN" || return 1; fi
+        if [ -n "${INSTALL_JQ_WRAPPER:-}" ]; then install_write_jq_wrapper "$GSG_SHARE/jq" "$INSTALL_JQ_BIN" "$INSTALL_BASH_BIN" || return 1; fi
         return 0
     fi
     mkdir -p -- "${GSG_SHARE%/*}" || return 1
@@ -461,7 +468,7 @@ install_copy_share() {
     # ^ security cp -a keeps the modes of the checkout (777 on a WSL drive) => nothing the hook sources or runs may stay writable by group or others
     chmod -R go-w -- "$GSG_SHARE_NEW" && desktop_git_carry_over || return 1
     install_write_settings "$GSG_SHARE_NEW/settings" || return 1
-    if [ -n "${INSTALL_JQ_WRAPPER:-}" ]; then install_write_jq_wrapper "$GSG_SHARE_NEW/jq" "$INSTALL_JQ_BIN" || return 1; fi
+    if [ -n "${INSTALL_JQ_WRAPPER:-}" ]; then install_write_jq_wrapper "$GSG_SHARE_NEW/jq" "$INSTALL_JQ_BIN" "$INSTALL_BASH_BIN" || return 1; fi
     if [ -e "$GSG_SHARE" ]; then
         old="$(mktemp -d "$GSG_SHARE.old.XXXXXX")" || return 1
         mv -- "$GSG_SHARE" "$old/previous" || {

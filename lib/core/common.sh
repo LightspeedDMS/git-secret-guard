@@ -230,6 +230,17 @@ gsg_proc_tool_name() {
     if gsg_is_windows; then printf 'taskkill\n'; else printf 'setsid\n'; fi
 }
 
+# ^ invariant shebang_unusable PATH prints why a shebang line cannot name PATH (whitespace, longer than 100 characters) and returns 0; returns 1 when it can
+shebang_unusable() {
+    if [[ $1 == *[[:space:]]* ]]; then
+        printf 'whitespace'
+    elif [ "${#1}" -gt 100 ]; then
+        printf 'longer than 100 characters'
+    else
+        return 1
+    fi
+}
+
 tool_unusable() {
     local label="$1" path="${2:-}"
     if [ -z "$path" ]; then

@@ -255,7 +255,7 @@ The hook reads `<share>/settings` (`<share>` = two levels above the resolved scr
 absolute `TRUFFLEHOG_BIN`, `BETTERLEAKS_BIN`, `JQ_BIN`, `SETSID_BIN` (`TASKKILL_BIN` on Windows), `TIMEOUT_BIN`, the pinned `TRUFFLEHOG_VERSION` and
 `BETTERLEAKS_VERSION` (shown on the pass line only) and `SCAN_TIMEOUT_SECONDS`, `BASH_BIN` (every platform), plus the macOS key `GNUBIN_DIR`
 and the timer key `SYSTEMCTL_BIN`, `LAUNCHCTL_BIN` (macOS) or `SCHTASKS_BIN` (Windows) (see [install.md](install.md)). On Windows `JQ_BIN` is the
-wrapper `<share>/jq` that install writes, which runs the `jq` it found or installed with `-b`. `DOCTOR_TIMEOUT_SECONDS` is read when present
+wrapper `<share>/jq` that install writes, whose shebang is the recorded `BASH_BIN` (never `env bash`) and which runs the `jq` it found or installed with `-b`. `DOCTOR_TIMEOUT_SECONDS` is read when present
 (by `doctor`, see [doctor.md](doctor.md)) but install never writes it. A missing,
 relative or non-executable tool path blocks the commit and says nothing was scanned. A missing `SCAN_TIMEOUT_SECONDS`
 means 300; only an integer from 1 to 999999 written without a leading zero is accepted, anything else blocks (empty, a non-digit, `0`, `00`, `007`, `1000000`). GNU `timeout` reads `00` as no limit and fails open on a value of about 20 digits, so those must never reach it; `007` would mean 7 and is refused only to keep one strict form, the same as the pre-flight; missing or non-numeric versions only drop the versions from

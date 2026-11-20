@@ -481,7 +481,12 @@ that run a git 2.54 or newer, because the hook lives in the global git config.
   for Windows either way, next to `git.exe` or in its default locations, and never uses the WSL `bash.exe` in `System32`.
 - **File names.** The scanners and jq keep their `.exe` names. `~/.local/bin/git-secret-guard` is a small wrapper script,
   not a symlink, and `git-secret-guard.cmd` next to it serves PowerShell and cmd. `uninstall` removes both. `JQ_BIN` names a wrapper in the share dir adding `-b`,
-  because a native `jq.exe` otherwise writes CRLF.
+  because a native `jq.exe` otherwise writes CRLF. The wrapper's shebang is the recorded `BASH_BIN` (POSIX form, e.g. `#!/usr/bin/bash.exe`), never
+  `env bash`: the hook runs jq many times a commit, and `env` would start the first bash on `PATH` (#31; the first windows-suite run of
+  `test_recorded_bash.sh` showed it). A shebang holds no whitespace and only a short path, so `install` refuses on Windows a running bash whose path has
+  whitespace or is longer than 100 characters (`a shebang cannot hold it`), before any change. Every install rewrites the wrapper
+  (`install_copy_share`, both the in-place and the new-tree write), so an install from before this change is fixed by the next install, the one an
+  auto-update runs. Pinned by `tests/install/test_jq_wrapper.sh`, which runs on Linux.
 - **Weekly doctor.** `--with-timer` needs systemd or launchd. Use [Task Scheduler](doctor.md#a-weekly-run-on-windows-task-scheduler).
 - **Auto-update.** `install --auto-update` registers an hourly Task Scheduler task of your own user (`git-secret-guard-update`) that runs while you are logged on; the
   interval knob of the tests is ignored there. Details: [Auto-update on Windows](install.md#auto-update-on-windows).
@@ -637,7 +642,9 @@ Result: not yet recorded.
   and `hook_command_text` writes it, and the hook path, through `cygpath -m` (`C:/.../usr/bin/bash.exe`), the form a native git passes to any `sh`
   it can start. The command's own `[ -f ] && [ -x ]` check runs first, so a git whose `sh` cannot reach that file (a MinGit without the Git for
   Windows tree) blocks with `cannot start the bash the install recorded (<bash>); nothing was scanned; run git-secret-guard install`, and
-  never reaches `System32\bash.exe`. `tests/install/test_recorded_bash.sh` puts a script named `bash` first on `PATH` and asserts it is never
+  never reaches `System32\bash.exe`. The command is not the only script that starts a bash: the jq wrapper (see File names above) and doctor's git shim
+  name the recorded or running bash in their shebangs too, found by the first windows-suite run, which failed `test_recorded_bash.sh` until the
+  wrapper stopped using `env bash`. `tests/install/test_recorded_bash.sh` puts a script named `bash` first on `PATH` and asserts it is never
   started; it never starts WSL (no `wsl.exe`, `wsl`, `ubuntu.exe`, no real `bash.exe` from `System32`) and runs in `windows-suite`. Not shown
   by any run here; `windows-suite` shows it for Git for Windows' own git only (no workflow uses MinGit). **Untested Hook gap:** a MinGit beside a
   full Git for Windows starting that tree's `bash.exe` with MinGit's own `sh` (different msys runtimes), and whether a script named `bash.exe`

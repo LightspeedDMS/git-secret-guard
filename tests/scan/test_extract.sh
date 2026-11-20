@@ -299,4 +299,77 @@ test_the_awk_error_sanitizer_ends_the_text_with_a_newline_not_a_question_mark() 
     assert_empty "$(<"$SANDBOX/.err")" "empty input prints nothing"
 }
 
+# ^ hazard a no-op find first on PATH (#25) => the helpers under test run with one there and still answer from the tree itself
+# shellcheck disable=SC2016
+tree_fn() {
+    local fn="$1"
+    shift
+    mkdir -p -- "$SANDBOX/nofind" && printf '#!/bin/sh\nexit 0\n' >"$SANDBOX/nofind/find" && chmod 755 -- "$SANDBOX/nofind/find" || return 1
+    run_cap env -i "${GSG_ENV[@]}" PATH="$SANDBOX/nofind:$PATH" GSG_EXTRACT_FILES="${TREE_FILES:-0}" GSG_EXTRACT_LINES="${TREE_LINES:-0}" bash -c \
+        'set -u; set -o pipefail; source "$1/lib/core/common.sh" && source "$1/lib/scan/extract.sh" && fn="$2" && shift 2 && "$fn" "$@"' _ "$SHARE" "$fn" "$@"
+}
+
+test_scan_tree_has_file_answers_from_the_tree_not_from_find() {
+    local d="$SANDBOX/tree"
+    mkdir -p -- "$d/empty" "$d/only/dirs/here" "$d/a[b]*/.hid/deep" || return 1
+    tree_fn scan_tree_has_file "$d/empty"
+    assert_rc 1 "an empty directory holds no file"
+    tree_fn scan_tree_has_file "$d/only"
+    assert_rc 1 "directories only hold no file"
+    printf 'x\n' >"$d/a[b]*/.hid/deep/.dot" || return 1
+    tree_fn scan_tree_has_file "$d/a[b]*"
+    assert_rc 0 "a hidden file in a hidden directory, below a path with glob characters, is a file"
+    printf 'x\n' >"$d/only/top.txt" || return 1
+    tree_fn scan_tree_has_file "$d/only"
+    assert_rc 0 "a file at the top is a file"
+    tree_fn scan_tree_has_file "$d/missing"
+    assert_rc 2 "a directory that is not there cannot be inspected"
+}
+
+# ^ invariant counts and tree agree => a counted file with no file on disk is a broken extraction, never an empty commit (#25)
+test_scan_tree_verdict_blocks_when_the_counts_say_lines_were_added_and_the_tree_is_empty() {
+    local d="$SANDBOX/vtree"
+    mkdir -p -- "$d" || return 1
+    TREE_FILES=0 TREE_LINES=0 tree_fn scan_tree_verdict "$d"
+    assert_rc 1 "no count and no file: nothing to scan"
+    TREE_FILES=2 TREE_LINES=7 tree_fn scan_tree_verdict "$d"
+    assert_rc 2 "counts above zero and no file: the invariant is broken"
+    assert_eq "$OUT" "the extraction counted 7 added lines in 2 files but the scan tree holds no file; nothing was scanned." "the reason names both counts"
+    TREE_FILES=1 TREE_LINES=0 tree_fn scan_tree_verdict "$d"
+    assert_rc 2 "one file counted is enough"
+    assert_contains "$OUT" "0 added lines in 1 files" "the counts are printed as they are"
+    printf 'x\n' >"$d/f.txt" || return 1
+    TREE_FILES=1 TREE_LINES=1 tree_fn scan_tree_verdict "$d"
+    assert_rc 0 "a file on disk is scanned"
+    TREE_FILES=0 TREE_LINES=0 tree_fn scan_tree_verdict "$d"
+    assert_rc 0 "a file on disk is scanned whatever the counts say"
+    tree_fn scan_tree_verdict "$d/missing"
+    assert_rc 3 "a missing tree cannot be inspected"
+}
+
+test_dir_contents_clear_removes_every_entry_including_hidden_ones_without_find() {
+    local d="$SANDBOX/clr"
+    mkdir -p -- "$d/sub/.deep" "$d/-dash" || return 1
+    printf 'x\n' >"$d/a.txt" && printf 'x\n' >"$d/.hid" && printf 'x\n' >"$d/sub/.deep/f" && printf 'x\n' >"$d/-rf" || return 1
+    tree_fn scan_dir_clear "$d"
+    assert_rc 0 "clear"
+    assert_eq "$(cd -- "$d" && shopt -s dotglob nullglob && left=(*) && printf '%s' "${#left[@]}")" 0 "nothing is left, hidden entries and a name starting with a dash included"
+    assert_file "$d" "the directory itself stays"
+    tree_fn scan_dir_clear "$d"
+    assert_rc 0 "an empty directory is cleared too"
+    tree_fn scan_dir_clear "$d/missing"
+    assert_rc 1 "a directory that is not there is a failure"
+}
+
+test_dir_contents_clear_fails_when_the_rm_on_path_does_nothing() {
+    local d="$SANDBOX/clr2"
+    mkdir -p -- "$d" "$SANDBOX/norm" || return 1
+    printf 'x\n' >"$d/left.txt" && printf '#!/bin/sh\nexit 0\n' >"$SANDBOX/norm/rm" && chmod 755 -- "$SANDBOX/norm/rm" || return 1
+    # shellcheck disable=SC2016
+    run_cap env -i "${GSG_ENV[@]}" PATH="$SANDBOX/norm:$PATH" bash -c \
+        'set -u; source "$1/lib/core/common.sh" && source "$1/lib/scan/extract.sh" && scan_dir_clear "$2"' _ "$SHARE" "$d"
+    assert_rc 1 "a no-op rm leaves the entries, the clear says so"
+    assert_file "$d/left.txt" "sanity: the no-op rm removed nothing"
+}
+
 run_file_tests

@@ -451,6 +451,33 @@ test_the_hook_never_loads_the_doctor_and_timer_libraries() {
 # ^ why floors, not exact counts; a check over an empty list passes by itself, each dependency test asserts it saw this much of the real tree
 DEP_MIN_HOOK_ENTRIES=8
 
+# ^ security the hook runs no find (#25); a no-op one made the scan tree look empty and a token committed => bash globs decide
+# ^ invariant command position only (line start, after ; & | ( { $( or a keyword or a wrapper) => the word find in a message is fine
+GSG_FIND_WORDS='then|do|else|exec|command( -p)?|env|xargs|if|elif|while|until|time|timeout [0-9]+|nice'
+# shellcheck disable=SC2016
+GSG_FIND_CALL_RE='(^|[;&|(){`!\\]|\$\(|(^|[;&|(){`[:space:]])('"$GSG_FIND_WORDS"'))[[:space:]]*\\?find([[:space:]]|$)'
+
+# shellcheck disable=SC2016
+test_the_hook_runs_no_find_command() {
+    cd -- "$GSG_PROJECT" || return 1
+    local entries entry f
+    local -a files=(hooks/secret-scan lib/core/common.sh)
+    printf '%s\n' '    find "$work" -mindepth 1 -delete || {' 'first="$(find "$d" -type f -print -quit)" || return 1' 'x | xargs find .' 'if [ -n "$(command find .)" ]; then' \
+        'if find . -type f; then' 'elif find . -type f; then' 'while find .; do' 'until find .; do' 'if ! find .; then' 'x=`find .`' 'timeout 5 find .' 'nice find .' \
+        'time find .' '\find .' 'command -p find .' 'y) find . ;;' \
+        | grep -cE "$GSG_FIND_CALL_RE" | grep -qx 16 || fail "the pattern does not catch the sixteen call forms it exists for"
+    printf '%s\n' 'printf "%s: cannot find the Git LFS storage"' 'a message that says find a file' | grep -qE "$GSG_FIND_CALL_RE" \
+        && fail "the pattern flags the word find inside a message"
+    entries="$(dep_hook_entries)" || { fail "cannot read the hook lists out of lib/core/common.sh"; return 1; }
+    while IFS= read -r entry; do files+=("lib/$entry"); done <<<"$entries"
+    [ "${#files[@]}" -gt "$DEP_MIN_HOOK_ENTRIES" ] || fail "only ${#files[@]} hook files found"
+    for f in "${files[@]}"; do
+        case "$f" in *.toml) continue ;; esac
+        grep -vE '^[[:space:]]*#' -- "$f" | grep -nE "$GSG_FIND_CALL_RE" && fail "$f runs find"
+    done
+    return 0
+}
+
 # ^ invariant the hook lists come out of lib/core/common.sh, the file the hook reads them from => this test holds no copy of them
 # shellcheck disable=SC2016
 dep_hook_entries() {

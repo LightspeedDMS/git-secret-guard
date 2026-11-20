@@ -21,7 +21,7 @@ how to run the tests, and the limits of the scan. Exemptions have their own page
    install again ...`, and a `GNUBIN_DIR` that is not an absolute directory blocks with `GNUBIN_DIR in the settings file is
    not an absolute directory (...)`. **Everything
    else the hook runs is found through `PATH`**: `bash` itself on Linux (the `#!/usr/bin/env bash` shebang of the
-   hook), `git`, `awk`, `sed`, `cp`, `rm`, `mkdir`, `mktemp`, `find` and the other coreutils (not `realpath`: macOS 12 has none, the hook walks its own links with `readlink`). Git prepends
+   hook), `git`, `awk`, `sed`, `cp`, `rm`, `mkdir`, `mktemp` and the other coreutils (not `find`: the hook runs none, it reads the scan tree with bash globs, so a `find` that prints nothing cannot make a commit look empty; not `realpath`: macOS 12 has none, the hook walks its own links with `readlink`). Git prepends
    its own exec-path to `PATH` when it runs a hook, which puts git's directory first; a `PATH` you control decides the
    rest. The shebang is not pinned to an absolute `bash`. On macOS the hook command names the recorded `BASH_BIN`
    instead. Child scripts (`lib/scan/run-scanner.sh`, the coverage re-check) run under the same bash binary as the hook
@@ -30,7 +30,9 @@ how to run the tests, and the limits of the scan. Exemptions have their own page
    (on Windows a `TMPDIR` outside your home is ignored and `~/.tmp` is used, because NTFS ignores `chmod` and only your
    profile's permissions keep the staged lines private) (mode 700, removed on exit and on HUP/INT/TERM): each touched file at its real relative path, each **added** line
    at its real line number, every other line blank. Nothing added (empty commit, deletions only, binary only) means no
-   scan is started and the commit proceeds. The exemptions are loaded before that point, so a repository with a
+   scan is started and the commit proceeds, but only when the extraction also counted no added line: a scan tree with no file
+   after the extraction counted lines blocks with `the extraction counted N added lines in M files but the scan tree holds no
+   file; nothing was scanned.` The exemptions are loaded before that point, so a repository with a
    `.gitleaks.toml` at HEAD still gets its betterleaks pre-flight ([Exemptions](exemptions.md)), and a config that
    does not load blocks even a commit with nothing to scan. A staged Git LFS pointer is replaced in that tree by its
    object's content (or the commit is blocked), see "Files tracked by Git LFS" under Limits. Blocks of this step, each
@@ -530,6 +532,18 @@ PII detection together with its own config can put the same rules into that conf
 ## Maintainer notes
 
 Why the scan code is shaped this way; each point was probed on the pinned versions.
+
+- **The hook runs no `find`** (#25). `find` came from `PATH`, and a no-op one printed nothing and exited 0, which read as "the scan tree
+  holds no file": the commit passed with `no added lines to scan` (`extract_lfs_objects` skipped the LFS swap the same way, and the
+  work dir was emptied by `find -delete`). There is no `FIND_BIN` setting on purpose: an existing install keeps working after an
+  auto-update without a reinstall, and `type -P find` can find Windows' `find.exe`. `lib/scan/extract.sh` has the bash-only
+  replacements: `scan_tree_has_file` (`globstar dotglob nullglob` in a subshell, any depth, hidden files too), `scan_dir_clear`
+  (the reminder's work dir) and `scan_tree_verdict`, the second layer: `GSG_EXTRACT_FILES`/`GSG_EXTRACT_LINES` count only files
+  that got a line (exempt files and binary LFS objects leave the counts), so counts above zero with an empty tree is a broken
+  extraction and blocks; only two zero counts are "nothing to scan". Pinned by `test_the_hook_runs_no_find_command` (no code
+  line of the hook, `GSG_HOOK_LIBS` or `GSG_HOOK_FILES` runs `find`), `test_scan_tree_*` and
+  `test_real_formats_n02_a_no_op_find_first_on_path_still_blocks_a_token`. No end-to-end path to "counts above zero, empty tree"
+  was found besides a failing tool; the invariant is tested at row level.
 
 - **trufflehog 3.99.2** exits 0 on unreadable input even with `--fail-on-scan-errors` and only logs an error-level JSON
   line: those lines are scan errors, and only their `msg` is printed (other fields can hold verifier URLs with the

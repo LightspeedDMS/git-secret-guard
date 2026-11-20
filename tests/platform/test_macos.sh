@@ -122,7 +122,7 @@ test_linux_install_never_calls_brew_and_writes_no_macos_settings() {
     gsg install
     assert_rc 0 "a Linux install"
     assert_no_file "$SANDBOX/brew.log" "brew is never called on Linux"
-    assert_eq "$(setting_of BASH_BIN)" "" "no BASH_BIN line on Linux"
+    if [ -z "$(setting_of BASH_BIN)" ]; then fail "a Linux install records the bash that ran it (#28, #31)"; fi
     assert_eq "$(setting_of GNUBIN_DIR)" "" "no GNUBIN_DIR line on Linux"
 }
 
@@ -130,7 +130,7 @@ test_the_hook_command_names_the_recorded_bash_and_status_accepts_it() {
     lc_begin && as_macos && lc_make_fixtures && lc_use_fixtures || return 1
     gsg install
     assert_rc 0 "install"
-    assert_eq "$(gitx config --global --get hook.git-secret-guard.command)" "'$(brew_prefix)/bin/bash' '$LC_DATA/hooks/secret-scan'" \
+    assert_eq "$(gitx config --global --get hook.git-secret-guard.command)" "$(lc_hook_command "$LC_DATA" "$(brew_prefix)/bin/bash")" \
         "the command starts the hook under the recorded bash"
     gsg status
     assert_rc 0 "status"
@@ -164,7 +164,7 @@ test_doctor_accepts_the_macos_command_form_and_checks_the_recorded_bash() {
     assert_rc 0 "a healthy macOS machine"
     assert_not_contains "$OUT" "PROBLEM" "nothing wrong"
     assert_contains "$OUT" "  ok       bash: $(brew_prefix)/bin/bash" "the recorded bash is checked"
-    assert_contains "$OUT" "command='$(brew_prefix)/bin/bash' '$LC_DATA/hooks/secret-scan' (executable)" "the command form install wrote is the wanted one"
+    assert_contains "$OUT" "command=$(lc_hook_command "$LC_DATA" "$(brew_prefix)/bin/bash") (executable)" "the command form install wrote is the wanted one"
     sed -i "s#^BASH_BIN=.*#BASH_BIN=/nonexistent/bash#" "$LC_DATA/settings" || return 1
     gsg doctor --roots "$roots"
     assert_rc 1 "a recorded bash that does not exist"
@@ -759,31 +759,26 @@ test_status_on_macos_exits_1_when_the_recorded_bash_is_not_an_executable_bash_4_
         assert_contains "$OUT" "run: git-secret-guard install" "$label: says how to fix it"
         case "$label" in
             bash-3-2 | not-bash) assert_contains "$OUT" "does not report bash 4.4 or newer" "$label: the version reason" ;;
-            *) assert_contains "$OUT" "git cannot start the hook with it and the commit fails" "$label: the start reason" ;;
+            *) assert_contains "$OUT" "the hook command stops with its own message and the commit is blocked: nothing is scanned" "$label: the start reason" ;;
         esac
     done
     rm -rf -- "$bb" && mv -- "$bb.real" "$bb" || return 1
     mac_status_set BASH_BIN bash || return 1
-    gitx config --global --replace-all hook.git-secret-guard.command "'bash' '$LC_DATA/hooks/secret-scan'" || return 1
     gsg status
     assert_rc 1 "a relative path"
-    assert_contains "$OUT" "bash: MISMATCH (bash must be an absolute path, got [bash]; git runs whichever bash its PATH finds first, and under bash 3.2 the hook blocks every commit" "relative: its own reason"
-    assert_not_contains "$OUT" "git cannot start the hook" "relative: the hook does start"
-    new_repo bash-relative && stage_file src/ok.txt hello "nothing secret" || return 1
-    commit_cap probe
-    assert_contains "$ERR" "scanner did not complete" "relative: measured, the hook runs on to the scanners under the bash PATH finds"
+    assert_contains "$OUT" "bash: MISMATCH (bash must be an absolute path, got [bash]; the hook command cannot be written with it" "relative: its own reason"
+    assert_contains "$OUT" "global config: MISMATCH (the wanted command cannot be built" "relative: the config line says the command cannot be built"
     mac_status_unset BASH_BIN || return 1
     gitx config --global --replace-all hook.git-secret-guard.command "$LC_DATA/hooks/secret-scan" || return 1
     gsg status
     assert_rc 1 "no BASH_BIN recorded"
     assert_contains "$OUT" "global config: matches" "unset: the bare hook path is what the config wants"
-    assert_contains "$OUT" "bash: MISMATCH (bash is not configured in the settings file; the hook command is the bare hook path, so a git client with /bin/bash 3.2 first on PATH runs it under bash 3.2 and the hook blocks every commit" "unset: its own reason"
-    assert_not_contains "$OUT" "git cannot start the hook" "unset: the hook does start"
+    assert_contains "$OUT" "bash: MISMATCH (bash is not configured in the settings file; the hook command is the bare hook path, so the bash the script's shebang finds first on PATH runs the hook" "unset: its own reason"
     new_repo bash-unset && stage_file src/ok.txt hello "nothing secret" || return 1
     commit_cap probe
     assert_contains "$ERR" "scanner did not complete" "unset: measured, the hook runs on to the scanners under the bash PATH finds"
     cat -- "$SANDBOX/settings.orig" >"$LC_DATA/settings" || return 1
-    gitx config --global --replace-all hook.git-secret-guard.command "'$bb' '$LC_DATA/hooks/secret-scan'" || return 1
+    gitx config --global --replace-all hook.git-secret-guard.command "$(lc_hook_command "$LC_DATA" "$bb")" || return 1
     gsg status
     assert_rc 0 "the recorded bash is back"
     assert_eq "$(mac_status_footprint)" "$before" "status wrote nothing under HOME, the share, the state or TMPDIR"

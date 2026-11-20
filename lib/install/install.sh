@@ -230,7 +230,22 @@ install_resolve_bins() {
         esac
     done
     if tools_is_windows && [ -n "${INSTALL_JQ_BIN:-}" ]; then INSTALL_JQ_WRAPPER="$GSG_SHARE/jq"; fi
+    install_record_bash || bad=$((bad + 1))
     return "$bad"
+}
+
+# ^ why $BASH, not type -P bash; it parsed these libraries => the hook is known to run under it (macOS records Homebrew's instead)
+# ^ why the command names it, not the shebang; env bash takes the first bash on PATH, a stand-in or the WSL launcher (#28, #31)
+# ^ invariant sets INSTALL_BASH_BIN to an absolute executable file (a .exe on Git for Windows); rc 1 = refused with the reason printed
+install_record_bash() {
+    local b="${BASH:-}" why
+    INSTALL_BASH_BIN=""
+    if tools_is_windows && [ "${b%.exe}" = "$b" ] && [ -f "$b.exe" ]; then b="$b.exe"; fi
+    if why="$(tool_unusable bash "$b")"; then
+        printf '%s: %s; the hook command must name the bash it runs under\n' "$GSG_NAME" "$why" >&2
+        return 1
+    fi
+    INSTALL_BASH_BIN="$b"
 }
 
 # ^ external a native jq.exe writes CRLF unless given -b => rows end in a carriage return; on Windows JQ_BIN is this wrapper adding -b

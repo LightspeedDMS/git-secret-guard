@@ -68,7 +68,8 @@ _message_matches_git() {
             if [ "$mn" = on ]; then args+=(-c diff.mnemonicPrefix=true); fi
             args+=(diff --cached --no-color --no-ext-diff --no-textconv)
             if [ -n "$base" ]; then args+=("$base"); fi
-            if _message_git "${args[@]}" >"$out" 2>/dev/null && cmp -s -- "$part" "$out"; then return 0; fi
+            # ^ security cmp comes from PATH and a no-op one says equal for any text; bash confirms the answer (#31)
+            if _message_git "${args[@]}" >"$out" 2>/dev/null && cmp -s -- "$part" "$out" && [ "$(<"$part")" = "$(<"$out")" ]; then return 0; fi
         done
     done
     return 1
@@ -83,6 +84,8 @@ message_scan_prepare() {
     mkdir -p -- "$dir.cut" "$dir" || return 1
     meta="$(_message_split_cut "$dir.cut/s1" "$dir.cut/s2" <"$src")" || return 1
     cat -- "$src" >"$dest" || return 1
+    # ^ security cat comes from PATH and a no-op one leaves an empty copy the hook skips as an empty message; builtin tests catch it (#31)
+    if [ -s "$src" ] && [ ! -s "$dest" ]; then return 1; fi
     read -r a1 b1 _ _ rest <<<"$meta"
     # ^ hazard a diff of git for a commit this hook cannot rebuild is no match and is scanned; at worst a removed secret blocks the commit
     if [ -n "$rest" ] || [[ ! $a1 =~ ^[0-9]+$ ]] || [ "$b1" -eq 0 ]; then return 0; fi

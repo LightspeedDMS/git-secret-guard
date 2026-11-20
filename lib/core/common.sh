@@ -244,24 +244,36 @@ tool_unusable() {
     return 0
 }
 
-# ^ invariant prints the value hook.git-secret-guard.command must hold, the hook path alone on Linux, "'<bash>' '<hook>'" when a bash is recorded (macOS)
-# ^ why the recorded bash is named in the command, not left to the shebang; a git client started from the GUI has /bin/bash 3.2 first on PATH
-# ^ see test:test_the_hook_command_names_the_recorded_bash_and_status_accepts_it
+# ^ why the recorded bash is named, not left to env bash; env bash takes the first bash on PATH (an old one, a stand-in, the WSL launcher; #28, #31)
+# ^ why a check before the exec, not the exec alone; sh prints "not found" without our name, our message names this tool and the commit blocks
+# ^ external git appends ` "$@"` to a shell command; the exec ends ours, commit-msg still gets the message file
 hook_command_text() {
-    local hook="$1/hooks/secret-scan" bash_bin="${2:-}" q="'" esc="'\\''"
-    # ^ external native Windows git rewrites a POSIX path argument to C:/dir/file (probed) => on Windows the hook path is the mixed form
-    if [ -z "$bash_bin" ] && gsg_is_windows; then
-        cygpath -m "$hook" | tr -d '\n'
-        return "${PIPESTATUS[0]}"
+    local hook="$1/hooks/secret-scan" bash_bin="${2:-}" q="'" esc="'\\''" msg
+    # ^ security a relative bash is refused, not written; the check would look in the repository and exec would search PATH
+    local absolute=0
+    case "$bash_bin" in
+        "" | /*) absolute=1 ;;
+        [A-Za-z]:[\\/]*) if gsg_is_windows; then absolute=1; fi ;;
+    esac
+    if [ "$absolute" -eq 0 ]; then
+        printf '%s: the recorded bash must be an absolute path, got [%s]\n' "$GSG_NAME" "${bash_bin//[^[:print:]]/?}" >&2
+        return 1
+    fi
+    # ^ external native Windows git rewrites a POSIX path argument to C:/dir/file (probed) => on Windows the hook and the bash are in the mixed form
+    if gsg_is_windows; then
+        hook="$(cygpath -m "$hook")" || return 1
+        if [ -n "$bash_bin" ]; then bash_bin="$(cygpath -m "$bash_bin")" || return 1; fi
     fi
     if [ -z "$bash_bin" ]; then
         printf '%s' "$hook"
         return 0
     fi
-    printf "'%s' '%s'" "${bash_bin//$q/$esc}" "${hook//$q/$esc}"
+    msg="$GSG_NAME: cannot start the bash the install recorded ($bash_bin); nothing was scanned; run $GSG_NAME install"
+    printf "[ -f '%s' ] && [ -x '%s' ] || { printf '%%s\\\\n' '%s' >&2; exit 1; }; exec '%s' '%s'" \
+        "${bash_bin//$q/$esc}" "${bash_bin//$q/$esc}" "${msg//$q/$esc}" "${bash_bin//$q/$esc}" "${hook//$q/$esc}"
 }
 
-# ^ invariant prints BASH_BIN from the settings of the installed share, "" when there is none (Linux, or not installed)
+# ^ invariant prints BASH_BIN from the settings of the installed share, "" when there is none (not installed, or an install from before it)
 share_recorded_bash() {
     (
         load_settings "$1/settings" >/dev/null 2>&1 || exit 0

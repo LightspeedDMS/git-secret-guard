@@ -75,7 +75,7 @@ test_a_repo_level_command_override_is_listed_without_printing_the_value() {
     dr_begin && dr_repo over && dr_repo same || return 1
     marker="$(new_marker)"
     gitx -C "$DR_ROOTS/over" config hook.git-secret-guard.command "/bin/true --token=$marker" || return 1
-    gitx -C "$DR_ROOTS/same" config hook.git-secret-guard.command "$LC_DATA/hooks/secret-scan" || return 1
+    gitx -C "$DR_ROOTS/same" config hook.git-secret-guard.command "$(lc_hook_command "$LC_DATA")" || return 1
     doctor
     assert_rc 1 "an overridden command"
     assert_contains "$OUT" "PROBLEM  command overridden in local config: hook.git-secret-guard.command ($DR_REAL/over/.git/config); remove that key to run the installed hook" "named by key and file"

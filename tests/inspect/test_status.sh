@@ -61,7 +61,7 @@ test_status_flags_every_kind_of_drift_and_exits_1() {
     assert_rc 1 "a changed command"
     assert_contains "$OUT" "global config: MISMATCH" "flagged"
     assert_contains "$OUT" "command=[/elsewhere/secret-scan]" "shows what is configured"
-    assert_contains "$OUT" "want [$LC_DATA/hooks/secret-scan]" "and what is expected"
+    assert_contains "$OUT" "want [$(lc_hook_command "$LC_DATA")]" "and what is expected"
 
     fresh_install
     gitx config --global --add hook.git-secret-guard.event pre-push || return 1
@@ -946,7 +946,7 @@ test_status_checks_gnubin_dir_on_every_platform() {
     assert_rc 1 "a relative GNUBIN_DIR, which the hook blocks on every platform"
     assert_contains "$OUT" "GNUBIN_DIR: MISMATCH (GNUBIN_DIR in the settings file is not an absolute directory (relative/dir); the hook blocks every commit: nothing is scanned" "flagged"
     assert_not_contains "$OUT" "launchctl" "still no launchctl line"
-    if grep -qE '^  (PROBLEM|WARNING|ok|info) +bash: ' <<<"$OUT"; then fail "a bash line outside macOS"; fi
+    assert_contains "$OUT" "  ok       bash: " "the recorded bash is listed on every platform (#28, #31)"
     st_commit_probe
     assert_rc 1 "the commit itself"
     assert_contains "$ERR" "GNUBIN_DIR in the settings file is not an absolute directory (relative/dir); nothing was scanned" "the hook says the same"

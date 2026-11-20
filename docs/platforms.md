@@ -339,7 +339,8 @@ bin/git-secret-guard install        # lists what is missing, installs it with br
   directory), `TIMEOUT_BIN` (`gnubin/timeout`), `SETSID_BIN` and `JQ_BIN`. The hook puts `GNUBIN_DIR` first on its own `PATH`
   (a non-empty value must be an absolute, existing directory or the hook blocks; an empty one adds nothing) and the CLI does the same (it checks only
   that the directory exists), so no BSD tool answers where a GNU flag is used.
-- **The hook never runs unscanned under bash 3.2.** The configured command is `'<BASH_BIN>' '<share>/hooks/secret-scan'`, so a GUI git
+- **The hook never runs unscanned under bash 3.2.** The configured command (the same form on every platform since #28 and #31) checks the
+  recorded bash and then runs `exec '<BASH_BIN>' '<share>/hooks/secret-scan'`, so a GUI git
   client that starts with `/usr/bin:/bin` (and `/bin/bash` 3.2 first) still runs the hook under the recorded bash. A hook started any
   other way under bash older than 4.4 blocks with `nothing was scanned` before it reads another line. The CLI behaves the same: started
   by bash 3.2 it re-executes under the Homebrew bash (`install` first runs `brew install bash` alone when none exists), or refuses.
@@ -353,18 +354,23 @@ bin/git-secret-guard install        # lists what is missing, installs it with br
   `doctor.log` in the state directory; `launchctl` is recorded as `LAUNCHCTL_BIN` (details in
   [the launchd section of the doctor chapter](doctor.md#the-weekly-timer-on-macos-launchd)). `doctor` and `status` check `BASH_BIN`
   (executable, bash 4.4 or newer) and, when a timer is recorded, `LAUNCHCTL_BIN`, like the other recorded tools. `status` also checks
-  `GNUBIN_DIR` (when set, an absolute existing directory, the rule the hook blocks on). The `bash:` and `launchctl:` lines of `status` exist on
-  macOS only, whatever the settings hold elsewhere; `GNUBIN_DIR:` is checked on every platform whenever the key is set, because the hook blocks
-  on it on every platform (unset prints nothing).
+  `GNUBIN_DIR` (when set, an absolute existing directory, the rule the hook blocks on). The `bash:` line of `status` and `doctor` exists on every
+  platform (install records a bash everywhere, an install from before that has none and is a PROBLEM that says to run install); the
+  `launchctl:` line exists on macOS only, whatever the settings hold elsewhere; `GNUBIN_DIR:` is checked on every platform whenever the key is
+  set, because the hook blocks on it on every platform (unset prints nothing).
 - **What a commit does with a broken `BASH_BIN`.** Observed with git 2.56 through the fake-uname harness (`tests/platform/test_macos.sh`), **not on a
-  real Mac**. The hook command is `'<BASH_BIN>' '<share>/hooks/secret-scan'`, and git runs it through `sh`. Each claim names its test, and in each
-  case `status` exits 1.
-  - `BASH_BIN` missing, a file without the executable bit, or a directory: the shell prints `<BASH_BIN>: No such file or directory`,
-    `Permission denied` or `Is a directory`, the hook never starts and the commit fails (exit 1, no commit made). A program that is no bash and
+  real Mac**; the wording below was written for the older command `'<BASH_BIN>' '<share>/hooks/secret-scan'` and is kept where the new command
+  does not change it. The hook command is now `[ -f '<BASH_BIN>' ] && [ -x '<BASH_BIN>' ] || { <message>; exit 1; }; exec '<BASH_BIN>' '<hook>'`,
+  and git runs it through `sh`. In each case `status` exits 1.
+  - `BASH_BIN` missing, a file without the executable bit, or a directory: the command's own check prints
+    `git-secret-guard: cannot start the bash the install recorded (<BASH_BIN>); nothing was scanned; run git-secret-guard install` and the commit
+    fails (exit 1, no commit made); sh's `No such file or directory` is never reached. A program that is no bash and
     exits 3 also fails the commit, with no message. A program that is no bash and exits 0 starts nothing: git counts the hook as passed and the
-    commit **lands unscanned**, with no message
+    commit **lands unscanned**, with no message; `status` and `doctor` are what flag it
     (`test_a_commit_with_a_recorded_bash_that_cannot_run_fails_and_one_that_is_no_bash_passes_unscanned`).
-  - `BASH_BIN` relative, or unset (the hook command is then the bare hook path): the hook still starts, under the bash `PATH` or the shebang finds,
+  - `BASH_BIN` relative: `hook_command_text` refuses it (`the recorded bash must be an absolute path`), so no command is ever written with it;
+    install and doctor fail and `status` reports the hook config as a PROBLEM. The command already in git config is left as it was.
+    `BASH_BIN` unset (the hook command is then the bare hook path): the hook still starts, under the bash `PATH` or the shebang finds,
     and ran on to the scanners here because that bash is 5.x. Under a bash 3.2 first on `PATH` the hook's version check blocks every commit (read
     in `hooks/secret-scan`, not run: no bash 3.2 was available)
     (`test_status_on_macos_exits_1_when_the_recorded_bash_is_not_an_executable_bash_4_4`).
@@ -624,6 +630,18 @@ Behaviour and commands: [install.md](install.md#github-desktop-on-linux---link-d
 Result: not yet recorded.
 
 ## Maintainer notes
+
+- **The hook interpreter on Windows (#28, #31).** A git without its own `bash` (MinGit has only `sh`) used to run the script through its
+  `#!/usr/bin/env bash` shebang, which searches the Windows `PATH` and finds `C:\Windows\System32\bash.exe`, the WSL launcher. The hook command
+  now names the bash install recorded: `BASH_BIN` is the Git for Windows bash that ran install (`$BASH`, with `.exe` added where the file exists),
+  and `hook_command_text` writes it, and the hook path, through `cygpath -m` (`C:/.../usr/bin/bash.exe`), the form a native git passes to any `sh`
+  it can start. The command's own `[ -f ] && [ -x ]` check runs first, so a git whose `sh` cannot reach that file (a MinGit without the Git for
+  Windows tree) blocks with `cannot start the bash the install recorded (<bash>); nothing was scanned; run git-secret-guard install`, and
+  never reaches `System32\bash.exe`. `tests/install/test_recorded_bash.sh` puts a script named `bash` first on `PATH` and asserts it is never
+  started; it never starts WSL (no `wsl.exe`, `wsl`, `ubuntu.exe`, no real `bash.exe` from `System32`) and runs in `windows-suite`. Not shown
+  by any run here; `windows-suite` shows it for Git for Windows' own git only (no workflow uses MinGit). **Untested Hook gap:** a MinGit beside a
+  full Git for Windows starting that tree's `bash.exe` with MinGit's own `sh` (different msys runtimes), and whether a script named `bash.exe`
+  would be started by `env` (the test uses a script named `bash`; a control step proves the stand-in is reached with the old command).
 
 - **SmartGit (`lib/integrations/smartgit/smartgit*.sh`, [smartgit.md](smartgit.md)).** What was measured: SmartGit 26.1.056 on a real Mac (the `git:` block of `preferences.yml`, a plain absolute path accepted, edits while closed and while running, bundled git 2.53.0 and git-lfs 3.7.1) and 26.1.057 on Fedora 45, Flatpak and tarball (settings paths, bundled state, an outside edit accepted, the `startup` file, `flatpak ps` stale entries; see the Linux maintainer notes of smartgit.md). Automated: the two-line edit for macOS, a Linux tarball or package and Windows (26.1.057 on Windows Server 2019 with Git for Windows 2.56.0: the spike, then on 2026-11-12 the tool against that SmartGit with commits through its GUI, the 26.1.056 to 26.1.057 and 25.1.100 to 26.1.057 updates, Git LFS through the GUI, an install in `%LOCALAPPDATA%\Programs\SmartGit` and the consent prompt in mintty; see the Windows maintainer notes of smartgit.md), and for the Flatpak the four steps as one recorded unit with its own consent (`--allow-smartgit-sandbox-removal` without a terminal). Refused by design: any other major version. Snap is only detected (a `status` line); no Snap-specific settings location is searched and nothing is edited for it. Not detected: the portable Windows `7z` (settings in `<unpack dir>\.settings`, no `<major>` directory; measured, docs only). The content of Git LFS files is not scanned on any platform. The automated Flatpak unit ran on Fedora 45 on 2026-11-11 (install, verify inside the sandbox, rerun, restore, a commit through the GUI; the `--user` override alone was enough). On 2026-11-12, in containers with a virtual display: the tool against the 26.1.057 tarball (install, GUI commits, rerun, restore) and, on the Flatpak, an authenticated push through the rewritten credential helper and a Git LFS commit and push through the GUI (the container runs in the maintainer notes of smartgit.md). On 2026-11-12 on a real Ubuntu 26.04.1 VM: the tool against the 26.1.057 `.deb` (no bundled git; the PPA route raised `/usr/bin/git` itself to 2.56.1, so SmartGit needed no edit; with SmartGit pointed at a git 2.53.0 the edit, GUI commits, rerun, restore and uninstall; the Ubuntu run in the maintainer notes of smartgit.md). Also on that VM: SmartGit updates after configuring (26.1.056 to 26.1.057 kept the setting; 25.1.100 to 26.1.057 carried the old git into the new directory, see the [update runs](smartgit.md#maintainer-notes-the-update-runs-2026-11-12) for the left-over directory). In a Debian 13 container: the `.deb` with the source route, where the edit is needed (one install run built git into `/usr/local/bin` and pointed SmartGit at it; GUI commits, rerun, restore, uninstall). Syntevo publishes no `.rpm` for 26.1. Not run: Snap. The macOS Git LFS check runs under the PATH SmartGit gives git, measured in the maintainer notes of smartgit.md; the Linux one under the git's directory plus `/usr/local/bin:/usr/bin:/bin` (not measured). The recorded set is `SMARTGIT_RECORDED_MAJOR` plus the kinds in `smartgit_check_dir`; recording a new platform means adding its spike here first. Files: `smartgit.sh` (detection, shape), `smartgit_report.sh` (status, doctor), `smartgit_offer.sh` (refusals, plan, consent), `smartgit_lfs.sh`, `smartgit_apply.sh` (backup, manifest, edit, verify, restore), `smartgit_flatpak.sh` (the Flatpak unit: override, wrapper, vmoptions line, `flatpak.record`, undo, verify inside the sandbox).
 - **Bumping the Ubuntu image digest.** `IMAGE` in `tests/platform/ubuntu.sh` is the manifest-list digest. Look it up without skopeo: an anonymous

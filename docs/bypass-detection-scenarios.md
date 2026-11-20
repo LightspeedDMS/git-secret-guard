@@ -146,7 +146,7 @@ A key with no shape of its own (no prefix) written bare is a Hook gap: a rule fo
 | D18 | `git worktree add`, then commit in the worktree | Block | Hook |
 | D19 | Commit inside a submodule | Block | Hook |
 | D20 | New repo via `git init`, or `git clone --template=<empty dir>` | Block | Hook |
-| D21 | Portable Git / MinGit unzipped into the user profile (ignores managed system config) | Detect | Hook gap (a git older than 2.54); Hook, by accident (2.54 or newer on a machine without a WSL distribution: MinGit 2.56.1 runs the global config hook, but it has no bash of its own, so its `sh` resolves the script's `env bash` to `C:\Windows\System32\bash.exe`, the WSL launcher; the launcher fails and git refuses the commit unscanned. The refusal is the launcher failing, not the hook's doing; probed by hand on the Windows test machine); Hook gap (the same with a WSL distribution installed: the hook would run inside it, untested; see #28) |
+| D21 | Portable Git / MinGit unzipped into the user profile (ignores managed system config) | Detect | Hook gap (a git older than 2.54); Hook for what is tested (2.54 or newer: MinGit 2.56.1 runs the global config hook, but it has no bash of its own and its `sh` used to resolve the script's `env bash` to `C:\Windows\System32\bash.exe`, the WSL launcher. The hook command now names the bash install recorded, checks it and runs `exec` on it, so the shebang never chooses (a stand-in `bash` first on `PATH` is never started, with the old command it is) and a git that cannot start the recorded bash blocks with `cannot start the bash the install recorded`, never reaching the launcher; `tests/install/test_recorded_bash.sh`, no WSL started); Hook gap, **untested**: a MinGit beside a full Git for Windows starting that full tree's `bash.exe` with its own `sh` (different msys runtimes), no workflow or test uses MinGit. See [platforms.md](platforms.md#maintainer-notes)) |
 | D22 | GUI client with bundled git (GitHub Desktop, SourceTree embedded git) | Block / Detect (record) | Hook gap (a bundled git older than 2.54, e.g. GitHub Desktop's; the other clients were not checked and count as a gap until one is) |
 | D23 | VS Code with `git.allowNoVerifyCommit` on, using "Commit (No Verify)" | Detect | Hook gap |
 | D24 | JetBrains IDE with "Run Git hooks" unchecked | Detect | Hook gap (the IDE commits with `--no-verify`, like D01: [JetBrains help, Commit changes locally](https://www.jetbrains.com/help/idea/commit-and-push-changes.html) says clearing the checkbox disables Git hooks for that commit, and `GitRepositoryCommitter.kt` in `JetBrains/intellij-community` adds `--no-verify` when `isSkipHooks` is set) |
@@ -203,7 +203,7 @@ Requires Security and IT to confirm results from their consoles, using the UTC t
 
 ## N. Found while testing
 
-Scenarios added while the catalog was automated. There is no N06.
+Scenarios added while the catalog was automated. There is no N06. N09 to N15 come from #31 (tools taken from `PATH`) and #28.
 
 | ID | Scenario | Expected | Who covers it |
 |---|---|---|---|
@@ -214,6 +214,13 @@ Scenarios added while the catalog was automated. There is no N06.
 | N05 | `git config --global --remove-section hook.git-secret-guard` | Detect | Hook gap |
 | N07 | Config that changes how git prints a diff (`-c`, `GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_COUNT`, repository config), to hide added lines from extraction | Block | Hook |
 | N08 | `git config --local hook.git-secret-guard.command true` | Detect | Hook gap |
+| N09 | Shadow `cat` with a no-op earlier in the user `PATH` (the report reads the scanners' rows and errors with it) | Block | Hook (the scanner's exit status is recorded with a bash builtin and `report_results` cross-checks it: `<scanner> reported findings but none reached the report; nothing was decided`) |
+| N10 | Shadow `sort` with a no-op earlier in the user `PATH` (the rows are sorted with it) | Block | Hook (same cross-check as N09) |
+| N11 | Shadow `awk` with one that answers the extraction with counts `0 0` and no files | Block | Hook gap (the commit passes with `no added lines to scan`; the stand-in must know `extract.awk` and the count file, no second reading of the tree is made; `test_a_counts_lying_awk_first_on_path_still_lets_a_commit_pass_unscanned`) |
+| N12 | Shadow `head`, `mv`, `tr` or `wc` with a no-op earlier in the user `PATH` (the Git LFS object swap and the binary probe use them) | Block | Hook gap for `head` and `mv` (a no-op `head` makes the object look binary and drops it, a no-op `mv` leaves only the pointer text scanned; pinned by `test_a_no_op_head_first_on_path_drops_an_lfs_object_from_the_scan` and `test_a_no_op_mv_first_on_path_scans_the_pointer_instead_of_the_lfs_object`); `tr` and `wc` are Block, with a misleading reason (`cannot read the staged blobs to look for Git LFS pointers`, `its object is 0 bytes, the pointer says ...`), pinned by `test_a_no_op_tr_first_on_path_blocks_with_the_lfs_pointer_message` and `test_a_zero_printing_wc_first_on_path_blocks_with_a_size_mismatch` |
+| N13 | Shadow `cmp` with a no-op (exit 0) so a hand-written cut line in the commit message is taken for git's own diff | Block | Hook (bash confirms every "equal" by comparing both texts) |
+| N14 | Shadow `cat` with a no-op so the scanned copy of the commit message is empty | Block | Hook (a non-empty message with an empty copy blocks with `cannot read the commit message file git passed; nothing was scanned`) |
+| N15 | Put a script named `bash` earlier in the user `PATH` (the hook's `#!/usr/bin/env bash` shebang takes the first one) | Block | Hook (the hook command starts the hook with the bash install recorded, so the shebang never chooses; a recorded bash that is gone blocks with `cannot start the bash the install recorded`) |
 
 ---
 
@@ -242,13 +249,18 @@ Scenarios added while the catalog was automated. There is no N06.
   - **D13:** a missing scanner blocks with `nothing was scanned`; a crashing scanner blocks with `scan failed (exit N)`, a missing shipped rule file with `the shipped rule file ...`.
   - **D14, D15a, D16:** a plumbing commit, a merge that `git merge` commits by itself, and `cherry-pick`, `rebase` and `am` of a commit made with `--no-verify` run no scan and commit. **D15b:** a conflicted merge finished with `git commit` is scanned and blocked.
   - **N01:** a hook script overwritten with `exit 0` commits with no hook output.
+  - **N09, N10:** a no-op `cat` or `sort` first on `PATH` is used, the real scanners find the token, and the commit is blocked by the cross-check (`reported findings but none reached the report`), never passed with `no findings`. **N11:** the commit passes (the gap), with `no added lines to scan`. **N12:** a no-op `head` or `mv` passes the commit with the object content absent from the scanner's input (the gap); a no-op `tr` or a `wc` printing 0 blocks, with the LFS pointer or size message. **N13, N14:** blocked or scanned whole. **N15:** the stand-in `bash` is never started and the commit is scanned; with the recorded bash removed the commit is blocked with our message and the stand-in is still never started.
 - **No verification.** trufflehog runs with `--no-verification`, so a fake token is a plain `match` ([scan.md](scan.md#limits)); the tests also set a dead proxy, as extra isolation only. This matches the rest of the real-scanner suite.
 
 | Rows | Test (in `tests/scan/test_bypass_catalog.sh` unless named) |
 |---|---|
 | A02, A03, A04 (PEM, OpenSSH), A09, A12, A13, A14, A15, A16 (CRLF, path), A17 (binary, large), A18 | `test_real_catalog_a*` |
 | A16 UTF-16 | `test_real.sh` (`test_real_utf16_and_nul_byte_files_commit_unscanned_a_documented_limit`) |
-| A04 (`.ppk`), A05–A11, A19–A42, B02, C03 (rule file or settings edited), N02 | `test_bypass_formats_real.sh` (`test_real_formats_*`) |
+| A04 (`.ppk`), A05–A11, A19–A42, B02, C03 (rule file or settings edited), N02, N09, N10 | `test_bypass_formats_real.sh` (`test_real_formats_*`) |
+| N09, N10 (without the real scanners) | `test_cross_check.sh` |
+| N11, N12 | `test_path_tool_gaps.sh` |
+| N13, N14 | `test_message.sh` (`test_a_no_op_cmp_on_path_*`, `test_a_no_op_cat_on_path_*`) |
+| N15, D21 | `tests/install/test_recorded_bash.sh` (D21 on the Windows suite: a git without bash is a recorded bash that is gone, or a stand-in `bash` first on `PATH`) |
 | B01, B04 | `test_real_catalog_b*` |
 | C01 | `test_exemptions_real.sh`: `test_real_trufflehog_ignore_mutes_trufflehog_only`, `test_real_gitleaks_allow_mutes_betterleaks_only`, `test_real_both_markers_on_one_line_let_the_commit_succeed_in_either_order` |
 | C02 | `test_exemptions_real.sh`: `test_real_an_exemption_counts_only_from_the_commit_after_it_is_committed`, `test_real_a_staged_gitleaks_config_cannot_replace_the_one_at_head` |
@@ -264,7 +276,7 @@ Scenarios added while the catalog was automated. There is no N06.
 - **A01 in the catalog files:** the AWS documentation keys are allowlisted on purpose (B01). A non-example key with its secret is blocked in `test_real.sh`, which is what the Hook value rests on.
 - **B03:** latency is better measured outside CI.
 - **D10, D17:** not applicable.
-- **D21:** needs a separate git build on Windows; probed by hand (the row). The refusal seen there comes from the WSL launcher failing, not from the hook; a git without bash runs the hook through the WSL `bash.exe` (#28).
+- **D21:** needs a separate git build on Windows; probed by hand before #28 (the row). The refusal seen then came from the WSL launcher failing, not from the hook; the hook command now names the recorded bash, and the stand-in tests of N15 stand for that git; MinGit itself is not run by any test.
 - **D22, D23, D25:** need GUI clients or IDEs. **D24** is settled from JetBrains' documentation and source (the row).
 - **E:** elevated scenarios, run by IT.
 - **F:** F01–F03 rest on the `windows`, `windows-suite`, `macos-suite` and `suite` CI jobs, F05 on `tests/platform/wsl-ci.sh` (the `wsl` workflow); none of them runs as a standard or non-admin user (F01, F02), and F04, F06 and F07 need images or VMs CI does not have.

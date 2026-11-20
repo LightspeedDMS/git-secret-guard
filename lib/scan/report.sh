@@ -136,6 +136,36 @@ _report_guidance() {
         }' "$1" >&2
 }
 
+# ^ invariant args = work dir, sorted rows, collected errors; one PROBLEM line per scanner whose own record did not reach them; rc 1 when any
+# ^ security bash builtins only (no cat, sort, wc, grep, awk) => a PATH tool losing the rows cannot hide the loss too (#31)
+# ^ why the scanner's exit-status marker and its own errors file, not the merged files; the merged files are what a lying tool empties
+_report_cross_check() {
+    local work="$1" rows="$2" errs="$3" s line need=" " seen=" " lost=0
+    for s in "${GSG_SCANNERS[@]}"; do
+        if [ -e "$work/$s.found" ]; then need+="$s "; fi
+    done
+    if [ "$need" != " " ]; then
+        while IFS= read -r line || [ -n "$line" ]; do
+            for s in "${GSG_SCANNERS[@]}"; do
+                if [[ $line == "$s"$'\t'* ]]; then seen+="$s "; fi
+            done
+        done <"$rows" || return 1
+    fi
+    for s in "${GSG_SCANNERS[@]}"; do
+        if [[ $need == *" $s "* ]] && [[ $seen != *" $s "* ]]; then
+            ui_prefix 2 PROBLEM
+            printf '%s%s: %s reported findings but none reached the report; nothing was decided\n' "$REPLY" "$GSG_NAME" "$s" >&2
+            lost=1
+        fi
+        if [ -s "$work/$s.errors" ] && [ ! -s "$errs" ]; then
+            ui_prefix 2 PROBLEM
+            printf '%s%s: %s recorded errors but none reached the report; nothing was decided\n' "$REPLY" "$GSG_NAME" "$s" >&2
+            lost=1
+        fi
+    done
+    [ "$lost" -eq 0 ]
+}
+
 report_results() {
     local work="${1:-}" rows errs n heading="in lines this commit adds" shown=""
     case "${2:-}" in
@@ -158,6 +188,8 @@ report_results() {
     collect "$work" rows >"$work/all.rows.unsorted" || return 1
     LC_ALL=C sort -u -- "$work/all.rows.unsorted" >"$rows" || return 1
     collect "$work" errors >"$errs" || return 1
+    local lost=0
+    _report_cross_check "$work" "$rows" "$errs" || lost=1
 
     if [ -s "$errs" ]; then
         ui_prefix 2 PROBLEM
@@ -174,7 +206,7 @@ report_results() {
         printf '  (values are not shown; remove them and rotate any real credential)\n' >&2
         _report_guidance "$rows" "${2:-}" || return 1
     fi
-    if [ -s "$errs" ] || [ -s "$rows" ]; then
+    if [ -s "$errs" ] || [ -s "$rows" ] || [ "$lost" -eq 1 ]; then
         return 1
     fi
     return 0

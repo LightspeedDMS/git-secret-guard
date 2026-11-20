@@ -353,7 +353,7 @@ test_fresh_install_sets_exactly_the_two_events_and_one_absolute_command() {
     assert_rc 0 "fresh install"
     assert_eq "$(gitx config --global --get-all hook.git-secret-guard.event | tr '\n' ' ')" "pre-commit commit-msg " "the two events, lines first"
     assert_eq "$(cfg_count hook.git-secret-guard.event)" 2 "one value per event"
-    assert_eq "$(gitx config --global --get-all hook.git-secret-guard.command)" "$LC_DATA/hooks/secret-scan" "command is the installed hook, absolute"
+    assert_eq "$(gitx config --global --get-all hook.git-secret-guard.command)" "$(lc_hook_command "$LC_DATA")" "command starts the installed hook, absolute, with the recorded bash"
     assert_eq "$(cfg_count hook.git-secret-guard.command)" 1 "command is single-valued"
     assert_eq "$(gitx config --global --get-regexp '^hook\.' | wc -l)" 3 "nothing else under hook.*"
 }
@@ -370,7 +370,7 @@ test_install_replaces_duplicate_and_stale_config_values_instead_of_adding() {
     gsg install
     assert_rc 0 "install over stale values"
     assert_eq "$(gitx config --global --get-all hook.git-secret-guard.event | tr '\n' ' ')" "pre-commit commit-msg " "exactly the two events, the stale pre-push and the duplicates are gone"
-    assert_eq "$(gitx config --global --get-all hook.git-secret-guard.command)" "$LC_DATA/hooks/secret-scan" "one command, the stale paths are gone"
+    assert_eq "$(gitx config --global --get-all hook.git-secret-guard.command)" "$(lc_hook_command "$LC_DATA")" "one command, the stale paths are gone"
     gsg install
     assert_rc 0 "second install"
     assert_eq "$(cfg_count hook.git-secret-guard.event)$(cfg_count hook.git-secret-guard.command)" 21 "still two events and one command"
@@ -852,7 +852,7 @@ test_install_prints_a_summary_of_what_it_did() {
     gsg install
     assert_rc 0 "install"
     assert_contains "$OUT" "installed git-secret-guard $(<"$GSG_PROJECT/VERSION")" "version"
-    assert_contains "$OUT" "hook command: $LC_DATA/hooks/secret-scan" "hook command"
+    assert_contains "$OUT" "hook command: $(lc_hook_command "$LC_DATA")" "hook command"
     assert_contains "$OUT" "trufflehog 3.99.2: kept $LC_BIN/trufflehog$LC_EXE (already at the pinned version)" "a tool that was already right"
     assert_contains "$OUT" "betterleaks 1.9.0: downloaded, verified against tools.lock and installed to $LC_BIN/betterleaks$LC_EXE" "a tool that was downloaded"
     gsg install
@@ -966,7 +966,7 @@ test_without_xdg_variables_the_defaults_under_home_are_used() {
     assert_rc 0 "install with HOME only"
     assert_file "$LC_HOME/.local/share/git-secret-guard/hooks/secret-scan" "share dir under ~/.local/share"
     assert_file "$LC_HOME/.local/state/git-secret-guard/state" "state under ~/.local/state"
-    assert_eq "$(gitx config --global --get hook.git-secret-guard.command)" "$LC_HOME/.local/share/git-secret-guard/hooks/secret-scan" "command points there"
+    assert_eq "$(gitx config --global --get hook.git-secret-guard.command)" "$(lc_hook_command "$LC_HOME/.local/share/git-secret-guard")" "command points there"
     assert_no_file "$SANDBOX/xdg/data/git-secret-guard" "the XDG dirs were not used"
 }
 

@@ -444,4 +444,22 @@ test_real_formats_n02_a_no_op_find_first_on_path_still_blocks_a_token() {
     no_leak "$(fake_github_token)"
 }
 
+# ^ security a no-op tool between the scanners and the verdict loses the rows; the exit status said findings => the commit blocks (#31)
+# ^ invariant args = catalog id (upper case), tool name; the stand-in exits 0 and prints nothing, first on PATH
+assert_lost_rows_block() {
+    need_real_tools
+    mkdir -p -- "$SANDBOX/shadow-$2"
+    printf '#!/bin/sh\nexit 0\n' >"$SANDBOX/shadow-$2/$2" && chmod 755 -- "$SANDBOX/shadow-$2/$2" || return 1
+    set_env PATH="$SANDBOX/shadow-$2:$REAL_HOME/.local/bin:$TEST_BASE_PATH"
+    commit_sample "${1,,}" k.env "$(token_line)" || return 1
+    catalog "$1" Block "PATH=<dir with a no-op $2>:<PATH> git commit"
+    assert_rc 1 "$1 blocked"
+    assert_contains "$ERR" "reported findings but none reached the report" "$1 the cross-check names the lost findings"
+    assert_not_contains "$ERR" ": no findings" "$1 no pass line"
+    no_leak "$(fake_github_token)"
+}
+
+test_real_formats_n09_a_no_op_cat_first_on_path_still_blocks_a_token() { assert_lost_rows_block N09 cat; }
+test_real_formats_n10_a_no_op_sort_first_on_path_still_blocks_a_token() { assert_lost_rows_block N10 sort; }
+
 run_file_tests

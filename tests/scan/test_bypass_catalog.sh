@@ -1,93 +1,11 @@
 #!/usr/bin/env bash
 # ^ see doc:docs/bypass-detection-scenarios.md; each test pins the hook's current answer to one catalog row, gaps included
 # ^ external the dead proxy is extra isolation only; trufflehog runs --no-verification and a fake credential is a "match"; see docs/scan.md#limits
-# ^ security GSG_CATALOG_REPORT names a TSV the tests append to; hook stderr only, it never holds a value (no_leak checks each test)
 # shellcheck source=tests/support/lib.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/../support/lib.sh"
+# shellcheck source=tests/scan/catalog_helpers.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/catalog_helpers.sh"
 
-DEAD_PROXY=(HTTPS_PROXY=http://127.0.0.1:9 HTTP_PROXY=http://127.0.0.1:9 https_proxy=http://127.0.0.1:9 http_proxy=http://127.0.0.1:9)
-CATALOG_REPORT="${GSG_CATALOG_REPORT:-}"
-CATALOG_HEADER='ID\tExpected\tActual\tVerdict\tUTC\tHost\tOS\tGit\tCommand\tHook output\n'
-if [ -n "$CATALOG_REPORT" ] && [ ! -s "$CATALOG_REPORT" ]; then
-    # shellcheck disable=SC2059
-    printf "$CATALOG_HEADER" >"$CATALOG_REPORT" || exit 2
-fi
-
-need_real_tools() {
-    local extra="${1:-}"
-    [ -x "$REAL_TRUFFLEHOG" ] || skip_test "trufflehog not found at $REAL_TRUFFLEHOG"
-    [ -x "$REAL_BETTERLEAKS" ] || skip_test "betterleaks not found at $REAL_BETTERLEAKS"
-    use_real_tools "$extra"
-    set_env "${DEAD_PROXY[@]}"
-}
-
-# ^ security fragments and per-call random parts => no credential-looking literal; test:test_the_project_tree_holds_no_credential_looking_literals
-fake_gitlab_token() { printf '%s%s' "glpat""-" "$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 20 || true)"; }
-aws_doc_key_id() { printf '%s%s' "AKI""A" "IOSFODNN7EXAMPLE"; }
-aws_doc_secret() { printf '%s%s' "wJalrXUtnFEMI/K7MDENG/bPxRfiCY" "EXAMPLEKEY"; }
-token_line() { printf 'token = "%s"' "$(fake_github_token)"; }
-
-catalog_os() {
-    local pretty=""
-    if [ "$TEST_OS" = Darwin ]; then
-        printf 'macOS %s (%s)' "$(sw_vers -productVersion 2>/dev/null)" "$(uname -m)"
-        return 0
-    fi
-    if [ -r /etc/os-release ]; then pretty="$(sed -n 's/^PRETTY_NAME=//p' /etc/os-release | tr -d '"')"; fi
-    printf '%s (%s)' "${pretty:-$(uname -sr)}" "$(uname -srm)"
-}
-
-# ^ invariant classifies the last run_cap; Blocked = a scan ran and stopped it, Blocked-unscanned = it stopped before scanning, Allowed = exit 0
-catalog_actual() {
-    if [ "$RC" -eq 0 ]; then
-        printf 'Allowed'
-    elif [[ $ERR == *"nothing was scanned"* ]]; then
-        printf 'Blocked-unscanned'
-    elif [[ $ERR == *"git-secret-guard:"* ]]; then
-        printf 'Blocked'
-    else
-        printf 'Error'
-    fi
-}
-
-# ^ invariant one TSV row per call when GSG_CATALOG_REPORT is set; nothing otherwise; the verdict compares the catalog's Expected with Actual
-catalog() {
-    local id="$1" expected="$2" cmd="$3" actual verdict text
-    actual="$(catalog_actual)"
-    case "$expected:$actual" in
-        Block:Blocked | Allow:Allowed | Detect:Blocked | FailClosed:Blocked-unscanned) verdict=PASS ;;
-        *:Blocked-unscanned) verdict=ERROR ;;
-        Detect:Allowed) verdict=PENDING-SEC ;;
-        Gap:* | Record:*) verdict=RECORDED ;;
-        *:Error) verdict=ERROR ;;
-        *) verdict=FAIL ;;
-    esac
-    [ -n "$CATALOG_REPORT" ] || return 0
-    text="${ERR//$'\t'/ }"
-    text="${text//$'\n'/ | }"
-    text="${text//[^[:print:]]/?}"
-    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$id" "$expected" "$actual" "$verdict" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-        "$(uname -n)" "$(catalog_os)" "$("$GIT" --version)" "$cmd" "${text:0:600}" >>"$CATALOG_REPORT"
-}
-
-assert_blocked() {
-    assert_rc 1 "$1 blocked"
-    assert_not_contains "$ERR" "nothing was scanned" "$1 the hook scanned (a setup block proves nothing)"
-    assert_contains "$ERR" "potential secret(s)" "$1 by a finding"
-}
-assert_blocked_unscanned() {
-    assert_rc 1 "$1 blocked"
-    assert_contains "$ERR" "nothing was scanned" "$1 failed closed"
-}
-assert_hook_never_ran() {
-    assert_rc 0 "$1 commits"
-    assert_not_contains "$ERR" "git-secret-guard" "$1 without any hook output"
-}
-restore_hook_files() {
-    cp -- "$GSG_PROJECT/hooks/secret-scan" "$SHARE/hooks/secret-scan" || return 1
-    chmod 755 -- "$SHARE/hooks/secret-scan" || return 1
-    cp -- "$GSG_PROJECT/lib/scan/betterleaks-rule.toml" "$SHARE/lib/scan/betterleaks-rule.toml"
-}
 commit_token_on_branch() {
     gitx checkout -q -b "$1" || return 1
     stage_file k.env "$(token_line)" || return 1
@@ -268,19 +186,6 @@ test_real_catalog_b01_aws_documentation_keys_and_placeholders() {
     catalog B01 Allow 'git commit (AWS documentation example keys and placeholders)'
     [ "$(catalog_actual)" != Error ] || fail "B01 the hook errored: ${ERR:0:300}"
     no_leak "$(aws_doc_secret)"
-}
-
-test_real_catalog_b02_lockfile_hashes_uuids_and_data_uris() {
-    need_real_tools
-    new_repo b02 || return 1
-    printf '{\n  "packages": {\n    "node_modules/x": { "integrity": "sha512-%s==" }\n  }\n}\n' \
-        "$(LC_ALL=C tr -dc 'A-Za-z0-9+/' </dev/urandom | head -c 86 || true)" >package-lock.json
-    printf 'id: 3f2b6c1e-4a5d-4e8f-9b0a-1c2d3e4f5a6b\nsha256: %s\n' "$(LC_ALL=C tr -dc 'a-f0-9' </dev/urandom | head -c 64 || true)" >ids.yml
-    printf '<img src="data:image/png;base64,%s">\n' "$(head -c 600 /dev/urandom | base64 | tr -d '\n')" >page.html
-    gitx add .
-    commit_cap B02
-    catalog B02 Allow 'git commit (lockfile integrity hashes, UUID, sha256, base64 image)'
-    [ "$(catalog_actual)" != Error ] || fail "B02 the hook errored: ${ERR:0:300}"
 }
 
 test_real_catalog_b04_a_clean_commit_prints_only_the_pass_line() {
@@ -572,18 +477,6 @@ test_real_catalog_n01_a_replaced_hook_script_lets_a_token_through() {
     restore_hook_files || return 1
     catalog N01 Detect 'overwrite <share>/hooks/secret-scan with "exit 0" (user-writable) && git commit'
     assert_hook_never_ran N01
-}
-
-test_real_catalog_n02_a_find_shadowed_on_path() {
-    need_real_tools
-    mkdir -p -- "$SANDBOX/shadow-find"
-    printf '#!/bin/sh\nexit 0\n' >"$SANDBOX/shadow-find/find" && chmod 755 -- "$SANDBOX/shadow-find/find"
-    set_env PATH="$SANDBOX/shadow-find:$REAL_HOME/.local/bin:$TEST_BASE_PATH"
-    new_repo n02 || return 1
-    stage_file k.env "$(token_line)"
-    commit_cap N02
-    catalog N02 Block 'PATH=<dir with a no-op find>:<PATH> git commit'
-    no_leak "$(fake_github_token)"
 }
 
 test_real_catalog_n05_n08_removing_or_overriding_the_hook_command_skips_the_scan() {

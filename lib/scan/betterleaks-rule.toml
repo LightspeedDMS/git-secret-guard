@@ -8,6 +8,110 @@ keywords = ["a3t", "akia", "asia", "abia", "acca"]
 [[rules.allowlists]]
 regexes = ['''.+EXAMPLE$''']
 
+# ^ why rules of our own, not only the built-ins; betterleaks 1.9.0 and trufflehog 3.99.2 let these shapes through, see docs/scan.md#credential-rules
+# ^ security every rule is pattern-only, never the validate key => no candidate value leaves the machine
+[[rules]]
+id = "putty-private-key"
+description = "PuTTY private key file (.ppk), format 2 or 3, encrypted or not"
+regex = '''(?m)^(PuTTY-User-Key-File-[23]): '''
+keywords = ["putty-user-key-file"]
+
+# ^ why sv= before sig= on one line, not sig= alone; sig= is a common query name, the sv=<date> version marks an Azure SAS
+[[rules]]
+id = "azure-sas-signature"
+description = "Azure shared access signature: a sig= parameter after sv=<date> on the same line"
+regex = '''(?i)\bsv=[0-9]{4}-[0-9]{2}-[0-9]{2}[^\s'"<>]*?[&;]sig=([a-z0-9%+/]{40,120})'''
+keywords = ["sig="]
+entropy = 3.5
+
+# ^ invariant kept only with a letter, a digit and entropy 3.5, plus an uppercase letter, a run of 20 letters and digits, or 4 digits (a UUID)
+[[rules]]
+id = "authorization-bearer-token"
+description = "Token after the word Bearer (an Authorization header in code, a request file or a config)"
+regex = '''(?im)\bbearer[ \t]+([a-z0-9_~+/.-]{20,}=*)(?:$|[^a-z0-9_~+/.=-])'''
+keywords = ["bearer"]
+filter = '''
+let s = finding["secret"];
+entropy(s) < 3.5 || !matchesAny(s, [`[0-9]`]) || !matchesAny(s, [`[A-Za-z]`]) || !matchesAny(s, [`[A-Z]`, `[A-Za-z0-9]{20}`, `[0-9].*[0-9].*[0-9].*[0-9]`])
+'''
+
+# ^ why only names no built-in covers; generic-password takes passw*, psw and _pw, generic-api-key secret; an overlap hid their row in a test run
+# ^ why two rules, not one; a quoted value is a literal, a bare one can be code, so only the bare rule drops references and relative paths
+# ^ invariant both drop entropy below 2.7, letters or digits only, templates and interpolation, paths, placeholder words, joined words with no 2-digit part
+[[rules]]
+id = "password-assignment"
+description = "Quoted password assigned to a name ending in pass, pwd or passphrase, or to pw"
+regex = '''(?im)(?:^|[^a-z0-9_.])(?:(?:[a-z0-9]+[_.-])*(?:user|db|admin|root)?(?:pass|pwd|passphrase)|pw)['"]?[ \t]*(?:=|:=|=>|:)[ \t]*(?:"([^"\s]{8,128})"|'([^'\s]{8,128})')(?:$|[ \t,;})\]#])'''
+keywords = ["pass", "pwd", "pw"]
+filter = '''
+let s = finding["secret"]; let l = lower(s);
+entropy(s) < 2.7 || !matchesAny(s, [`[0-9]`, `[^A-Za-z0-9]`]) || matchesAny(l, [`^\$\{`, `^\$[a-z_][a-z0-9_]*$`, `^\$[a-z_][a-z0-9_]*/`, `^\$\(`, `^#\{`, `^\$env:`, `^%env\(`, `^@microsoft\.keyvault\(`, `^\{[a-z_][a-z0-9_.]*\}$`, `^\{\{`, `^<[^>]*>$`, `^%\(`, `^(/|~/|\./|\.\./)`, `^[a-z]:[\\/]`, `changeme`, `example`, `placeholder`, `redacted`, `dummy`, `xxxx`, `\*\*\*`, `^your`, `^[0-9]+$`]) || (matchesAny(s, [`^[a-z]+([_-][a-z0-9]+)+$`]) && !matchesAny(s, [`[_-][0-9]{2,}`]))
+'''
+
+# ^ why a bare value after ": " only for a YAML key at line start; prose such as "pass: see below" would match anywhere else
+# ^ invariant also drops references (user.password, var.db_pass, arn: vault:), relative paths, a leading $ % { < @ # . / ~ \ => code is not a password
+[[rules]]
+id = "password-assignment-bare"
+description = "Unquoted password assigned to a name ending in pass, pwd or passphrase, or to pw (env, properties, YAML)"
+regex = '''(?im)(?:(?:^|[^a-z0-9_.])(?:(?:[a-z0-9]+[_.-])*(?:user|db|admin|root)?(?:pass|pwd|passphrase)|pw)['"]?[ \t]*(?:=|:=|=>)[ \t]*([^\s"'`,;#<>()\[\]{}]{8,128})|^[ \t]*(?:-[ \t]+)?(?:(?:[a-z0-9]+[_.-])*(?:user|db|admin|root)?(?:pass|pwd|passphrase)|pw):[ \t]+([^\s"'`,;#<>()\[\]{}]{8,128}))(?:$|[ \t,;}\]#])'''
+keywords = ["pass", "pwd", "pw"]
+filter = '''
+let s = finding["secret"]; let l = lower(s);
+entropy(s) < 2.7 || !matchesAny(s, [`[0-9]`, `[^A-Za-z0-9]`]) || matchesAny(l, [`^[$%{<@#]`, `^[./~\\]`, `^(arn|vault|sm|ssm|op|gcp|azure|keyvault):`, `^[a-z]:[\\/]`, `changeme`, `example`, `placeholder`, `redacted`, `dummy`, `xxxx`, `\*\*\*`, `^your`, `^[0-9]+$`]) || matchesAny(s, [`^[A-Za-z_$][A-Za-z0-9_$]*(\.[A-Za-z_$][A-Za-z0-9_$]*)+;?$`, `^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+$`]) || (matchesAny(s, [`^[a-z]+([_-][a-z0-9]+)+$`]) && !matchesAny(s, [`[_-][0-9]{2,}`]))
+'''
+
+# ^ why bare-key rules, not only the built-in deepseek, elevenlabs, stability and voyageai rules; those need the vendor name before the key
+[[rules]]
+id = "deepseek-api-key-bare"
+description = "DeepSeek API key shape (sk- and 32 hex) with no vendor name nearby"
+regex = '''(?:^|[^A-Za-z0-9_-])(sk-[a-f0-9]{32})(?:$|[^A-Za-z0-9_-])'''
+keywords = ["sk-"]
+entropy = 3
+
+[[rules]]
+id = "elevenlabs-api-key-bare"
+description = "ElevenLabs API key shape (sk_ and 48 hex) with no vendor name nearby"
+regex = '''(?:^|[^A-Za-z0-9_-])(sk_[a-f0-9]{48})(?:$|[^A-Za-z0-9_-])'''
+keywords = ["sk_"]
+entropy = 3
+
+[[rules]]
+id = "stability-ai-api-key-bare"
+description = "Stability AI API key shape (sk- and 48 letters or digits) with no vendor name nearby"
+regex = '''(?:^|[^A-Za-z0-9_-])(sk-[A-Za-z0-9]{48})(?:$|[^A-Za-z0-9_-])'''
+keywords = ["sk-"]
+entropy = 3.5
+
+[[rules]]
+id = "voyageai-api-key-bare"
+description = "Voyage AI API key shape (pa- or al- and 43 URL-safe characters) with no vendor name nearby"
+regex = '''(?:^|[^A-Za-z0-9_-])((?:pa|al)-[A-Za-z0-9_-]{43})(?:$|[^A-Za-z0-9_-])'''
+keywords = ["pa-", "al-"]
+entropy = 4
+
+# ^ why context, not a bare key; an Azure OpenAI key is 32 hex or 84 letters and digits, the same as any hash or id
+[[rules]]
+id = "azure-openai-api-key"
+description = "Azure OpenAI key assigned to AZURE_OPENAI_API_KEY or AZURE_OPENAI_KEY, or passed as api_key to AzureOpenAI(...)"
+regex = '''(?i)(?:azure[_.-]?openai[_.-]?(?:api[_.-]?)?key['"]?[ \t]*(?:=|:=|=>|:)[ \t]*['"]?|AzureOpenAI\([^)\n]*?\bapi_key[ \t]*=[ \t]*['"])([a-f0-9]{32}|[A-Za-z0-9]{84})(?:$|[^A-Za-z0-9])'''
+keywords = ["azure_openai", "azure-openai", "azure.openai", "azureopenai"]
+
+# ^ invariant an api-key header counts only with an Azure OpenAI or Cognitive Services endpoint within 5 lines
+[[rules]]
+id = "azure-openai-api-key-header"
+description = "Azure OpenAI key in an api-key header near an *.openai.azure.com or *.cognitiveservices.azure.com endpoint"
+regex = '''(?i)\bapi-key['"]?[ \t]*:[ \t]*['"]?([a-f0-9]{32}|[A-Za-z0-9]{84})(?:$|[^A-Za-z0-9])'''
+keywords = ["api-key"]
+[[rules.required]]
+id = "azure-openai-endpoint"
+withinLines = 5
+
+[[rules]]
+id = "azure-openai-endpoint"
+description = "Azure OpenAI or Cognitive Services endpoint, helper of azure-openai-api-key-header, never reported"
+regex = '''(?i)[a-z0-9-]+\.(?:openai|cognitiveservices)\.azure\.com'''
+skipReport = true
+
 # ^ why boundary classes, not lookaround; RE2 has none, the classes exclude a longer digit or dash run and (?m) anchors per line
 # ^ invariant structure checks of the SSN rules are area not 000, 666 or 9xx, group not 00, serial not 0000
 [[rules]]

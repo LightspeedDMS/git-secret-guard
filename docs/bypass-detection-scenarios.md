@@ -41,9 +41,9 @@ Scenario catalog for validating the `LightspeedDMS/git-secret-guard` rollout: ho
 | **Record** | A question to answer or a fact to log, not a control | Answer it and keep the record |
 | **Undecided** | No test or document settles it yet | Treat it as not covered until a test decides it |
 | **N/A** | Does not apply to this hook | Nothing |
-| **Several**, e.g. Hook (PEM); Undecided (`.ppk`) | The scenario has parts that are covered differently; each value names the part it applies to, in parentheses | Handle each part by its own value (the weakest part decides whether the scenario as a whole is covered) |
+| **Several**, e.g. Hook (PEM); Hook gap (`.ppk`) | The scenario has parts that are covered differently; each value names the part it applies to, in parentheses | Handle each part by its own value (the weakest part decides whether the scenario as a whole is covered) |
 
-Most tests behind these values are listed in [Automated coverage](#automated-coverage). A01, A11, B01 and F08 also rest on `tests/scan/test_real.sh` and `tests/scan/test_exemptions_real.sh`, D22 on [platform-testing.md](platform-testing.md#github-desktops-bundled-git), F01–F03 on the `windows`, `windows-suite`, `macos-suite` and `suite` CI jobs, and F05 on `tests/platform/wsl-ci.sh`.
+Most tests behind these values are listed in [Automated coverage](#automated-coverage). A01, A11, B01 and F08 also rest on `tests/scan/test_real.sh` and `tests/scan/test_exemptions_real.sh`, D21 on a probe by hand on the Windows test machine (described in the row), D22 on [platform-testing.md](platform-testing.md#github-desktops-bundled-git), D24 on JetBrains' documentation and source (cited in the row), F01–F03 on the `windows`, `windows-suite`, `macos-suite` and `suite` CI jobs, and F05 on `tests/platform/wsl-ci.sh`.
 
 ---
 
@@ -54,14 +54,14 @@ Most tests behind these values are listed in [Automated coverage](#automated-cov
 | A01 | Commit a file with an AWS access key + secret | Block | Hook |
 | A02 | GitLab PAT (`glpat-…`) | Block | Hook |
 | A03 | GitHub PAT or fine-grained token | Block | Hook |
-| A04 | Private key (PEM, OpenSSH, PuTTY `.ppk`) | Block | Hook (PEM, OpenSSH); Undecided (`.ppk`) |
-| A05 | Slack token or webhook URL | Block | Undecided |
-| A06 | Azure storage key, SAS token, or client secret | Block | Undecided |
-| A07 | DB connection string with password (JDBC, SQL Server, Postgres URI) | Block | Undecided |
-| A08 | JWT / bearer token | Block | Undecided |
-| A09 | `.env`, `application.properties`, or `appsettings.json` with secrets | Block | Hook (`.env`, `appsettings.json`); Undecided (`application.properties`) |
-| A10 | Basic-auth credentials in a URL (a user name and password written before the host name) | Block | Undecided |
-| A11 | Generic high-entropy password assigned to a variable | Block (verify rule exists) | Hook (`api_key = "<random>"`); Undecided (other variable names) |
+| A04 | Private key (PEM, OpenSSH, PuTTY `.ppk`) | Block | Hook (PEM, OpenSSH; `.ppk` by our rule `putty-private-key`) |
+| A05 | Slack token or webhook URL | Block | Hook |
+| A06 | Azure storage key, SAS token, or client secret | Block | Hook (storage key, client secret; a service SAS also by trufflehog `AzureSasToken`, an account or service SAS by our rule `azure-sas-signature`) |
+| A07 | DB connection string with password (JDBC, SQL Server, Postgres URI) | Block | Hook |
+| A08 | JWT / bearer token | Block | Hook (JWT; a bearer header in a `curl` command, and in code or an HTTP request file by our rule `authorization-bearer-token`) |
+| A09 | `.env`, `application.properties`, or `appsettings.json` with secrets | Block | Hook |
+| A10 | Basic-auth credentials in a URL (a user name and password written before the host name) | Block | Hook |
+| A11 | Generic high-entropy password assigned to a variable | Block (verify rule exists) | Hook (names with `passw`, `_pw`, `secret`, `token`, `key`, `auth`, `credential`; `pass`, `pwd`, `pw`, `passphrase`, `db_pass`, `userpass`, `DB_PASS` by our rules `password-assignment` (quoted) and `password-assignment-bare` (unquoted), in env, YAML, JSON, properties, Go and PHP forms) |
 | A12 | Secret in a file staged with `git add -p` (partial staging) | Block | Hook |
 | A13 | Secret in a renamed or moved file | Block | Hook (token added); Hook gap (pure rename) |
 | A14 | Secret in the commit message | Block (the `commit-msg` event) | Hook |
@@ -70,12 +70,45 @@ Most tests behind these values are listed in [Automated coverage](#automated-cov
 | A17 | Secret in a large file, a binary, or a Git LFS-tracked file | Record behavior | Hook (large text, LFS object); Hook gap (binary) |
 | A18 | Secret in a Jupyter notebook or other JSON blob | Block | Hook |
 
+### AI vendor API keys
+
+Each key is tested in three forms: bare on a line, in a `.env` (`<VENDOR>_API_KEY=...`) and in a client call (`Vendor(api_key="...")`).
+"Built-in" names the betterleaks 1.9.0 rule or trufflehog detector; rules of ours are listed in [scan.md](scan.md#credential-rules).
+A key with no shape of its own (no prefix) written bare is a Hook gap: a rule for it would block every hash and id of that length.
+
+| ID | Scenario | Expected | Who covers it |
+|---|---|---|---|
+| A19 | Anthropic API key (`sk-ant-api03-`) and admin key (`sk-ant-admin01-`) | Block | Hook (built-in `anthropic-api-key`, `anthropic-admin-api-key`, trufflehog `Anthropic`) |
+| A20 | OpenAI key, `sk-proj-` and legacy `sk-` | Block | Hook (built-in `openai-api-key`, trufflehog `OpenAI`) |
+| A21 | Voyage AI key (`pa-`) | Block | Hook (built-in `voyageai-api-key` next to the name; bare by our rule `voyageai-api-key-bare`) |
+| A22 | Google Gemini / GCP API key (`AIza`) | Block | Hook (built-in `gcp-api-key`) |
+| A23 | Mistral key (32 characters, no prefix) | Block | Hook (`.env`: built-in `mistral-api-key`; code: `generic-api-key`); Hook gap (bare) |
+| A24 | Cohere key (40 characters, no prefix) | Block | Hook (`.env`: built-in `cohere-api-token`; code: `generic-api-key`); Hook gap (bare) |
+| A25 | Groq key (`gsk_`) | Block | Hook (built-in `groq-api-key`, trufflehog `Groq`) |
+| A26 | xAI key (`xai-`) | Block | Hook (built-in `xai-api-key`, trufflehog `XAI`) |
+| A27 | DeepSeek key (`sk-` and 32 hex) | Block | Hook (built-in `deepseek-api-key` next to the name, trufflehog `DeepSeek`; bare by our rule `deepseek-api-key-bare`) |
+| A28 | Perplexity key (`pplx-`) | Block | Hook (built-in `perplexity-api-key`) |
+| A29 | Together AI key (64 hex, no prefix) | Block | Hook (`.env`, code: `generic-api-key`); Hook gap (bare) |
+| A30 | Cerebras key (`csk-`) | Block | Hook (built-in `cerebras-api-key`) |
+| A31 | OpenRouter key (`sk-or-v1-`) | Block | Hook (built-in `openrouter-api-key`, trufflehog `OpenRouter`) |
+| A32 | Replicate token (`r8_`) | Block | Hook (built-in `replicate-api-token`, trufflehog `Replicate`) |
+| A33 | Hugging Face token (`hf_`) | Block | Hook (built-in `huggingface-access-token`, trufflehog `HuggingFace`) |
+| A34 | LangSmith key (`lsv2_pt_`) | Block | Hook (built-in `langchain-langsmith-personal-access-token`, trufflehog `LangSmith`) |
+| A35 | ElevenLabs key (`sk_` and 48 hex) | Block | Hook (built-in `elevenlabs-api-key` next to the name, trufflehog `ElevenLabs`; bare by our rule `elevenlabs-api-key-bare`) |
+| A36 | Deepgram key (40 hex, no prefix) | Block | Hook (`.env`: built-in `deepgram-api-key`, trufflehog `Deepgram`; code: `generic-api-key`); Hook gap (bare) |
+| A37 | AssemblyAI key (32 hex, no prefix) | Block | Hook (`.env`: built-in `assemblyai-api-key`, trufflehog `AssemblyAI`; code: `generic-api-key`); Hook gap (bare) |
+| A38 | Stability AI key (`sk-` and 48 characters) | Block | Hook (built-in `stability-ai-api-key` next to the name; bare by our rule `stability-ai-api-key-bare`) |
+| A39 | NVIDIA key (`nvapi-`) | Block | Hook (built-in `nvidia-api-key`, trufflehog `NVAPI`) |
+| A40 | Weights & Biases key (40 hex, no prefix) | Block | Hook (`.env`: built-in `weights-and-biases-api-key`, trufflehog `WeightsAndBiases`; code: `generic-api-key`); Hook gap (bare) |
+| A41 | Pinecone key, `pcsk_` and the legacy UUID | Block | Hook (`pcsk_`: built-in `pinecone-api-key.2`, trufflehog `Pinecone`; a legacy UUID after a `pinecone` name: built-in `pinecone-api-key.1`; in a client call: `generic-api-key`); Hook gap (a legacy UUID bare) |
+| A42 | Azure OpenAI key (32 hex or 84 characters, no prefix) | Block | Hook (our rules: `azure-openai-api-key` for `AZURE_OPENAI_API_KEY` / `AZURE_OPENAI_KEY` and `AzureOpenAI(api_key=...)`, `azure-openai-api-key-header` for an `api-key` header near an Azure endpoint; trufflehog `AzureOpenAI` in the client call); Hook gap (bare) |
+
 ## B. False positives and noise
 
 | ID | Scenario | Expected | Who covers it |
 |---|---|---|---|
 | B01 | AWS docs `EXAMPLE` keys and obvious placeholders (`changeme`, `<TOKEN>`) | Allow | Hook (betterleaks passes a lone `EXAMPLE` key ID and an all-`A` placeholder); Record (the whole commit, the rest) |
-| B02 | Lockfiles, hashes, UUIDs, base64-embedded images | Allow | Undecided |
+| B02 | Lockfiles, hashes, UUIDs, base64-embedded images | Allow | Hook |
 | B03 | Commit latency on a large change (~10k files) | Record latency | Record |
 | B04 | Normal commit with no secrets | Allow, and no alert fires | Hook |
 
@@ -85,7 +118,7 @@ Most tests behind these values are listed in [Automated coverage](#automated-cov
 |---|---|---|---|
 | C01 | Inline ignore comment (e.g. `gitleaks:allow`, `# nosec`) on a real-format secret | Detect, or apply policy decision | Hook gap |
 | C02 | Add the secret's path/fingerprint to a repo-level allowlist or ignore file in the same commit | Detect | Hook |
-| C03 | Edit a user-level scanner config or rules file, if one exists in a user-writable path | Detect | Hook (shipped rule file removed); Undecided (rule file or settings edited) |
+| C03 | Edit a user-level scanner config or rules file, if one exists in a user-writable path | Detect | Hook (shipped rule file removed; a scanner path or the timeout edited in the settings file: fails closed); Hook gap (rule file edited: betterleaks is muted, trufflehog still blocks its own kinds; a line ending the shell, e.g. `exit 0`, in the settings file: no scan, no output; see #26) |
 | C04 | Set any env-var kill switch found in the code (e.g. `SKIP=`, `*_DISABLE=1`) | Detect | Hook gap |
 | C05 | Obfuscated secret: base64-encoded, split across lines, or string-concatenated | Gap (record) | Hook gap |
 
@@ -113,10 +146,10 @@ Most tests behind these values are listed in [Automated coverage](#automated-cov
 | D18 | `git worktree add`, then commit in the worktree | Block | Hook |
 | D19 | Commit inside a submodule | Block | Hook |
 | D20 | New repo via `git init`, or `git clone --template=<empty dir>` | Block | Hook |
-| D21 | Portable Git / MinGit unzipped into the user profile (ignores managed system config) | Detect | Hook gap (a git older than 2.54); Undecided (2.54 or newer) |
-| D22 | GUI client with bundled git (GitHub Desktop, SourceTree embedded git) | Block / Detect (record) | Hook gap (a bundled git older than 2.54, e.g. GitHub Desktop's); Undecided (the rest) |
+| D21 | Portable Git / MinGit unzipped into the user profile (ignores managed system config) | Detect | Hook gap (a git older than 2.54); Hook, by accident (2.54 or newer on a machine without a WSL distribution: MinGit 2.56.1 runs the global config hook, but it has no bash of its own, so its `sh` resolves the script's `env bash` to `C:\Windows\System32\bash.exe`, the WSL launcher; the launcher fails and git refuses the commit unscanned. The refusal is the launcher failing, not the hook's doing; probed by hand on the Windows test machine); Hook gap (the same with a WSL distribution installed: the hook would run inside it, untested; see #28) |
+| D22 | GUI client with bundled git (GitHub Desktop, SourceTree embedded git) | Block / Detect (record) | Hook gap (a bundled git older than 2.54, e.g. GitHub Desktop's; the other clients were not checked and count as a gap until one is) |
 | D23 | VS Code with `git.allowNoVerifyCommit` on, using "Commit (No Verify)" | Detect | Hook gap |
-| D24 | JetBrains IDE with "Run Git hooks" unchecked | Detect | Undecided |
+| D24 | JetBrains IDE with "Run Git hooks" unchecked | Detect | Hook gap (the IDE commits with `--no-verify`, like D01: [JetBrains help, Commit changes locally](https://www.jetbrains.com/help/idea/commit-and-push-changes.html) says clearing the checkbox disables Git hooks for that commit, and `GitRepositoryCommitter.kt` in `JetBrains/intellij-community` adds `--no-verify` when `isSkipHooks` is set) |
 | D25 | libgit2- or JGit-based client (e.g. Eclipse EGit) that may not run hooks | Record → Server | Record |
 
 ## E. Elevated bypass — MANUAL, test VM only, run by IT
@@ -175,7 +208,7 @@ Scenarios added while the catalog was automated. There is no N06.
 | ID | Scenario | Expected | Who covers it |
 |---|---|---|---|
 | N01 | Overwrite the installed hook script (`~/.local/share/git-secret-guard/hooks/secret-scan`, user-writable) with `exit 0` | Detect | Hook gap |
-| N02 | Shadow `find` with a no-op earlier in the user `PATH` | Block | Undecided |
+| N02 | Shadow `find` with a no-op earlier in the user `PATH` | Block | Hook gap (the hook takes `find` from `PATH`: the commit passes with `no added lines to scan`; see #25) |
 | N03 | Commit a catch-all pattern (`*`, `**`) to the repository's exemption file, then commit a secret | Detect (the hook warns on every commit) | Hook gap (the hook warns) |
 | N04 | Commit a `.gitleaks.toml` without `[extend] useDefault = true`, turning betterleaks' built-in rules off | Detect (the hook warns on every commit) | Hook gap (the hook warns) |
 | N05 | `git config --global --remove-section hook.git-secret-guard` | Detect | Hook gap |
@@ -192,7 +225,7 @@ Scenarios added while the catalog was automated. There is no N06.
 
 ## Automated coverage
 
-`tests/scan/test_bypass_catalog.sh` runs the scenarios below on every CI run (`.github/workflows/tests.yml`, Ubuntu 24.04, git from the git-core PPA, the pinned scanners). It uses the same sandbox as the rest of the suite: scratch `HOME`, `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_NOSYSTEM=1`. The real `~/.gitconfig` is never read or written, which is stricter than backing it up and restoring it. Run it locally with `tests/run.sh tests/scan/test_bypass_catalog.sh`.
+`tests/scan/test_bypass_catalog.sh` and `tests/scan/test_bypass_formats_real.sh` (credential formats, edited rule and settings files, a shadowed `find`) run the scenarios below on every CI run (`.github/workflows/tests.yml`, Ubuntu 24.04, git from the git-core PPA, the pinned scanners; the Windows and macOS suites run them too). They use the same sandbox as the rest of the suite: scratch `HOME`, `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_NOSYSTEM=1`. The real `~/.gitconfig` is never read or written, which is stricter than backing it up and restoring it. Every sample is built at run time from fragments and random parts, so the tree holds no credential-looking literal. Run them locally with `tests/run.sh tests/scan/test_bypass_catalog.sh tests/scan/test_bypass_formats_real.sh`.
 
 - **What a test asserts.** Each test asserts the hook's **current** behaviour. A Block row asserts the block. A Gap or Detect row that is a known hole asserts the hole, the way the suite pins its other documented limits. A test going red means the behaviour changed, in either direction.
 - **The results table.** With `GSG_CATALOG_REPORT=<file>` set, each scenario appends one TSV row: ID, Expected, Actual (Blocked / Blocked-unscanned / Allowed / Error), Verdict (PASS / FAIL / ERROR / PENDING-SEC / RECORDED), UTC, host, OS, git version, command and hook output. CI sets the variable, publishes the table in the job summary and uploads it as the `catalog-head` artifact. PENDING-SEC means the bypass worked; Security must confirm whether an alert fired at that UTC time (Section G).
@@ -203,7 +236,9 @@ Scenarios added while the catalog was automated. There is no N06.
   - **C04, D07, D08b, D09, N05, N08:** disabling the hook (`hook.git-secret-guard.enabled=false` by `-c`, `GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_COUNT`, local config or an include), an empty `GIT_CONFIG_GLOBAL`, a replaced or removed `hook.git-secret-guard.command`, and an alias with `--no-verify` all commit with no hook output at all.
   - **D03, D04, D05, D08a:** `core.hooksPath` (empty, an empty directory, global, local, through an include) does not switch the config hook off; the commit is blocked.
   - **D11:** a hook script without its exec bit makes the commit fail (git cannot start it).
-  - **D12:** scanners shadowed on `PATH` are not used (tool paths come from the settings file); the commit is blocked. **N02** (`find` shadowed) is recorded, not asserted.
+  - **D12:** scanners shadowed on `PATH` are not used (tool paths come from the settings file); the commit is blocked. **N02:** a no-op `find` first on `PATH` is used (the hook takes `find` from `PATH`): a token commits, with `no added lines to scan` as the only output.
+  - **A04, A06, A08, A11, A19–A42:** every sample is blocked with the rule or detector named in the test. A PuTTY `.ppk` key, an account SAS, a bearer header outside a `curl` command, a password under `pass`, `pwd`, `pw` or `db_pass`, the bare DeepSeek, ElevenLabs, Stability AI and Voyage AI keys and the Azure OpenAI keys in context passed both scanners before; they are blocked by the [credential rules](scan.md#credential-rules) of `lib/scan/betterleaks-rule.toml`. A bare key with no prefix (A23, A24, A29, A36, A37, A40, A41 legacy, A42) is scanned and passes, pinned by the test. Placeholders (`changeme`, `<password>`, `${VAR}`, templates), paths (`PWD=/home/...`), `os.getenv(...)`, prose, bearer templates, a plain UUID and hex hashes without vendor context commit with only the pass line.
+  - **C03:** a match-all allowlist appended to the shipped rule file mutes betterleaks (a lone AWS key ID commits; a GitHub token is still blocked by trufflehog); `exit 0` appended to the settings file commits with no hook output; a scanner path set to a no-op script, or `SCAN_TIMEOUT_SECONDS=1` with a scanner slower than that, blocks.
   - **D13:** a missing scanner blocks with `nothing was scanned`; a crashing scanner blocks with `scan failed (exit N)`, a missing shipped rule file with `the shipped rule file ...`.
   - **D14, D15a, D16:** a plumbing commit, a merge that `git merge` commits by itself, and `cherry-pick`, `rebase` and `am` of a commit made with `--no-verify` run no scan and commit. **D15b:** a conflicted merge finished with `git commit` is scanned and blocked.
   - **N01:** a hook script overwritten with `exit 0` commits with no hook output.
@@ -213,24 +248,24 @@ Scenarios added while the catalog was automated. There is no N06.
 |---|---|
 | A02, A03, A04 (PEM, OpenSSH), A09, A12, A13, A14, A15, A16 (CRLF, path), A17 (binary, large), A18 | `test_real_catalog_a*` |
 | A16 UTF-16 | `test_real.sh` (`test_real_utf16_and_nul_byte_files_commit_unscanned_a_documented_limit`) |
-| B01, B02 (recorded, no assertion), B04 | `test_real_catalog_b*` |
+| A04 (`.ppk`), A05–A11, A19–A42, B02, C03 (rule file or settings edited), N02 | `test_bypass_formats_real.sh` (`test_real_formats_*`) |
+| B01, B04 | `test_real_catalog_b*` |
 | C01 | `test_exemptions_real.sh`: `test_real_trufflehog_ignore_mutes_trufflehog_only`, `test_real_gitleaks_allow_mutes_betterleaks_only`, `test_real_both_markers_on_one_line_let_the_commit_succeed_in_either_order` |
 | C02 | `test_exemptions_real.sh`: `test_real_an_exemption_counts_only_from_the_commit_after_it_is_committed`, `test_real_a_staged_gitleaks_config_cannot_replace_the_one_at_head` |
 | C04, C05 (recorded) | `test_real_catalog_c*` |
 | D01–D05, D07–D09, D11–D16, D18–D20 | `test_real_catalog_d*` |
 | D06 | no test of its own: every test runs with `GIT_CONFIG_NOSYSTEM=1` and the hook in the global config, so each Block row above shows it is still blocked |
-| N01 (replaced hook script), N02 (`find` shadowed on PATH, recorded), N05/N08 (hook config removed or overridden) | `test_real_catalog_n*` |
+| N01 (replaced hook script), N05/N08 (hook config removed or overridden) | `test_real_catalog_n*` |
 | N03 catch-all, N04 `.gitleaks.toml` without defaults | `test_exemptions_real.sh` (`test_real_catch_all_patterns_...`, `test_real_a_repo_config_without_use_default_runs_only_its_own_rules`) |
 | N07 inherited config | `test_inherited_config.sh` |
 
 **Not automated, and why:**
 
-- **A01:** under the test rules only AWS documentation keys may be used, and those are allowlisted on purpose (B01).
-- **A04 `.ppk`:** needs puttygen.
-- **A05–A08, A10, A11:** formats outside the permitted fake-secret set.
+- **A01 in the catalog files:** the AWS documentation keys are allowlisted on purpose (B01). A non-example key with its secret is blocked in `test_real.sh`, which is what the Hook value rests on.
 - **B03:** latency is better measured outside CI.
 - **D10, D17:** not applicable.
-- **D21–D25:** need GUI tools, IDEs or other git builds.
+- **D21:** needs a separate git build on Windows; probed by hand (the row). The refusal seen there comes from the WSL launcher failing, not from the hook; a git without bash runs the hook through the WSL `bash.exe` (#28).
+- **D22, D23, D25:** need GUI clients or IDEs. **D24** is settled from JetBrains' documentation and source (the row).
 - **E:** elevated scenarios, run by IT.
-- **F:** each platform needs its own runner. F01 is partly covered by the `windows` CI job.
+- **F:** F01–F03 rest on the `windows`, `windows-suite`, `macos-suite` and `suite` CI jobs, F05 on `tests/platform/wsl-ci.sh` (the `wsl` workflow); none of them runs as a standard or non-admin user (F01, F02), and F04, F06 and F07 need images or VMs CI does not have.
 - **G:** needs a throwaway GitLab project and credentials; CI must never push.

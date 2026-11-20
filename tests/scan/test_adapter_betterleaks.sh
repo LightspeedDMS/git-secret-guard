@@ -336,16 +336,18 @@ test_a_key_pair_is_reported_once_the_key_id_row_is_dropped_on_the_same_line() {
 $(tab betterleaks aws-access-token match src/a.txt 3)" "one row for the pair, the lone ID on another line stays"
 }
 
-# ^ invariant the keyword rules of the context rules carry skipReport => they never reach the report; validate (live API) appears nowhere
+# ^ invariant the helper rules of the context rules carry skipReport => they never reach the report; validate (live API) appears nowhere
 test_the_generated_config_holds_the_pii_rules_and_hides_their_keyword_rules() {
     prepare piiconf
     run_adapter betterleaks "$SCAN" "$OUTD"
     local calls id
     calls="$(<"$SANDBOX/calls-piiconf")"
-    for id in pii-us-ssn pii-us-ssn-context pii-ssn-keyword pii-credit-card pii-phone-context pii-phone-keyword pii-iban; do
+    for id in pii-us-ssn pii-us-ssn-context pii-ssn-keyword pii-credit-card pii-phone-context pii-phone-keyword pii-iban \
+        putty-private-key azure-sas-signature authorization-bearer-token password-assignment password-assignment-bare deepseek-api-key-bare \
+        elevenlabs-api-key-bare stability-ai-api-key-bare voyageai-api-key-bare azure-openai-api-key azure-openai-api-key-header azure-openai-endpoint; do
         assert_contains "$calls" "betterleaks-config-line: id = \"$id\"" "the generated config holds $id"
     done
-    assert_eq "$(grep -c '^betterleaks-config-line: skipReport = true' "$SANDBOX/calls-piiconf")" 2 "exactly the two keyword helper rules are hidden"
+    assert_eq "$(grep -c '^betterleaks-config-line: skipReport = true' "$SANDBOX/calls-piiconf")" 3 "exactly the three helper rules are hidden (two PII keywords, the Azure OpenAI endpoint)"
     assert_not_contains "$calls" "betterleaks-config-line: validate" "no live-API validation key in the generated config"
     assert_empty "$(errors)" "no error"
 }

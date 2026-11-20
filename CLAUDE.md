@@ -77,6 +77,9 @@ This file is an index: each topic states what must not break and links the doc h
 - **PII rules:** `pii-*` rules in `lib/scan/betterleaks-rule.toml`, offline (Luhn and mod-97 are rule `filter` expressions, never the
   `validate` key); a HEAD `.gitleaks.toml` turns them off; samples in tests and docs are built from fragments, never written as a literal,
   and a new rule means scanning the tree with that rule file too: [scan.md#pii-rules](docs/scan.md#pii-rules).
+- **Credential rules:** ours in `lib/scan/betterleaks-rule.toml` only for a shape a real-scanner test shows both scanners miss (ours on the
+  same value can leave out a generic built-in finding), offline, tested in `tests/scan/test_bypass_formats_real.sh` with seeded `det_chars` samples (a random one
+  can fall under an entropy filter): [scan.md#credential-rules](docs/scan.md#credential-rules).
 - **Output:** a clean commit prints one pass line, then the coverage reminder only after `REMINDER_READY=1`; the commit's exit status
   never depends on the reminder: [scan.md#the-coverage-reminder](docs/scan.md#the-coverage-reminder),
   [scan.md#maintainer-notes](docs/scan.md#maintainer-notes). **The `commit-msg` run** (the hook has one argument, the message file) comes

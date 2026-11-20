@@ -79,7 +79,7 @@ runs:
         export GSG_TEST_JOBS="$jobs"
         # The install step puts betterleaks in ~/.local/bin; without this the real-betterleaks tests look under linuxbrew and skip.
         export GSG_TEST_BETTERLEAKS="$HOME/.local/bin/betterleaks"
-        # tests/scan/test_bypass_catalog.sh appends one row per catalog scenario (docs/bypass-detection-scenarios.md) here
+        # tests/scan/test_bypass_catalog.sh and test_bypass_formats_real.sh append one row per catalog scenario (docs/bypass-detection-scenarios.md) here
         export GSG_CATALOG_REPORT="$RUNNER_TEMP/catalog-$TARGET.tsv"
         files=()
         case "$SELECT" in

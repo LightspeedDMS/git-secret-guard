@@ -292,6 +292,57 @@ with a reason when it is absent. `tests/fetch-test-tools.sh` downloads the pinne
 `GSG_TEST_TRUFFLEHOG` and `GSG_TEST_BETTERLEAKS` at them. Other overrides: `GSG_TEST_JQ`, `GSG_TEST_SHELLCHECK`,
 `GSG_TEST_SETSID`, `GSG_TEST_TIMEOUT`.
 
+## Credential rules
+
+betterleaks runs its built-in rules plus the rules of `lib/scan/betterleaks-rule.toml` (the generated config has `[extend] useDefault = true`).
+Besides `aws-access-key-id` ([Limits](#limits)), that file holds credential rules for shapes both scanners let through: each was
+written only after a test showed the built-in rules and trufflehog miss it (`tests/scan/test_bypass_formats_real.sh`). They are
+offline and pattern-only (no `validate`, no network) and run in the main betterleaks run.
+
+| Rule | Blocks | Needs |
+|---|---|---|
+| `putty-private-key` | a PuTTY private key file (`.ppk`), format 2 or 3, encrypted or not | its header line at the start of a line |
+| `azure-sas-signature` | an Azure shared access signature, account or service (trufflehog's `AzureSasToken` covers only a service SAS, `sr=`) | `sv=<yyyy-mm-dd>` before `sig=` on the same line; a signature of 40-120 base64 or percent-encoded characters, entropy 3.5 |
+| `authorization-bearer-token` | a token after the word `Bearer` (an `Authorization` header in code, a `.http` file, a config); betterleaks' `curl-auth-header` covers only a `curl` command | 20 or more token characters with a letter, a digit and entropy 3.5, plus an uppercase letter, a run of 20 letters and digits, or 4 digits (a UUID token) |
+| `password-assignment` | a quoted password assigned to a name ending in `pass`, `pwd` or `passphrase` (`db_pass`, `userpass`, `DB_PASS`, `app.db.pass`), or to `pw` | `=`, `:=`, `=>` or `:` and a quoted value of 8-128 characters with a digit or a symbol, entropy 2.7; not a template or an interpolation (`${...}`, `$VAR`, `$VAR/...`, `$(...)`, `#{...}`, `$env:`, `%env(...)%`, `{name}`, `{{`, `<...>`, `%(`, `@Microsoft.KeyVault(...)`), a path, a placeholder word, or lowercase words joined by `_` or `-` without a part of two or more digits (`tokenize_v2` passes, `hunter_2024` blocks) |
+| `password-assignment-bare` | the same names with an unquoted value (env files, properties, YAML) | `=`, `:=` or `=>`, or `<name>: <value>` as a YAML key at the start of a line (also a `- ` list item); the conditions above, and not a member access or reference (`user.password`, `process.env.DB_PWD`, `var.db_pass`), a relative path (`refs/heads/main`), a secret-manager reference (`arn:`, `vault:`, `sm:`, `ssm:`, `op:`, `gcp:`, `azure:`, `keyvault:`) or a value starting with `$ % { < @ # . / ~ \` |
+| `deepseek-api-key-bare` | a DeepSeek key, `sk-` and 32 hex digits | nothing else (betterleaks' `deepseek-api-key` needs the word deepseek before it) |
+| `elevenlabs-api-key-bare` | an ElevenLabs key, `sk_` and 48 hex digits | the same, for `elevenlabs-api-key` |
+| `stability-ai-api-key-bare` | a Stability AI key, `sk-` and 48 letters or digits (an old-style OpenAI key has the same shape and is reported by it too) | entropy 3.5 |
+| `voyageai-api-key-bare` | a Voyage AI key, `pa-` or `al-` and 43 URL-safe characters | entropy 4 |
+| `azure-openai-api-key` | an Azure OpenAI key (32 hex digits, or 84 letters and digits) | assigned to `AZURE_OPENAI_API_KEY` or `AZURE_OPENAI_KEY` (any case, `_`, `-` or `.`), or passed as `api_key=` inside `AzureOpenAI(...)` on one line |
+| `azure-openai-api-key-header` | the same key in an `api-key:` header | an `*.openai.azure.com` or `*.cognitiveservices.azure.com` endpoint within 5 lines (the hidden helper rule `azure-openai-endpoint`) |
+
+**The built-in rules cover the rest**, and no rule here repeats one: `password`, `passwd`, `*_PASSWORD`, `PGPASSWORD` and `*_pw` are
+betterleaks' `generic-password`, `secret`, `token` and `*_key` names its `generic-api-key`; Slack, Azure storage keys, Entra ID client secrets,
+JWTs, connection strings, user:password URLs and the AI vendor keys of [bypass-detection-scenarios.md](bypass-detection-scenarios.md#ai-vendor-api-keys)
+have rules or detectors of their own. Where a bare-key rule here matches the same key as a built-in vendor rule (a DeepSeek key after
+`DEEPSEEK_API_KEY=`), both findings are reported. A low-confidence generic built-in (`generic-password`, `generic-api-key`) on the same
+value can be left out next to ours: that is why the two `password-assignment` rules do not list the names those two already cover.
+
+**Not detected:** a key with no shape of its own written bare on a line (Mistral, Cohere, Together AI, Deepgram, AssemblyAI, Weights &
+Biases, Azure OpenAI, and a legacy Pinecone key, which is a plain UUID): it looks like any hash or id, so only the vendor's name, a key
+variable or a client call next to it makes it a finding (betterleaks' vendor rules, `generic-api-key`, the two Azure OpenAI rules above; the
+legacy Pinecone key needs `pinecone` before it, `pinecone-api-key.1`). A SAS whose `sig=` comes before `sv=`, a password with a space in it,
+a password of letters only or under 8 characters (`hunter2`), one of 8-9 characters with several repeated characters (entropy
+below 2.7), joined lowercase words without a two-digit part (`blue_sky_7`), an unquoted password shaped like a
+reference or a relative path (`DB_PASS=My.Secret2024`; quoted, it blocks), and a password under a name these rules and the built-in ones
+do not list (`bypass`, `mypass`).
+
+**False positives.** A test value or a real-looking example blocks like a real one: an `sk-`-shaped id, a `Bearer` sample in documentation,
+a test password in a fixture, a documentation line that starts with the `.ppk` header, a hash prefix or a version string under a
+password name (`pw = "sha256$..."`, `pass: v1.2.3-rc4`). Placeholders pass: `changeme`, `<password>`, `${VAR}`, `{{ .Values.x }}`, `$VAR`, `********`, `xxxx...`,
+values with `example`, `placeholder`, `redacted`, `dummy` or starting with `your`, all-digit values, paths (`PWD=/home/...`), function
+calls (`os.getenv(...)`), member access and references (`user.password`, `process.env.DB_PWD`, `var.db_pass`), relative paths,
+compiler-pass names of lowercase words joined by `_` or `-` (`first_pass = "tokenize_v2"`; a dotted one such as `lexer.v2` blocks), interpolation (`"#{ENV[...]}"`, `"$env:X"`, `"$(X)"`, `"$PWD/out"`, `'%env(X)%'`),
+Key Vault and secret-manager references (`@Microsoft.KeyVault(...)`, `arn:...`, `vault:...`), prose after `bearer`, and the shell's `PWD`/`OLDPWD`. Accept one like any finding: a `.secret-scan-ignore` entry committed at HEAD, or
+`betterleaks:allow` on the line ([Exemptions](exemptions.md)).
+
+**Tests:** `tests/scan/test_bypass_formats_real.sh`, through the hook with both real scanners: a blocked case for every rule and form,
+the placeholders, templates, paths and prose above in a commit that must pass, and a plain UUID and hex hashes without vendor context.
+
+**Limit: a `.gitleaks.toml` at HEAD turns these rules off,** as it does the PII rules (below).
+
 ## PII rules
 
 Besides credentials, the hook blocks personal data the way it blocks a secret: the finding names the rule, the file and the line, and
@@ -328,8 +379,8 @@ Accept one like any other finding: a `.secret-scan-ignore` entry with a reason, 
 marker on the line ([Exemptions](exemptions.md#accepting-a-pii-false-positive)). The tests are `tests/scan/test_pii_real.sh` (real betterleaks,
 every rule with positive and negative cases) and the PII tests of `tests/scan/test_adapter_betterleaks.sh`.
 
-**Limit: a `.gitleaks.toml` at HEAD turns the PII rules off.** A repository config runs exactly as written and replaces our config, so
-the PII rules do not run. Only `aws-access-key-id` still runs, in its own isolated run ([A lone AWS access key ID](#limits)); a PII value
+**Limit: a `.gitleaks.toml` at HEAD turns the PII rules off** (and the [credential rules](#credential-rules)). A repository config runs
+exactly as written and replaces our config, so the PII rules do not run. Only `aws-access-key-id` still runs, in its own isolated run ([A lone AWS access key ID](#limits)); a PII value
 is not reported by that run (`test_real_pii_the_isolated_aws_run_reports_no_pii_and_existing_detection_is_unchanged`). A repository that wants
 PII detection together with its own config can put the same rules into that config (not tested here).
 
@@ -511,7 +562,14 @@ Why the scan code is shaped this way; each point was probed on the pinned versio
   `Isolating rules` on the `--enable-rule` run. `betterleaks_write_ignore` adds the twins (bounded by
   `GSG_BETTERLEAKS_IGNORE_MAX_LINES`); `betterleaks_drop_pair_key_rows` drops the key-ID row of a pair. The stand-in tells
   the runs apart by `--enable-rule` (`STUB_GL_EXTRA_FINDINGS`, `STUB_GL_EXTRA_RC`).
-- **The PII rules.** They sit after the AWS rule in `lib/scan/betterleaks-rule.toml`; the adapter code knows no `pii-` ID (rows
+- **The credential rules** ([Credential rules](#credential-rules)) sit after the AWS rule, before the PII rules. Before adding one,
+  test the shape with both real scanners through the hook: a built-in rule or a trufflehog detector may already cover it, sometimes only
+  next to a keyword, and a rule of ours on the same value can leave a low-confidence generic built-in finding out (a vendor rule's
+  finding stays beside ours). Each rule's positive and negative
+  cases live in `tests/scan/test_bypass_formats_real.sh`, with samples from its seeded `det_chars` (a random value can fall under an
+  entropy filter now and then; a fixed one never flakes). `azure-openai-api-key-header` uses `[[rules.required]]` with `withinLines = 5`
+  and the hidden `azure-openai-endpoint`, the PII context pattern below with a wider window.
+- **The PII rules.** They sit after the AWS rule and the credential rules in `lib/scan/betterleaks-rule.toml`; the adapter code knows no `pii-` ID (rows
   pass through, `betterleaks_drop_pair_key_rows` drops only a key-ID row). Patterns that bite: RE2 has no lookaround, so a value is
   bounded by a class that excludes a longer run (`[^0-9\n-]`, `[^0-9A-Za-z\n]`) with `(?m)` and `\n` excluded, else a keyword or a
   number on the neighbouring line would match across the newline; the structure exclusions are alternations. The context rules use

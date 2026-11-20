@@ -146,7 +146,7 @@ A key with no shape of its own (no prefix) written bare is a Hook gap: a rule fo
 | D18 | `git worktree add`, then commit in the worktree | Block | Hook |
 | D19 | Commit inside a submodule | Block | Hook |
 | D20 | New repo via `git init`, or `git clone --template=<empty dir>` | Block | Hook |
-| D21 | Portable Git / MinGit unzipped into the user profile (ignores managed system config) | Detect | Hook gap (a git older than 2.54); Hook (2.54 or newer: MinGit 2.56.1 runs the global config hook, and with no bash of its own the hook cannot start, so the commit is refused unscanned; probed by hand on the Windows test machine, which has no WSL distribution. Its `sh` resolves the script's `env bash` to `C:\Windows\System32\bash.exe`, the WSL launcher); Hook gap (the same with a WSL distribution installed: the hook would start inside it, untested) |
+| D21 | Portable Git / MinGit unzipped into the user profile (ignores managed system config) | Detect | Hook gap (a git older than 2.54); Hook, by accident (2.54 or newer on a machine without a WSL distribution: MinGit 2.56.1 runs the global config hook, but it has no bash of its own, so its `sh` resolves the script's `env bash` to `C:\Windows\System32\bash.exe`, the WSL launcher; the launcher fails and git refuses the commit unscanned. The refusal is the launcher failing, not the hook's doing; probed by hand on the Windows test machine); Hook gap (the same with a WSL distribution installed: the hook would run inside it, untested; see #28) |
 | D22 | GUI client with bundled git (GitHub Desktop, SourceTree embedded git) | Block / Detect (record) | Hook gap (a bundled git older than 2.54, e.g. GitHub Desktop's; the other clients were not checked and count as a gap until one is) |
 | D23 | VS Code with `git.allowNoVerifyCommit` on, using "Commit (No Verify)" | Detect | Hook gap |
 | D24 | JetBrains IDE with "Run Git hooks" unchecked | Detect | Hook gap (the IDE commits with `--no-verify`, like D01: [JetBrains help, Commit changes locally](https://www.jetbrains.com/help/idea/commit-and-push-changes.html) says clearing the checkbox disables Git hooks for that commit, and `GitRepositoryCommitter.kt` in `JetBrains/intellij-community` adds `--no-verify` when `isSkipHooks` is set) |
@@ -264,7 +264,7 @@ Scenarios added while the catalog was automated. There is no N06.
 - **A01 in the catalog files:** the AWS documentation keys are allowlisted on purpose (B01). A non-example key with its secret is blocked in `test_real.sh`, which is what the Hook value rests on.
 - **B03:** latency is better measured outside CI.
 - **D10, D17:** not applicable.
-- **D21:** needs a separate git build on Windows; probed by hand (the row).
+- **D21:** needs a separate git build on Windows; probed by hand (the row). The refusal seen there comes from the WSL launcher failing, not from the hook; a git without bash runs the hook through the WSL `bash.exe` (#28).
 - **D22, D23, D25:** need GUI clients or IDEs. **D24** is settled from JetBrains' documentation and source (the row).
 - **E:** elevated scenarios, run by IT.
 - **F:** F01–F03 rest on the `windows`, `windows-suite`, `macos-suite` and `suite` CI jobs, F05 on `tests/platform/wsl-ci.sh` (the `wsl` workflow); none of them runs as a standard or non-admin user (F01, F02), and F04, F06 and F07 need images or VMs CI does not have.

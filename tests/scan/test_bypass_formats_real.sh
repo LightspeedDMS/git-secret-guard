@@ -419,10 +419,12 @@ test_real_formats_c03_an_edited_settings_file() {
     catalog C03-settings-betterleaks Block 'settings BETTERLEAKS_BIN=<script exiting 0> && git commit'
     assert_rc 1 "C03 a no-op betterleaks blocked"
     assert_contains "$ERR" "betterleaks: no report was written" "C03 the no-op betterleaks fails closed"
-    use_real_tools "SCAN_TIMEOUT_SECONDS=1"
+    # ^ hazard a real scan can finish inside 1s (macOS CI did) => the stand-in sleeps, the timeout always fires
+    printf '#!/bin/sh\nexec sleep 30\n' >"$SANDBOX/slow-scanner" && chmod 755 -- "$SANDBOX/slow-scanner" || return 1
+    use_real_tools "$(printf 'TRUFFLEHOG_BIN=%s\nSCAN_TIMEOUT_SECONDS=1' "$SANDBOX/slow-scanner")"
     commit_sample c03f gh.env "$(token_line)" || return 1
     use_real_tools
-    catalog C03-settings-timeout Block 'settings SCAN_TIMEOUT_SECONDS=1 && git commit'
+    catalog C03-settings-timeout Block 'settings SCAN_TIMEOUT_SECONDS=1, a scanner slower than that && git commit'
     assert_rc 1 "C03 a one-second timeout blocked"
     assert_contains "$ERR" "timed out after 1s" "C03 the timeout fails closed"
     no_leak "$(fake_github_token)"

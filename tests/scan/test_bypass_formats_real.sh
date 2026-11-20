@@ -430,16 +430,17 @@ test_real_formats_c03_an_edited_settings_file() {
     no_leak "$(fake_github_token)"
 }
 
-# ^ security the hook takes find from PATH; a no-op find first there makes the extraction see no added lines, the commit passes
-test_real_formats_n02_a_no_op_find_first_on_path_lets_a_token_commit() {
+# ^ security the hook runs no find; a no-op find first on PATH changes nothing, the token is found and the commit blocked (#25)
+test_real_formats_n02_a_no_op_find_first_on_path_still_blocks_a_token() {
     need_real_tools
     mkdir -p -- "$SANDBOX/shadow-find"
     printf '#!/bin/sh\nexit 0\n' >"$SANDBOX/shadow-find/find" && chmod 755 -- "$SANDBOX/shadow-find/find" || return 1
     set_env PATH="$SANDBOX/shadow-find:$REAL_HOME/.local/bin:$TEST_BASE_PATH"
     commit_sample n02 k.env "$(token_line)" || return 1
     catalog N02 Block 'PATH=<dir with a no-op find>:<PATH> git commit'
-    assert_rc 0 "N02 commits"
-    assert_eq "$ERR" "git-secret-guard: no added lines to scan" "N02 the hook reports nothing to scan"
+    assert_blocked N02
+    assert_row trufflehog Github k.env N02
+    assert_not_contains "$ERR" "no added lines to scan" "N02 the hook does not claim there was nothing to scan"
     no_leak "$(fake_github_token)"
 }
 

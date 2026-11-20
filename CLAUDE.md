@@ -37,7 +37,8 @@ This file is an index: each topic states what must not break and links the doc h
 - **No real `brew` or `systemctl` in lifecycle tests** (`lc_begin` puts recording stand-ins first); the one real call is the read-only
   `systemctl show $GSG_TEST_SERVICE_UNIT` in `service_prepare`.
 - **Tool paths come only from the settings file** (`install_write_settings`; `load_settings` unsets every key before sourcing); an unusable
-  path blocks the commit ("nothing was scanned").
+  path blocks the commit ("nothing was scanned"). **The hook runs no `find`** (bash globs in `lib/scan/extract.sh`; counts above zero with an
+  empty scan tree block; `test_the_hook_runs_no_find_command`): [scan.md#maintainer-notes](docs/scan.md#maintainer-notes).
   `type -P` only in `lib/install/install.sh`, `lib/platform/brew.sh` and the one line of `smartgit_tool` (pinned by tests).
 - **Fail closed**, `set -u`, check every return value, bounded loops, files under 1000 lines, shellcheck 0.11.0 clean including info
   (`GSG_SHELLCHECK_PIN`; any other version skips the gate, which proves nothing).

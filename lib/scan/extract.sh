@@ -299,13 +299,57 @@ lfs_block_text() {
     fi
 }
 
+# ^ security the hook runs no find; a no-op one first on PATH answered "no file" and skipped the scan (#25) => bash globs only, no PATH tool
+# ^ invariant arg 1 = a directory; rc 0 = it holds a regular file at any depth, hidden ones too, 1 = none, 2 = not a directory; bounded by the expanded list
+scan_tree_has_file() {
+    [ -d "$1" ] || return 2
+    (
+        shopt -s globstar dotglob nullglob || exit 2
+        for f in "$1"/**; do
+            if [ -f "$f" ]; then exit 0; fi
+        done
+        exit 1
+    )
+}
+
+# ^ security the hook runs no find here either (#25); the work dir holds the added lines => emptied with a bash glob and rm, the directory stays
+# ^ invariant arg 1 = a directory; rc 0 = it holds nothing now (an empty one is fine), 1 = not a directory or an entry could not be removed
+scan_dir_clear() {
+    [ -d "$1" ] || return 1
+    (
+        shopt -s dotglob nullglob || exit 1
+        entries=("$1"/*)
+        if [ "${#entries[@]}" -eq 0 ]; then exit 0; fi
+        rm -rf -- "${entries[@]}" || exit 1
+        # ^ security a no-op rm on PATH exits 0 and leaves the added lines for the re-check => the glob is read again, anything left fails
+        entries=("$1"/*)
+        [ "${#entries[@]}" -eq 0 ]
+    )
+}
+
+# ^ invariant arg 1 = scan dir, after extraction and the LFS swap; rc 0 = scan it, 1 = nothing was added (both counts 0), 3 = cannot inspect it
+# ^ invariant rc 2 = counts above zero and no file, the reason goes to stdout => the hook blocks and never passes it as an empty commit
+# ^ coupled GSG_EXTRACT_FILES and GSG_EXTRACT_LINES come from exempt_extract_tree and extract_lfs_objects; exempt and binary LFS files are never counted
+scan_tree_verdict() {
+    local rc
+    scan_tree_has_file "$1"
+    rc=$?
+    if [ "$rc" -eq 0 ]; then return 0; fi
+    if [ "$rc" -ne 1 ]; then return 3; fi
+    if [ "${GSG_EXTRACT_FILES:-0}" -eq 0 ] && [ "${GSG_EXTRACT_LINES:-0}" -eq 0 ]; then return 1; fi
+    printf 'the extraction counted %s added lines in %s files but the scan tree holds no file; nothing was scanned.\n' "${GSG_EXTRACT_LINES:-0}" "${GSG_EXTRACT_FILES:-0}"
+    return 2
+}
+
 # ^ invariant args = scan dir; swaps each staged pointer's scan file for its object and fixes the counts; rc 1 = a pointer was not followed
 # ^ coupled lib/scan/exempt.sh:exempt_extract_tree sets GSG_EXTRACT_FILES and GSG_EXTRACT_LINES first; the hook calls this right after it
 extract_lfs_objects() {
     local dir="$1" obj="$1.lfs-object" i path rc obj_lines bad=0 first
     GSG_LFS_FAIL_EXT=0 GSG_LFS_FAIL_OBJECT=0
-    first="$(find "$dir" -type f -print -quit)" || return 1
-    if [ -z "$first" ]; then return 0; fi
+    scan_tree_has_file "$dir"
+    first=$?
+    if [ "$first" -eq 2 ]; then return 1; fi
+    if [ "$first" -eq 1 ]; then return 0; fi
     if ! _lfs_staged_blobs "$dir" || ! _lfs_find_pointers "$dir"; then
         printf '%s: cannot read the staged blobs to look for Git LFS pointers\n' "$GSG_NAME" >&2
         return 1

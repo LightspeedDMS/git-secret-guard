@@ -79,6 +79,9 @@ esac
 TEST_RECORDED_BASH="${TEST_BASH:-$BASH}"
 if [ "$TEST_IS_WINDOWS" -eq 1 ] && [ -f "$TEST_RECORDED_BASH.exe" ]; then TEST_RECORDED_BASH="$TEST_RECORDED_BASH.exe"; fi
 
+# ^ invariant gnubin_has TOOL is true when the settings' GNUBIN_DIR holds TOOL; the hook puts it first on PATH => a user-PATH stand-in never runs
+gnubin_has() { [ -n "$TEST_GNUBIN" ] && [ -x "$TEST_GNUBIN/$1" ]; }
+
 # ^ external BSD sed wants a suffix argument after -i where GNU sed takes none; the suites use the GNU spelling and only this wrapper adapts it
 if [ "$TEST_OS" = Darwin ]; then
     sed() {

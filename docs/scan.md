@@ -27,7 +27,7 @@ how to run the tests, and the limits of the scan. Exemptions have their own page
    nothing was scanned; run git-secret-guard install`. **Everything
    else the hook runs is found through `PATH`**: `git`, `awk`, `sed`, `cp`, `rm`, `mkdir`, `mktemp` and the other coreutils (not `find`: the hook runs none, it reads the scan tree with bash globs, so a `find` that prints nothing cannot make a commit look empty; not `realpath`: macOS 12 has none, the hook walks its own links with `readlink`). Git prepends
    its own exec-path to `PATH` when it runs a hook, which puts git's directory first; a `PATH` you control decides the
-   rest, so a no-op `awk`, `head`, `mv` or `wc` earlier on it is still used; the rows that are left open are Hook gaps in
+   rest, so a no-op `awk`, `head`, `mv` or `wc` earlier on it is still used (on macOS the coreutils among them come from the recorded `GNUBIN_DIR`, which the hook puts first on `PATH`, so of the tools in the #31 rows only `awk` and `cmp`, which are not coreutils, can be shadowed there; `git`, `sed` and the other non-coreutils tools still come from your `PATH`); the rows that are left open are Hook gaps in
    [bypass-detection-scenarios.md](bypass-detection-scenarios.md) (N11, N12). Two losses are closed by a cross-check instead of a trusted
    `PATH`: see step 5. Child scripts (`lib/scan/run-scanner.sh`, the coverage re-check) run under the same bash binary as the hook
    (`$BASH`), not through a new lookup.
@@ -552,7 +552,7 @@ Why the scan code is shaped this way; each point was probed on the pinned versio
   ` "$@"` after the exec, so `commit-msg` still gets the message file); (3) commit-msg `cat` (`message_scan_prepare`: a non-empty source with
   an empty copy fails) and `cmp` (`_message_matches_git`: an "equal" is confirmed by comparing `$(<a)` and `$(<b)` in bash). Open, pinned
   by `tests/scan/test_path_tool_gaps.sh`: a counts-lying `awk` (N11) and the LFS `mv` and `head` (N12; a no-op `tr` or a `wc` printing 0 block, with
-  misleading reasons, and are pinned as blocks); a lying answer there has no second reading to check against, a stand-in must know the hook's own arguments, and a trusted `PATH` for every tool is out of scope.
+  misleading reasons, and are pinned as blocks); a lying answer there has no second reading to check against (on macOS the coreutils tools come first from `GNUBIN_DIR` and a user-`PATH` stand-in is never run; the tests assert that), a stand-in must know the hook's own arguments, and a trusted `PATH` for every tool is out of scope.
 
 - **The hook runs no `find`** (#25). `find` came from `PATH`, and a no-op one printed nothing and exited 0, which read as "the scan tree
   holds no file": the commit passed with `no added lines to scan` (`extract_lfs_objects` skipped the LFS swap the same way, and the

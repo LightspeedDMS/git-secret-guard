@@ -18,8 +18,17 @@ begin() {
 # ^ invariant args = tool name, script body; the script goes first on PATH for the commit after it, the real tools stay behind
 shadow() {
     mkdir -p -- "$SANDBOX/shadow-$1" || return 1
-    printf '#!/bin/sh\n%s\n' "$2" >"$SANDBOX/shadow-$1/$1" && chmod 755 -- "$SANDBOX/shadow-$1/$1" || return 1
+    rm -f -- "$SANDBOX/ran-$1"
+    printf '#!/bin/sh\n: >"%s"\n%s\n' "$SANDBOX/ran-$1" "$2" >"$SANDBOX/shadow-$1/$1" && chmod 755 -- "$SANDBOX/shadow-$1/$1" || return 1
     set_env PATH="$SANDBOX/shadow-$1:$PATH"
+}
+
+# ^ external on macOS the hook puts GNUBIN_DIR first on PATH => a coreutils stand-in on the user PATH is never run, the commit is scanned normally
+# ^ invariant args = tool name, test name; the stand-in left no trace, the commit passed and the object content reached the scanner
+assert_gnubin_wins() {
+    assert_no_file "$SANDBOX/ran-$1" "the stand-in $1 was never run"
+    assert_rc 0 "the commit is decided normally"
+    assert_contains "$(recorded "$2")" "$MARKER" "the object content reached the scanner"
 }
 
 # ^ coupled tests/scan/test_lfs.sh:lfs_stage, the same pointer and storage layout
@@ -56,6 +65,8 @@ test_a_no_op_head_first_on_path_drops_an_lfs_object_from_the_scan() {
     lfs_stage_object data/big.dat "$SANDBOX/obj-head" || return 1
     shadow head 'exit 0' || return 1
     commit_cap "head lies"
+    if gnubin_has head; then assert_gnubin_wins head head; return 0; fi
+    assert_file "$SANDBOX/ran-head" "the stand-in head ran, the shadow took effect"
     assert_rc 0 "N12 is a Hook gap: the commit passes"
     assert_not_contains "$(recorded head)" "$MARKER" "the object content never reached the scanner"
 }
@@ -67,6 +78,8 @@ test_a_no_op_mv_first_on_path_scans_the_pointer_instead_of_the_lfs_object() {
     lfs_stage_object data/big.dat "$SANDBOX/obj-mv" || return 1
     shadow mv 'exit 0' || return 1
     commit_cap "mv lies"
+    if gnubin_has mv; then assert_gnubin_wins mv mv; return 0; fi
+    assert_file "$SANDBOX/ran-mv" "the stand-in mv ran, the shadow took effect"
     assert_not_contains "$(recorded mv)" "$MARKER" "the object content never reached the scanner"
 }
 
@@ -82,6 +95,8 @@ lfs_commit_with_shadow() {
 # ^ invariant N12 tr and wc are not gaps, they block with a misleading reason => the rows are pinned here
 test_a_no_op_tr_first_on_path_blocks_with_the_lfs_pointer_message() {
     lfs_commit_with_shadow tr 'exit 0' || return 1
+    if gnubin_has tr; then assert_gnubin_wins tr tr; return 0; fi
+    assert_file "$SANDBOX/ran-tr" "the stand-in tr ran, the shadow took effect"
     assert_rc 1 "blocked"
     assert_contains "$ERR" "cannot read the staged blobs to look for Git LFS pointers" "the message names a pointer walk, not the tr"
     assert_not_contains "$(recorded tr)" "$MARKER" "the object content never reached the scanner"
@@ -89,6 +104,8 @@ test_a_no_op_tr_first_on_path_blocks_with_the_lfs_pointer_message() {
 
 test_a_zero_printing_wc_first_on_path_blocks_with_a_size_mismatch() {
     lfs_commit_with_shadow wc 'echo 0' || return 1
+    if gnubin_has wc; then assert_gnubin_wins wc wc; return 0; fi
+    assert_file "$SANDBOX/ran-wc" "the stand-in wc ran, the shadow took effect"
     assert_rc 1 "blocked"
     assert_contains "$ERR" "its object is 0 bytes, the pointer says" "the size check sees 0 and refuses"
     assert_not_contains "$(recorded wc)" "$MARKER" "the object content never reached the scanner"

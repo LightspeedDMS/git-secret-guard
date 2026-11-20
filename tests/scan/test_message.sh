@@ -308,7 +308,8 @@ fix: both hooks" "and the config hook scanned the message"
 # ^ invariant args = tool name; a script exiting 0 with no output goes first on PATH for the hook run after it (#31)
 shadow_tool_on_path() {
     mkdir -p -- "$SANDBOX/shadow-$1" || return 1
-    printf '#!/bin/sh\nexit 0\n' >"$SANDBOX/shadow-$1/$1" && chmod 755 -- "$SANDBOX/shadow-$1/$1" || return 1
+    rm -f -- "$SANDBOX/ran-$1"
+    printf '#!/bin/sh\n: >"%s"\nexit 0\n' "$SANDBOX/ran-$1" >"$SANDBOX/shadow-$1/$1" && chmod 755 -- "$SANDBOX/shadow-$1/$1" || return 1
     set_env PATH="$SANDBOX/shadow-$1:$PATH"
 }
 
@@ -318,6 +319,14 @@ test_a_no_op_cat_on_path_blocks_instead_of_scanning_an_empty_copy() {
     shadow_tool_on_path cat || return 1
     printf 'subject\nline two %s\n' "$MARKER" >"$SANDBOX/msg-nocat"
     run_message_hook nocat "$SANDBOX/msg-nocat"
+    if gnubin_has cat; then
+        # ^ external on macOS the hook puts GNUBIN_DIR first => cat is the GNU one and the stand-in is never reached
+        assert_no_file "$SANDBOX/ran-cat" "the stand-in cat was never run"
+        assert_rc 0 "the message is decided normally"
+        assert_contains "$(<"$SANDBOX/record-nocat.trufflehog")" "line two $MARKER" "and scanned"
+        return 0
+    fi
+    assert_file "$SANDBOX/ran-cat" "the stand-in cat ran, the shadow took effect"
     assert_rc 1 "blocked"
     assert_contains "$ERR" "cannot read the commit message file git passed; nothing was scanned" "says nothing was scanned"
 }
@@ -329,6 +338,7 @@ test_a_no_op_cmp_on_path_does_not_hide_text_below_a_forged_cut_line() {
     shadow_tool_on_path cmp || return 1
     { printf '+hand written line %s\n' "$MARKER"; } | verbose_message "$SANDBOX/msg-nocmp"
     run_message_hook nocmp "$SANDBOX/msg-nocmp"
+    assert_file "$SANDBOX/ran-cmp" "the stand-in cmp ran (cmp is not in the GNU directory, on macOS too)"
     assert_contains "$(<"$SANDBOX/record-nocmp.trufflehog")" "hand written line $MARKER" "the text below the forged cut line is scanned"
 }
 

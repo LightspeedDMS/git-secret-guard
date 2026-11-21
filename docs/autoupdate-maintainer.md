@@ -100,14 +100,24 @@ Behaviour: [Auto-update](install.md#auto-update---auto-update-and-update). Inter
 - **The update log** (macOS and Windows; Linux writes the journal and never reaches this code). The log is the job's own stdout and stderr on both
   platforms (launchd `StandardOutPath` and `StandardErrorPath`, the Windows wrapper's `>> update.log 2>&1`), so `update` itself stamps it: no plist
   change, no reload, and an existing macOS install is stamped from the first run of the new version. `autoupdate_run` asks `autoupdate_log_target`
-  right after `paths_init`: true only when **both** stdout and stderr are the file `GSG_UPDATE_LOG` (`[ /dev/stdout -ef "$GSG_UPDATE_LOG" ]` and the
-  same for stderr), so merging stderr into the stamped stream never moves an error line where it did not go before. A pipe (the journal), a
+  right after `paths_init`: true only when **both** stdout and stderr are the file `GSG_UPDATE_LOG`, so merging stderr into the stamped stream never moves an error line where it
+  did not go before. The test asks the open descriptors, not a path: `{ out="$(stat -c '%d:%i' - <&3)" && err="$(stat -c '%d:%i' - <&4)"; } 4>&2 2>/dev/null 3>&1` (the order is not free: redirections run left to right and a closed stdout makes `3>&1` fail, which bash would print on the real stderr, possibly the log; `test_a_closed_stdout_leaves_no_redirection_error_from_the_detection`; GNU `stat` on
+  `-` is an fstat of stdin; the group makes fds 3 and 4 copies of the original stdout and stderr) against `stat -L -c '%d:%i' -- "$GSG_UPDATE_LOG"`. The first
+  version tested `[ /dev/stdout -ef "$GSG_UPDATE_LOG" ]`: it was proven on Windows (all 23 tests of `test_autoupdate_schtasks` passed under real `cmd`, stamped runs
+  included) and failed only on macOS (nothing stamped, no start line, no rotation), so a path through `/dev/stdout` is not trusted there. The descriptor method has
+  Linux evidence so far; its Windows and macOS evidence comes from the next CI run. `stat` comes from `PATH` like the other tools of `update` (`wc`, `mv`, `ps`): `brew_use_gnubin` puts GNU coreutils first on a Mac, and Linux
+  and Git for Windows ship it; a BSD `stat`, a missing one or a closed descriptor fails the test, which is the unstamped behaviour of a run without this feature
+  (`test_a_stat_that_fails_means_not_the_log_and_the_run_stays_unstamped`, `test_the_log_is_known_by_the_identity_of_the_open_descriptors`). When a logged-form test
+  fails, its message carries `ul_report`: the bash `-ef` results, the `stat` of fd 1, of fd 2 and of the path, and what `autoupdate_log_target` answered, so the CI
+  log itself shows what each method saw. A pipe (the journal), a
   terminal or another file is unchanged byte for byte (`test_a_run_whose_output_is_not_the_update_log_is_unchanged`).
   - **The shape** (`autoupdate_run_logged`): the parent runs `"$BASH" "$GSG_ROOT/bin/$GSG_NAME" update 2>&1 | autoupdate_stamp "$from"` and returns
     `${PIPESTATUS[0]}`, the child's status. The child is **a fresh bash, not a subshell**: the lock records `$$` and `autoupdate_is_ancestor` lets the
     child install in only when the lock holder is its parent or grandparent; in a `( ... ) |` subshell `$$` would be the parent's pid and the child
     install would be locked out (`test_a_logged_update_that_installs_stamps_the_installer_output_and_ends_with_the_result` installs through it). The
-    fresh bash's stdout is the pipe, so `autoupdate_log_target` is false there and it runs the update as always: no recursion, no flag. On Windows
+    child is started as `GSG_UPDATE_LOGGED_CHILD=1 "$BASH" ...` (the marker is set for that one command): `autoupdate_run` reads it, unsets it (the child install never sees it)
+    and runs the plain update, so the logged path is one level whatever the detection answers; the pipe makes the detection false there as well, but termination does not
+    rest on that (`test_a_detection_that_is_always_true_still_logs_one_level_only` forces the detection true under a timeout, `test_the_logged_child_marker_does_not_reach_the_child_install`). On Windows
     the parent already runs from the private copy (`GSG_UPDATE_COPY` is inherited), so the child skips the re-exec and nothing pins the share.
   - **`autoupdate_stamp`** prints one start line, `<UTC time> git-secret-guard: update: run started, <version> is installed` (`nothing` for an empty
     version), then every input line behind its time (`YYYY-MM-DDTHH:MM:SSZ`, the form of the record's `checked_at`, taken with `printf -v` and no fork per line);

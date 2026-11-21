@@ -12,15 +12,131 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/autoupdate.sh"
 STAMP='[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z'
 
 # ^ invariant ul_logged runs update the way launchd and the Windows wrapper do, both streams appended to the log, no terminal; RC = update's status
-ul_logged() {
+ul_logged_raw() {
     env -i "${LC_ENV[@]}" "${EXTRA_ENV[@]}" "$LC_DATA/bin/git-secret-guard" update </dev/null >>"$LC_STATE/update.log" 2>&1
     RC=$?
+}
+
+# ^ invariant ul_report prints what each way of telling the log sees with stdout and stderr appended to a probe file; the CI log shows the cause
+# ^ external the bash -ef test stats the path /dev/stdout, stat on a duplicated descriptor asks the open file itself; macOS fdesc may differ between the two
+ul_report() {
+    local f="$SANDBOX/ul-probe.log"
+    : >"$f" || return 1
+    env -i "${LC_ENV[@]}" "${EXTRA_ENV[@]}" bash -c "$AU_PRELUDE"'paths_init || exit 9; GSG_UPDATE_LOG="$1"
+        autoupdate_log_target; trc=$?
+        { [ /dev/stdout -ef "$GSG_UPDATE_LOG" ] && a=yes || a=no
+          [ /dev/stderr -ef "$GSG_UPDATE_LOG" ] && b=yes || b=no
+          o="$(stat -c "%d:%i" - <&3 2>&1)"; e="$(stat -c "%d:%i" - <&4 2>&1)"; p="$(stat -L -c "%d:%i" -- "$GSG_UPDATE_LOG" 2>&1)"
+          echo "os=$(uname -s) bash=$BASH_VERSION stat=$(command -v stat) bash -ef stdout=$a stderr=$b; stat fd1=[$o] fd2=[$e] path=[$p]; autoupdate_log_target rc=$trc"
+        } 3>&1 4>&2 >&9' _ "$GSG_PROJECT" "$f" >>"$SANDBOX/ul-probe.log" 2>&1 9>"$SANDBOX/ul-probe.report"
+    cat -- "$SANDBOX/ul-probe.report"
+}
+
+# ^ invariant a logged run is only a test of stamping when update knows its streams are the log; if it does not, say what each method saw
+ul_logged() {
+    local rep
+    ul_logged_raw
+    rep="$(ul_report)" || rep="the probe could not run"
+    case "$rep" in
+        *"autoupdate_log_target rc=0"*) ;;
+        *) fail "update does not recognise its streams as the log: $rep" ;;
+    esac
+}
+
+# ^ invariant ul_stat_standin record|fail|same puts a stat first for update; record logs and runs the real one, fail exits 1, same logs and prints 1:1
+# ^ external brew_use_gnubin puts GNUBIN_DIR of the settings ahead of PATH on macOS (tests/scan/test_lfs.sh) => the stand-in also goes into a gnubin copy
+ul_stat_standin() {
+    local real tool body
+    real="$(command -v stat)" || return 1
+    if [ -n "${TEST_GNUBIN:-}" ]; then real="$TEST_GNUBIN/stat"; fi
+    case "$1" in
+        record) body="$(printf '#!/bin/sh\nprintf "%%s\\n" "$*" >>"%s"\nexec "%s" "$@"\n' "$SANDBOX/ul-stat.log" "$real")" ;;
+        fail) body="$(printf '#!/bin/sh\nexit 1\n')" ;;
+        same) body="$(printf '#!/bin/sh\necho call >>"%s"\necho 1:1\n' "$SANDBOX/ul-stat.log")" ;;
+        *) return 1 ;;
+    esac
+    printf '%s\n' "$body" >"$SANDBOX/pathbin/stat" || return 1
+    chmod 755 "$SANDBOX/pathbin/stat" || return 1
+    if [ -n "${TEST_GNUBIN:-}" ]; then
+        rm -rf -- "${SANDBOX:?}/gnubin-stat" && mkdir -p -- "$SANDBOX/gnubin-stat" || return 1
+        for tool in "$TEST_GNUBIN"/*; do ln -sf -- "$tool" "$SANDBOX/gnubin-stat/" || return 1; done
+        rm -f -- "$SANDBOX/gnubin-stat/stat" && cp -- "$SANDBOX/pathbin/stat" "$SANDBOX/gnubin-stat/stat" || return 1
+        printf 'GNUBIN_DIR=%q\n' "$SANDBOX/gnubin-stat" >>"$LC_DATA/settings" || return 1
+    fi
+    : >"$SANDBOX/ul-stat.log"
+}
+
+test_the_log_is_known_by_the_identity_of_the_open_descriptors() {
+    local calls
+    au_setup || return 1
+    ul_stat_standin record || return 1
+    # ^ why the raw run, not ul_logged; ul_report asks stat through the same stand-in, its calls would satisfy the assertions
+    ul_logged_raw
+    calls="$(<"$SANDBOX/ul-stat.log")"
+    assert_rc 0 "a logged update"
+    ul_all_stamped "$LC_STATE/update.log" || fail "the run is stamped"
+    assert_eq "$(grep -c -x -F -- '-c %d:%i -' "$SANDBOX/ul-stat.log")" 2 "stat is asked once for each open descriptor, whole lines (the path call holds the same text)"
+    assert_contains "$calls" "-L -c %d:%i -- $LC_STATE/update.log" "and for the identity of the log by its path"
+}
+
+# ^ hazard redirections run left to right => a closed stdout fails 3>&1 and bash reports it on stderr, possibly the log, unless 2>/dev/null comes first
+test_a_closed_stdout_leaves_no_redirection_error_from_the_detection() {
+    local line bad=0
+    au_setup || return 1
+    env -i "${LC_ENV[@]}" "${EXTRA_ENV[@]}" "$LC_DATA/bin/git-secret-guard" update </dev/null >&- 2>"$SANDBOX/ul-closed.err"
+    RC=$?
+    assert_rc 0 "the update with a closed stdout"
+    while IFS= read -r line || [ -n "$line" ]; do
+        if [[ $line =~ :\ line\ [0-9]+:\ [0-9]+:\ Bad\ file\ descriptor ]]; then bad=$((bad + 1)); fi
+    done <"$SANDBOX/ul-closed.err"
+    assert_eq "$bad" 0 "no redirection error of the detection reaches stderr: [$(head -c 400 "$SANDBOX/ul-closed.err" | tr '\n' '|')]"
+}
+
+# ^ invariant the logged path is entered once per run whatever the detection answers; the child carries a marker and never re-enters it
+# ^ hazard a stat telling every descriptor is the log made the child start a child without end; the run is bounded here by a timeout as well
+test_a_detection_that_is_always_true_still_logs_one_level_only() {
+    local starts=0 line
+    au_setup || return 1
+    ul_stat_standin same || return 1
+    env -i "${LC_ENV[@]}" "${EXTRA_ENV[@]}" "$TEST_TIMEOUT" -k 5 40 "$LC_DATA/bin/git-secret-guard" update </dev/null >>"$LC_STATE/update.log" 2>&1
+    RC=$?
+    assert_rc 0 "the update ends, 124 would mean it never did"
+    [ -s "$SANDBOX/ul-stat.log" ] || fail "the stat stand-in was never called, so the detection was not forced true"
+    ul_load "$LC_STATE/update.log" || return 1
+    for line in "${UL_LINES[@]}"; do
+        if [[ $line == *"update: run started, "* ]]; then starts=$((starts + 1)); fi
+    done
+    assert_eq "$starts" 1 "one start line, one level"
+    assert_contains "${UL_LINES[${#UL_LINES[@]} - 1]}" "update: current, 1.0.0 is installed" "and the result of the update"
+}
+
+test_the_logged_child_marker_does_not_reach_the_child_install() {
+    au_setup || return 1
+    au_broken_installer "env >\"$SANDBOX/au-child.env\"; exit 0" && au_release 1.1.0 && au_publish || return 1
+    ul_logged
+    assert_file "$SANDBOX/au-child.env" "the stand-in installer ran and dumped its environment"
+    assert_not_contains "$(<"$SANDBOX/au-child.env")" "GSG_UPDATE_LOGGED_CHILD" "the marker is gone before the install starts"
+}
+
+# ^ invariant any failure of the detection counts as not the log, the behaviour of a run without the stamping
+test_a_stat_that_fails_means_not_the_log_and_the_run_stays_unstamped() {
+    au_setup || return 1
+    ul_stat_standin fail || return 1
+    ul_logged_raw
+    assert_rc 0 "the update runs"
+    assert_eq "$(<"$LC_STATE/update.log")" "git-secret-guard: update: current, 1.0.0 is installed" "one plain line, no stamp, no start line"
 }
 
 # ^ invariant ul_load FILE sets UL_LINES to the lines of FILE; a last line without a newline counts
 ul_load() {
     UL_LINES=()
     mapfile -t UL_LINES <"$1" || return 1
+}
+
+# ^ why -L as well as -e, not -e alone; the lock is a symlink to a pid and -e follows it
+ul_assert_lock_released() {
+    assert_no_file "$LC_STATE/update.lock" "$1"
+    if [ -L "$LC_STATE/update.lock" ]; then fail "$1: a link to [$(readlink -- "$LC_STATE/update.lock")] is still there"; fi
 }
 
 # ^ invariant rc 0 = FILE is not empty and every line of it starts with a stamp and a space
@@ -52,7 +168,7 @@ test_a_logged_update_that_installs_stamps_the_installer_output_and_ends_with_the
     [[ ${UL_LINES[0]} =~ ^$STAMP\ .*run\ started,\ 1\.0\.0\ is\ installed$ ]] || fail "the first line is the start line: [${UL_LINES[0]}]"
     [[ ${UL_LINES[${#UL_LINES[@]} - 1]} =~ ^$STAMP\ .*update:\ updated\ 1\.0\.0\ -\>\ 1\.1\.0$ ]] || fail "the last line is the result: [${UL_LINES[${#UL_LINES[@]} - 1]}]"
     [ "${#UL_LINES[@]}" -gt 2 ] || fail "the installer's own lines sit between the two, got ${#UL_LINES[@]} lines"
-    assert_no_file "$LC_STATE/update.lock" "the lock is released"
+    ul_assert_lock_released "the lock is released"
 }
 
 test_a_second_logged_run_appends_and_the_first_run_stays() {
@@ -109,7 +225,9 @@ test_a_run_whose_output_is_not_the_update_log_is_unchanged() {
 
 # ^ invariant autoupdate_stamp reads to the end whatever the write does; the run feeding it is never cut by SIGPIPE
 test_the_stamp_filter_drains_its_input_when_it_cannot_write() {
-    au_lib "$GSG_PROJECT" 'awk "BEGIN { for (i = 0; i < 50000; i++) print \"line\" }" | cat | autoupdate_stamp 1.0.0 >/dev/full; echo "${PIPESTATUS[*]}"'
+    lc_begin || return 1
+    # ^ why a closed stdout, not /dev/full; macOS has no /dev/full, a write to a closed descriptor fails everywhere
+    au_lib "$GSG_PROJECT" 'awk "BEGIN { for (i = 0; i < 50000; i++) print \"line\" }" | cat | autoupdate_stamp 1.0.0 >&-; echo "${PIPESTATUS[*]}"'
     assert_rc 0 "the body ran"
     assert_eq "$OUT" "0 0 0" "the writer and the filter all end 0: no SIGPIPE, no failed write ends the filter"
 }
@@ -185,12 +303,19 @@ ul_gone() {
 # ^ invariant ul_signal_case SIGNAL RC runs a logged update in its own process group, held in the child install, and sends SIGNAL to the group
 # ^ why env --default-signal, not a plain env; a background job starts with SIGINT ignored, and a shell cannot trap a signal ignored at start
 ul_signal_case() {
-    local sig="$1" want="$2" pid rc=0
+    local sig="$1" want="$2" pid rc=0 sbin
     au_setup && au_broken_installer "exec sleep $UL_INSTALLER_SLEEP" && au_release 1.1.0 && au_publish || return 1
     rm -f -- "$SANDBOX/au-child.args" || return 1
-    setsid env --default-signal=INT,HUP,TERM env -i "${LC_ENV[@]}" "${EXTRA_ENV[@]}" "$LC_DATA/bin/git-secret-guard" update </dev/null >>"$LC_STATE/update.log" 2>&1 &
+    # ^ why the setsid of the installed settings, not the one on PATH; the install recorded a usable one, a Mac test shell may have none on PATH
+    sbin="$(bash -c 'source "$1" && printf "%s" "${SETSID_BIN:-}"' _ "$LC_DATA/settings")" || sbin=""
+    sbin="${sbin:-${TEST_SETSID:-setsid}}"
+    "$sbin" env --default-signal=INT,HUP,TERM env -i "${LC_ENV[@]}" "${EXTRA_ENV[@]}" "$LC_DATA/bin/git-secret-guard" update </dev/null >>"$LC_STATE/update.log" 2>&1 &
     pid=$!
-    ul_wait_until "$UL_START_WAIT" test -e "$SANDBOX/au-child.args" || { kill -KILL -- "-$pid" 2>/dev/null; fail "the child install never started"; return 1; }
+    ul_wait_until "$UL_START_WAIT" test -e "$SANDBOX/au-child.args" || {
+        kill -KILL -- "-$pid" 2>/dev/null
+        fail "the child install never started; setsid=[$sbin] executable=[$([ -x "$sbin" ] && echo yes || echo no)] env=[$(command -v env)] output of the update: [$(head -c 1500 "$LC_STATE/update.log" 2>&1 | tr '\n' '|')] $(ul_report)"
+        return 1
+    }
     kill "-$sig" -- "-$pid"
     if ! ul_wait_until "$UL_STOP_WAIT" ul_gone "$pid"; then
         fail "$sig did not end the logged update within $UL_STOP_WAIT s; left in its session: $(ps -o pid=,ppid=,stat=,args= -s "$pid" 2>&1 | cut -c1-110 | tr '\n' '|')"
@@ -199,7 +324,7 @@ ul_signal_case() {
     fi
     wait "$pid" || rc=$?
     assert_eq "$rc" "$want" "$sig ends the logged update with the signal's code"
-    assert_no_file "$LC_STATE/update.lock" "the lock is released"
+    ul_assert_lock_released "the lock is released"
     assert_eq "$(au_leftovers)" 0 "the work dir is removed"
     ul_all_stamped "$LC_STATE/update.log" || fail "every line of the log is stamped, the last ones included"
     [[ ${UL_LINES[0]} =~ ^$STAMP\ .*run\ started,\ 1\.0\.0\ is\ installed$ ]] || fail "the log starts with the start line: [${UL_LINES[0]}]"
@@ -220,9 +345,9 @@ cygpath() { case "$1" in -w) printf "%s" "W:${2//\//\\}" ;; -m) printf "%s" "M:$
 '
 
 test_the_wrapper_text_keeps_the_header_and_puts_everything_new_after_the_update_line() {
-    local text log line
+    local text log file="$SANDBOX/wrapper-text.cmd"
     lc_begin || return 1
-    au_lib "$GSG_PROJECT" "$UL_WRAPPER_LIBS"'GSG_UPDATE_LOG="/state/50%/update.log"; schtasks_cmd_text "C:\bin\bash.exe"'
+    au_lib "$GSG_PROJECT" "$UL_WRAPPER_LIBS"'GSG_UPDATE_LOG="/state/50%/update.log"; schtasks_cmd_text "C:\bin\bash.exe" >"$1"; cat -- "$1"' "$file"
     assert_rc 0 "the wrapper text is made"
     text="${OUT//$'\r'/}"
     log='W:\state\50%%\update.log'
@@ -231,9 +356,8 @@ test_the_wrapper_text_keeps_the_header_and_puts_everything_new_after_the_update_
     assert_not_contains "$text" " update > " "and never truncates the log"
     [[ $text == *" update >> "*$'\n''set "GSG_RC=%errorlevel%"'$'\n'*"move /y"*$'\n''exit /b %GSG_RC%' ]] || fail "after the update line: the status is kept, the rotation follows, the exit returns the status"
     assert_not_contains "${text%% update >> *}" "move /y" "nothing new sits before the update line"
-    while IFS= read -r line; do
-        [[ $line == *$'\r' ]] || fail "a line of the wrapper does not end in CR: [$line]"
-    done <<<"$OUT"
+    # ^ why the bytes of a file, not a captured string; command substitution drops the end of the last line and Windows text handling alters CR
+    assert_eq "$(tr -cd '\r' <"$file" | wc -c | tr -d ' ')" "$(wc -l <"$file" | tr -d ' ')" "every line of the wrapper ends in CRLF"
 }
 
 # ^ hazard cmd reopens the batch file by name and seeks to the byte offset it saved => a wrapper rewritten mid-run resumes inside the new text

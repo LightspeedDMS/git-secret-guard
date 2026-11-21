@@ -594,7 +594,14 @@ autoupdate_finish() {
 # ^ why both, not stdout alone; merging stderr into the stamped stream must not move an error line to a place it did not go before
 # ^ external a journal, a pipe or a terminal is not the log; Linux logs to the journal and never reaches the stamping
 autoupdate_log_target() {
-    [ -n "${GSG_UPDATE_LOG:-}" ] && [ /dev/stdout -ef "$GSG_UPDATE_LOG" ] && [ /dev/stderr -ef "$GSG_UPDATE_LOG" ]
+    local out err log
+    if [ -z "${GSG_UPDATE_LOG:-}" ]; then return 1; fi
+    # ^ why stat on a duplicated descriptor, not [ /dev/stdout -ef ]; the open file is asked, and macOS may map the path /dev/stdout elsewhere
+    # ^ external stat is GNU (brew_use_gnubin puts it first on a Mac; Linux and Git for Windows ship it); "-" is stdin, fds 3 and 4 hold stdout and stderr
+    # ^ invariant any failure (a BSD stat, no stat, a closed descriptor) is "not the log", the unchanged and unstamped behaviour
+    { out="$(stat -c '%d:%i' - <&3)" && err="$(stat -c '%d:%i' - <&4)"; } 4>&2 2>/dev/null 3>&1 || return 1
+    log="$(stat -L -c '%d:%i' -- "$GSG_UPDATE_LOG" 2>/dev/null)" || return 1
+    [ -n "$log" ] && [ "$out" = "$log" ] && [ "$err" = "$log" ]
 }
 
 # ^ invariant autoupdate_stamp FROM copies stdin to stdout, each line behind a UTC stamp, after one line saying the run started with version FROM installed
@@ -655,7 +662,7 @@ autoupdate_stop() {
 
 # ^ invariant the parent of a logged run; update runs in a fresh bash whose output is a pipe into autoupdate_stamp, rc = the child's status
 # ^ why a fresh bash, not a subshell; the lock names $$ and autoupdate_is_ancestor lets the child install in only for its parent or grandparent
-# ^ coupled the child's stdout is the pipe => autoupdate_log_target is false there; it runs the update as it always did, with no flag and no recursion
+# ^ invariant the child carries GSG_UPDATE_LOGGED_CHILD=1 for its own command; autoupdate_run unsets it and runs the plain update, one level always
 autoupdate_run_logged() {
     local from rc=0
     autoupdate_installed_version
@@ -666,7 +673,7 @@ autoupdate_run_logged() {
     trap 'autoupdate_stop TERM "$GSG_UPDATE_EXIT_TERM"' TERM
     # ^ invariant a failed rotation is said by the function and never changes the run; the log just stays long
     if ! tools_is_windows; then autoupdate_log_rotate || :; fi
-    "$BASH" "$GSG_ROOT/bin/$GSG_NAME" update 2>&1 | autoupdate_stamp "$from"
+    GSG_UPDATE_LOGGED_CHILD=1 "$BASH" "$GSG_ROOT/bin/$GSG_NAME" update 2>&1 | autoupdate_stamp "$from"
     rc="${PIPESTATUS[0]}"
     return "$rc"
 }
@@ -677,7 +684,9 @@ autoupdate_run_logged() {
 autoupdate_run() {
     local rc=0
     paths_init || return 1
-    if autoupdate_log_target; then
+    if [ -n "${GSG_UPDATE_LOGGED_CHILD:-}" ]; then
+        unset GSG_UPDATE_LOGGED_CHILD
+    elif autoupdate_log_target; then
         autoupdate_run_logged
         return
     fi

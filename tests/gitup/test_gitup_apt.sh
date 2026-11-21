@@ -304,10 +304,16 @@ test_a_failed_package_install_reports_what_may_have_changed() {
     assert_not_contains "$ERR" "nothing was changed" "no claim that nothing changed"
 }
 
-test_the_unattended_flag_path_never_reads_the_terminal_for_a_query() {
+test_the_flag_path_run_from_a_terminal_still_gives_the_apt_cache_query_a_closed_stdin() {
     gu_apt_setup 2.43.0 ubuntu "$NOBLE_STOCK" "$NOBLE_PPA" || return 1
-    gsg install --upgrade-git </dev/null
-    assert_not_contains "$(gu_log)" "query-stdin-is-a-terminal" "the apt-cache query had a closed stdin"
+    # ^ why a control first, not the bare absence check; the stand-in must be shown to notice a terminal on stdin under this pty
+    gu_pty "" "$SANDBOX/pathbin/apt-cache" policy git
+    assert_contains "$(gu_log)" "query-stdin-is-a-terminal" "control: an apt-cache that inherits the terminal is seen by the stand-in"
+    rm -f -- "$SANDBOX/gitup.log" || return 1
+    gsg_pty "" install --upgrade-git
+    assert_rc 0 "the flag path from a terminal"
+    assert_contains "$(gu_log)" "apt-cache policy git | locale=C" "the query ran"
+    assert_not_contains "$(gu_log)" "query-stdin-is-a-terminal" "the apt-cache query had a closed stdin although the outer stdin is a terminal"
 }
 
 test_the_module_never_pipes_apt_output_into_an_early_exiting_reader() {

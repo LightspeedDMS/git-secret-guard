@@ -7,6 +7,7 @@
 test_adapter_betterleaks - 5
 test_adapter_trufflehog - 2
 test_autoupdate 630 43
+test_autoupdate_git_env - 4
 test_autoupdate_probes - 2
 test_autoupdate_report - 33
 test_autoupdate_schtasks - 0
@@ -32,6 +33,7 @@ test_doctor_findings 1020 162
 test_doctor_home - 22
 test_doctor_info - 3
 test_doctor_readonly - 17
+test_doctor_record_refusals - 2
 test_doctor_repos - 34
 test_exempt - 1
 test_exemptions - 18
@@ -46,6 +48,7 @@ test_gitup_contract - 20
 test_gitup_followups - 1
 test_gitup_macos - 22
 test_gitup_partial - 39
+test_gitup_refusals - 2
 test_gitup_robust - 14
 test_gitup_round2 - 22
 test_gitup_round3 - 39
@@ -73,6 +76,7 @@ test_macos_ci - 0
 test_macos_intel - 5
 test_message - 14
 test_message_real - 88
+test_message_third_block - 0
 test_path_tool_gaps - 1
 test_pii_real - 40
 test_platform - 7
@@ -84,10 +88,12 @@ test_quality 150 318
 test_real 168 107
 test_recorded_bash - 5
 test_reminder 162 30
+test_report_collect - 0
 test_runner - 3
 test_share_permissions - 0
 test_smartgit - 360
 test_smartgit_linux - 265
+test_smartgit_record_refusals - 4
 test_smartgit_windows 642 2
 test_state - 1
 test_status 216 72

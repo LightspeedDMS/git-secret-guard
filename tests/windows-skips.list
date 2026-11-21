@@ -8,7 +8,6 @@ test_doctor_repos::test_an_unreadable_directory_is_a_listed_problem_and_the_rest
 test_doctor_repos::test_control_characters_in_repository_names_never_reach_the_output | NTFS forbids control characters in file names
 test_doctor_findings::test_a_full_run_keeps_recorded_repos_it_could_not_have_seen_under_its_roots | NTFS ignores chmod, so nothing is unreadable
 test_doctor_findings::test_a_repository_path_the_record_cannot_hold_is_reported_not_silently_lost | NTFS forbids control characters in file names
-test_doctor_findings::test_machine_problems_are_recorded_as_machine_scope | NTFS has no executable bit, chmod -x changes nothing
 test_doctor_findings::test_recheck_keeps_a_recorded_repo_and_worktree_it_cannot_reach_and_says_so | NTFS ignores chmod, so nothing is unreadable
 test_doctor_findings::test_recheck_reruns_the_machine_checks_and_prints_what_is_still_broken | NTFS has no executable bit, chmod -x changes nothing
 test_doctor_home::test_a_folder_find_calls_operation_not_permitted_is_listed_and_the_rest_is_checked | NTFS ignores chmod, so nothing is unreadable

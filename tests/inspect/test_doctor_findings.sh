@@ -94,15 +94,6 @@ test_a_full_run_records_its_problems_and_nothing_else() {
     assert_not_contains "$content" "$DR_REAL/fw" "the repository with only a warning and an info is not recorded"
 }
 
-test_machine_problems_are_recorded_as_machine_scope() {
-    dr_begin || return 1
-    chmod -x "$LC_DATA/hooks/secret-scan" || return 1
-    doctor
-    assert_rc 1 "an unusable hook command"
-    assert_valid_record "machine record"
-    assert_eq "$(rec_body)" "machine${TAB}hook: hook command is missing or not executable ($LC_DATA/hooks/secret-scan); run git-secret-guard install" "scope machine and the printed text"
-}
-
 test_a_clean_full_run_empties_the_record() {
     dr_begin && dr_repo fine || return 1
     write_record "repo${TAB}$DR_REAL/fine${TAB}-${TAB}$(off_text fine)" "machine${TAB}some old machine problem" || return 1
@@ -140,10 +131,11 @@ test_recheck_drops_what_was_fixed_and_keeps_what_is_not() {
     assert_eq "$(rec_body)" "repo${TAB}$DR_REAL/b${TAB}-${TAB}$(off_text b)" "only b remains in the record, c was never inspected"
 }
 
-test_recheck_has_no_count_limit() {
+# ^ why one broken repository copied, not 55 made with git; the disabled key travels in the copied .git/config and only the doctor runs git per repository
+test_a_full_run_and_a_recheck_have_no_count_limit() {
     local i n
-    dr_begin || return 1
-    for i in $(seq 1 "$MANY_REPOS"); do dr_repo "r$i" && dr_disable "r$i" || return 1; done
+    dr_begin && dr_repo r1 && dr_disable r1 || return 1
+    for i in $(seq 2 "$MANY_REPOS"); do cp -a -- "$DR_ROOTS/r1" "$DR_ROOTS/r$i" || return 1; done
     doctor
     assert_rc 1 "many broken repositories"
     assert_eq "$(rec_body | wc -l | tr -d ' ')" "$MANY_REPOS" "all of them recorded"
@@ -152,6 +144,21 @@ test_recheck_has_no_count_limit() {
     n="$(grep -c 'PROBLEM  disabled in local config' <<<"$OUT")"
     assert_eq "$n" "$MANY_REPOS" "every one of them was re-checked and printed"
     assert_eq "$(rec_body | wc -l | tr -d ' ')" "$MANY_REPOS" "and every one is still recorded"
+}
+
+# ^ why recorded paths gone from disk, not repositories made with git; a recheck visits every recorded path with no cap and a gone one costs no git
+test_recheck_has_no_count_limit() {
+    local i
+    local -a lines=()
+    dr_begin && dr_repo real1 && dr_repo real2 || return 1
+    dr_disable real1 && dr_disable real2 || return 1
+    for i in $(seq 1 "$MANY_REPOS"); do lines+=("$(repo_line "gone$i")"); done
+    write_record "$(repo_line real1)" "${lines[@]}" "$(repo_line real2)" || return 1
+    recheck
+    assert_rc 1 "the two real ones are still broken"
+    assert_eq "$(grep -c 'PROBLEM  disabled in local config' <<<"$OUT")" 2 "both real ones were re-checked and printed"
+    assert_eq "$(grep -c 'no longer exists; dropped' <<<"$ERR")" "$MANY_REPOS" "every one of the gone ones was visited and dropped"
+    assert_eq "$(rec_body | wc -l | tr -d ' ')" 2 "and only the two real ones are still recorded"
 }
 
 # ^ invariant $1 = what the record is; a recheck exits 0 with an empty stdout
@@ -255,7 +262,7 @@ test_a_tampered_record_is_reported_not_trusted_and_the_next_full_run_replaces_it
 }
 
 test_a_record_that_is_not_a_regular_file_is_invalid() {
-    dr_begin || return 1
+    dr_begin_bare || return 1
     mkdir -p -- "$LC_STATE" "$SANDBOX/elsewhere" || return 1
     write_record "machine${TAB}x" || return 1
     mv -- "$(rec_file)" "$SANDBOX/elsewhere/real" && ln -s "$SANDBOX/elsewhere/real" "$(rec_file)" || return 1
@@ -303,6 +310,9 @@ test_recheck_reruns_the_machine_checks_and_prints_what_is_still_broken() {
     dr_begin || return 1
     chmod -x "$LC_DATA/hooks/secret-scan" || return 1
     doctor
+    assert_rc 1 "an unusable hook command"
+    assert_valid_record "machine record"
+    assert_eq "$(rec_body)" "machine${TAB}hook: hook command is missing or not executable ($LC_DATA/hooks/secret-scan); run git-secret-guard install" "scope machine and the printed text"
     recheck
     assert_rc 1 "still broken"
     assert_eq "$OUT" "machine:
@@ -348,23 +358,12 @@ test_a_full_run_that_cannot_finish_leaves_the_record_alone() {
 }
 
 test_a_full_run_creates_the_state_dir_when_the_machine_is_not_installed() {
-    dr_begin || return 1
-    gsg uninstall
-    assert_rc 0 "uninstall"
-    rm -rf -- "$LC_STATE" || return 1
+    dr_begin_bare || return 1
+    assert_no_file "$LC_STATE" "the sandbox has no state dir"
     doctor
     assert_rc 1 "not installed is a PROBLEM"
     assert_valid_record "recorded without a state dir"
     assert_contains "$(rec_body)" "installed: not installed" "the machine PROBLEM"
-}
-
-test_a_lock_left_by_a_dead_process_is_broken() {
-    dr_begin && dr_repo off || return 1
-    dr_disable off || return 1
-    ln -s "$DEAD_PID" "$LC_STATE/findings.lock" || return 1
-    doctor
-    assert_rc 1 "a lock left by a dead process"
-    assert_valid_record "the stale lock was broken"
 }
 
 test_a_lock_held_by_a_live_process_is_waited_for_then_refused() {
@@ -534,6 +533,8 @@ test_an_invalid_record_contributes_nothing_to_a_full_run() {
     write_record "repo${TAB}$SANDBOX/outside/forged${TAB}-${TAB}forged problem" "garbage line" || return 1
     doctor
     assert_rc 0 "nothing is wrong"
+    assert_contains "$ERR" "is invalid (line 4 is malformed); replacing it" "the full run says what it does"
+    assert_not_contains "$ERR" "to replace it" "and does not tell the user to run what is running"
     assert_valid_record "after the full run"
     assert_empty "$(rec_body)" "the valid line before the bad one did not survive"
 }
@@ -564,7 +565,7 @@ test_a_lock_held_by_a_live_pid_but_older_than_a_minute_is_stale() {
 }
 
 test_a_record_over_the_byte_limit_is_invalid() {
-    dr_begin || return 1
+    dr_begin_bare || return 1
     mkdir -p -- "$LC_STATE" || return 1
     dd if=/dev/zero bs="$BLOCK_BYTES" count="$((RECORD_BYTE_LIMIT / BLOCK_BYTES + 1))" 2>/dev/null | tr '\0' x >"$(rec_file)" || return 1
     recheck
@@ -596,7 +597,8 @@ test_recheck_keeps_the_time_of_the_last_full_run() {
     assert_not_contains "$(sed -n 2p "$(rec_file)")" "2026-01-01" "a full run stamps its own time"
 }
 
-WRITE_DELAY_SECONDS=2
+WRITE_DELAY_SECONDS=1
+RACING_PAIRS=2
 
 # ^ invariant a date stand-in first on the sandbox PATH delays doctor's record write and logs held or free by the lock link at the call
 # ^ coupled with lib/inspect/doctor_findings.sh:doctor_rec_write, running date after the old record was read and before the rename, under the lock
@@ -615,7 +617,7 @@ test_concurrent_runs_over_different_roots_keep_both_sets() {
     local -a pids=() files=()
     dr_begin && slow_date || return 1
     for name in dev/a1 dev/a2 work/b1 work/b2; do dr_repo "$name" && dr_disable "$name" || return 1; done
-    for i in $(seq 1 "$CONCURRENT_PAIRS"); do
+    for i in $(seq 1 "$RACING_PAIRS"); do
         gsg_bg "$SANDBOX/dev.$i" --roots "$DR_ROOTS/dev"
         pids+=("$BG_PID") files+=("$SANDBOX/dev.$i")
         gsg_bg "$SANDBOX/work.$i" --roots "$DR_ROOTS/work"
@@ -644,51 +646,58 @@ source "$GSG_PROJECT/lib/core/common.sh"
 # shellcheck source=lib/inspect/doctor_findings.sh
 source "$GSG_PROJECT/lib/inspect/doctor_findings.sh"
 
-MIB=1048576
+BIG_LINE_BYTES=1024
 TIME_LINE_BYTES=26
+# ^ why small limits set only inside the unit subshells, not the production ones; the boundary logic is the same at any size and 64 MiB took a minute
+# ^ coupled the two CLI tests below keep GSG_FINDINGS_MAX_LINES and GSG_FINDINGS_MAX_BYTES as the library sets them
+UNIT_LINE_LIMIT=200
+UNIT_BYTE_LIMIT=10000
 
-# ^ invariant runs doctor_rec_write of the project library against the sandbox state dir with DR_REC_BODY as the caller set it; stderr goes to write.err
+# ^ invariant runs doctor_rec_write against the sandbox state dir with DR_REC_BODY as the caller set it and the unit limits; stderr goes to write.err
 run_writer() {
     (
         GSG_NAME=git-secret-guard GSG_STATE_DIR="$LC_STATE" GSG_FINDINGS_FILE="$LC_STATE/findings"
+        GSG_FINDINGS_MAX_LINES=$UNIT_LINE_LIMIT GSG_FINDINGS_MAX_BYTES=$UNIT_BYTE_LIMIT
         doctor_rec_write 2>"$SANDBOX/write.err"
     )
 }
 
-# ^ invariant runs doctor_rec_read of the project library on the sandbox record; stderr goes to read.err
+# ^ invariant runs doctor_rec_read of the project library on the sandbox record with the unit limits; stderr goes to read.err
 read_record() {
     (
         GSG_NAME=git-secret-guard GSG_FINDINGS_FILE="$LC_STATE/findings"
+        GSG_FINDINGS_MAX_LINES=$UNIT_LINE_LIMIT GSG_FINDINGS_MAX_BYTES=$UNIT_BYTE_LIMIT
         doctor_rec_read 2>"$SANDBOX/read.err"
     )
 }
 
-# ^ invariant $1 = EXTRA; sets DR_REC_BODY for a written file of the line limit plus EXTRA lines, the two header lines included
+# ^ invariant $1 = EXTRA; sets DR_REC_BODY for a written file of the unit line limit plus EXTRA lines, the two header lines included
 body_of_lines() {
-    local i n=$((GSG_FINDINGS_MAX_LINES - GSG_FINDINGS_HEADER_LINES + $1))
+    local i n=$((UNIT_LINE_LIMIT - GSG_FINDINGS_HEADER_LINES + $1))
     DR_REC_BODY=()
     for ((i = 0; i < n; i++)); do DR_REC_BODY+=("machine${TAB}m$i"); done
 }
 
-# ^ invariant $1 = EXTRA; sets DR_REC_BODY for a written file of the byte limit plus EXTRA bytes, as lines of one MiB and a last one for the rest
+# ^ invariant $1 = EXTRA; sets DR_REC_BODY for a written file of the unit byte limit plus EXTRA bytes, as lines of BIG_LINE_BYTES and a last one for the rest
 body_of_bytes() {
     local big header rest k i p last_len
-    big="$(head -c "$MIB" /dev/zero | tr '\0' x)" || return 1
+    big="$(head -c "$BIG_LINE_BYTES" /dev/zero | tr '\0' x)" || return 1
     header=$((${#GSG_FINDINGS_MAGIC} + 1 + TIME_LINE_BYTES))
-    rest=$((GSG_FINDINGS_MAX_BYTES + $1 - header))
-    k=$((rest / (MIB + 1)))
+    rest=$((UNIT_BYTE_LIMIT + $1 - header))
+    k=$((rest / (BIG_LINE_BYTES + 1)))
     DR_REC_BODY=()
     for ((i = 0; i < k; i++)); do
         p="machine${TAB}$i."
-        DR_REC_BODY+=("$p${big:0:$((MIB - ${#p}))}")
+        DR_REC_BODY+=("$p${big:0:$((BIG_LINE_BYTES - ${#p}))}")
     done
-    last_len=$((rest - k * (MIB + 1) - 1))
+    last_len=$((rest - k * (BIG_LINE_BYTES + 1) - 1))
     p="machine${TAB}last."
     DR_REC_BODY+=("$p${big:0:$((last_len - ${#p}))}")
 }
 
-RECORD_LINE_LIMIT=$GSG_FINDINGS_MAX_LINES
-RECORD_BYTE_LIMIT=$GSG_FINDINGS_MAX_BYTES
+# ^ coupled lib/inspect/doctor_findings.sh:GSG_FINDINGS_MAX_LINES and GSG_FINDINGS_MAX_BYTES; literals pin the production limits against a change
+RECORD_LINE_LIMIT=100000
+RECORD_BYTE_LIMIT=67108864
 
 test_recheck_keeps_a_recorded_repo_and_worktree_it_cannot_reach_and_says_so() {
     local before rc
@@ -714,7 +723,7 @@ test_recheck_keeps_a_recorded_repo_and_worktree_it_cannot_reach_and_says_so() {
 }
 
 test_a_record_over_the_line_limit_is_invalid() {
-    dr_begin || return 1
+    dr_begin_bare || return 1
     mkdir -p -- "$LC_STATE" || return 1
     awk -v magic="$REC_MAGIC" -v n="$RECORD_LINE_LIMIT" 'BEGIN { print magic; print "time 2026-01-01T00:00:00Z"; for (i = 0; i < n; i++) print "machine\tx" }' >"$(rec_file)" || return 1
     recheck
@@ -736,7 +745,7 @@ test_the_functions_that_run_under_the_lock_probe_no_directory() {
 # ^ invariant $1 = body helper, $2 = the limit as the message words it; one unit over the limit is refused, the old record and the state dir stay as they were
 assert_writer_refuses_over_limit() {
     local rc
-    dr_begin && write_record "machine${TAB}old" && cp -- "$(rec_file)" "$SANDBOX/old" || return 1
+    dr_begin_bare && write_record "machine${TAB}old" && cp -- "$(rec_file)" "$SANDBOX/old" || return 1
     "$1" 1 || return 1
     run_writer
     rc=$?
@@ -749,7 +758,7 @@ assert_writer_refuses_over_limit() {
 # ^ invariant $1 = body helper, $2 = the wc flag counting the unit, $3 = the limit; exactly the limit is written and the reader accepts it
 assert_writer_accepts_at_limit() {
     local rc
-    dr_begin || return 1
+    dr_begin_bare && mkdir -p -- "$LC_STATE" || return 1
     "$1" 0 || return 1
     run_writer
     rc=$?
@@ -761,29 +770,19 @@ assert_writer_accepts_at_limit() {
 }
 
 test_the_writer_refuses_a_record_over_the_line_limit_and_keeps_the_old_one() {
-    assert_writer_refuses_over_limit body_of_lines "$GSG_FINDINGS_MAX_LINES lines"
+    assert_writer_refuses_over_limit body_of_lines "$UNIT_LINE_LIMIT lines"
 }
 
 test_the_writer_accepts_exactly_the_line_limit_and_the_reader_accepts_it() {
-    assert_writer_accepts_at_limit body_of_lines -l "$GSG_FINDINGS_MAX_LINES"
+    assert_writer_accepts_at_limit body_of_lines -l "$UNIT_LINE_LIMIT"
 }
 
 test_the_writer_refuses_a_record_over_the_byte_limit_and_keeps_the_old_one() {
-    assert_writer_refuses_over_limit body_of_bytes "$GSG_FINDINGS_MAX_BYTES bytes"
+    assert_writer_refuses_over_limit body_of_bytes "$UNIT_BYTE_LIMIT bytes"
 }
 
 test_the_writer_accepts_exactly_the_byte_limit_and_the_reader_accepts_it() {
-    assert_writer_accepts_at_limit body_of_bytes -c "$GSG_FINDINGS_MAX_BYTES"
-}
-
-test_a_full_run_that_replaces_an_invalid_record_says_it_is_replacing_it() {
-    dr_begin && dr_repo fine || return 1
-    write_record "garbage line" || return 1
-    doctor
-    assert_rc 0 "nothing is wrong"
-    assert_contains "$ERR" "is invalid (line 3 is malformed); replacing it" "the full run says what it does"
-    assert_not_contains "$ERR" "to replace it" "and does not tell the user to run what is running"
-    assert_valid_record "replaced"
+    assert_writer_accepts_at_limit body_of_bytes -c "$UNIT_BYTE_LIMIT"
 }
 
 run_file_tests

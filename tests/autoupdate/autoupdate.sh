@@ -68,10 +68,40 @@ au_clone() {
     gitx clone -q "${@:2}" "$(lc_file_url "$AU_ORIGIN")" "$SANDBOX/au-extra-$1"
 }
 
+# ^ invariant AU_TEMPLATE=1 in a file makes the first au_setup build and every later one restore a fresh copy of what it built
+# ^ why a copy on disk, not shell state; each test runs in its own subshell and only files outlast it
+# ^ why the same paths, not another place; state, settings and git configs record absolute paths and SANDBOX is fixed for the file
+AU_TEMPLATE=0
+AU_TEMPLATE_ITEMS=(home xdg gitconfig fixtures au-src au-origin.git au-checkout)
+
+au_template_save() {
+    local tpl="$SANDBOX/au-template" item
+    rm -rf -- "${tpl:?}" "${tpl:?}.part" && mkdir -p -- "$tpl.part" || return 1
+    for item in "${AU_TEMPLATE_ITEMS[@]}"; do cp -a -- "$SANDBOX/$item" "$tpl.part/" || return 1; done
+    mv -- "$tpl.part" "$tpl"
+}
+
+# ^ invariant sets what the build sets; AU_SRC, AU_ORIGIN, AU_CO, the lifecycle variables and the fixture environment, no leftover of an earlier test
+au_template_restore() {
+    local tpl="$SANDBOX/au-template" item
+    lc_begin || return 1
+    rm -rf -- "$SANDBOX"/au-extra-* "$SANDBOX"/au-child.* || return 1
+    for item in "${AU_TEMPLATE_ITEMS[@]}"; do
+        rm -rf -- "${SANDBOX:?}/$item" && cp -a -- "$tpl/$item" "$SANDBOX/" || return 1
+    done
+    lc_use_fixtures
+}
+
 # ^ invariant au_setup [real] leaves version 1.0.0 installed from the checkout, auto_update=yes and the checkout recorded; origin holds v1.0.0 only
 # ^ why the state keys are set here, not by install --auto-update; these tests are about update, the flag and the units have their own file
+# ^ invariant real never takes part in the copy; its tools and its proxy are its own
 au_setup() {
     local mode="${1:-fixtures}" item
+    AU_SRC="$SANDBOX/au-src" AU_ORIGIN="$SANDBOX/au-origin.git" AU_CO="$SANDBOX/au-checkout"
+    if [ "$mode" != real ] && [ "$AU_TEMPLATE" = 1 ] && [ -d "$SANDBOX/au-template" ]; then
+        au_template_restore
+        return
+    fi
     lc_begin || return 1
     if [ "$mode" = real ]; then
         lc_seed_real_tools || return 1
@@ -79,7 +109,6 @@ au_setup() {
     else
         lc_make_fixtures && lc_use_fixtures || return 1
     fi
-    AU_SRC="$SANDBOX/au-src" AU_ORIGIN="$SANDBOX/au-origin.git" AU_CO="$SANDBOX/au-checkout"
     rm -rf -- "$AU_SRC" "$AU_ORIGIN" "$AU_CO" "$SANDBOX"/au-extra-* "$SANDBOX"/au-child.* || return 1
     gitx init -q "$AU_SRC" || return 1
     for item in bin lib hooks tools.lock VERSION; do cp -a -- "$GSG_PROJECT/$item" "$AU_SRC/" || return 1; done
@@ -89,7 +118,8 @@ au_setup() {
     gitx clone -q "$(lc_file_url "$AU_ORIGIN")" "$AU_CO" || return 1
     run_cap env -i "${LC_ENV[@]}" "${EXTRA_ENV[@]}" "$AU_CO/bin/git-secret-guard" install </dev/null
     assert_rc 0 "setup: install 1.0.0 from the checkout" || return 1
-    au_state auto_update yes && au_state source_checkout "$AU_CO"
+    au_state auto_update yes && au_state source_checkout "$AU_CO" || return 1
+    if [ "$mode" != real ] && [ "$AU_TEMPLATE" = 1 ]; then au_template_save; fi
 }
 
 # ^ invariant the setup of the skip tests; release 1.1.0 waits on origin => only the obstacle of each case keeps update from installing it

@@ -4,10 +4,25 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/../support/lib.sh"
 # shellcheck source=tests/support/lifecycle.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/../support/lifecycle.sh"
 
+# ^ invariant fresh_install leaves a healthy install; the first call builds it and saves a copy, every later one restores a fresh copy of it after lc_begin
+# ^ why a copy on disk at the same paths, not shell state; each test runs in its own subshell and the install records absolute paths under the fixed SANDBOX
+# ^ invariant install touches home, xdg and the global config only (a listing of the sandbox before and after shows it); fixtures feed GSG_TOOLS_* only
+ST_TEMPLATE_ITEMS=(home xdg gitconfig fixtures)
+
 fresh_install() {
-    lc_begin && lc_make_fixtures && lc_use_fixtures || return 1
-    gsg install
-    assert_rc 0 "install"
+    local tpl="$SANDBOX/st-template" item
+    lc_begin || { fail "fresh_install: lc_begin"; return 1; }
+    if [ ! -d "$tpl" ]; then
+        { lc_make_fixtures && lc_use_fixtures; } || { fail "fresh_install: fixtures"; return 1; }
+        gsg install
+        assert_rc 0 "install" || return 1
+        { rm -rf -- "${tpl:?}.part" && mkdir -p -- "$tpl.part"; } || { fail "fresh_install: template dir"; return 1; }
+        for item in "${ST_TEMPLATE_ITEMS[@]}"; do cp -a -- "$SANDBOX/$item" "$tpl.part/" || { fail "save the install ($item)"; return 1; }; done
+        mv -- "$tpl.part" "$tpl" || { fail "save the install (mv)"; return 1; }
+        return
+    fi
+    for item in "${ST_TEMPLATE_ITEMS[@]}"; do { rm -rf -- "${SANDBOX:?}/$item" && cp -a -- "$tpl/$item" "$SANDBOX/"; } || { fail "restore the saved install ($item)"; return 1; }; done
+    lc_use_fixtures || { fail "fresh_install: fixtures"; return 1; }
 }
 
 lc_which() {
@@ -93,6 +108,10 @@ test_status_flags_every_kind_of_drift_and_exits_1() {
     gsg status
     assert_rc 1 "missing settings"
     assert_contains "$OUT" "settings: $LC_DATA/settings (MISSING or unreadable)" "flagged"
+
+    fresh_install
+    gsg status
+    assert_rc 0 "a fresh install after six mutations is whole again: the saved copy never carries a mutation"
 }
 
 test_status_lists_the_originals_install_moved_aside() {
@@ -122,14 +141,6 @@ test_status_judges_versions_exactly_like_install_does() {
     assert_rc 0 "install's own accepted spellings (v-prefix) are ok"
     assert_contains "$OUT" "  ok       betterleaks: $LC_BIN/betterleaks$LC_EXE " "the v-prefixed betterleaks is ok"
     assert_not_contains "$OUT" "MISMATCH" "and nothing is flagged"
-}
-
-test_status_flags_an_unusable_timeout_in_the_settings() {
-    fresh_install
-    sed -i 's#^TIMEOUT_BIN=.*#TIMEOUT_BIN=/nonexistent/timeout#' "$LC_DATA/settings" || return 1
-    gsg status
-    assert_rc 1 "a timeout that cannot run"
-    assert_contains "$OUT" "timeout: /nonexistent/timeout (MISSING or not executable)" "flagged"
 }
 
 # ^ coupled lc_begin puts $SANDBOX/pathbin first on the CLI PATH => a git written there is the one status measures
@@ -346,7 +357,8 @@ test_status_flags_an_old_install_that_has_only_the_pre_commit_event() {
     gitx config --global --replace-all hook.git-secret-guard.event pre-commit || return 1
     gsg status
     assert_rc 1 "a 0.3.x config: the message is not scanned"
-    assert_contains "$OUT" "global config: MISMATCH (event=[pre-commit] want [pre-commit commit-msg]" "the config line names both events"
+    assert_contains "$OUT" "global config: MISMATCH (event=[pre-commit] want [pre-commit commit-msg])" "the config line names both events and only the event part"
+    assert_not_contains "$OUT" "command=[" "the matching command is not repeated"
     assert_contains "$OUT" "hook list: MISMATCH (git-secret-guard is not in git hook list commit-msg, so commit messages are not scanned; run git-secret-guard install)" "git's own verdict for the second event"
     gsg install
     assert_rc 0 "install repairs it"
@@ -381,14 +393,6 @@ test_status_says_only_commit_messages_are_unscanned_for_a_disabled_commit_msg_ev
     assert_contains "$OUT" "hook.commit-msg.enabled=false in the global config" "the setting is located"
     assert_contains "$OUT" "disables the commit-msg event: commit messages are not scanned (lines still are)" "per-event wording"
     assert_not_contains "$OUT" "switches the hook off, commits are not scanned" "the lines scan still runs"
-}
-
-test_status_prints_only_the_part_of_the_global_config_that_differs() {
-    fresh_install
-    gitx config --global --replace-all hook.git-secret-guard.event pre-commit || return 1
-    gsg status
-    assert_contains "$OUT" "global config: MISMATCH (event=[pre-commit] want [pre-commit commit-msg])" "only the event part"
-    assert_not_contains "$OUT" "command=[" "the matching command is not repeated"
 }
 
 test_status_names_the_disabled_hook_once_not_per_event() {

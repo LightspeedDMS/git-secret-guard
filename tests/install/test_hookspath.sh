@@ -8,9 +8,9 @@ seed_old_hooks() {
     mkdir -p -- "$1" && printf '#!/bin/sh\necho old pre-commit\n' >"$1/pre-commit" && chmod 755 "$1/pre-commit"
 }
 
-# ^ why find -exec sha256sum, not xargs -d; BSD xargs (macOS, gnubin first on PATH only for coreutils) has no -d and its usage text was what got hashed (#48)
+# ^ why find -exec sha256sum, not the xargs delimiter option; BSD xargs (macOS) lacks it and its usage text was what got hashed (#48)
 # ^ invariant prints one digest of every file and symlink target (sha256sum follows links) under $1; rc 1 and no output when find or sha256sum fails
-# ^ coupled tests/install/test_install.sh keeps its own xargs copy until #48 lands there, an open PR changes the file
+# ^ coupled tests/install/test_install.sh keeps an identical copy and the same test of it
 tree_digest() {
     local sums
     sums="$(cd -- "$1" && find . \( -type f -o -type l \) -exec sha256sum {} +)" || return 1

@@ -2,7 +2,6 @@
 # shellcheck shell=bash disable=SC2016,SC2034
 # ^ order sourced after tests/support/lib.sh and tests/support/lifecycle.sh by the update tests; real git, a local bare origin, real tags
 
-DEAD_PROXY=(HTTPS_PROXY=http://127.0.0.1:9 HTTP_PROXY=http://127.0.0.1:9 https_proxy=http://127.0.0.1:9 http_proxy=http://127.0.0.1:9)
 HOLDER_SECONDS=300
 # ^ coupled lib/autoupdate/autoupdate.sh cuts the detail of the record at this many characters, the cut mark included
 DETAIL_MAX=160
@@ -92,23 +91,17 @@ au_template_restore() {
     lc_use_fixtures
 }
 
-# ^ invariant au_setup [real] leaves version 1.0.0 installed from the checkout, auto_update=yes and the checkout recorded; origin holds v1.0.0 only
+# ^ invariant au_setup leaves version 1.0.0 installed from the checkout, auto_update=yes and the checkout recorded; origin holds v1.0.0 only
 # ^ why the state keys are set here, not by install --auto-update; these tests are about update, the flag and the units have their own file
-# ^ invariant real never takes part in the copy; its tools and its proxy are its own
 au_setup() {
-    local mode="${1:-fixtures}" item
+    local item
     AU_SRC="$SANDBOX/au-src" AU_ORIGIN="$SANDBOX/au-origin.git" AU_CO="$SANDBOX/au-checkout"
-    if [ "$mode" != real ] && [ "$AU_TEMPLATE" = 1 ] && [ -d "$SANDBOX/au-template" ]; then
+    if [ "$AU_TEMPLATE" = 1 ] && [ -d "$SANDBOX/au-template" ]; then
         au_template_restore
         return
     fi
     lc_begin || return 1
-    if [ "$mode" = real ]; then
-        lc_seed_real_tools || return 1
-        set_env "${DEAD_PROXY[@]}"
-    else
-        lc_make_fixtures && lc_use_fixtures || return 1
-    fi
+    lc_make_fixtures && lc_use_fixtures || return 1
     rm -rf -- "$AU_SRC" "$AU_ORIGIN" "$AU_CO" "$SANDBOX"/au-extra-* "$SANDBOX"/au-child.* || return 1
     gitx init -q "$AU_SRC" || return 1
     for item in bin lib hooks tools.lock VERSION; do cp -a -- "$GSG_PROJECT/$item" "$AU_SRC/" || return 1; done
@@ -119,7 +112,7 @@ au_setup() {
     run_cap env -i "${LC_ENV[@]}" "${EXTRA_ENV[@]}" "$AU_CO/bin/git-secret-guard" install </dev/null
     assert_rc 0 "setup: install 1.0.0 from the checkout" || return 1
     au_state auto_update yes && au_state source_checkout "$AU_CO" || return 1
-    if [ "$mode" != real ] && [ "$AU_TEMPLATE" = 1 ]; then au_template_save; fi
+    if [ "$AU_TEMPLATE" = 1 ]; then au_template_save; fi
 }
 
 # ^ invariant the setup of the skip tests; release 1.1.0 waits on origin => only the obstacle of each case keeps update from installing it
@@ -131,10 +124,12 @@ au_setup_follower_at_release() {
     gitx -C "$AU_CO" fetch -q origin && gitx -C "$AU_CO" merge -q --ff-only 'refs/tags/v1.1.0^{commit}'
 }
 
-# ^ invariant prints every installed file with its hash and the state file after them; equal output = the installed copy and the state are unchanged
+# ^ invariant prints the share files with hashes, the state, the global git config and the tool files with hashes; equal output = nothing changed
 au_share_state() {
     (cd -- "$LC_DATA" && find . -type f -exec sha256sum {} + | LC_ALL=C sort) || return 1
-    cat -- "$LC_STATE/state"
+    cat -- "$LC_STATE/state" || return 1
+    cat -- "$SANDBOX/gitconfig" || return 1
+    (cd -- "$LC_BIN" && find . -type f -exec sha256sum {} + | LC_ALL=C sort)
 }
 
 # ^ invariant one hash over au_share_state and the refs, HEAD and status of checkout $1; equal hashes = nothing of these changed

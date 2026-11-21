@@ -112,10 +112,11 @@ test_a_detection_that_is_always_true_still_logs_one_level_only() {
 
 test_the_logged_child_marker_does_not_reach_the_child_install() {
     au_setup || return 1
-    au_broken_installer "env >\"$SANDBOX/au-child.env\"; exit 0" && au_release 1.1.0 && au_publish || return 1
+    # ^ why one variable, not an environment dump; a probe records only what it needs, a dump once printed real keys (CLAUDE.md)
+    au_broken_installer "printf '%s\\n' \"\${GSG_UPDATE_LOGGED_CHILD-unset}\" >\"$SANDBOX/au-child.marker\"; exit 0" && au_release 1.1.0 && au_publish || return 1
     ul_logged
-    assert_file "$SANDBOX/au-child.env" "the stand-in installer ran and dumped its environment"
-    assert_not_contains "$(<"$SANDBOX/au-child.env")" "GSG_UPDATE_LOGGED_CHILD" "the marker is gone before the install starts"
+    assert_file "$SANDBOX/au-child.marker" "the stand-in installer ran and wrote the state of the marker"
+    assert_eq "$(<"$SANDBOX/au-child.marker")" unset "the marker is gone before the install starts"
 }
 
 # ^ invariant any failure of the detection counts as not the log, the behaviour of a run without the stamping

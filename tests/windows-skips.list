@@ -101,3 +101,8 @@ test_hook_signals::test_ctrl_c_during_real_diff_tree_output_prints_no_extraction
 test_autoupdate::test_the_state_dir_made_for_the_lock_is_private | NTFS ignores chmod, so modes 600 and 700 cannot be checked
 test_autoupdate::test_the_update_record_is_private | NTFS ignores chmod, so modes 600 and 700 cannot be checked
 test_hook_signals::test_the_supervisor_polls_with_a_foreground_sleep_never_a_blocking_wait | Git for Windows has no pgrep -P to see the supervisor's sleep child
+test_update_log::test_a_logged_update_stopped_by_term_ends_cleanly_with_143 | no process groups on Windows; a signal cannot be sent to the group of one run
+test_update_log::test_a_logged_update_stopped_by_int_ends_cleanly_with_130 | no process groups on Windows; a signal cannot be sent to the group of one run
+test_update_log::test_a_logged_update_stopped_by_hup_ends_cleanly_with_129 | no process groups on Windows; a signal cannot be sent to the group of one run
+test_update_log::test_a_log_over_the_bound_is_rotated_to_one_previous_file_and_a_smaller_one_is_appended_to | Windows rotates in the wrapper (cmd), tested in test_autoupdate_schtasks
+test_update_log::test_a_rotation_that_cannot_happen_is_said_and_the_run_goes_on | Windows rotates in the wrapper (cmd), tested in test_autoupdate_schtasks

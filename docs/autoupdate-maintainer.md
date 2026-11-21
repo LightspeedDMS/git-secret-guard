@@ -97,6 +97,53 @@ Behaviour: [Auto-update](install.md#auto-update---auto-update-and-update). Inter
   holder makes them) and a temp record older than a minute; `uninstall_update_record`, which also runs under the lock,
   removes the record, every `update-tmp.??????` file and every `update-work.??????` that is a real directory (never through
   a link), so the state dir's `rmdir` succeeds (`test_uninstall_removes_the_update_units_the_record_and_the_state_dir`).
+- **The update log** (macOS and Windows; Linux writes the journal and never reaches this code). The log is the job's own stdout and stderr on both
+  platforms (launchd `StandardOutPath` and `StandardErrorPath`, the Windows wrapper's `>> update.log 2>&1`), so `update` itself stamps it: no plist
+  change, no reload, and an existing macOS install is stamped from the first run of the new version. `autoupdate_run` asks `autoupdate_log_target`
+  right after `paths_init`: true only when **both** stdout and stderr are the file `GSG_UPDATE_LOG` (`[ /dev/stdout -ef "$GSG_UPDATE_LOG" ]` and the
+  same for stderr), so merging stderr into the stamped stream never moves an error line where it did not go before. A pipe (the journal), a
+  terminal or another file is unchanged byte for byte (`test_a_run_whose_output_is_not_the_update_log_is_unchanged`).
+  - **The shape** (`autoupdate_run_logged`): the parent runs `"$BASH" "$GSG_ROOT/bin/$GSG_NAME" update 2>&1 | autoupdate_stamp "$from"` and returns
+    `${PIPESTATUS[0]}`, the child's status. The child is **a fresh bash, not a subshell**: the lock records `$$` and `autoupdate_is_ancestor` lets the
+    child install in only when the lock holder is its parent or grandparent; in a `( ... ) |` subshell `$$` would be the parent's pid and the child
+    install would be locked out (`test_a_logged_update_that_installs_stamps_the_installer_output_and_ends_with_the_result` installs through it). The
+    fresh bash's stdout is the pipe, so `autoupdate_log_target` is false there and it runs the update as always: no recursion, no flag. On Windows
+    the parent already runs from the private copy (`GSG_UPDATE_COPY` is inherited), so the child skips the re-exec and nothing pins the share.
+  - **`autoupdate_stamp`** prints one start line, `<UTC time> git-secret-guard: update: run started, <version> is installed` (`nothing` for an empty
+    version), then every input line behind its time (`YYYY-MM-DDTHH:MM:SSZ`, the form of the record's `checked_at`, taken with `printf -v` and no fork per line);
+    a last line without a newline is kept. It ignores HUP, INT and TERM first and always reads to the end, a failed write ignored: the run feeding it must
+    never get SIGPIPE and its last lines must not be lost (`test_the_stamp_filter_drains_its_input_when_it_cannot_write`). No here-string, no process substitution.
+  - **Signals.** Bash runs a trap only after its foreground command returns, and GNU `timeout` (every step runs under it) gives its step a process group of its
+    own. So a signal to the process group (Ctrl-C, `timeout` of an outer caller) reaches the parent and the child but not the running step, and is acted on when
+    that step returns, as one during the child install always was: the child's traps remove the lock and the work dir, and the parent's trap
+    (`autoupdate_stop`) prints one stamped line `<UTC time> git-secret-guard: update: stopped by TERM (exit 143)` to the log and exits with the signal's code (129, 130,
+    143) after the child returned. A signal to the parent's pid alone lets the run finish, with its record and its result line, and only then exits the parent the
+    same way. How launchd stops a job is not verified here and nothing relies on it. The filter ignores the three signals and drains to the end
+    (`test_a_logged_update_stopped_by_term_ends_cleanly_with_143`, `..._int_..._130`, `..._hup_..._129`, each also asserting the stopped line, so none of
+    them passes without the parent's trap; skipped on Windows, which has no process groups).
+  - **The bound.** `GSG_UPDATE_LOG_MAX` (1 MiB). On macOS the parent rotates before the run (`autoupdate_log_rotate`): a larger log is moved to `update.log.1`
+    (an older one replaced; a directory there is refused, `mv` would move the log into it) and `exec >>"$GSG_UPDATE_LOG" 2>&1` reopens the streams, because launchd
+    opened the file for append and its descriptor follows the rename; the reopened stdout starts the new log. A failure prints one line and the run goes on, the
+    outcome is never changed (`test_a_log_over_the_bound_is_rotated_to_one_previous_file_and_a_smaller_one_is_appended_to`,
+    `test_a_rotation_that_cannot_happen_is_said_and_the_run_goes_on`). On Windows the wrapper holds the log open during the run and Windows refuses to rename an open
+    file, so `schtasks_cmd_text` rotates in `cmd` **after** the run, when the log is closed (macOS rotates at the start of a run, in bash). The wrapper is the old one
+    with the update line changed from `>` to `>>` (exactly one byte longer) and everything new after it: `set "GSG_RC=%errorlevel%"`, then
+    `if exist "<log>" for %%F in ("<log>") do if %%~zF GTR <max> move /y "<log>" "<log>.1" >nul 2>&1` (`if exist` first: for a missing file `%%~zF` is empty and the
+    `if` is a syntax error), then `exit /b %GSG_RC%`, so the wrapper exits with update's status whether the log was rotated or not. **Why this layout:** an install made
+    earlier has the old wrapper, and the first auto-update to this version runs it; its child install rewrites `update-task.cmd` (`schtasks_refresh`, a rename over
+    the file) while `cmd` still reads it, and `cmd` reopens a batch file by name and seeks to the byte offset it saved after the update line. With every header line
+    and the update line in place, that offset lands on the last byte of the new update line (a bare newline) and `cmd` goes on with the `set` line: the transition
+    run neither runs update twice nor loses its status. A line placed before the update line would put the offset inside new text. The one-byte argument assumes the header is unchanged: a wrapper variable (`XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CONFIG_HOME`, `GIT_CONFIG_GLOBAL`) set at the new install but not at the old one adds a header line and shifts the offset for that one transition run (rare).
+    `test_an_old_wrapper_resumes_on_the_final_newline_of_the_new_update_line` pins the offset on Linux (the old text is built from the new by the inverse change),
+    `test_a_wrapper_rewritten_while_cmd_runs_it_runs_update_once_and_keeps_its_status` runs it through real `cmd` and
+    `test_the_new_wrapper_exits_with_the_status_of_update_with_and_without_a_rotation` pins the status; the `set` variable is `GSG_RC`, which nothing else uses.
+    After the refresh the next hourly run appends and rotates (`test_a_refresh_rewrites_the_wrapper_an_earlier_version_wrote`,
+    `test_a_plain_install_rewrites_a_wrapper_that_still_truncates_the_log`). **Hazard, no code for it:** a directory at `update.log.1` on Windows defeats the rotation: `cmd`'s `move` would
+    put the log inside the directory instead of replacing `update.log.1`. Remove the directory. The macOS side refuses it and says so.
+    `uninstall` removes `update.log.1` with the log (`uninstall_update_record`, `uninstall_agent update`; a regular file only).
+  - **Lines that can be unstamped:** what runs before the run reaches the filter. The rotation's own failure line, a bash that cannot start, the failure of
+    `winupdate_failed` before its re-exec (no private copy could be made) and the `paths_init` failures. The text of those is unchanged on purpose. The
+    `stopped by` line of `autoupdate_stop` is stamped by the parent itself, as the start line is stamped by the filter.
 - **Install side.** `install_prepare_update pre` runs before `gitup_offers` (a refusal after an accepted git upgrade would
   not be "before any change") and again without `pre` after `install_prepare_timer`, with the final git directory. The
   manager check (`install_update_manager_reachable`, a read-only `systemctl --user show --property=Version`) comes last in

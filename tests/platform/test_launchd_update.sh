@@ -99,6 +99,7 @@ test_both_flags_install_two_separate_agents() {
 test_uninstall_boots_out_and_removes_the_update_agent_its_log_and_the_record() {
     lau_install --auto-update || return 1
     printf 'update output\n' >"$LC_STATE/update.log" || return 1
+    printf 'an earlier log\n' >"$LC_STATE/update.log.1" || return 1
     printf 'result=current\n' >"$LC_STATE/update" || return 1
     : >"$SANDBOX/launchctl.log"
     gsg uninstall
@@ -106,6 +107,7 @@ test_uninstall_boots_out_and_removes_the_update_agent_its_log_and_the_record() {
     assert_eq "$(launchctl_log)" "print $(upd_target)"$'\n'"bootout $(upd_target)" "the update agent is booted out"
     assert_no_file "$(upd_plist)" "the plist is removed"
     assert_no_file "$LC_STATE/update.log" "and the log"
+    assert_no_file "$LC_STATE/update.log.1" "and the one previous log the rotation keeps"
     assert_no_file "$LC_STATE/update" "and the update record"
     assert_no_file "$LC_STATE/state" "and the state"
     assert_no_file "$LC_DATA" "and the share dir"

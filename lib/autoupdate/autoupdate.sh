@@ -37,6 +37,9 @@ GSG_UPDATE_DETAIL_MAX=159
 GSG_UPDATE_EXIT_HUP=129
 GSG_UPDATE_EXIT_INT=130
 GSG_UPDATE_EXIT_TERM=143
+# ^ invariant the bytes the update log may hold; a larger one becomes update.log.1, at the start of a run on macOS (here) and after it on Windows (schtasks.sh)
+# ^ coupled lib/platform/schtasks.sh writes this number into the wrapper's rotation line; tests/autoupdate/test_update_log.sh:UL_LOG_MAX
+GSG_UPDATE_LOG_MAX=1048576
 
 AU_LOCK_HELD=0
 AU_ROLE="" AU_RESULT="" AU_REASON="" AU_DETAIL="" AU_FROM="" AU_TO="" AU_WORK=""
@@ -587,12 +590,97 @@ autoupdate_finish() {
     return "$rc"
 }
 
+# ^ invariant rc 0 = stdout and stderr of this process are both the file GSG_UPDATE_LOG, the way launchd and the Windows wrapper start update
+# ^ why both, not stdout alone; merging stderr into the stamped stream must not move an error line to a place it did not go before
+# ^ external a journal, a pipe or a terminal is not the log; Linux logs to the journal and never reaches the stamping
+autoupdate_log_target() {
+    [ -n "${GSG_UPDATE_LOG:-}" ] && [ /dev/stdout -ef "$GSG_UPDATE_LOG" ] && [ /dev/stderr -ef "$GSG_UPDATE_LOG" ]
+}
+
+# ^ invariant autoupdate_stamp FROM copies stdin to stdout, each line behind a UTC stamp, after one line saying the run started with version FROM installed
+# ^ why it drains to the end, not stops at a failed write; the run feeding it must never get SIGPIPE and its last lines must not be lost; it returns 0
+# ^ security HUP INT and TERM are ignored first => a signal sent to the group ends the run, the filter keeps writing its last lines
+autoupdate_stamp() {
+    local line ts
+    trap '' HUP INT TERM
+    TZ=UTC0 printf -v ts '%(%Y-%m-%dT%H:%M:%SZ)T' -1
+    printf '%s %s: update: run started, %s is installed\n' "$ts" "$GSG_NAME" "${1:-nothing}" 2>/dev/null || :
+    # ^ invariant ends at the end of the input; a last line without a newline is kept
+    while IFS= read -r line || [ -n "$line" ]; do
+        TZ=UTC0 printf -v ts '%(%Y-%m-%dT%H:%M:%SZ)T' -1
+        printf '%s %s\n' "$ts" "$line" 2>/dev/null || :
+    done
+    return 0
+}
+
+# ^ invariant rc 0 = the log is at most GSG_UPDATE_LOG_MAX bytes or became update.log.1 (an older one replaced); rc 1 = said on stderr, the run goes on
+# ^ why the exec, not a write by path; launchd opened the log for append and its descriptor follows the renamed file, a reopened stdout starts the new log
+# ^ external a failed exec redirection returns 1 in bash's own mode and the shell goes on with its streams (probed); Windows rotates in the wrapper
+autoupdate_log_rotate() {
+    local size
+    size="$(wc -c <"$GSG_UPDATE_LOG")" || {
+        printf '%s: update: cannot read the size of %s\n' "$GSG_NAME" "$GSG_UPDATE_LOG" >&2
+        return 1
+    }
+    size="${size//[[:space:]]/}"
+    if [[ ! $size =~ ^[0-9]{1,15}$ ]]; then
+        printf '%s: update: the size of %s is not a number: %s\n' "$GSG_NAME" "$GSG_UPDATE_LOG" "$size" >&2
+        return 1
+    fi
+    if [ "$size" -le "$GSG_UPDATE_LOG_MAX" ]; then return 0; fi
+    # ^ hazard mv onto a directory moves the file into it and exits 0; a directory at update.log.1 is refused first
+    if [ -d "$GSG_UPDATE_LOG.1" ]; then
+        printf '%s: update: cannot move %s to %s.1, a directory is there\n' "$GSG_NAME" "$GSG_UPDATE_LOG" "$GSG_UPDATE_LOG" >&2
+        return 1
+    fi
+    mv -f -- "$GSG_UPDATE_LOG" "$GSG_UPDATE_LOG.1" || {
+        printf '%s: update: cannot move %s to %s.1\n' "$GSG_NAME" "$GSG_UPDATE_LOG" "$GSG_UPDATE_LOG" >&2
+        return 1
+    }
+    exec >>"$GSG_UPDATE_LOG" 2>&1 || {
+        printf '%s: update: cannot reopen %s\n' "$GSG_NAME" "$GSG_UPDATE_LOG" >&2
+        return 1
+    }
+}
+
+# ^ invariant autoupdate_stop SIGNAL CODE ends the parent of a logged run; one stamped line says who stopped it; the log never ends on the start line
+# ^ invariant a failed write is ignored and the exit is never skipped; further signals are ignored first, as in autoupdate_stamp
+autoupdate_stop() {
+    local ts
+    trap '' HUP INT TERM
+    TZ=UTC0 printf -v ts '%(%Y-%m-%dT%H:%M:%SZ)T' -1
+    printf '%s %s: update: stopped by %s (exit %s)\n' "$ts" "$GSG_NAME" "$1" "$2" 2>/dev/null || :
+    exit "$2"
+}
+
+# ^ invariant the parent of a logged run; update runs in a fresh bash whose output is a pipe into autoupdate_stamp, rc = the child's status
+# ^ why a fresh bash, not a subshell; the lock names $$ and autoupdate_is_ancestor lets the child install in only for its parent or grandparent
+# ^ coupled the child's stdout is the pipe => autoupdate_log_target is false there; it runs the update as it always did, with no flag and no recursion
+autoupdate_run_logged() {
+    local from rc=0
+    autoupdate_installed_version
+    from="$REPLY"
+    # ^ invariant bash runs a trap after its foreground child returns => the exit with the signal's code follows the child's own cleanup
+    trap 'autoupdate_stop HUP "$GSG_UPDATE_EXIT_HUP"' HUP
+    trap 'autoupdate_stop INT "$GSG_UPDATE_EXIT_INT"' INT
+    trap 'autoupdate_stop TERM "$GSG_UPDATE_EXIT_TERM"' TERM
+    # ^ invariant a failed rotation is said by the function and never changes the run; the log just stays long
+    if ! tools_is_windows; then autoupdate_log_rotate || :; fi
+    "$BASH" "$GSG_ROOT/bin/$GSG_NAME" update 2>&1 | autoupdate_stamp "$from"
+    rc="${PIPESTATUS[0]}"
+    return "$rc"
+}
+
 # ^ invariant the entry point of "git-secret-guard update"; with auto_update not yes it prints one line, takes no lock and writes nothing
 # ^ invariant a lock held by another run is a skip (locked) with the record written; the traps release the lock and the work dir on every exit
 # ^ hazard bash runs a trap only after its foreground child returns => a signal during the child install is acted on when the install ends or times out
 autoupdate_run() {
     local rc=0
     paths_init || return 1
+    if autoupdate_log_target; then
+        autoupdate_run_logged
+        return
+    fi
     lifecycle_require_git || return 1
     state_read || return 1
     if [ "$ST_EXISTS" -ne 1 ] || [ "$ST_AUTO_UPDATE" != yes ]; then

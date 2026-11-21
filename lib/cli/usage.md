@@ -22,7 +22,9 @@ commands:
         that runs git-secret-guard update: a systemd user timer of its own on Linux (five minutes after
         boot, then every hour; output in the journal), a LaunchAgent of its own on macOS (every hour;
         output in update.log in the state directory), a Task Scheduler task on Windows (every hour while
-        you are logged on; output in update.log of the state directory). It follows the git checkout
+        you are logged on; output in update.log of the state directory). On both, update.log keeps the
+        runs, each line stamped with its UTC time, and one earlier file (update.log.1) once it passes
+        1 MiB. It follows the git checkout
         install was run from; every install run from a checkout records it, and a later plain install
         keeps auto-update on. On Linux the timer runs only while you have a session unless linger is on
         (install prints the loginctl enable-linger command and does not run it). Refused before any

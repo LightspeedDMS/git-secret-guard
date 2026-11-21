@@ -7,14 +7,13 @@ Behaviour: [Auto-update](install.md#auto-update---auto-update-and-update). Inter
 
 - **Every doubtful case is a skip, never a guess.** A skip sets the outcome and returns before anything is changed; exit 0 is
   for `current`, `updated` and `skipped`, 1 for `failed` (`autoupdate_finish`). The skip tests compare the share files, the
-  state file and the checkout's refs, `HEAD` and status before and after, and each ends in a control run that installs once
-  the obstacle is gone (`test_a_checkout_in_a_doubtful_shape_is_skipped_and_nothing_changes`,
-  `test_a_doubtful_origin_or_history_is_skipped_and_nothing_changes`,
-  `test_a_held_lock_or_a_bad_installed_version_is_skipped_and_nothing_changes`). The owner's checks keep their order, shallow,
+  state file and the checkout's refs, `HEAD` and status before and after. One test runs every group in turn, each removing its
+  obstacle again, and ends in one control run that installs once every obstacle is gone
+  (`test_every_doubtful_case_is_skipped_and_nothing_changes`). The owner's checks keep their order, shallow,
   no origin, not on `main`, dirty (`autoupdate_owner_checks`). `bad-version` for the installed version is judged in
   `autoupdate_prepare`, before the fetch, so that skip leaves the refs alone too.
 - **The off check comes before the lock.** `autoupdate_run` reads the state, and with `auto_update` not `yes` prints the one
-  line and returns: no lock, no record (`test_update_does_nothing_while_auto_update_is_off`). With the lock first, a held lock
+  line and returns: no lock, no record (the off group of `test_every_doubtful_case_is_skipped_and_nothing_changes`). With the lock first, a held lock
   plus `auto_update=no` would write a `locked` record. Under the lock the state is read again (`autoupdate_cycle`), so an
   install that finished a moment ago is seen.
 - **The role is a pure function of the two paths** (`autoupdate_role`: `[ -O co ] && [ -O co/.git ]`; rc 1 when `.git` is no

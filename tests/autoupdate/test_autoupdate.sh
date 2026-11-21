@@ -8,6 +8,7 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/../support/lifecycle.sh"
 
 # shellcheck source=tests/autoupdate/autoupdate.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/autoupdate.sh"
+AU_TEMPLATE=1
 
 test_the_role_is_a_pure_function_of_the_two_paths() {
     local base="$SANDBOX/role"
@@ -205,8 +206,11 @@ test_a_tag_with_an_oversized_version_part_is_ignored_and_a_valid_newer_tag_insta
     assert_eq "$(<"$LC_DATA/VERSION")" 1.2.0 "1.2.0 is installed"
 }
 
-test_a_checkout_in_a_doubtful_shape_is_skipped_and_nothing_changes() {
-    au_setup_with_release || return 1
+# ^ invariant an au_case_* function runs one group of skip cases on the au_setup_with_release setup and removes its obstacles before it returns
+# ^ why the groups in one test, not one test each; a setup and a control install cost about 250 programs each
+# ^ invariant a group records the checkout of the setup first; the group before it leaves another one recorded
+au_case_doubtful_shape() {
+    au_state source_checkout "$AU_CO" || return 1
     gitx -C "$AU_CO" checkout -q -b side || return 1
     au_skip_case not-on-main "$AU_CO"
     gitx -C "$AU_CO" checkout -q main && gitx -C "$AU_CO" branch -q -D side || return 1
@@ -224,12 +228,11 @@ test_a_checkout_in_a_doubtful_shape_is_skipped_and_nothing_changes() {
     au_skip_case not-a-plain-checkout "$SANDBOX/au-extra-worktree"
     assert_contains "$(rec detail)" ".git is not a directory or no repository" "the detail names both causes"
     gitx -C "$AU_CO" worktree remove --force "$SANDBOX/au-extra-worktree" && gitx -C "$AU_CO" branch -q -D wt || return 1
-    au_control
 }
 
-test_a_doubtful_origin_or_history_is_skipped_and_nothing_changes() {
+au_case_doubtful_origin() {
     local url gone detail
-    au_setup_with_release || return 1
+    au_state source_checkout "$AU_CO" || return 1
     gitx -C "$AU_CO" remote rename origin elsewhere || return 1
     au_skip_case no-origin "$AU_CO"
     gitx -C "$AU_CO" remote rename elsewhere origin || return 1
@@ -248,7 +251,6 @@ test_a_doubtful_origin_or_history_is_skipped_and_nothing_changes() {
     gitx -C "$SANDBOX/au-extra-ahead" reset -q --hard v1.0.0 || return 1
     printf 'local\n' >"$SANDBOX/au-extra-ahead/local.txt" && au_commit "$SANDBOX/au-extra-ahead" "a local commit the tag does not contain" || return 1
     au_skip_case ahead-of-tag "$SANDBOX/au-extra-ahead"
-    au_control
 }
 
 # ^ invariant the locked case against live process $1; the caller stops this process whatever the case returns
@@ -261,9 +263,9 @@ au_locked_case() {
     assert_eq "$(readlink -- "$LC_STATE/update.lock")" "$holder" "locked: the other run's lock is not ours to remove"
 }
 
-test_a_held_lock_or_a_bad_installed_version_is_skipped_and_nothing_changes() {
+au_case_held_lock_or_bad_version() {
     local holder
-    au_setup_with_release || return 1
+    au_state source_checkout "$AU_CO" || return 1
     au_state version 1.x.0 || return 1
     au_skip_case bad-version "$AU_CO"
     au_state version 1.0.0 || return 1
@@ -273,13 +275,12 @@ test_a_held_lock_or_a_bad_installed_version_is_skipped_and_nothing_changes() {
     au_locked_case "$holder"
     stop_holder "$holder"
     rm -f -- "$LC_STATE/update.lock" || return 1
-    au_control
 }
 
 # ^ hazard ln -s PID DIR made DIR/PID and let the run in, a second run did the same => two runs, both skipped
-test_a_directory_at_the_update_lock_path_is_skipped_as_locked_and_left_empty() {
+au_case_directory_at_the_lock_path() {
     local run
-    au_setup_with_release || return 1
+    au_state source_checkout "$AU_CO" || return 1
     mkdir -- "$LC_STATE/update.lock" || return 1
     for run in first second; do
         au_run_unchanged "dir lock, $run run" "$AU_CO" 0
@@ -289,17 +290,27 @@ test_a_directory_at_the_update_lock_path_is_skipped_as_locked_and_left_empty() {
         assert_empty "$(ls -A -- "$LC_STATE/update.lock")" "dir lock, $run run: nothing was made inside"
     done
     rmdir -- "$LC_STATE/update.lock" || return 1
-    au_control
 }
 
-test_update_does_nothing_while_auto_update_is_off() {
-    au_setup_with_release || return 1
+au_case_auto_update_off() {
+    au_state source_checkout "$AU_CO" || return 1
     au_state auto_update no || return 1
     au_run_unchanged "auto-update off" "$AU_CO" 0
     assert_contains "$OUT" "auto-update is off" "says it is off"
     assert_no_file "$LC_STATE/update" "auto-update off: no record is written"
     assert_no_file "$LC_STATE/update.lock" "auto-update off: no lock is left"
     au_state auto_update yes || return 1
+}
+
+# ^ invariant every skip group in turn and one installing update at the end; it proves each obstacle was the only thing in the way
+# ^ why a failed assert, not a return, ends no group; the next group still runs and only a broken step stops the test
+test_every_doubtful_case_is_skipped_and_nothing_changes() {
+    au_setup_with_release || return 1
+    au_case_doubtful_shape || return 1
+    au_case_doubtful_origin || return 1
+    au_case_held_lock_or_bad_version || return 1
+    au_case_directory_at_the_lock_path || return 1
+    au_case_auto_update_off || return 1
     au_control
 }
 
@@ -513,13 +524,44 @@ EOF
     assert_record updated "" "control: updated"
 }
 
+# ^ invariant au_release_stream PREFIX COUNT adds PREFIX.1 to PREFIX.COUNT to main of AU_SRC, a commit with its own VERSION and an annotated tag each
+# ^ why one git fast-import, not au_release in a loop; each release is 4 git calls and the test needs only the tags and their VERSION files
+# ^ hazard the refs move, the work tree and the index of AU_SRC stay behind; the test publishes refs only
+au_release_stream() {
+    local prefix="$1" count="$2" i v msg stream="$SANDBOX/au-fast-import" when who='Test User <test@example.invalid>'
+    : >"$stream" || return 1
+    for ((i = 1; i <= count; i++)); do
+        v="$prefix.$i" when="$((1700000000 + i)) +0000"
+        msg="release $v"
+        {
+            printf 'commit refs/heads/main\nmark :%s\ncommitter %s %s\ndata %s\n%s\n' "$i" "$who" "$when" "${#msg}" "$msg"
+            if [ "$i" -eq 1 ]; then printf 'from refs/heads/main^0\n'; fi
+            printf 'M 100644 inline VERSION\ndata %s\n%s\n\n' "$((${#v} + 1))" "$v"
+            printf 'tag v%s\nfrom :%s\ntagger %s %s\ndata %s\nv%s\n' "$v" "$i" "$who" "$when" "$((${#v} + 2))" "$v"
+        } >>"$stream" || return 1
+    done
+    gitx -C "$AU_SRC" fast-import --quiet <"$stream"
+}
+
+# ^ invariant au_assert_release_stream PREFIX COUNT = COUNT annotated tags over commits whose VERSION is the tag's version, read with two git calls
+au_assert_release_stream() {
+    local prefix="$1" count="$2" refs shapes want got i
+    refs="$(gitx -C "$AU_SRC" for-each-ref --sort=creatordate --format='%(refname:strip=2) %(objecttype) %(*objecttype) %(*objectname)' "refs/tags/v$prefix.[1-9]*")" || return 1
+    shapes="$(awk '{ print $2 " " $3 }' <<<"$refs" | sort -u)"
+    assert_eq "$shapes" "tag commit" "every stream tag is annotated and points at a commit"
+    assert_eq "$(wc -l <<<"$refs" | tr -d ' ')" "$count" "the stream made $count tags"
+    want="$(for ((i = 1; i <= count; i++)); do printf '%s.%s\n' "$prefix" "$i"; done)"
+    got="$(awk '{ print $4 ":VERSION" }' <<<"$refs" | gitx -C "$AU_SRC" cat-file --batch | grep -v -e ' blob ' -e '^$')" || return 1
+    assert_eq "$got" "$want" "each tagged commit holds the VERSION of its tag, in order"
+    assert_eq "$(awk '{ print $1 }' <<<"$refs")" "v${want//$'\n'/$'\nv'}" "and the tags are named for those versions"
+}
+
 # ^ invariant EXTRA_RELEASES more releases on origin => a selection reading one tag per git call would show in the count; two cat-file calls read them all
 test_tag_selection_costs_a_constant_number_of_git_calls() {
-    local i calls
+    local calls
     au_setup && au_owner_scene || return 1
-    for ((i = 1; i <= EXTRA_RELEASES; i++)); do
-        au_release "1.10.$i" || return 1
-    done
+    au_release_stream 1.10 "$EXTRA_RELEASES" || return 1
+    au_assert_release_stream 1.10 "$EXTRA_RELEASES" || return 1
     au_publish && au_timeout_standin no-such-argument log || return 1
     upd
     assert_rc 0 "update exits 0"

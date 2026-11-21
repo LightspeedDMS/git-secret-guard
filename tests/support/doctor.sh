@@ -17,12 +17,23 @@ dr_begin_macos() {
     dr_install
 }
 
-dr_install() {
-    lc_make_fixtures && lc_use_fixtures || return 1
+# ^ why an empty roots dir made per call, not a shared one; every test starts from its own sandbox
+dr_roots() {
     DR_ROOTS="$SANDBOX/roots"
     rm -rf -- "$DR_ROOTS" || return 1
     mkdir -p -- "$DR_ROOTS" || return 1
     DR_REAL="$(realpath -- "$DR_ROOTS")" || return 1
+}
+
+# ^ why lc_begin and the roots only, not dr_begin; a test calling lib functions or stopping before any machine check would not use an install
+dr_begin_bare() {
+    lc_begin || return 1
+    dr_roots
+}
+
+dr_install() {
+    lc_make_fixtures && lc_use_fixtures || return 1
+    dr_roots || return 1
     gsg install
     assert_rc 0 "install for the doctor"
 }

@@ -91,6 +91,9 @@ test_real 168 107
 test_recorded_bash - 5
 test_reminder 162 30
 test_report_collect - 0
+test_rule_file_hash - 1
+test_rule_file_hash_install - 10
+test_rule_file_hash_status - 6
 test_runner - 3
 test_share_permissions - 0
 test_smartgit - 360

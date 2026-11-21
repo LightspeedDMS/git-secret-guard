@@ -229,7 +229,7 @@ test_an_install_from_the_installed_copy_on_wsl1_never_renames_the_directory_it_r
     for item in hooks lib bin tools.lock VERSION; do cp -a -- "$GSG_PROJECT/$item" "$share/" || return 1; done
     printf 'old\n' >"$share/settings" && printf 'kept\n' >"$share/sentinel" || return 1
     wsl 'GSG_ROOT="$1" GSG_SHARE="$1" GSG_BIN_DIR=/b GSG_TOOL_VER=(1 2) INSTALL_JQ_BIN=/b/jq INSTALL_JQ_WRAPPER=""
-INSTALL_TIMEOUT_BIN=/t INSTALL_BASH_BIN="" INSTALL_GNUBIN_DIR="" INSTALL_TIMER_BIN=""; install_copy_share; echo "rc=$?"' "$share"
+INSTALL_TIMEOUT_BIN=/t INSTALL_BASH_BIN="" INSTALL_GNUBIN_DIR="" INSTALL_TIMER_BIN="" INSTALL_RULE_SHA=0000000000000000000000000000000000000000000000000000000000000000; install_copy_share; echo "rc=$?"' "$share"
     assert_contains "$OUT" "rc=0" "no rename is attempted"
     assert_contains "$(<"$share/settings")" "JQ_BIN=" "the settings are rewritten in place"
     assert_eq "$(<"$share/sentinel")" kept "the rest of the tree is not replaced (the sentinel is not one of the copied items, so a replaced tree would lose it)"
@@ -244,7 +244,7 @@ test_the_same_install_on_a_plain_kernel_replaces_the_tree_and_loses_the_sentinel
     for item in hooks lib bin tools.lock VERSION; do cp -a -- "$GSG_PROJECT/$item" "$share/" || return 1; done
     printf 'old\n' >"$share/settings" && printf 'kept\n' >"$share/sentinel" || return 1
     wsl 'GSG_ROOT="$1" GSG_SHARE="$1" GSG_BIN_DIR=/b GSG_TOOL_VER=(1 2) INSTALL_JQ_BIN=/b/jq INSTALL_JQ_WRAPPER=""
-INSTALL_TIMEOUT_BIN=/t INSTALL_BASH_BIN="" INSTALL_GNUBIN_DIR="" INSTALL_TIMER_BIN=""; install_copy_share; echo "rc=$?"' "$share"
+INSTALL_TIMEOUT_BIN=/t INSTALL_BASH_BIN="" INSTALL_GNUBIN_DIR="" INSTALL_TIMER_BIN="" INSTALL_RULE_SHA=0000000000000000000000000000000000000000000000000000000000000000; install_copy_share; echo "rc=$?"' "$share"
     assert_contains "$OUT" "rc=0" "the copy ran"
     assert_no_file "$share/sentinel" "the tree was replaced, not updated in place"
     assert_contains "$(<"$share/settings")" "JQ_BIN=" "and the new tree has its settings"

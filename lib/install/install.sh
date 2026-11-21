@@ -448,6 +448,8 @@ install_write_settings() {
         done
         if [ -n "$INSTALL_BASH_BIN" ]; then printf 'BASH_BIN=%q\n' "$INSTALL_BASH_BIN"; fi
         if [ -n "$INSTALL_GNUBIN_DIR" ]; then printf 'GNUBIN_DIR=%q\n' "$INSTALL_GNUBIN_DIR"; fi
+        # ^ security the hook compares the share's rule file with this value (install_record_rule_hash); set -u stops a write before it is computed
+        printf 'BETTERLEAKS_RULE_SHA256=%q\n' "$INSTALL_RULE_SHA"
         if [ -n "$INSTALL_TIMER_BIN" ] && brew_is_macos; then printf 'LAUNCHCTL_BIN=%q\n' "$INSTALL_TIMER_BIN"; fi
         if [ -n "$INSTALL_TIMER_BIN" ] && tools_is_windows; then printf 'SCHTASKS_BIN=%q\n' "$INSTALL_TIMER_BIN"; fi
         if [ -n "$INSTALL_TIMER_BIN" ] && ! brew_is_macos && ! tools_is_windows; then printf 'SYSTEMCTL_BIN=%q\n' "$INSTALL_TIMER_BIN"; fi
@@ -844,6 +846,7 @@ install_run() {
     install_prepare_update || return 1
     tools_announce_overrides
     install_tools_ready || return 1
+    install_record_rule_hash || return 1
     install_hash_staged || return 1
     install_backup_hooks_dir || return 1
     install_write_state pending || return 1

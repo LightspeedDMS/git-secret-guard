@@ -253,7 +253,8 @@ git-secret-guard: 2 coverage problems still open (doctor run 2026-11-03):
 
 The hook reads `<share>/settings` (`<share>` = two levels above the resolved script path), written by `install` (`install_write_settings`, with `printf %q`, because the hook sources it):
 absolute `TRUFFLEHOG_BIN`, `BETTERLEAKS_BIN`, `JQ_BIN`, `SETSID_BIN` (`TASKKILL_BIN` on Windows), `TIMEOUT_BIN`, the pinned `TRUFFLEHOG_VERSION` and
-`BETTERLEAKS_VERSION` (shown on the pass line only) and `SCAN_TIMEOUT_SECONDS`, `BASH_BIN` (every platform), plus the macOS key `GNUBIN_DIR`
+`BETTERLEAKS_VERSION` (shown on the pass line only) and `SCAN_TIMEOUT_SECONDS`, `BASH_BIN` (every platform), `BETTERLEAKS_RULE_SHA256` (the SHA-256 of
+`lib/scan/betterleaks-rule.toml`, [Limits](#limits)), plus the macOS key `GNUBIN_DIR`
 and the timer key `SYSTEMCTL_BIN`, `LAUNCHCTL_BIN` (macOS) or `SCHTASKS_BIN` (Windows) (see [install.md](install.md)). On Windows `JQ_BIN` is the
 wrapper `<share>/jq` that install writes, whose shebang is the recorded `BASH_BIN` (never `env bash`) and which runs the `jq` it found or installed with `-b`. `DOCTOR_TIMEOUT_SECONDS` is read when present
 (by `doctor`, see [doctor.md](doctor.md)) but install never writes it. A missing,
@@ -400,6 +401,17 @@ PII detection together with its own config can put the same rules into that conf
 
 ## Limits
 
+- **The shipped rule file is checked, the share is not.** `<share>/lib/scan/betterleaks-rule.toml` is user-writable, and a match-all `[allowlist]`
+  appended to it would mute betterleaks (#26). Install records its SHA-256 as `BETTERLEAKS_RULE_SHA256` in the settings file, a different file; the
+  hook (`rule_file_hash_check`, before betterleaks starts) blocks with `betterleaks: the shipped rule file <path> does not match the SHA-256 install
+  recorded; nothing was scanned; reinstall git-secret-guard from a checkout or a release`, and `status` and `doctor` flag it. An `install` run from
+  the installed copy refuses while the share's rule file differs from the record, so the hook's own advice cannot bless an edit; only an install
+  from a checkout or a release replaces the file. **Not covered:** a user who can write the share can rewrite the settings file as well (the same gap as
+  an `exit 0` appended to it, bypass scenario C03); a `sha256sum` first on `PATH` that prints the recorded hash (on Linux and Windows; on macOS the
+  recorded `GNUBIN_DIR` comes first) is the N11 case of `awk`, a trusted `PATH` is out of scope; an install from before the check has no record,
+  so the hook keeps scanning, `status` and `doctor` report it, and the first install after the upgrade records the file as it is on disk (from
+  the installed copy; from a checkout it records the checkout's file). An install from the installed copy whose settings file cannot be loaded
+  counts as "no record" and records the file on disk (inside the same gap: whoever can write the share can write the settings).
 - **Git >= 2.54 only.** Older git (e.g. `/usr/bin/git` 2.52) ignores config hooks without any message; its commits are
   not scanned.
 - **Two events only.** The lines are scanned by `pre-commit` and the message by `commit-msg` ([table](#the-commit-message)).
@@ -597,6 +609,18 @@ Why the scan code is shaped this way; each point was probed on the pinned versio
   `Isolating rules` on the `--enable-rule` run. `betterleaks_write_ignore` adds the twins (bounded by
   `GSG_BETTERLEAKS_IGNORE_MAX_LINES`); `betterleaks_drop_pair_key_rows` drops the key-ID row of a pair. The stand-in tells
   the runs apart by `--enable-rule` (`STUB_GL_EXTRA_FINDINGS`, `STUB_GL_EXTRA_RC`).
+- **The rule file's hash (#26).** `scan_betterleaks` calls `rule_file_hash_check FILE` (`lib/core/common.sh`; rc 0 equal, rc 1 differs, cannot be
+  hashed or the record is not 64 lowercase hex, rc 2 no record) right after the "unreadable" check and before any betterleaks run: every code but
+  0 and 2 (rc 1, and an unexpected one such as 127 from a function missing in a mixed share, `test_an_unexpected_verdict_code_fails_closed`) writes one
+  line to the errors file and returns (`nothing was scanned`, so the commit blocks); rc 2 keeps scanning, the upgrade path of an install from before
+  the check. The hash is `sha256sum <FILE` (stdin: no file name to escape; the first field only, Windows prints `<hash> *-`) and must itself be 64
+  hex before it is compared. `load_settings` unsets `BETTERLEAKS_RULE_SHA256` first (`test_an_inherited_hash_in_the_environment_never_fills_the_gap`).
+  `status_rule_file` and `doctor_rule_file_line` call the same function. Install: `install_record_rule_hash` (`lib/install/install_tools.sh`, right
+  before `install_hash_staged`, so a refusal changes nothing) hashes `$GSG_ROOT/lib/scan/betterleaks-rule.toml`, the tree it copies; run from the
+  installed copy (`$GSG_ROOT` is the share) a valid record must still match or the install refuses, no record hashes the file on disk, and
+  `install_write_settings` prints the value. `tests/support/lib.sh` records the hash of the sandbox copy in `sandbox_create` (once per file: a test
+  that edits `$SHARE/lib/scan/betterleaks-rule.toml` restores it itself). Tests: `tests/scan/test_rule_file_hash.sh` (hook, stand-ins),
+  `tests/install/test_rule_file_hash_install.sh`, `tests/inspect/test_rule_file_hash_status.sh`, and C03 in `tests/scan/test_bypass_formats_real.sh`.
 - **The credential rules** ([Credential rules](#credential-rules)) sit after the AWS rule, before the PII rules. Before adding one,
   test the shape with both real scanners through the hook: a built-in rule or a trufflehog detector may already cover it, sometimes only
   next to a keyword, and a rule of ours on the same value can leave a low-confidence generic built-in finding out (a vendor rule's

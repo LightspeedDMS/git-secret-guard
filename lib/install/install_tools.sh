@@ -246,6 +246,42 @@ install_hash_staged() {
     done
 }
 
+# ^ invariant prints BETTERLEAKS_RULE_SHA256 from the settings of the installed share, "" when there is none (not installed, or an install from before #26)
+install_recorded_rule_sha() {
+    (
+        load_settings "$GSG_SHARE/settings" >/dev/null 2>&1 || exit 0
+        printf '%s' "${BETTERLEAKS_RULE_SHA256:-}"
+    )
+}
+
+# ^ invariant sets INSTALL_RULE_SHA = the SHA-256 install_write_settings records for the rule file the share will hold; rc 1 = refused, nothing changed
+# ^ security from the installed copy the source is the share's own file => a record must still match it, else the hook's "reinstall" advice would bless an edit
+# ^ why hash the file on disk for rc 0 and rc 2, not only rc 2; a match hashes to itself, the first record after an upgrade trusts the share (docs/scan.md)
+install_record_rule_hash() {
+    local file="$GSG_ROOT/lib/scan/betterleaks-rule.toml" recorded reason rc sha
+    INSTALL_RULE_SHA=""
+    if [ "$GSG_ROOT" -ef "$GSG_SHARE" ]; then
+        recorded="$(install_recorded_rule_sha)" || return 1
+        reason="$(BETTERLEAKS_RULE_SHA256="$recorded" rule_file_hash_check "$file")"
+        rc=$?
+        if [ "$rc" -eq 1 ]; then
+            printf '%s: the shipped rule file %s %s; install from a checkout or a release\n' "$GSG_NAME" "$file" "$reason" >&2
+            install_stage_refused || return 1
+        fi
+    fi
+    if ! sha="$(sha256sum <"$file")"; then
+        printf '%s: cannot hash the rule file %s\n' "$GSG_NAME" "$file" >&2
+        install_stage_refused || return 1
+    fi
+    sha="${sha%% *}"
+    if [[ ! $sha =~ ^[0-9a-f]{64}$ ]]; then
+        printf '%s: cannot hash the rule file %s\n' "$GSG_NAME" "$file" >&2
+        install_stage_refused || return 1
+    fi
+    # shellcheck disable=SC2034
+    INSTALL_RULE_SHA="$sha"
+}
+
 # ^ order install_write_state before install_commit_tools => every aside name and placed hash is recorded before a user's file moves
 # ^ external coreutils 8.32 (el9) mv -n exits 0 when it skips => the move is verified by looking at both paths
 install_commit_tools() {

@@ -379,8 +379,9 @@ test_real_formats_ai_a_plain_uuid_and_a_hex_hash_without_context_commit() {
     assert_passes_scanned AI-fp
 }
 
-# ^ security the shipped rule file is user-writable; a match-all allowlist in it mutes betterleaks, trufflehog keeps its own kinds
-test_real_formats_c03_an_edited_rule_file_mutes_betterleaks_only() {
+# ^ security the shipped rule file is user-writable; a match-all allowlist in it would mute betterleaks, the hook checks its SHA-256 against the settings (#26)
+# ^ invariant both commits fail closed before betterleaks starts => "nothing was scanned" blocks them; trufflehog still runs and is not what this pins
+test_real_formats_c03_an_edited_rule_file_blocks_the_commit() {
     need_real_tools
     local key key_rc key_err
     key="$(fake_aws_key)"
@@ -390,13 +391,14 @@ test_real_formats_c03_an_edited_rule_file_mutes_betterleaks_only() {
     commit_sample c03b gh.env "$(token_line)" || { restore_hook_files; return 1; }
     restore_hook_files || return 1
     catalog C03-rule-file-token Detect 'append a match-all [allowlist] to <share>/lib/scan/betterleaks-rule.toml && git commit (a GitHub token)'
-    assert_blocked C03-rule-file-token
-    assert_row trufflehog Github gh.env C03-rule-file-token
-    assert_not_contains "$ERR" "betterleaks github-pat" "C03 betterleaks reports nothing under the edited rule file"
+    assert_blocked_unscanned C03-rule-file-token
+    assert_contains "$ERR" "betterleaks: the shipped rule file" "C03 the edited rule file is named"
+    assert_contains "$ERR" "reinstall git-secret-guard from a checkout or a release" "C03 the recovery is named"
     no_leak "$(fake_github_token)"
     RC="$key_rc" ERR="$key_err"
     catalog C03-rule-file-key Detect 'append a match-all [allowlist] to <share>/lib/scan/betterleaks-rule.toml && git commit (a lone AWS key ID)'
-    assert_passes_scanned C03-rule-file-key
+    assert_blocked_unscanned C03-rule-file-key
+    assert_contains "$ERR" "betterleaks: the shipped rule file" "C03 the edited rule file is named for the lone key ID too"
     no_leak "$key"
 }
 

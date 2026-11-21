@@ -50,7 +50,7 @@ scanner_dead_proxy_env() {
 load_settings() {
     local file="$1"
     unset TRUFFLEHOG_BIN BETTERLEAKS_BIN JQ_BIN SETSID_BIN TASKKILL_BIN TIMEOUT_BIN SYSTEMCTL_BIN SCHTASKS_BIN LAUNCHCTL_BIN BASH_BIN GNUBIN_DIR SCAN_TIMEOUT_SECONDS \
-        DOCTOR_TIMEOUT_SECONDS TRUFFLEHOG_VERSION BETTERLEAKS_VERSION
+        DOCTOR_TIMEOUT_SECONDS TRUFFLEHOG_VERSION BETTERLEAKS_VERSION BETTERLEAKS_RULE_SHA256
     if [ ! -f "$file" ] || [ ! -r "$file" ]; then
         printf 'settings file is missing or unreadable: %s\n' "$file" >&2
         return 1
@@ -71,6 +71,32 @@ load_settings() {
 gnubin_dir_unusable() {
     [ -n "${GNUBIN_DIR:-}" ] || return 1
     [ "${GNUBIN_DIR#/}" = "$GNUBIN_DIR" ] || [ ! -d "$GNUBIN_DIR" ]
+}
+
+# ^ security rc 0 = the SHA-256 of the user-writable rule file equals BETTERLEAKS_RULE_SHA256 of the settings file => one edit of either file is noticed
+# ^ invariant rc 1 = differs, cannot be hashed or the record is not 64 lowercase hex, reason on stdout; rc 2 = nothing recorded (an install from before #26)
+# ^ coupled hook (scan_betterleaks blocks on rc 1), status and doctor; sha256sum reads stdin => no file name to escape (Windows prints "<hash> *-")
+rule_file_hash_check() {
+    local want="${BETTERLEAKS_RULE_SHA256:-}" got
+    if [ -z "$want" ]; then return 2; fi
+    if [[ ! $want =~ ^[0-9a-f]{64}$ ]]; then
+        printf 'cannot be checked: the value recorded in the settings file is not a SHA-256'
+        return 1
+    fi
+    if ! got="$(sha256sum <"$1" 2>/dev/null)"; then
+        printf 'cannot be hashed'
+        return 1
+    fi
+    got="${got%% *}"
+    if [[ ! $got =~ ^[0-9a-f]{64}$ ]]; then
+        printf 'cannot be hashed'
+        return 1
+    fi
+    if [ "$got" != "$want" ]; then
+        printf 'does not match the SHA-256 install recorded'
+        return 1
+    fi
+    return 0
 }
 
 # ^ invariant the one place holding escape sequences and icons; text printed through it is already cleaned of control characters

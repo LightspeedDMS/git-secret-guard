@@ -118,6 +118,9 @@ sandbox_create() {
     # ^ invariant every test sees a plain Linux kernel through the WSL seams => no result depends on the machine running the suite (a test of WSL sets its own)
     printf '%s\n' "6.8.0-45-generic" >"$SANDBOX/wsl-kernel" || exit 2
     cp -r -- "$GSG_PROJECT/hooks" "$GSG_PROJECT/lib" "$SHARE/" || exit 2
+    # ^ invariant the hash is taken from the fresh copy before any test edits it => write_settings records what install would and an edit is noticed
+    TEST_RULE_SHA256="$(sha256sum <"$SHARE/lib/scan/betterleaks-rule.toml")" || exit 2
+    TEST_RULE_SHA256="${TEST_RULE_SHA256%% *}"
     # ^ invariant jq on the sandbox PATH like a system jq elsewhere => install keeps it; a test wanting the download path removes it with lc_path_without
     if [ "$TEST_IS_WINDOWS" -eq 1 ]; then
         mkdir -p -- "$SANDBOX/jqbin" && cp -- "$TEST_JQ_EXE" "$SANDBOX/jqbin/jq.exe" || exit 2
@@ -196,6 +199,7 @@ write_settings() {
         printf 'BETTERLEAKS_VERSION=%q\n' "$TEST_GL_VERSION"
         printf 'BASH_BIN=%q\n' "$TEST_RECORDED_BASH"
         if [ -n "$TEST_BASH" ]; then printf 'GNUBIN_DIR=%q\n' "$TEST_GNUBIN"; fi
+        printf 'BETTERLEAKS_RULE_SHA256=%q\n' "$TEST_RULE_SHA256"
         if [ -n "${4:-}" ]; then printf '%s\n' "$4"; fi
     } >"$SHARE/settings"
 }

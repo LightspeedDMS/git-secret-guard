@@ -5,11 +5,11 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/../support/lib.sh"
 source "$(dirname -- "${BASH_SOURCE[0]}")/../support/lifecycle.sh"
 # shellcheck source=tests/support/doctor.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/../support/doctor.sh"
+# shellcheck source=tests/inspect/findings_helpers.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/findings_helpers.sh"
 
-REC_MAGIC="git-secret-guard findings 1"
 REC_TIME_RE='^time [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'
 REC_HEADER_LINES=2
-TAB=$'\t'
 MANY_REPOS=55
 HOLDER_SECONDS=60
 # ^ external each lock attempt starts a few processes => on Windows the 300 attempts outlast 60 seconds and a dead holder is rightly broken
@@ -20,19 +20,12 @@ CONCURRENT_PAIRS=4
 SHOWN_LINE_MAX=100
 
 recheck() { gsg doctor --recheck; }
-rec_file() { printf '%s' "$LC_STATE/findings"; }
 dr_disable() { gitx -C "$DR_ROOTS/$1" config hook.git-secret-guard.enabled false; }
 dr_enable() { gitx -C "$DR_ROOTS/$1" config --unset hook.git-secret-guard.enabled; }
 off_text() { printf 'disabled in local config: hook.git-secret-guard.enabled=false (%s/%s/.git/config); remove that key to cover this repository' "$DR_REAL" "$1"; }
 
 # ^ invariant the record body = every line after the header lines
 rec_body() { tail -n "+$((REC_HEADER_LINES + 1))" "$(rec_file)"; }
-
-# ^ invariant writes a valid record whose body is the arguments, one line each
-write_record() {
-    mkdir -p -- "$LC_STATE" || return 1
-    { printf '%s\ntime 2026-01-01T00:00:00Z\n' "$REC_MAGIC"; if [ "$#" -gt 0 ]; then printf '%s\n' "$@"; fi; } >"$(rec_file)"
-}
 
 # ^ invariant a valid record has header and time lines, only machine and repo lines of the exact shape after them, and leaves no temp file or lock behind
 assert_valid_record() {

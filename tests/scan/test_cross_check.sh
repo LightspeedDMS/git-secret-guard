@@ -4,25 +4,11 @@
 # shellcheck source=tests/support/lib.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/../support/lib.sh"
 
-WORK=""
+# shellcheck source=tests/scan/report_helpers.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/report_helpers.sh"
+
 LOST_TF="trufflehog reported findings but none reached the report; nothing was decided"
 LOST_BL="betterleaks reported findings but none reached the report; nothing was decided"
-
-begin() {
-    new_repo "$1" || return 1
-    WORK="$SANDBOX/work-$1"
-    mkdir -p -- "$WORK" || return 1
-    : >"$WORK/trufflehog.rows" && : >"$WORK/betterleaks.rows" && : >"$WORK/trufflehog.errors" && : >"$WORK/betterleaks.errors" || return 1
-}
-
-# ^ invariant report_with STAND_IN [MODE] runs report_results on the work dir; STAND_IN is shell text run first, it can use $W (the work dir)
-report_with() {
-    # shellcheck disable=SC2016
-    run_cap env -i "${GSG_ENV[@]}" bash -c 'source "$1/lib/core/common.sh" && source "$1/lib/scan/report.sh" || exit 9
-        W="$2"
-        eval "$3"
-        report_results "$2" "$4"' _ "$SHARE" "$WORK" "$1" "${2:-}"
-}
 
 test_a_clean_run_with_no_marker_and_no_errors_still_passes() {
     begin clean || return 1

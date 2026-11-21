@@ -2,15 +2,9 @@
 # ^ see doc:docs/scan.md#the-commit-message; the commit-msg event scans the message file git hands the hook, one scan file named COMMIT_EDITMSG
 # shellcheck source=tests/support/lib.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/../support/lib.sh"
+# shellcheck source=tests/scan/message_helpers.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/message_helpers.sh"
 
-CALLS="" MARKER=""
-begin() {
-    new_repo "$1" || return 1
-    CALLS="$SANDBOX/calls-$1"
-    MARKER="$(new_marker)"
-    enable_message_hook
-    set_env STUB_LOG="$CALLS" STUB_MARKER="$MARKER"
-}
 tf_runs() { local n=0; if [ -f "$CALLS" ]; then n="$(grep -c '^trufflehog ' "$CALLS")"; fi; printf '%s' "$n"; }
 
 test_a_clean_message_is_scanned_as_one_file_and_prints_only_the_pass_line() {
@@ -41,28 +35,6 @@ test_a_finding_in_the_message_blocks_as_commit_message_line_and_never_prints_the
     assert_not_contains "$ERR" "COMMIT_EDITMSG" "the scan file name stays internal"
     assert_contains "$ERR" "git commit --no-verify" "bypass hint"
     no_leak "$MARKER"
-}
-
-# ^ invariant runs the hook by hand on a message file, as git does for commit-msg (path as the one argument), and records what both scanners saw
-run_message_hook() {
-    set_env STUB_RECORD="$SANDBOX/record-$1"
-    run_cap env -i "${GSG_ENV[@]}" "${EXTRA_ENV[@]}" "$SHARE/hooks/secret-scan" "$2"
-}
-
-# ^ invariant builds a message file as commit -v writes it with comment char ; (subject, comments, cut block, the text from stdin last)
-verbose_message() {
-    local sc=' ------------------------ >8 ------------------------'
-    {
-        printf 'subject\n\n; Please enter the commit message.\n;\n; On branch main\n'
-        printf ';%s\n; Do not modify or remove the line above.\n; Everything below it will be ignored.\n;\n; Changes to be committed:\n' "$sc"
-        cat
-    } >"$1"
-}
-
-# ^ invariant a repository with the removed line "gone MARKER" staged; the diff of git holds the marker in a removed line
-verbose_repo() {
-    printf 'keep\ngone %s\n' "$MARKER" >src.txt && gitx add src.txt && gitx commit -q --no-verify -m base || return 1
-    printf 'keep\nnew line\n' >src.txt && gitx add src.txt
 }
 
 test_the_scan_file_blanks_gits_own_verbose_diff_and_keeps_the_numbering() {

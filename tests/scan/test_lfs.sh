@@ -587,4 +587,37 @@ test_both_kinds_of_problem_print_both_pieces_of_advice() {
     assert_contains "$ERR" "for the other files, run 'git lfs install', then 'git add' the file again, or commit from the machine that has the content" "advice for the object"
 }
 
+test_an_lfs_path_and_storage_with_control_characters_are_shown_with_question_marks() {
+    [ "$TEST_IS_WINDOWS" -eq 0 ] || skip_test "a Windows file name cannot hold ESC, tab or newline"
+    begin lfsctl || return 1
+    local store="$SANDBOX/store"$'\e'"x" name line
+    name="data/a"$'\e'"b"$'\t'"c"$'\n'"d.dat"
+    printf 'control bytes\n' >"$SANDBOX/objctl" || return 1
+    lfs_stage "$name" "$SANDBOX/objctl" || return 1
+    gitx config --local lfs.storage "$store" || return 1
+    commit_cap "lfs"
+    assert_rc 1 "blocked"
+    line="$(grep -F 'Git LFS file' <<<"$ERR" | head -n 1)"
+    assert_eq "$line" "git-secret-guard: Git LFS file data/a?b?c?d.dat: its object is not in the LFS storage ($SANDBOX/store?x)" "path and storage mapped to ?"
+    assert_not_contains "$ERR" $'\e' "no ESC byte reaches the terminal"
+    assert_not_contains "$ERR" $'\t' "no tab byte"
+    if gitx rev-parse -q --verify HEAD >/dev/null 2>&1; then fail "a commit was created"; fi
+}
+
+test_an_lfs_path_over_200_characters_is_cut_and_the_full_name_is_not_printed() {
+    begin lfslong || return 1
+    local name line
+    # ^ external Git for Windows refuses a path near MAX_PATH without core.longpaths
+    gitx config --local core.longpaths true || return 1
+    name="data/$(printf 'x%.0s' $(seq 1 250)).dat"
+    printf 'long name\n' >"$SANDBOX/objlong" || return 1
+    lfs_stage "$name" "$SANDBOX/objlong" || return 1
+    rm -- "$REPO/.git/lfs/objects/${LFS_OID:0:2}/${LFS_OID:2:2}/$LFS_OID" || return 1
+    commit_cap "lfs"
+    assert_rc 1 "blocked"
+    line="$(grep -F 'Git LFS file' <<<"$ERR" | head -n 1)"
+    assert_eq "$line" "git-secret-guard: Git LFS file ${name:0:200}…: its object is not in the LFS storage ($REPO/.git/lfs)" "cut at 200 with the mark"
+    assert_not_contains "$ERR" "${name:0:201}" "one more character than the cut is not there"
+}
+
 run_file_tests

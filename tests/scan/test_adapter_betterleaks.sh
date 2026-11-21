@@ -434,4 +434,55 @@ test_an_unreadable_shipped_rule_file_is_a_scan_error_and_nothing_runs() {
     assert_no_file "$SANDBOX/calls-norule" "betterleaks was not started"
 }
 
+# ^ invariant args = count, file; writes count lines "# fingerprint note N"
+many_lines() { seq 1 "$1" | sed 's/^/# fingerprint note /' >"$2"; }
+
+test_a_head_gitleaksignore_over_20000_lines_is_a_scan_error_and_betterleaks_never_starts() {
+    prepare bigign
+    many_lines 20001 "$OUTD/repo-gitleaksignore" || return 1
+    run_adapter betterleaks "$SCAN" "$OUTD"
+    assert_rc 0 "reported through the errors file, which blocks the commit"
+    assert_eq "$(errors)" "betterleaks: .gitleaksignore at HEAD has more than 20000 lines; nothing was scanned" "the error, and nothing else"
+    assert_empty "$(rows)" "no rows"
+    assert_no_file "$SANDBOX/calls-bigign" "betterleaks was not started"
+}
+
+test_exactly_20000_lines_of_head_gitleaksignore_are_accepted() {
+    prepare edgeign
+    many_lines 20000 "$OUTD/repo-gitleaksignore" || return 1
+    run_adapter betterleaks "$SCAN" "$OUTD"
+    assert_rc 0 adapter
+    assert_empty "$(errors)" "no error at the limit"
+    assert_eq "$(grep -c '^betterleaks-ignore-line: # fingerprint note' "$SANDBOX/calls-edgeign")" 20000 "all lines reached betterleaks"
+}
+
+test_a_scan_tree_with_a_committed_name_already_taken_is_refused_and_nothing_is_overwritten() {
+    local name
+    for name in .gitleaksignore .betterleaksignore; do
+        prepare "taken${name#.}"
+        printf 'root %s\n' "$name" >"$SCAN/$name"
+        printf 'already %s\n' "$name" >"$SCAN/$name.gsg-committed"
+        run_adapter betterleaks "$SCAN" "$OUTD"
+        assert_rc 1 "the adapter refuses ($name)"
+        assert_no_file "$SANDBOX/calls-taken${name#.}" "betterleaks was not started ($name)"
+        assert_empty "$(rows)" "no rows"
+        assert_eq "$(<"$SCAN/$name")" "root $name" "the scan tree's $name is unchanged"
+        assert_eq "$(<"$SCAN/$name.gsg-committed")" "already $name" "the scan tree's renamed name is unchanged"
+        assert_eq "$(<"$OUTD/betterleaks-tree/$name.gsg-committed")" "already $name" "the copy's taken name was not overwritten"
+        assert_eq "$(<"$OUTD/betterleaks-tree/$name")" "root $name" "and the root file was not moved onto it"
+    done
+}
+
+test_an_aws_access_token_row_drops_the_key_id_row_of_the_other_run_on_the_same_line() {
+    prepare across
+    write_default_repo_config
+    set_env STUB_GL_FINDINGS="aws-access-token|src/a.txt|3" STUB_GL_EXTRA_FINDINGS="aws-access-key-id|src/a.txt|3;aws-access-key-id|src/a.txt|5"
+    run_adapter betterleaks "$SCAN" "$OUTD"
+    assert_rc 0 adapter
+    assert_eq "$(dir_calls "$SANDBOX/calls-across")" 2 "both runs happened"
+    assert_eq "$(rows | LC_ALL=C sort)" "$(tab betterleaks aws-access-key-id match src/a.txt 5)
+$(tab betterleaks aws-access-token match src/a.txt 3)" "one row for the pair across the runs, the lone ID on line 5 stays"
+    assert_empty "$(errors)" "no error"
+}
+
 run_file_tests

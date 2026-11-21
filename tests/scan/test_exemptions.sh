@@ -631,4 +631,32 @@ test_other_inherited_git_settings_cannot_change_what_is_extracted() {
 X" "only the added line, at its real line number, whatever the diff settings say"
 }
 
+test_the_commit_blocks_when_the_head_gitleaksignore_is_over_20000_lines() {
+    begin bigign || return 1
+    seq 1 20001 | sed 's/^/# fingerprint note /' >.gitleaksignore || return 1
+    gitx add -- .gitleaksignore || return 1
+    gitx commit -q --no-verify -m "big ignore file" || return 1
+    stage_file src/a.txt "x $MARKER"
+    commit_cap "scan"
+    assert_rc 1 "blocked"
+    assert_contains "$ERR" "betterleaks: .gitleaksignore at HEAD has more than 20000 lines; nothing was scanned" "the reason is printed"
+    assert_not_contains "$ERR" "no findings" "no pass line"
+    no_leak "$MARKER"
+}
+
+test_a_commit_holding_both_a_root_ignore_file_and_its_committed_name_blocks() {
+    local name
+    for name in .gitleaksignore .betterleaksignore; do
+        begin "both${name#.}" || return 1
+        stage_file "$name" '*'
+        stage_file "$name.gsg-committed" '*'
+        stage_file src/a.txt "x $MARKER"
+        commit_cap "both"
+        assert_rc 1 "a silent pass is the bug ($name)"
+        assert_contains "$ERR" "betterleaks: scan wrapper failed internally (exit 1)" "the hook names the failed wrapper"
+        assert_not_contains "$ERR" "no findings" "no pass line"
+        no_leak "$MARKER"
+    done
+}
+
 run_file_tests

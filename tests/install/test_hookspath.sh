@@ -8,7 +8,29 @@ seed_old_hooks() {
     mkdir -p -- "$1" && printf '#!/bin/sh\necho old pre-commit\n' >"$1/pre-commit" && chmod 755 "$1/pre-commit"
 }
 
-tree_digest() { (cd -- "$1" && find . -type f -o -type l | LC_ALL=C sort | xargs -d '\n' sha256sum 2>&1 | sha256sum); }
+# ^ why find -exec sha256sum, not xargs -d; BSD xargs (macOS, gnubin first on PATH only for coreutils) has no -d and its usage text was what got hashed (#48)
+# ^ invariant prints one digest of every file and symlink target (sha256sum follows links) under $1; rc 1 and no output when find or sha256sum fails
+# ^ coupled tests/install/test_install.sh keeps its own xargs copy until #48 lands there, an open PR changes the file
+tree_digest() {
+    local sums
+    sums="$(cd -- "$1" && find . \( -type f -o -type l \) -exec sha256sum {} +)" || return 1
+    printf '%s\n' "$sums" | LC_ALL=C sort | sha256sum
+}
+
+test_the_tree_digest_changes_with_a_file_and_fails_loudly_on_an_unreadable_one() {
+    local d1 d2 d3
+    mkdir -p -- "$SANDBOX/dg/sub" && printf 'one\n' >"$SANDBOX/dg/sub/f" || return 1
+    d1="$(tree_digest "$SANDBOX/dg")" || return 1
+    assert_eq "$(tree_digest "$SANDBOX/dg")" "$d1" "the same tree digests the same"
+    printf 'two\n' >"$SANDBOX/dg/sub/f" || return 1
+    d2="$(tree_digest "$SANDBOX/dg")" || return 1
+    [ "$d2" != "$d1" ] || fail "a changed file did not change the digest"
+    printf 'two\n' >"$SANDBOX/dg/sub/g" || return 1
+    d3="$(tree_digest "$SANDBOX/dg")" || return 1
+    [ "$d3" != "$d2" ] || fail "an added file did not change the digest"
+    ln -s "$SANDBOX/dg/nowhere" "$SANDBOX/dg/dangling" || return 1
+    if tree_digest "$SANDBOX/dg" >/dev/null 2>&1; then fail "a link sha256sum cannot read still produced a digest"; fi
+}
 
 # ^ security these tests run WITHOUT GIT_CONFIG_GLOBAL on a scratch HOME => git's own lookup of ~/.gitconfig, XDG and includes is what is under test
 assert_refused_and_untouched() {
@@ -29,7 +51,7 @@ test_install_refuses_a_hooks_path_that_lives_in_an_included_file() {
         lc_begin && lc_real_lookup && lc_make_fixtures && lc_use_fixtures || return 1
         printf '[user]\n\tname = T\n[include]\n\tpath = extra.conf\n' >"$LC_HOME/.gitconfig" || return 1
         printf '[core]\n\thooksPath = /inc/hooks\n' >"$LC_HOME/extra.conf" || return 1
-        before="$(tree_digest "$LC_HOME")"
+        before="$(tree_digest "$LC_HOME")" || return 1
         gsg install ${flag:+"$flag"}
         assert_refused_and_untouched "$before" "$LC_HOME/extra.conf" "/inc/hooks" "include, flag [$flag]"
     done
@@ -41,7 +63,7 @@ test_install_refuses_a_hooks_path_in_the_xdg_config_when_a_gitconfig_exists() {
         lc_begin && lc_real_lookup && lc_make_fixtures && lc_use_fixtures || return 1
         printf '[user]\n\tname = T\n' >"$LC_HOME/.gitconfig" || return 1
         printf '[core]\n\thooksPath = /xdg/hooks\n' >"$LC_HOME/.config/git/config" || return 1
-        before="$(tree_digest "$LC_HOME")"
+        before="$(tree_digest "$LC_HOME")" || return 1
         gsg install ${flag:+"$flag"}
         assert_refused_and_untouched "$before" "$LC_HOME/.config/git/config" "/xdg/hooks" "xdg, flag [$flag]"
     done
@@ -55,7 +77,7 @@ test_install_refuses_a_hooks_path_in_a_conditional_include() {
             printf '[user]\n\tname = T\n[remote "o"]\n\turl = https://example.invalid/x\n[includeIf "%s"]\n\tpath = %s/cond.conf\n' \
                 "$cond" "$LC_HOME" >"$LC_HOME/.gitconfig" || return 1
             printf '[core]\n\thooksPath = /cond/hooks\n' >"$LC_HOME/cond.conf" || return 1
-            before="$(tree_digest "$LC_HOME")"
+            before="$(tree_digest "$LC_HOME")" || return 1
             gsg install ${flag:+"$flag"}
             assert_refused_and_untouched "$before" "$LC_HOME/cond.conf" "/cond/hooks" "includeIf [$cond] flag [$flag]"
         done
@@ -151,7 +173,7 @@ test_install_refuses_when_there_are_more_included_files_than_it_will_read() {
         printf '[user]\n\temail = %s@example.invalid\n' "$n" >"$LC_HOME/inc$n.conf" || return 1
         printf '[includeIf "gitdir:/no/such/place/%s/"]\n\tpath = inc%s.conf\n' "$n" "$n" >>"$LC_HOME/.gitconfig" || return 1
     done
-    before="$(tree_digest "$LC_HOME")"
+    before="$(tree_digest "$LC_HOME")" || return 1
     gsg install
     assert_rc 1 "65 include targets"
     assert_contains "$ERR" "more than 64 included git config files" "says why it cannot decide"
@@ -294,6 +316,81 @@ test_hp_records_returns_git_s_own_status_and_reads_nul_records_without_a_wait() 
     assert_rc 7 "git's own exit status, whatever it is"
     assert_eq "$(sed -n '/^hp_records()/,/^}/p' "$GSG_PROJECT/lib/install/hookspath.sh" | grep -cE 'wait |< <\(')" "0" \
         "hp_records neither waits nor reads a process substitution (the wait raced with bash's reaping)"
+}
+
+# ^ why gitdir:/no/such/place/ as the condition, not a matching one; git lists no target of it, the static walk of ours alone reads them
+test_install_refuses_a_hooks_path_two_includes_deep() {
+    local variant flag before
+    for variant in plain conditional; do
+        for flag in "" --replace-hooks-path; do
+            lc_begin && lc_real_lookup && lc_make_fixtures && lc_use_fixtures || return 1
+            if [ "$variant" = plain ]; then
+                printf '[user]\n\tname = T\n[include]\n\tpath = a.conf\n' >"$LC_HOME/.gitconfig" || return 1
+            else
+                printf '[user]\n\tname = T\n[includeIf "gitdir:/no/such/place/"]\n\tpath = a.conf\n' >"$LC_HOME/.gitconfig" || return 1
+            fi
+            printf '[include]\n\tpath = b.conf\n' >"$LC_HOME/a.conf" || return 1
+            printf '[core]\n\thooksPath = /nested/hooks\n' >"$LC_HOME/b.conf" || return 1
+            before="$(tree_digest "$LC_HOME")" || return 1
+            gsg install ${flag:+"$flag"}
+            assert_refused_and_untouched "$before" "$LC_HOME/b.conf" "/nested/hooks" "$variant include of an include, flag [$flag]"
+        done
+    done
+}
+
+test_install_ends_when_two_included_files_include_each_other() {
+    lc_begin && lc_real_lookup && lc_make_fixtures && lc_use_fixtures || return 1
+    printf '[user]\n\tname = T\n[includeIf "gitdir:/no/such/place/"]\n\tpath = a.conf\n' >"$LC_HOME/.gitconfig" || return 1
+    printf '[include]\n\tpath = b.conf\n' >"$LC_HOME/a.conf" || return 1
+    printf '[include]\n\tpath = a.conf\n' >"$LC_HOME/b.conf" || return 1
+    run_cap "$TEST_TIMEOUT" 120 env -i "${LC_ENV[@]}" "${EXTRA_ENV[@]}" "$GSG_PROJECT/bin/git-secret-guard" install
+    assert_rc 0 "an include cycle that sets no hooksPath: the walk ends and the install goes through (a timeout would be 124)"
+    assert_not_contains "$ERR" "more than" "the include limit is not what stopped the walk"
+    assert_file "$LC_DATA/hooks/secret-scan" "installed"
+}
+
+# ^ why git is asked in a matching repository, not at /; the unreadable file could apply only there
+unreadable_include_setup() {
+    local kind="$1"
+    if [ "$TEST_IS_WINDOWS" -eq 1 ]; then skip_test "NTFS has no unix modes"; fi
+    if [ "$(id -u)" -eq 0 ]; then skip_test "root reads a file of mode 000"; fi
+    lc_begin && lc_real_lookup && lc_make_fixtures && lc_use_fixtures || return 1
+    mkdir -p -- "$LC_HOME/work/repo" || return 1
+    gitreal init -q "$LC_HOME/work/repo" || return 1
+    if [ "$kind" = plain ]; then
+        printf '[user]\n\tname = T\n[include]\n\tpath = secret.conf\n' >"$LC_HOME/.gitconfig" || return 1
+    else
+        printf '[user]\n\tname = T\n[includeIf "gitdir:%s/work/"]\n\tpath = secret.conf\n' "$LC_HOME" >"$LC_HOME/.gitconfig" || return 1
+    fi
+    printf '[core]\n\thooksPath = /hidden/hooks\n' >"$LC_HOME/secret.conf" || return 1
+}
+
+test_install_refuses_when_a_plain_include_is_unreadable() {
+    local flag before
+    for flag in "" --replace-hooks-path; do
+        unreadable_include_setup plain || return 1
+        before="$(tree_digest "$LC_HOME")" || return 1
+        chmod 000 "$LC_HOME/secret.conf" || return 1
+        gsg install ${flag:+"$flag"}
+        chmod 644 "$LC_HOME/secret.conf" || return 1
+        assert_rc 1 "an unreadable included file, flag [$flag]"
+        assert_contains "$ERR" "$LC_HOME/secret.conf" "names the unreadable file"
+        assert_contains "$ERR" "Permission denied" "with git's own reason"
+        assert_no_file "$LC_DATA" "no share dir"
+        assert_no_file "$LC_STATE" "no state"
+        assert_eq "$(tree_digest "$LC_HOME")" "$before" "no file under HOME changed"
+    done
+}
+
+test_an_unreadable_conditional_include_cannot_apply_a_hooks_path_in_silence() {
+    unreadable_include_setup conditional || return 1
+    chmod 000 "$LC_HOME/secret.conf" || return 1
+    gsg install
+    assert_rc 0 "install: git reads the file only inside a matching repository"
+    run_cap env -i "${LC_ENV[@]}" "${EXTRA_ENV[@]}" "$GIT" -C "$LC_HOME/work/repo" config --get core.hooksPath
+    chmod 644 "$LC_HOME/secret.conf" || return 1
+    assert_rc 128 "git in the matching repository dies, so the unreadable core.hooksPath is never applied silently"
+    assert_contains "$ERR" "$LC_HOME/secret.conf" "and names the file"
 }
 
 run_file_tests

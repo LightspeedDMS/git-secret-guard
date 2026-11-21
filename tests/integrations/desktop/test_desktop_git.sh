@@ -488,4 +488,138 @@ test_unlink_removes_only_files_with_the_marker_and_names_what_it_keeps() {
     assert_no_file "$hooks" "the empty directory is gone"
 }
 
+# ^ invariant dg_check_hooks makes $SANDBOX/ch with a plain pre-commit and commit-msg (no wrapper), acting on the fake key as $SANDBOX/ch.knob says
+# ^ invariant the pre-commit also chains to .husky and .git/hooks as the CHAIN knob says (none, husky or both)
+# ^ security the key shape is put together from fragments when the hooks are written; no literal of the shape is in this file
+dg_check_hooks() {
+    local pre msg key
+    key="$(printf '%s%s' 'AKI' 'A')"
+    IFS= read -r -d '' pre <<'EOF' || true
+#!/bin/sh
+. "@KNOB@"
+d="$(git diff --cached)" || exit 9
+case "$d" in
+*@KEY@*)
+    case "${GIT_CONFIG_PARAMETERS-}" in *credential.helper=desktop*) if [ "$PREVIEW" = pass ]; then exit 0; fi ;; esac
+    if [ "${GIT_CONFIG_COUNT-}" = 2 ] && [ "$COUNT" = pass ]; then exit 0; fi
+    case "$PRE" in
+    pass) exit 0 ;;
+    notext) echo "blocked" >&2; exit 1 ;;
+    esac
+    echo "git-secret-guard: potential secret(s) in lines this commit adds" >&2
+    exit 1 ;;
+esac
+n="$(cat "@COUNT@" 2>/dev/null || echo 0)"
+n=$((n + 1))
+echo "$n" >"@COUNT@"
+if [ "$n" -gt 1 ]; then
+    case "$CLEAN" in
+    fail) echo "a clean commit is refused" >&2; exit 1 ;;
+    silent) ;;
+    *) echo "git-secret-guard: scanned" >&2 ;;
+    esac
+fi
+if [ "$CHAIN" != none ] && [ -x .husky/pre-commit ]; then .husky/pre-commit || exit 1; fi
+if [ "$CHAIN" = both ] && [ -x .git/hooks/pre-commit ]; then .git/hooks/pre-commit || exit 1; fi
+exit 0
+EOF
+    IFS= read -r -d '' msg <<'EOF' || true
+#!/bin/sh
+. "@KNOB@"
+m="$(cat "$1")"
+case "$m" in
+*@KEY@*)
+    case "$MSG" in
+    pass) exit 0 ;;
+    notext) echo "blocked" >&2; exit 1 ;;
+    esac
+    echo "git-secret-guard: potential secret(s) in the commit message" >&2
+    exit 1 ;;
+esac
+exit 0
+EOF
+    mkdir -p -- "$SANDBOX/ch" || return 1
+    pre="${pre//@KEY@/$key}" && pre="${pre//@KNOB@/$SANDBOX/ch.knob}" && pre="${pre//@COUNT@/$SANDBOX/ch.n}" || return 1
+    msg="${msg//@KEY@/$key}" && msg="${msg//@KNOB@/$SANDBOX/ch.knob}" || return 1
+    printf '%s\n' "$pre" >"$SANDBOX/ch/pre-commit" && printf '%s\n' "$msg" >"$SANDBOX/ch/commit-msg" || return 1
+    chmod 755 "$SANDBOX/ch/pre-commit" "$SANDBOX/ch/commit-msg" || return 1
+}
+
+# ^ invariant dg_check_knob [NAME=VALUE]... sets the knobs of dg_check_hooks; the defaults make every step of the check hold
+dg_check_knob() {
+    printf '%s\n' PRE=block MSG=block CLEAN=ok CHAIN=both PREVIEW=block COUNT=block "$@" >"$SANDBOX/ch.knob"
+}
+
+# ^ invariant dg_check_run OVERRIDE runs desktop_git_check_run on $SANDBOX/ch after the shell text OVERRIDE redefined some of the product's functions
+dg_check_run() {
+    printf '%s\n' "${1:-:}" >"$SANDBOX/ch.override" || return 1
+    rm -f -- "$SANDBOX/ch.n" || return 1
+    dg_run 'lifecycle_require_git && paths_init && desktop_git_paths && . "$2" && desktop_git_check_run "$1"' "$SANDBOX/ch" "$SANDBOX/ch.override"
+}
+
+# ^ invariant prints the shell text dropping the credential entries of Desktop's environment MODE (1 = the appended parameters, 2 = the count entries)
+dg_check_drop_credentials() {
+    local text
+    IFS= read -r -d '' text <<'EOF' || true
+eval "orig_$(declare -f desktop_git_check_env)"
+desktop_git_check_env() {
+    if [ "${2:-0}" -ne @MODE@ ]; then orig_desktop_git_check_env "$@"; return; fi
+    orig_desktop_git_check_env "$@" | sed -e "s/ 'credential[.]helper=.*//" -e '/^GIT_CONFIG_\(COUNT\|KEY_\|VALUE_\)/d'
+}
+EOF
+    printf '%s' "${text//@MODE@/$1}"
+}
+
+test_every_outcome_of_the_desktop_check_is_named_with_its_own_text() {
+    local row code knobs how why override
+    local -a kn
+    local -a rows=(
+        "2|CHAIN=both|repo|the scratch repository could not be set up (check status 2)"
+        "3|PRE=pass|none|a commit of a fake token in a file was NOT blocked"
+        "4|PRE=notext|none|a commit of a fake token in a file failed, but not with the findings text of the hook"
+        "5|MSG=pass|none|a commit of a fake token only in the message was NOT blocked"
+        "6|MSG=notext|none|a commit with a fake token in its message failed, but not with the message findings text"
+        "7|CLEAN=fail|none|a clean commit failed"
+        "8|CLEAN=silent|none|a clean commit printed no git-secret-guard summary line"
+        "9|CHAIN=none|none|a repository hook named by its own core.hooksPath (husky style) did not run"
+        "10|CHAIN=husky|none|a repository hook in .git/hooks did not run"
+        "11|CHAIN=both|env1|the credential parameters of Desktop's preview branch (appended to GIT_CONFIG_PARAMETERS) did not coexist with core.hooksPath"
+        "12|PREVIEW=pass|none|a commit of a fake token was NOT blocked in Desktop's preview branch (credential parameters appended to ours)"
+        "13|CHAIN=both|env2|the credential entries of Desktop's default (count) branch (GIT_CONFIG_COUNT=2) did not coexist with core.hooksPath"
+        "14|COUNT=pass|none|a commit of a fake token was NOT blocked in Desktop's default (count) branch (GIT_CONFIG_COUNT=2 beside our parameter)"
+    )
+    dg_begin || return 1
+    dg_need_old_git
+    dg_check_hooks || return 1
+    for row in "${rows[@]}"; do
+        IFS='|' read -r code knobs how why <<<"$row"
+        read -ra kn <<<"$knobs"
+        dg_check_knob "${kn[@]}" || return 1
+        case "$how" in
+            repo) override='desktop_git_check_repo_hook() { return 2; }' ;;
+            env1) override="$(dg_check_drop_credentials 1)" ;;
+            env2) override="$(dg_check_drop_credentials 2)" ;;
+            *) override=: ;;
+        esac
+        dg_check_run "$override"
+        assert_rc 1 "check outcome $code: the check fails ($ERR)"
+        assert_eq "$ERR" "git-secret-guard: checked through GitHub Desktop's git: $why" "check outcome $code: the failure is named with its own text"
+        assert_eq "$OUT" "" "check outcome $code: no success line is printed"
+    done
+}
+
+test_a_hooks_directory_that_holds_every_step_of_the_desktop_check_passes_it_and_leaves_no_scratch_directory() {
+    dg_begin || return 1
+    dg_need_old_git
+    dg_check_hooks && dg_check_knob || return 1
+    mkdir -p -- "$SANDBOX/tmp" || return 1
+    set_env TMPDIR="$SANDBOX/tmp"
+    dg_check_run
+    assert_rc 0 "the check passes ($ERR)"
+    assert_contains "$OUT" "git-secret-guard: checked through GitHub Desktop's own git with the launcher's environment: a fake token in a file and in a message were blocked, a clean commit was scanned" "the success line names what held"
+    assert_contains "$OUT" "Desktop's credential parameters coexist in its default (count) branch and in its preview (append) branch" "in both branches"
+    assert_eq "$ERR" "" "nothing is said on stderr"
+    assert_eq "$(find "$SANDBOX/tmp" -mindepth 1 | wc -l)" 0 "the scratch directory is removed"
+}
+
 run_file_tests

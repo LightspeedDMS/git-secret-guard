@@ -22,20 +22,6 @@ test_a_plain_install_with_desktop_present_prints_a_note_and_changes_nothing() {
     assert_no_file "$DG_LAUNCHER_USER" "no launcher without the flag"
 }
 
-test_a_linking_run_does_not_warn_that_desktops_commits_are_unscanned() {
-    local warn="it is the git GitHub Desktop bundles"
-    dg_install_begin || return 1
-    dg_need_old_git
-    gsg install --link-desktop-git </dev/null
-    assert_rc 0 "install --link-desktop-git ($ERR)"
-    assert_not_contains "$ERR" "$warn" "no warning that Desktop's commits are not scanned: this run scans them"
-    assert_contains "$OUT" "wrote the hooks directory" "the link lines are there"
-    assert_contains "$OUT" "checked through" "and the self-check line"
-    gsg install --link-desktop-git </dev/null
-    assert_rc 0 "a rerun of a current link ($ERR)"
-    assert_not_contains "$ERR" "$warn" "a current link draws no warning either"
-}
-
 test_a_failing_self_check_still_shows_the_unscanned_warning() {
     local warn="it is the git GitHub Desktop bundles"
     lc_begin && lc_make_fixtures && lc_use_fixtures && dg_fixture || return 1
@@ -62,11 +48,15 @@ test_a_failure_between_the_report_and_the_link_still_shows_the_warning_once() {
 }
 
 test_install_with_the_flag_links_desktop_and_a_desktop_commit_of_a_fake_token_is_blocked() {
-    local key
+    local key linked
     key="$(fake_aws_key)"
     dg_install_begin || return 1
     gsg install --link-desktop-git </dev/null
     assert_rc 0 "install --link-desktop-git ($ERR)"
+    assert_not_contains "$ERR" "it is the git GitHub Desktop bundles" "no warning that Desktop's commits are not scanned: this run scans them"
+    assert_contains "$OUT" "wrote the hooks directory" "the link lines are there"
+    linked="$(dg_contents)"
+    assert_contains "$linked" "$DG_HOOKS/pre-commit link gsg-desktop-chain" "the record of the real link holds the wrappers"
     assert_file "$DG_HOOKS/pre-commit" "the wrapper"
     assert_file "$DG_LAUNCHER_USER" "the launcher"
     assert_contains "$OUT" "restart GitHub Desktop" "the output says Desktop must be restarted"
@@ -79,6 +69,11 @@ test_install_with_the_flag_links_desktop_and_a_desktop_commit_of_a_fake_token_is
     dgit "$DG_HOOKS" commit -q -m t
     assert_rc 1 "a commit through Desktop's git with the launcher's environment is blocked"
     no_leak "$key"
+    gsg unlink-desktop-git
+    assert_rc 0 "unlink"
+    assert_no_file "$DG_HOOKS" "the real link is gone"
+    dg_link_files
+    assert_eq "$(dg_contents)" "$linked" "dg_link_files writes exactly the files, links and contents of a real link"
 }
 
 test_a_failing_check_removes_everything_this_run_wrote_and_says_so() {
@@ -100,6 +95,7 @@ test_a_rerun_changes_nothing_a_plain_install_keeps_the_link_and_a_missing_wrappe
     before="$(dg_snapshot)"
     gsg install --link-desktop-git </dev/null
     assert_rc 0 "second run ($ERR)"
+    assert_not_contains "$ERR" "it is the git GitHub Desktop bundles" "a current link draws no warning that Desktop's commits are not scanned"
     assert_eq "$(dg_snapshot)" "$before" "no file was rewritten"
     assert_contains "$OUT" "are current; nothing was changed" "the output says so"
     assert_not_contains "$OUT" "restart GitHub Desktop" "and nothing says Desktop must be restarted: nothing changed"
@@ -111,6 +107,9 @@ test_a_rerun_changes_nothing_a_plain_install_keeps_the_link_and_a_missing_wrappe
     assert_rc 0 "a plain install after a wrapper went missing ($ERR)"
     assert_file "$DG_HOOKS/post-merge" "the wrapper is back without the flag"
     assert_contains "$OUT" "restart GitHub Desktop" "and the output says Desktop must be restarted"
+    gsg status
+    assert_rc 0 "status after the plain install restored the wrapper"
+    assert_contains "$OUT" "GitHub Desktop: linked" "the link a plain install restored reads as linked"
 }
 
 test_every_refusal_happens_before_any_change() {
@@ -147,8 +146,9 @@ test_every_refusal_happens_before_any_change() {
 
 test_unlink_removes_only_our_files_and_a_repeat_is_harmless() {
     dg_install_begin || return 1
-    gsg install --link-desktop-git </dev/null
-    assert_rc 0 "link ($ERR)"
+    gsg install </dev/null
+    assert_rc 0 "install ($ERR)"
+    dg_link_files
     gsg unlink-desktop-git
     assert_rc 0 "unlink"
     assert_contains "$OUT" "removed 29 files of the GitHub Desktop link" "27 wrappers, the shared file and the launcher"
@@ -158,23 +158,24 @@ test_unlink_removes_only_our_files_and_a_repeat_is_harmless() {
     gsg unlink-desktop-git
     assert_rc 0 "a repeat"
     assert_contains "$OUT" "nothing to unlink" "says so"
-    gsg install --link-desktop-git </dev/null
-    assert_rc 0 "link again ($ERR)"
+    dg_link_files
     dg_foreign_launcher_kept unlink-desktop-git
     assert_no_file "$DG_HOOKS" "the wrappers are gone"
 }
 
 test_uninstall_removes_the_link_and_keeps_a_launcher_that_is_not_ours() {
     dg_install_begin || return 1
-    gsg install --link-desktop-git </dev/null
-    assert_rc 0 "link ($ERR)"
+    gsg install </dev/null
+    assert_rc 0 "install ($ERR)"
+    dg_link_files
     gsg uninstall
     assert_rc 0 "uninstall"
     assert_contains "$OUT" "removed the GitHub Desktop link (29 files" "says what it removed"
     assert_no_file "$DG_LAUNCHER_USER" "the launcher is gone"
     assert_no_file "$LC_DATA" "so is the share dir"
-    gsg install --link-desktop-git </dev/null
-    assert_rc 0 "link again ($ERR)"
+    gsg install </dev/null
+    assert_rc 0 "install again ($ERR)"
+    dg_link_files
     dg_foreign_launcher_kept uninstall
 }
 
@@ -202,8 +203,9 @@ test_uninstall_stops_and_keeps_a_file_of_the_users_in_the_hooks_directory() {
 
 test_uninstall_and_unlink_name_and_keep_a_file_that_is_no_hook_name() {
     dg_install_begin || return 1
-    gsg install --link-desktop-git </dev/null
-    assert_rc 0 "link ($ERR)"
+    gsg install </dev/null
+    assert_rc 0 "install ($ERR)"
+    dg_link_files
     printf 'mine\n' >"$DG_HOOKS/notes.txt" || return 1
     gsg unlink-desktop-git
     assert_rc 0 "unlink"
@@ -217,12 +219,18 @@ test_uninstall_and_unlink_name_and_keep_a_file_that_is_no_hook_name() {
 }
 
 test_a_system_entry_with_a_spaced_exec_key_still_gets_our_variable() {
-    local spelling
+    local spelling first=1
     dg_install_begin || return 1
     for spelling in '  Exec=github-desktop %U' 'Exec =github-desktop %U'; do
         printf '[Desktop Entry]\nName=GitHub Desktop\n%s\nType=Application\n' "$spelling" >"$DG_LAUNCHER_SYS" || return 1
-        gsg install --link-desktop-git </dev/null
-        assert_rc 0 "link with a system entry spelled [$spelling] ($ERR)"
+        # ^ why the real link once, not twice; the second spelling only needs the launcher text from desktop_git_launcher_write, the same either way
+        if [ "$first" -eq 1 ]; then
+            gsg install --link-desktop-git </dev/null
+            assert_rc 0 "link with a system entry spelled [$spelling] ($ERR)"
+            first=0
+        else
+            dg_link_files
+        fi
         assert_contains "$(<"$DG_LAUNCHER_USER")" 'Exec=env "GIT_CONFIG_PARAMETERS=' "the user entry carries the variable"
         assert_contains "$(<"$DG_LAUNCHER_USER")" ' github-desktop %U' "and still starts Desktop"
         gsg status
@@ -234,8 +242,9 @@ test_a_system_entry_with_a_spaced_exec_key_still_gets_our_variable() {
 test_a_kept_file_name_is_printed_without_control_characters() {
     local name=$'x\e[31mA\ngit-secret-guard: FAKE'
     dg_install_begin || return 1
-    gsg install --link-desktop-git </dev/null
-    assert_rc 0 "link ($ERR)"
+    gsg install </dev/null
+    assert_rc 0 "install ($ERR)"
+    dg_link_files
     : >"$DG_HOOKS/$name" || return 1
     gsg unlink-desktop-git
     assert_rc 0 "unlink"
@@ -247,8 +256,9 @@ test_a_kept_file_name_is_printed_without_control_characters() {
 test_a_name_starting_with_two_dots_and_a_long_list_are_named() {
     local i
     dg_install_begin || return 1
-    gsg install --link-desktop-git </dev/null
-    assert_rc 0 "link ($ERR)"
+    gsg install </dev/null
+    assert_rc 0 "install ($ERR)"
+    dg_link_files
     : >"$DG_HOOKS/..dotdot" || return 1
     gsg unlink-desktop-git
     assert_contains "$ERR" "$DG_HOOKS/..dotdot was not written by git-secret-guard; left in place" "a name starting with two dots is named"
@@ -269,21 +279,16 @@ test_a_half_written_link_is_completed_by_a_plain_install() {
     assert_file "$DG_LAUNCHER_USER" "the launcher is there"
     assert_contains "$OUT" "checked through" "the check ran before the launcher was written"
     assert_contains "$OUT" "restart GitHub Desktop" "and Desktop must be restarted"
-}
-
-test_a_launcher_that_cannot_be_written_rolls_the_whole_run_back() {
-    dg_install_begin || return 1
-    mkdir -p -- "$SANDBOX/xdg/data" && printf 'x\n' >"$SANDBOX/xdg/data/applications" || return 1
-    gsg install --link-desktop-git </dev/null
-    assert_rc 1 "a launcher directory that cannot be made"
-    assert_contains "$ERR" "GitHub Desktop was not linked; 28 files of the link (written by this run or an earlier one) were removed again" "the run undid itself"
-    assert_no_file "$DG_HOOKS" "no hooks directory is left"
+    gsg status
+    assert_rc 0 "status after the plain install wrote the launcher"
+    assert_contains "$OUT" "GitHub Desktop: linked" "the link a plain install completed reads as linked"
 }
 
 test_a_failed_refresh_of_an_existing_link_counts_the_files_of_the_earlier_run() {
     dg_install_begin || return 1
-    gsg install --link-desktop-git </dev/null
-    assert_rc 0 "first run ($ERR)"
+    gsg install </dev/null
+    assert_rc 0 "install ($ERR)"
+    dg_link_files
     rm -f -- "$DG_LAUNCHER_USER" && chmod 555 -- "${DG_LAUNCHER_USER%/*}" || return 1
     gsg install --link-desktop-git </dev/null
     chmod 755 -- "${DG_LAUNCHER_USER%/*}" || return 1
@@ -302,8 +307,7 @@ test_an_active_link_silences_the_old_git_warnings_of_install_and_doctor() {
     assert_contains "$ERR" "$warn" "unlinked, install warns that Desktop's git is old"
     gsg doctor --roots "$SANDBOX/roots"
     assert_contains "$OUT" "$warn" "and doctor does too"
-    gsg install --link-desktop-git </dev/null
-    assert_rc 0 "link ($ERR)"
+    dg_link_files
     gsg install </dev/null
     assert_rc 0 "install with an active link ($ERR)"
     assert_not_contains "$ERR" "$warn" "install no longer calls Desktop's commits unscanned"

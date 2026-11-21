@@ -63,7 +63,7 @@ sl_tarball_configure() {
     gsg install --configure-smartgit </dev/null
 }
 
-test_configure_on_a_tarball_changes_only_the_two_executable_lines_and_verifies() {
+test_configure_on_a_tarball_changes_only_the_two_executable_lines_verifies_and_the_restore_checks_the_linux_process_and_puts_the_original_back_byte_for_byte() {
     local target="$SANDBOX/pathbin/git"
     sl_tarball_configure || return 1
     assert_rc 0 "install --configure-smartgit on a tarball SmartGit"
@@ -74,24 +74,10 @@ test_configure_on_a_tarball_changes_only_the_two_executable_lines_and_verifies()
     assert_contains "$(sg_log)" 'pgrep -u' "the running check looked for the user's processes"
     assert_contains "$(sg_log)" 'lib/bootloader\.jar' "by the launcher jar"
     assert_contains "$OUT" "checked through $target: git lfs works, a fake-token commit was blocked" "the verify step ran"
-}
-
-test_the_linux_launch_path_is_the_git_directory_then_usr_local_bin_usr_bin_bin() {
-    sl_common || return 1
-    gu_run 'source "$GSG_ROOT/lib/integrations/smartgit/smartgit.sh" && source "$GSG_ROOT/lib/integrations/smartgit/smartgit_lfs.sh" || exit 9
-smartgit_platform() { REPLY=linux; }
-unset GSG_SMARTGIT_LAUNCH_PATH; smartgit_lfs_launch_path /opt/x/bin/git'
-    assert_rc 0 "an absolute git path"
-    assert_eq "$OUT" "/opt/x/bin:/usr/local/bin:/usr/bin:/bin" "the git directory first, then the system directories"
-}
-
-test_restore_of_a_tarball_checks_the_linux_process_and_puts_the_original_back_byte_for_byte() {
-    sl_tarball_configure || return 1
-    assert_rc 0 "configure"
     rm -f -- "$SANDBOX/smartgit.log" || return 1
     sg_running || return 1
     gsg restore-smartgit
-    assert_rc 1 "SmartGit is running"
+    assert_rc 1 "restore while SmartGit is running"
     assert_contains "$ERR" "SmartGit (or another Syntevo app) of this user is running" "the restore names what the Linux check matches"
     assert_contains "$(sg_log)" 'lib/bootloader\.jar' "the restore asked for the Linux process"
     assert_not_contains "$(sg_log)" 'Contents/MacOS' "never for the macOS app"
@@ -101,6 +87,15 @@ test_restore_of_a_tarball_checks_the_linux_process_and_puts_the_original_back_by
     assert_eq "$(sg_hash "$SG_PREFS")" "$(sg_hash "$SANDBOX/prefs.orig")" "the preferences are the original byte for byte"
     assert_no_file "$SG_BACKUPS" "no manifest or backup is left"
     assert_not_contains "$OUT" "removed what this tool added" "a restore with no Flatpak record names no Flatpak step"
+}
+
+test_the_linux_launch_path_is_the_git_directory_then_usr_local_bin_usr_bin_bin() {
+    sl_common || return 1
+    gu_run 'source "$GSG_ROOT/lib/integrations/smartgit/smartgit.sh" && source "$GSG_ROOT/lib/integrations/smartgit/smartgit_lfs.sh" || exit 9
+smartgit_platform() { REPLY=linux; }
+unset GSG_SMARTGIT_LAUNCH_PATH; smartgit_lfs_launch_path /opt/x/bin/git'
+    assert_rc 0 "an absolute git path"
+    assert_eq "$OUT" "/opt/x/bin:/usr/local/bin:/usr/bin:/bin" "the git directory first, then the system directories"
 }
 
 # ^ invariant sl_tarball_refused TEXT = install --configure-smartgit was refused with TEXT and nothing of SmartGit changed
@@ -222,7 +217,28 @@ test_a_flatpak_run_without_a_terminal_and_without_the_flag_is_refused_with_the_m
     assert_contains "$ERR" "step 1 removes the SmartGit sandbox and needs its own yes" "says why"
     assert_contains "$ERR" "--allow-smartgit-sandbox-removal" "names the flag"
     assert_contains "$ERR" "flatpak override --user --talk-name=org.freedesktop.Flatpak $SL_APP_ID" "prints the manual steps"
+    assert_contains "$ERR" "1. flatpak override --user --talk-name=org.freedesktop.Flatpak $SL_APP_ID" "step 1 by hand, no root"
+    assert_not_contains "$ERR" "sudo flatpak" "no sudo in the steps"
+    assert_contains "$ERR" "2. create the wrapper" "step 2 by hand"
+    assert_contains "$ERR" "3. add -Djava.io.tmpdir=" "step 3 by hand"
+    assert_contains "$ERR" "4. in SmartGit choose Other Git Executable" "step 4 by hand"
     sl_flatpak_untouched "no terminal, no flag"
+    assert_no_file "$SG_BACKUPS" "no backup or manifest directory"
+    assert_no_file "$LC_HOME/.local/share/smartgit" "no wrapper directory"
+    assert_not_contains "$(sg_log)" "override --user" "flatpak override did not run"
+    assert_no_file "$SANDBOX/flatpak.override.system" "no system override was written"
+    assert_not_contains "$(gu_log)" "install -y" "no package was installed"
+    # ^ why git-lfs removed for a second refusal, not only present; this refusal comes before smartgit_lfs_plan, a later one would plan and install git-lfs
+    rm -f -- "$SANDBOX/pathbin/git-lfs" || return 1
+    printf '3.7.1\n' >"$SANDBOX/dnf.candidate" || return 1
+    gsg install --configure-smartgit </dev/null
+    assert_rc 1 "refused with git-lfs missing"
+    assert_contains "$ERR" "step 1 removes the SmartGit sandbox and needs its own yes" "git-lfs missing: says why"
+    assert_contains "$ERR" "4. in SmartGit choose Other Git Executable" "git-lfs missing: the manual steps are printed"
+    sl_flatpak_untouched "no terminal, no flag, git-lfs missing"
+    assert_not_contains "$(gu_log)" "install -y" "git-lfs missing: no package was installed"
+    gsg status
+    assert_contains "$OUT" "flatpak com.syntevo.SmartGit (SmartGit 26.1.057)" "status still lists the Flatpak install, its Version 26_1_057 read with dots"
 }
 
 test_no_flatpak_spawn_inside_the_sandbox_is_refused_before_any_change() {
@@ -234,7 +250,7 @@ test_no_flatpak_spawn_inside_the_sandbox_is_refused_before_any_change() {
     sl_flatpak_untouched "no flatpak-spawn"
 }
 
-test_the_flatpak_setup_applies_the_four_steps_as_one_unit() {
+test_the_flatpak_setup_applies_the_four_steps_as_one_unit_a_rerun_carries_the_record_forward_and_the_restore_undoes_every_step_byte_for_byte() {
     sl_flatpak_configure || return 1
     assert_rc 0 "configure the Flatpak with the sandbox consent"
     assert_contains "$(cat "$SANDBOX/flatpak.override.user")" "org.freedesktop.Flatpak=talk" "1. the --user override lets SmartGit talk to flatpak"
@@ -255,6 +271,22 @@ test_the_flatpak_setup_applies_the_four_steps_as_one_unit() {
         "the LFS line says where it is checked for a Flatpak"
     assert_contains "$(sg_log)" "flatpak run --cwd=$SL_TMPDIR --command=$SL_WRAPPER $SL_APP_ID" "the verify pins its working directory under HOME"
     assert_contains "$OUT" "checked through the wrapper $SL_WRAPPER inside the SmartGit sandbox" "the verify ran inside the sandbox"
+    cp -- "$SANDBOX/prefs.orig" "$SG_PREFS" || return 1
+    gsg install --configure-smartgit --allow-smartgit-sandbox-removal </dev/null
+    assert_rc 0 "second run after SmartGit went back to its bundled git"
+    assert_eq "$(grep -E '^(override|wrapper|vmoption|tmpdir)=' "$SL_FLATPAK_RECORD")" "$(printf 'override=yes\nwrapper=yes\nvmoption=yes\ntmpdir=yes')" "earlier yes values carried"
+    gsg restore-smartgit </dev/null
+    assert_rc 0 "restore-smartgit"
+    assert_contains "$OUT" "removed what this tool added for the SmartGit Flatpak: the --user override, the wrapper, the smartgit.vmoptions line, the temp directory" \
+        "the restore names every Flatpak step it undid"
+    assert_no_file "$SANDBOX/flatpak.override.user" "1. the --user override that held only our line was reset"
+    assert_no_file "$SL_WRAPPER" "2. the wrapper is gone"
+    assert_no_file "${SL_WRAPPER%/*}" "with the directory made for it"
+    assert_eq "$(sg_hash "$SL_VMOPTS")" "$(sg_hash "$SANDBOX/vmopts.orig")" "3. smartgit.vmoptions is byte for byte the original"
+    assert_eq "$(stat -c %a "$SL_VMOPTS")" 640 "with its mode"
+    assert_no_file "$SL_TMPDIR" "the temp directory is gone"
+    assert_eq "$(sg_hash "$SG_PREFS")" "$(sg_hash "$SANDBOX/prefs.orig")" "4. preferences.yml is byte for byte the original"
+    assert_no_file "$SL_FLATPAK_RECORD" "the record is gone"
 }
 
 test_an_existing_temp_directory_is_planned_and_kept_as_it_is() {
@@ -269,23 +301,6 @@ test_an_existing_temp_directory_is_planned_and_kept_as_it_is() {
     assert_rc 0 "restore"
     assert_file "$SL_TMPDIR" "the restore keeps a directory this tool did not make"
     rmdir -- "$SL_TMPDIR"
-}
-
-test_restore_after_the_flatpak_setup_undoes_every_step_byte_for_byte() {
-    sl_flatpak_configure || return 1
-    assert_rc 0 "configure first"
-    gsg restore-smartgit </dev/null
-    assert_rc 0 "restore-smartgit"
-    assert_contains "$OUT" "removed what this tool added for the SmartGit Flatpak: the --user override, the wrapper, the smartgit.vmoptions line, the temp directory" \
-        "the restore names every Flatpak step it undid"
-    assert_no_file "$SANDBOX/flatpak.override.user" "1. the --user override that held only our line was reset"
-    assert_no_file "$SL_WRAPPER" "2. the wrapper is gone"
-    assert_no_file "${SL_WRAPPER%/*}" "with the directory made for it"
-    assert_eq "$(sg_hash "$SL_VMOPTS")" "$(sg_hash "$SANDBOX/vmopts.orig")" "3. smartgit.vmoptions is byte for byte the original"
-    assert_eq "$(stat -c %a "$SL_VMOPTS")" 640 "with its mode"
-    assert_no_file "$SL_TMPDIR" "the temp directory is gone"
-    assert_eq "$(sg_hash "$SG_PREFS")" "$(sg_hash "$SANDBOX/prefs.orig")" "4. preferences.yml is byte for byte the original"
-    assert_no_file "$SL_FLATPAK_RECORD" "the record is gone"
 }
 
 # ^ why a read-only config directory, not a symlink; the precheck passes it (the file is safe), only the rewrite in the undo fails
@@ -432,18 +447,6 @@ test_a_running_flatpak_smartgit_is_refused_and_a_stale_ps_entry_is_not() {
     sl_flatpak_stale_only || return 1
     gsg install --configure-smartgit --allow-smartgit-sandbox-removal </dev/null
     assert_rc 0 "an instance whose pid is gone does not count"
-}
-
-test_a_rerun_carries_the_earlier_record_forward() {
-    sl_flatpak_configure || return 1
-    assert_rc 0 "first run"
-    cp -- "$SANDBOX/prefs.orig" "$SG_PREFS" || return 1
-    gsg install --configure-smartgit --allow-smartgit-sandbox-removal </dev/null
-    assert_rc 0 "second run after SmartGit went back to its bundled git"
-    assert_eq "$(grep -E '^(override|wrapper|vmoption|tmpdir)=' "$SL_FLATPAK_RECORD")" "$(printf 'override=yes\nwrapper=yes\nvmoption=yes\ntmpdir=yes')" "earlier yes values carried"
-    gsg restore-smartgit </dev/null
-    assert_rc 0 "restore"
-    sl_flatpak_untouched "after two runs and a restore"
 }
 
 test_a_terminal_no_to_the_sandbox_removal_changes_nothing() {

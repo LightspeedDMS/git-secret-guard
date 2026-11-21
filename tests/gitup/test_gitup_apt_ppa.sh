@@ -70,6 +70,7 @@ test_a_failing_add_apt_repository_that_wrote_nothing_needs_no_removal_and_no_ref
     assert_rc 0 "the source route follows"
     assert_contains "$ERR" "add-apt-repository failed" "the output says why"
     assert_not_contains "$(gu_log)" "sudo -- $SANDBOX/pathbin/rm" "no removal was needed, so none was attempted"
+    assert_not_contains "$OUT$ERR" "were removed" "no removal happened, so none is claimed"
     assert_eq "$(apt_calls | grep -c "apt-get update")" 1 "nothing was added or fetched, so the only update is the one of the source route"
     assert_contains "$(gu_log)" "make " "the source route followed"
 }
@@ -87,6 +88,8 @@ test_a_failing_apt_install_from_the_ppa_disables_it_and_reports_the_partial_chan
     assert_contains "$ERR" "the build dependencies were installed" "and so is the dependency install of the fallback"
     assert_contains "$OUT" "sysconfdir=$GU_ROOT/etc" "and the fallback plan carries the same make words as every source build"
     assert_not_contains "$ERR" "nothing was changed" "no refusal claims that nothing changed"
+    assert_not_contains "$ERR" "the only change made was the git upgrade of this run" "nothing was upgraded, so the text must not say so"
+    assert_contains "$ERR" "the failed git upgrade of this run left behind" "it says what the failed attempt left"
 }
 
 test_a_failing_software_properties_install_falls_back_to_the_source_route_and_says_why() {
@@ -149,25 +152,6 @@ test_a_machine_with_no_ppa_files_after_the_add_is_not_a_pass() {
     gsg install --upgrade-git </dev/null
     assert_contains "$ERR" "no git-core PPA .sources or .list file found" "an add that wrote nothing cannot be checked, so it fails"
     assert_not_contains "$(apt_calls)" "no-install-recommends git" "nothing was installed from it"
-}
-
-# ^ invariant the stand-in add-apt-repository writes the files and sleeps => an INT there must disable the unchecked PPA
-test_an_interrupt_before_the_key_check_disables_the_ppa() {
-    local pid
-    gu_apt_setup 2.43.0 ubuntu "$NOBLE_STOCK" "$NOBLE_PPA" || return 1
-    printf 'x' >"$SANDBOX/apt.add.hang" || return 1
-    (setsid env --default-signal=INT env -i "${LC_ENV[@]}" "${EXTRA_ENV[@]}" "$GSG_PROJECT/bin/git-secret-guard" install --upgrade-git \
-        >"$SANDBOX/int.out" 2>&1 </dev/null & echo $! >"$SANDBOX/int.pid")
-    pid="$(<"$SANDBOX/int.pid")"
-    gu_poll "$GU_STALL_WAIT_TICKS" test -e "$SANDBOX/apt.add.started" || { kill -KILL -- "-$pid" 2>/dev/null; fail "add-apt-repository never started"; return 1; }
-    [ -n "$(ppa_files)" ] || fail "control: the PPA files existed when the interrupt came"
-    kill -INT -- "-$pid" 2>/dev/null
-    gu_poll "$GU_EXIT_WAIT_TICKS" gu_pid_gone "$pid" || { kill -KILL -- "-$pid" 2>/dev/null; fail "install did not end after SIGINT"; return 1; }
-    OUT="$(<"$SANDBOX/int.out")"
-    assert_empty "$(ppa_files)" "the unchecked PPA is disabled again"
-    assert_contains "$(apt_calls)" "apt-get update | ppa-files=0" "and apt was refreshed without it"
-    assert_not_contains "$(apt_calls)" "no-install-recommends git" "nothing was installed"
-    assert_contains "$OUT" "interrupted" "the interrupt says what changed"
 }
 
 # ^ invariant the real gpg reads both file forms; the stand-in only proves the module's calls, this proves the parser against the colon format of the real tool

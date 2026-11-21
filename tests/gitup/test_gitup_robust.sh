@@ -63,21 +63,6 @@ test_a_failed_removal_of_obsolete_files_after_a_good_copy_still_says_git_was_ins
     assert_eq "$("$GU_ROOT/usr/local/bin/git" --version)" "git version 2.56.0" "and it is"
 }
 
-test_an_interrupt_during_the_build_says_the_build_dependencies_were_installed() {
-    local pid
-    gu_rpm_setup || return 1
-    : >"$SANDBOX/make.hang"
-    (setsid env --default-signal=INT env -i "${LC_ENV[@]}" "${EXTRA_ENV[@]}" "$GU_CMD" install --upgrade-git >"$SANDBOX/int.out" 2>&1 </dev/null & echo $! >"$SANDBOX/int.pid")
-    pid="$(<"$SANDBOX/int.pid")"
-    if [ -z "$pid" ]; then fail "no pid for the started command"; return 1; fi
-    gu_poll "$GU_STALL_WAIT_TICKS" test -e "$SANDBOX/make.started" || { kill -KILL -- "-$pid" 2>/dev/null; fail "the build never started"; return 1; }
-    kill -INT -- "-$pid" 2>/dev/null
-    gu_poll "$GU_EXIT_WAIT_TICKS" gu_pid_gone "$pid" || { kill -KILL -- "-$pid" 2>/dev/null; fail "install did not end after SIGINT"; return 1; }
-    OUT="$(<"$SANDBOX/int.out")"
-    assert_contains "$OUT" "interrupted" "the interruption is reported"
-    assert_contains "$OUT" "build dependencies were installed" "with what the upgrade changed"
-}
-
 test_a_rebuild_under_an_active_takeover_is_refused_before_anything_is_copied() {
     GU_TK_PIN=2.57.0 gu_tk_start || return 1
     gsg install --take-over-system-git </dev/null

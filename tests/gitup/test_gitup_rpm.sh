@@ -39,14 +39,6 @@ test_a_rocky_machine_with_an_old_git_builds_the_pinned_source_when_the_user_acce
     assert_not_contains "$(gu_log)" "query-stdin-is-a-terminal" "no repository query read the terminal"
 }
 
-test_the_flag_gives_consent_up_front_for_the_source_route() {
-    gu_rpm_setup || return 1
-    gsg install --upgrade-git </dev/null
-    assert_rc 0 "install --upgrade-git without a terminal"
-    assert_not_contains "$OUT$ERR" "[y/N]" "no prompt"
-    assert_eq "$("$GU_ROOT/usr/local/bin/git" --version)" "git version 2.56.0" "built"
-}
-
 test_a_machine_whose_repositories_offer_a_new_enough_git_is_upgraded_through_dnf_with_no_build() {
     gu_rpm_setup || return 1
     printf '2.55.0\n' >"$SANDBOX/dnf.candidate"
@@ -54,7 +46,9 @@ test_a_machine_whose_repositories_offer_a_new_enough_git_is_upgraded_through_dnf
     gsg install --upgrade-git </dev/null
     assert_rc 0 "package route"
     assert_contains "$OUT" "route: package" "the plan names the package route"
+    assert_contains "$OUT" "as root: $SANDBOX/pathbin/dnf install -y --disablerepo=* --enablerepo=baseos git-core" "the plan says install for a missing git-core"
     assert_contains "$(gu_log)" "dnf install -y --disablerepo=* --enablerepo=baseos git-core" "dnf installed git-core"
+    assert_not_contains "$(gu_log)" "dnf upgrade -y --disablerepo=* --enablerepo=baseos git-core" "and upgrade is not used"
     assert_not_contains "$(gu_log)" "make -C" "no build ran"
     assert_eq "$(pathbin_git_version)" "git version 2.55.0" "git is the repository's"
 }
@@ -74,16 +68,6 @@ test_an_old_package_git_is_upgraded_with_dnf_upgrade_because_dnf_install_leaves_
     assert_contains "$(gu_log)" "dnf upgrade -y --disablerepo=* --enablerepo=baseos git-core" "and dnf upgraded git-core"
     assert_not_contains "$(gu_log)" "dnf install -y --disablerepo=* --enablerepo=baseos git-core" "dnf install is not used on an installed package"
     assert_eq "$(pathbin_git_version)" "git version 2.55.0" "git is the repository's"
-}
-
-test_a_missing_git_core_is_installed_with_dnf_install() {
-    gu_rpm_setup || return 1
-    printf '2.55.0\n' >"$SANDBOX/dnf.candidate"
-    printf '2.55.0' >"$SANDBOX/dnf.upgrade_to"
-    gsg install --upgrade-git </dev/null
-    assert_rc 0 "package route without git-core installed"
-    assert_contains "$OUT" "as root: $SANDBOX/pathbin/dnf install -y --disablerepo=* --enablerepo=baseos git-core" "the plan says install"
-    assert_not_contains "$(gu_log)" "dnf upgrade -y --disablerepo=* --enablerepo=baseos git-core" "and upgrade is not used"
 }
 
 test_the_repository_query_is_read_only_bounded_and_never_answers_a_prompt() {
@@ -269,6 +253,7 @@ test_the_key_note_matches_what_the_plan_runs_as_root() {
 
 test_a_repository_that_hangs_ends_within_the_timeout_and_is_named() {
     gu_rpm_setup || return 1
+    set_env GSG_GITUP_QUERY_TIMEOUT=1
     printf 'baseos\nslow\n' >"$SANDBOX/dnf.repos"
     printf 'slow' >"$SANDBOX/dnf.hang"
     SECONDS=0
@@ -317,24 +302,19 @@ test_a_failed_build_leaves_a_working_git_cleans_up_and_a_rerun_finishes() {
 }
 
 test_an_interrupt_during_the_build_removes_the_build_directory() {
-    local pid n=0
+    local pid
     gu_rpm_setup || return 1
     : >"$SANDBOX/make.hang"
     (setsid env --default-signal=INT env -i "${LC_ENV[@]}" "${EXTRA_ENV[@]}" "$GSG_PROJECT/bin/git-secret-guard" install --upgrade-git \
         >"$SANDBOX/int.out" 2>&1 </dev/null & echo $! >"$SANDBOX/int.pid")
     pid="$(<"$SANDBOX/int.pid")"
-    while [ ! -f "$SANDBOX/make.started" ] && [ "$n" -lt 100 ]; do
-        sleep 0.2
-        n=$((n + 1))
-    done
-    assert_file "$SANDBOX/make.started" "the build started"
+    if [ -z "$pid" ]; then fail "no pid for the started command"; return 1; fi
+    gu_poll "$GU_STALL_WAIT_TICKS" test -e "$SANDBOX/make.started" || { kill -KILL -- "-$pid" 2>/dev/null; fail "the build never started"; return 1; }
     kill -INT -- "-$pid" 2>/dev/null
-    n=0
-    while kill -0 "$pid" 2>/dev/null && [ "$n" -lt 100 ]; do
-        sleep 0.2
-        n=$((n + 1))
-    done
-    assert_eq "$(kill -0 "$pid" 2>/dev/null && echo alive || echo gone)" gone "install ended"
+    gu_poll "$GU_EXIT_WAIT_TICKS" gu_pid_gone "$pid" || { kill -KILL -- "-$pid" 2>/dev/null; fail "install did not end after SIGINT"; return 1; }
+    OUT="$(<"$SANDBOX/int.out")"
+    assert_contains "$OUT" "interrupted" "the interruption is reported"
+    assert_contains "$OUT" "build dependencies were installed" "with what the upgrade changed"
     assert_eq "$(pathbin_git_version)" "git version 2.52.0" "the old git still works"
     gu_nothing_changed_on_the_machine "interrupted build"
 }
@@ -381,6 +361,8 @@ test_the_manifest_lists_every_installed_file_and_git_help_can_find_the_man_pages
     gu_rpm_setup || return 1
     gsg install --upgrade-git </dev/null
     assert_rc 0 "source route"
+    assert_not_contains "$OUT$ERR" "[y/N]" "the flag gives consent up front, no prompt"
+    assert_eq "$("$GU_ROOT/usr/local/bin/git" --version)" "git version 2.56.0" "built"
     doc="$GU_ROOT/usr/local/share/doc/git-2.56.0-local/MANIFEST"
     assert_file "$doc" "the MANIFEST"
     assert_contains "$(<"$doc")" "$GU_ROOT/usr/local/bin/git" "lists git"

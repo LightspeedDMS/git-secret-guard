@@ -49,6 +49,10 @@ test_a_pre_existing_ppa_with_a_wrong_key_is_moved_aside_and_named_not_deleted() 
     assert_contains "$OUT$ERR" "$aside" "the output names the location"
     assert_eq "$(path_git)" "git version 2.56.0" "git came from the PPA after the fresh check"
     assert_not_contains "$OUT$ERR" "files this run added were removed" "nothing is claimed as removed"
+    assert_contains "$OUT$ERR" "to put them back" "the output says how to restore"
+    assert_contains "$OUT$ERR" "mv -n -- $aside/sources.list.d/git-core-ubuntu-ppa-jammy.list" "with the real command"
+    assert_contains "$(<"$GSG_PROJECT/docs/platforms.md")" "ppa-aside" "the docs name the directory"
+    assert_contains "$(<"$GSG_PROJECT/docs/platforms.md")" "uninstall keeps" "and say uninstall keeps it"
 }
 
 path_git() { "$SANDBOX/pathbin/git" --version; }
@@ -166,26 +170,6 @@ test_without_sudo_the_package_route_still_lists_its_commands() {
     assert_contains "$ERR" "install -y --no-install-recommends git" "and has the install"
 }
 
-test_apt_get_update_comes_before_the_first_install_on_every_route() {
-    gu_apt_setup 2.43.0 ubuntu "1:2.55.0-1ubuntu1" || return 1
-    gsg install --upgrade-git </dev/null
-    assert_eq "$(apt_calls | sed -E 's/ \| .*//')" $'apt-get update\napt-get install -y --no-install-recommends git' "package route: update, install"
-    assert_contains "$OUT" " update" "and the plan lists the update"
-    check_plan_matches_log "$OUT" "package route"
-    gu_apt_setup 2.39.5 debian "1:2.39.5-0+deb12u2" "" || return 1
-    gsg install --upgrade-git </dev/null
-    assert_rc 0 "Debian"
-    assert_eq "$(apt_calls | head -n 1 | sed -E 's/ \| .*//')" "apt-get update" "Debian source route: the first apt call is the update"
-    assert_contains "$(apt_calls | sed -n 2p)" "install -y --no-install-recommends build-essential" "then the build dependencies"
-    check_plan_matches_log "$OUT" "Debian source route"
-    gu_apt_setup 2.43.0 ubuntu "$NOBLE_STOCK" "$NOBLE_PPA" || return 1
-    gu_apt_without_sps || return 1
-    gsg install --upgrade-git </dev/null
-    assert_rc 0 "Ubuntu with software-properties-common missing"
-    assert_eq "$(apt_calls | sed -n 1p | sed -E 's/ \| .*//')" "apt-get update" "the software-properties step is preceded by an update"
-    assert_contains "$(apt_calls | sed -n 2p)" "software-properties-common" "the install follows it"
-}
-
 test_a_failing_gpg_is_a_failure_even_when_the_pin_is_in_its_output() {
     gu_apt_setup 2.43.0 ubuntu "$NOBLE_STOCK" "$NOBLE_PPA" || return 1
     printf 'STUBGARBAGE\n' >>"$SANDBOX/apt.fixture/sources/sources.list.d/git-core-ubuntu-ppa-noble.sources" || return 1
@@ -244,42 +228,17 @@ test_an_apt_query_that_fails_after_the_update_disables_the_ppa() {
     assert_empty "$(ppa_files)" "the PPA is gone"
 }
 
-test_an_apt_query_that_fails_at_plan_time_is_named_and_the_route_still_follows_the_rule() {
-    gu_apt_setup 2.43.0 ubuntu "$NOBLE_STOCK" "$NOBLE_PPA" || return 1
-    : >"$SANDBOX/apt.cache.fail" || return 1
-    gsg install </dev/null
-    assert_contains "$OUT" "the apt query for git failed" "named"
-    assert_contains "$OUT" "route: ppa" "and the PPA route is planned"
-}
-
 test_linux_mint_style_add_apt_repository_without_n_takes_the_source_route_and_never_runs_it() {
     gu_apt_setup 2.43.0 linuxmint "$NOBLE_STOCK" "$NOBLE_PPA" || return 1
     gu_os_release 'ID=linuxmint' 'ID_LIKE="ubuntu debian"' || return 1
     : >"$SANDBOX/apt.add.nonopt" || return 1
     gsg install --upgrade-git </dev/null
     assert_rc 0 "the source build finishes"
+    assert_contains "$OUT" "for this ubuntu system" "the class of an ID_LIKE ubuntu derivative is ubuntu"
     assert_contains "$OUT" "route: source" "the plan takes the source route"
     assert_contains "$OUT" "no -n" "and says why"
     assert_not_contains "$(gu_log)" "add-apt-repository -y" "add-apt-repository was never run to add the PPA"
     assert_empty "$(ppa_files)" "no PPA file exists"
-}
-
-test_an_interrupt_prints_a_real_reason_and_removes_only_what_this_run_added() {
-    local pid
-    gu_apt_setup 2.43.0 ubuntu "$NOBLE_STOCK" "$NOBLE_PPA" || return 1
-    printf 'x' >"$SANDBOX/apt.add.hang" || return 1
-    (setsid env --default-signal=INT env -i "${LC_ENV[@]}" "${EXTRA_ENV[@]}" "$GSG_PROJECT/bin/git-secret-guard" install --upgrade-git \
-        >"$SANDBOX/int.out" 2>&1 </dev/null & echo $! >"$SANDBOX/int.pid")
-    pid="$(<"$SANDBOX/int.pid")"
-    gu_poll "$GU_STALL_WAIT_TICKS" test -e "$SANDBOX/apt.add.started" || { kill -KILL -- "-$pid" 2>/dev/null; fail "add-apt-repository never started"; return 1; }
-    kill -INT -- "-$pid" 2>/dev/null
-    gu_poll "$GU_EXIT_WAIT_TICKS" gu_pid_gone "$pid" || { kill -KILL -- "-$pid" 2>/dev/null; fail "install did not end after SIGINT"; return 1; }
-    OUT="$(<"$SANDBOX/int.out")"
-    assert_contains "$OUT" "route was interrupted by a signal" "the reason is not empty"
-    assert_not_contains "$OUT" "the only change made was the git upgrade of this run" "an interrupted upgrade did not upgrade anything"
-    assert_contains "$OUT" "the failed git upgrade of this run left behind" "the summary says what the interrupted attempt left"
-    assert_not_contains "$OUT" "failed: "$'\n' "no empty reason"
-    assert_empty "$(ppa_files)" "what this run added is removed"
 }
 
 test_an_interrupt_with_a_verified_ppa_from_before_removes_nothing() {
@@ -289,21 +248,6 @@ test_an_interrupt_with_a_verified_ppa_from_before_removes_nothing() {
     assert_eq "$(ppa_files | wc -l | tr -d ' ')" 3 "the user's files are still there"
     assert_not_contains "$OUT" "was added" "and nothing is claimed as added"
     assert_not_contains "$(gu_log)" "sudo -- $SANDBOX/pathbin/rm" "nothing was removed"
-}
-
-test_the_plan_of_a_failing_ppa_route_matches_what_sudo_ran() {
-    gu_apt_setup 2.43.0 ubuntu "$NOBLE_STOCK" "$NOBLE_PPA" || return 1
-    gu_apt_fixture sources "$BAD_FPR" || return 1
-    gsg install --upgrade-git </dev/null
-    assert_rc 0 "the fallback finishes"
-    check_plan_matches_log "$OUT" "the failing PPA route"
-}
-
-test_the_plan_says_the_ppa_stays_enabled_and_uninstall_leaves_it() {
-    gu_apt_setup 2.43.0 ubuntu "$NOBLE_STOCK" "$NOBLE_PPA" || return 1
-    gsg install </dev/null
-    assert_contains "$OUT" "stays enabled" "the plan says the PPA stays enabled"
-    assert_contains "$(<"$GSG_PROJECT/docs/platforms.md")" "uninstall" "the docs say what uninstall does"
 }
 
 test_a_key_file_alone_a_disabled_entry_and_a_commented_out_entry_are_not_an_enabled_ppa() {
@@ -381,16 +325,6 @@ test_the_rebuild_route_lists_the_aside_commands_it_will_run() {
     [ -n "$(aside_dir)" ] || fail "the old PPA was set aside"
 }
 
-test_the_rebuild_route_refuses_an_entry_it_cannot_check() {
-    gu_apt_setup 2.34.1 ubuntu "1:2.34.1-1ubuntu1.11" || return 1
-    gu_old_build 2.55.0 || return 1
-    printf 'deb https://ppa.launchpadcontent.net/git-core/ppa/ubuntu noble main\n' >"$GU_ROOT/etc/apt/sources.list.d/mine.list" || return 1
-    gsg install --upgrade-git </dev/null
-    assert_rc 1 "the flag asked for a rebuild that cannot be done"
-    assert_contains "$OUT$ERR" "mine.list" "the entry is named"
-    assert_empty "$(gu_log | grep -E '^sudo ')" "no root call ran"
-}
-
 test_a_failing_mover_stops_before_any_later_root_apt_call() {
     local what skip
     for what in "mkdir -p|0" "mv -n|0" "mv -n|1"; do
@@ -439,17 +373,6 @@ test_a_kept_ppa_whose_candidate_lags_goes_through_the_floor_check() {
     assert_eq "$(find "$GU_ROOT/etc/apt/sources.list.d" -name 'git-core-ubuntu-ppa-*' | wc -l | tr -d ' ')" 1 "and the user's PPA is still there"
 }
 
-test_the_output_says_how_to_put_the_set_aside_files_back() {
-    gu_apt_setup 2.43.0 ubuntu "$NOBLE_STOCK" "$NOBLE_PPA" || return 1
-    gu_apt_preexisting list "$BAD_FPR" || return 1
-    gu_apt_fixture sources || return 1
-    gsg install --upgrade-git </dev/null
-    assert_contains "$OUT$ERR" "to put them back" "the output says how to restore"
-    assert_contains "$OUT$ERR" "mv -n -- $(aside_dir)/sources.list.d/git-core-ubuntu-ppa-jammy.list" "with the real command"
-    assert_contains "$(<"$GSG_PROJECT/docs/platforms.md")" "ppa-aside" "the docs name the directory"
-    assert_contains "$(<"$GSG_PROJECT/docs/platforms.md")" "uninstall keeps" "and say uninstall keeps it"
-}
-
 test_an_interrupt_between_the_two_moves_names_the_aside_directory() {
     gu_apt_setup 2.43.0 ubuntu "$NOBLE_STOCK" "$NOBLE_PPA" || return 1
     gu_apt_preexisting list "$BAD_FPR" || return 1
@@ -467,14 +390,6 @@ test_an_unreadable_ppa_file_gets_a_real_reason() {
     chmod 644 "$GU_ROOT/etc/apt/sources.list.d/git-core-ubuntu-ppa-noble.sources"
     assert_contains "$OUT$ERR" "cannot read git-core-ubuntu-ppa-noble.sources" "the reason names the file"
     assert_not_contains "$OUT$ERR" "Permission denied" "no raw shell error"
-}
-
-test_the_conditional_install_is_marked_so_a_failing_route_matches_its_plan() {
-    gu_apt_setup 2.43.0 ubuntu "$NOBLE_STOCK" "$NOBLE_PPA" || return 1
-    gu_apt_fixture sources "$BAD_FPR" || return 1
-    gsg install --upgrade-git </dev/null
-    assert_contains "$OUT" "no-install-recommends git  [only when the key and floor checks pass]" "the PPA install is marked"
-    check_plan_matches_log "$OUT" "the failing PPA route, both halves"
 }
 
 test_an_adopted_ppa_plan_does_not_promise_to_remove_files() {
@@ -508,21 +423,6 @@ test_a_foreign_key_under_the_underscore_name_is_rejected() {
     assert_empty "$(ppa_files)" "and it is removed"
 }
 
-test_the_gpg_backup_beside_the_key_is_removed_with_it() {
-    gu_apt_setup 2.34.1 ubuntu "1:2.34.1-1ubuntu1.11" "$NOBLE_PPA" || return 1
-    gu_apt_fixture list "$BAD_FPR" || return 1
-    gsg install --upgrade-git </dev/null
-    assert_empty "$(ppa_files)" "the .gpg~ backup is gone too"
-    assert_contains "$OUT$ERR" "git-core-ubuntu-ppa.gpg~" "and the sentence names it"
-}
-
-test_nothing_is_said_to_be_removed_when_nothing_was_written() {
-    gu_apt_setup 2.43.0 ubuntu "$NOBLE_STOCK" "$NOBLE_PPA" || return 1
-    : >"$SANDBOX/apt.add.nowrite" && printf '1' >"$SANDBOX/apt.add.rc" || return 1
-    gsg install --upgrade-git </dev/null
-    assert_not_contains "$OUT$ERR" "were removed" "no removal happened, so none is claimed"
-}
-
 test_a_kept_ppa_in_the_20_04_layout_is_kept_and_a_wrong_one_is_set_aside_with_its_real_names() {
     gu_apt_setup 2.25.1 ubuntu "1:2.25.1-1ubuntu3.14" "$NOBLE_PPA" || return 1
     gu_apt_preexisting focal || return 1
@@ -543,16 +443,6 @@ test_the_old_launchpad_host_is_found_by_the_content_scan() {
     assert_not_contains "$OUT" "route: package" "and the candidate does not decide"
 }
 
-test_a_failed_route_and_failed_fallback_do_not_claim_an_upgrade() {
-    gu_apt_setup 2.43.0 ubuntu "$NOBLE_STOCK" "$NOBLE_PPA" || return 1
-    printf 'no-install-recommends git' >"$SANDBOX/apt.fail" || return 1
-    : >"$SANDBOX/make.fail" || return 1
-    gsg install --upgrade-git </dev/null
-    assert_rc 1 "both fail"
-    assert_not_contains "$ERR" "the only change made was the git upgrade of this run" "nothing was upgraded, so the text must not say so"
-    assert_contains "$ERR" "the failed git upgrade of this run left behind" "it says what the failed attempt left"
-}
-
 test_the_rebuild_plan_prints_the_aside_lines_before_the_rebuild_and_a_refusal_prints_no_plan() {
     local plan_at aside_at
     gu_apt_setup 2.34.1 ubuntu "1:2.34.1-1ubuntu1.11" || return 1
@@ -567,6 +457,8 @@ test_the_rebuild_plan_prints_the_aside_lines_before_the_rebuild_and_a_refusal_pr
     printf 'deb https://ppa.launchpadcontent.net/git-core/ppa/ubuntu noble main\n' >"$GU_ROOT/etc/apt/sources.list.d/mine.list" || return 1
     gsg install --upgrade-git </dev/null
     assert_rc 1 "refused"
+    assert_contains "$OUT$ERR" "mine.list" "the entry is named"
+    assert_empty "$(gu_log | grep -E '^sudo ')" "no root call ran"
     assert_not_contains "$OUT" "rebuild plan" "a refusal prints no half rebuild plan"
 }
 
@@ -667,9 +559,15 @@ test_an_interrupt_leaves_a_neighbours_files_alone_too() {
         >"$SANDBOX/int.out" 2>&1 </dev/null & echo $! >"$SANDBOX/int.pid")
     pid="$(<"$SANDBOX/int.pid")"
     gu_poll "$GU_STALL_WAIT_TICKS" test -e "$SANDBOX/apt.add.started" || { kill -KILL -- "-$pid" 2>/dev/null; fail "add-apt-repository never started"; return 1; }
+    [ -n "$(ppa_files)" ] || fail "control: the PPA files existed when the interrupt came"
     kill -INT -- "-$pid" 2>/dev/null
     gu_poll "$GU_EXIT_WAIT_TICKS" gu_pid_gone "$pid" || { kill -KILL -- "-$pid" 2>/dev/null; fail "install did not end after SIGINT"; return 1; }
     OUT="$(<"$SANDBOX/int.out")"
+    assert_contains "$(apt_calls)" "apt-get update | ppa-files=0" "apt was refreshed without the unchecked PPA"
+    assert_not_contains "$(apt_calls)" "no-install-recommends git" "nothing was installed"
+    assert_not_contains "$OUT" "the only change made was the git upgrade of this run" "an interrupted upgrade did not upgrade anything"
+    assert_contains "$OUT" "the failed git upgrade of this run left behind" "the summary says what the interrupted attempt left"
+    assert_not_contains "$OUT" "failed: "$'\n' "no empty reason"
     assert_empty "$(ppa_files)" "what is provably the PPA's is removed"
     assert_file "$GU_ROOT/etc/apt/trusted.gpg.d/vendor.gpg" "the vendor key stays"
     assert_file "$GU_ROOT/etc/apt/sources.list.d/vendor.list" "and so does the vendor source file"

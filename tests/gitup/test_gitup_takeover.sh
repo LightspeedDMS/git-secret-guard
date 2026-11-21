@@ -233,6 +233,7 @@ test_a_rerun_of_the_takeover_changes_no_file_and_no_config() {
     gsg install --take-over-system-git </dev/null
     assert_rc 0 "second takeover"
     assert_contains "$OUT" "nothing to take over" "says so"
+    assert_contains "$OUT" "already active" "and why"
     assert_eq "$(cat "$GU_TK_DIR/record")$(gu_hashes)$(gu_conf)" "$rec_before" "the record, the links and the config are unchanged"
 }
 
@@ -313,6 +314,7 @@ test_a_new_rpm_version_over_the_saved_originals_is_said_not_overwritten_silently
     local n
     gu_tk_start || return 1
     gsg install --take-over-system-git </dev/null
+    assert_rc 0 "first takeover"
     for n in "${GU_TK_NAMES[@]}"; do
         # shellcheck disable=SC2016
         printf '#!/bin/sh\nif [ "$1" = --version ]; then echo "git version 2.53.0"; exit 0; fi\necho "rpm 2.53 %s"\n' "$n" >"$SANDBOX/new-$n" || return 1
@@ -320,11 +322,15 @@ test_a_new_rpm_version_over_the_saved_originals_is_said_not_overwritten_silently
         cp -a --remove-destination -- "$SANDBOX/new-$n" "$GU_ROOT/usr/bin/$n" || return 1
     done
     printf '%s\n' "$GU_CONF_BEFORE" >"$GU_ROOT/etc/dnf/dnf.conf" || return 1
+    rm -f -- "$SANDBOX/gitup.log" || return 1
     gsg install --take-over-system-git </dev/null
     assert_rc 0 "applied again over a newer RPM"
     assert_contains "$OUT" "saved originals" "the output says the saved originals differ"
     assert_contains "$OUT" "replaced" "and were replaced"
     assert_contains "$(<"$GU_TK_DIR/orig/git")" "rpm 2.53" "the new RPM file is the saved one now"
+    assert_contains "$(sudo_cmds)" "mv -T -- $GU_TK_DIR/orig $GU_TK_DIR/orig.old" "the earlier backup was set aside"
+    assert_contains "$(plan_lines "$OUT")" "mv -T -- $GU_TK_DIR/orig $GU_TK_DIR/orig.old  [only when an earlier backup exists]" "and the plan lists that command with its condition"
+    check_plan_matches_log "$OUT" "takeover over an earlier backup"
 }
 
 test_restoring_an_undone_takeover_leaves_the_rpm_files_alone_and_cleans_up() {

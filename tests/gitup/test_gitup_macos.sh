@@ -149,13 +149,8 @@ test_an_old_git_without_a_terminal_and_without_the_flag_refuses_names_the_flag_a
     assert_rc 1 "no terminal, no flag"
     assert_contains "$ERR" "install --upgrade-git" "names the flag"
     assert_contains "$ERR" "nothing was changed" "says nothing changed"
-    gm_nothing_installed "non-interactive"
-}
-
-test_the_hint_for_an_old_git_on_macos_names_upgrade_git_and_homebrew() {
-    gm_setup 2.40.0 || return 1
-    gsg install </dev/null
     assert_contains "$ERR" "install --upgrade-git; it installs or upgrades git with Homebrew" "the macOS hint"
+    gm_nothing_installed "non-interactive"
 }
 
 test_brew_is_never_run_as_root() {

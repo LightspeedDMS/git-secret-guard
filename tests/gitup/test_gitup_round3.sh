@@ -37,30 +37,16 @@ plan_tools() { grep -E '^  as root: ' <<<"$1" | sed -E 's/^  as root: ([^ ]+).*/
 # ^ invariant the tool paths sudo was asked to run, from the stand-in's log
 sudo_tools() { gu_log | grep -E '^sudo -- ' | sed -E 's/^sudo -- ([^ ]+).*/\1/' | LC_ALL=C sort -u; }
 
-test_the_source_route_plan_lists_every_privileged_command_with_its_full_path() {
-    local line tool
-    gu_rpm_setup || return 1
-    gsg install --upgrade-git </dev/null
-    assert_rc 0 "source route upgrade"
+# ^ invariant assert_plan_format PLAN TOOL... => every as-root line of PLAN starts with an absolute path, and PLAN names each TOOL
+assert_plan_format() {
+    local plan="$1" line tool tools
+    shift
     while IFS= read -r line; do
         assert_contains "$line" "as root: /" "an absolute tool path: ${line:0:70}"
-    done < <(grep -E '^  as root: ' <<<"$OUT")
-    for tool in mkdir install cp mv; do
-        assert_contains "$(plan_tools "$OUT")" "/$tool" "the plan names $tool"
-    done
-}
-
-test_the_takeover_plan_has_a_heading_and_lists_its_commands_with_full_paths() {
-    local line tool
-    gu_tk_start || return 1
-    gsg install --take-over-system-git </dev/null
-    assert_rc 0 "takeover"
-    assert_contains "$OUT" "system git takeover plan" "the plan has a heading"
-    while IFS= read -r line; do
-        assert_contains "$line" "as root: /" "an absolute tool path: ${line:0:70}"
-    done < <(grep -E '^  as root: ' <<<"$OUT")
-    for tool in mkdir cp install mv ln restorecon; do
-        assert_contains "$(plan_tools "$OUT")" "/$tool" "the plan names $tool"
+    done < <(grep -E '^  as root: ' <<<"$plan")
+    tools="$(plan_tools "$plan")"
+    for tool in "$@"; do
+        assert_contains "$tools" "/$tool" "the plan names $tool"
     done
 }
 
@@ -69,53 +55,13 @@ test_what_the_plan_prints_is_what_sudo_runs() {
     gsg install --take-over-system-git </dev/null
     assert_rc 0 "takeover"
     check_plan_matches_log "$OUT" "takeover"
+    assert_contains "$OUT" "system git takeover plan" "the plan has a heading"
+    assert_plan_format "$OUT" mkdir cp install mv ln restorecon
     gu_rpm_setup || return 1
     gsg install --upgrade-git </dev/null
     assert_rc 0 "source route"
     check_plan_matches_log "$OUT" "source route"
-}
-
-test_a_rolled_back_takeover_runs_only_commands_the_plan_lists() {
-    local line word known plan
-    gu_tk_start || return 1
-    printf 'ln -s' >"$SANDBOX/sudo.failon" && printf '1' >"$SANDBOX/sudo.skip" || return 1
-    gsg install --take-over-system-git </dev/null
-    assert_rc 1 "the second link fails and the takeover is rolled back"
-    plan="$OUT"
-    while IFS= read -r line; do
-        if grep -qxF -- "$line" <(plan_all_cmds "$plan"); then continue; fi
-        if [[ $line == *"rm -f -- "* ]]; then
-            for word in ${line#*" -- "}; do
-                known=0
-                if grep -F 'rm -f -- ' <(plan_all_cmds "$plan") | grep -qF -- "$word"; then known=1; fi
-                assert_eq "$known" "1" "rollback: the leftover file $word is named by an rm -f line of the plan"
-            done
-            continue
-        fi
-        fail "rollback: sudo ran a command the plan does not list: $line"
-    done < <(sudo_cmds)
-}
-
-# ^ invariant a takeover over a newer RPM finds an earlier backup => the annotated mv orig orig.old runs, and it must be a line of the plan
-test_the_conditional_plan_line_that_sets_an_earlier_backup_aside_is_listed_and_runs() {
-    local n plan
-    gu_tk_start || return 1
-    gsg install --take-over-system-git </dev/null
-    assert_rc 0 "first takeover"
-    for n in "${GU_TK_NAMES[@]}"; do
-        # shellcheck disable=SC2016
-        printf '#!/bin/sh\nif [ "$1" = --version ]; then echo "git version 2.53.0"; exit 0; fi\necho "rpm 2.53 %s"\n' "$n" >"$SANDBOX/new-$n" || return 1
-        chmod 755 "$SANDBOX/new-$n" || return 1
-        cp -a --remove-destination -- "$SANDBOX/new-$n" "$GU_ROOT/usr/bin/$n" || return 1
-    done
-    printf '%s\n' "$GU_CONF_BEFORE" >"$GU_ROOT/etc/dnf/dnf.conf" || return 1
-    rm -f -- "$SANDBOX/gitup.log" || return 1
-    gsg install --take-over-system-git </dev/null
-    assert_rc 0 "second takeover over a newer RPM"
-    plan="$OUT"
-    assert_contains "$(sudo_cmds)" "mv -T -- $GU_TK_DIR/orig $GU_TK_DIR/orig.old" "the earlier backup was set aside"
-    assert_contains "$(plan_lines "$plan")" "mv -T -- $GU_TK_DIR/orig $GU_TK_DIR/orig.old  [only when an earlier backup exists]" "and the plan lists that command with its condition"
-    check_plan_matches_log "$plan" "takeover over an earlier backup"
+    assert_plan_format "$OUT" mkdir install cp mv
 }
 
 # ^ invariant a leftover link of a file the failed swap never reaches is removed by the rollback rm -f => the annotated plan line must exist
@@ -129,7 +75,10 @@ test_the_conditional_plan_line_that_removes_leftover_files_is_listed_and_runs() 
     plan="$OUT"
     assert_contains "$(plan_lines "$plan")" "rm -f -- $GU_ROOT/usr/bin/.<file>.gsg-new" "the plan lists the rm -f line"
     while IFS= read -r line; do
-        if [[ $line != *"rm -f -- "* ]]; then continue; fi
+        if [[ $line != *"rm -f -- "* ]]; then
+            if ! grep -qxF -- "$line" <(plan_all_cmds "$plan"); then fail "rollback: sudo ran a command the plan does not list: $line"; fi
+            continue
+        fi
         ran=$((ran + 1))
         for word in ${line#*" -- "}; do
             known=0
@@ -167,21 +116,14 @@ test_a_stopped_restore_reports_the_state_and_the_next_command_and_leaves_no_temp
         assert_contains "$OUT" "links are in place" "it shows the state [$sig]"
         assert_contains "$OUT" "git-secret-guard restore-system-git" "and the next command [$sig]"
         assert_eq "$(ls -A "$SANDBOX/tmp")" "" "no temporary directory is left behind [$sig]"
+        gsg status
+        assert_contains "$OUT" "install --take-over-system-git" "status names the way back [$sig]"
+        assert_contains "$OUT" "restore-system-git" "and the way on for someone undoing it [$sig]"
+        assert_contains "$OUT" "no longer scanned" "and still says commits are not scanned [$sig]"
         gsg restore-system-git </dev/null
         assert_rc 0 "repeating the restore finishes it [$sig]"
         gu_untouched "restore after a stopped restore [$sig]"
     done
-}
-
-test_status_after_a_stopped_restore_names_both_ways_out() {
-    gu_tk_start || return 1
-    gsg install --take-over-system-git </dev/null
-    assert_rc 0 "takeover"
-    gu_interrupt_run '.git-shell.gsg-restore' 1 INT "$GSG_PROJECT/bin/git-secret-guard" restore-system-git || return 1
-    gsg status
-    assert_contains "$OUT" "install --take-over-system-git" "status names the way back"
-    assert_contains "$OUT" "restore-system-git" "and the way on for someone undoing it"
-    assert_contains "$OUT" "no longer scanned" "and still says commits are not scanned"
 }
 
 test_an_interrupted_copy_says_what_is_in_the_prefix_and_the_next_step_and_status_and_doctor_show_it() {
@@ -241,16 +183,6 @@ test_the_by_hand_undo_covers_original_none_and_removes_the_backup() {
     assert_rc 0 "after the by-hand steps"
     assert_contains "$OUT" "nothing to restore" "status has nothing left to warn about"
     gu_untouched "by-hand undo"
-}
-
-test_a_rerun_with_an_active_takeover_says_it_is_active() {
-    gu_tk_start || return 1
-    gsg install --take-over-system-git </dev/null
-    assert_rc 0 "takeover"
-    gsg install --take-over-system-git </dev/null
-    assert_rc 0 "the rerun"
-    assert_contains "$OUT" "nothing to take over" "it says there is nothing to do"
-    assert_contains "$OUT" "already active" "and why"
 }
 
 test_the_make_log_is_kept_when_the_build_fails_and_is_not_named_otherwise() {

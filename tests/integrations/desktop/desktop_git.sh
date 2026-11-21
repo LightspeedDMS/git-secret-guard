@@ -151,6 +151,25 @@ dg_snapshot() {
     { find "$DG_HOOKS" -type f -printf '%p %s %T@\n' 2>/dev/null; find "$DG_LAUNCHER_USER" -type f -printf '%p %s %T@\n' 2>/dev/null; } | LC_ALL=C sort
 }
 
+# ^ invariant dg_contents prints, sorted, path, type and link target or mode and sha256 of every file and link of the Desktop link (hooks directory, launcher)
+dg_contents() {
+    local f
+    find "$DG_HOOKS" "$DG_LAUNCHER_USER" \( -type f -o -type l \) 2>/dev/null | LC_ALL=C sort | while IFS= read -r f; do
+        if [ -L "$f" ]; then
+            printf '%s link %s\n' "$f" "$(readlink -- "$f")"
+        else
+            printf '%s file %s %s\n' "$f" "$(stat -c %a -- "$f")" "$(sha256sum -- "$f" | cut -d' ' -f1)"
+        fi
+    done
+}
+
+# ^ invariant dg_link_files writes the files of the link as the product does and runs no check; callers ran gsg install </dev/null first (the share dir)
+# ^ why the product's own writers, not a copy of their output; dg_contents in the real-link test pins the two to equal files
+dg_link_files() {
+    dg_run 'paths_init && desktop_git_paths && desktop_git_hooks_write "$GSG_SHARE" "$DG_HOOKS" && desktop_git_launcher_write'
+    assert_rc 0 "the link files are written without the check ($ERR)"
+}
+
 # ^ invariant dg_nothing_changed = a refused install left no share dir, state file, hook config or hooks directory (the sandbox starts without any)
 dg_nothing_changed() {
     assert_no_file "$LC_DATA" "no share dir"

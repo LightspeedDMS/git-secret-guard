@@ -22,26 +22,27 @@ test_status_shows_a_desktop_that_is_not_linked_as_a_warning() {
     assert_not_contains "$OUT" "MISMATCH" "it is no mismatch"
 }
 
-test_status_shows_an_active_link_as_current() {
-    dg_install_begin || return 1
-    gsg install --link-desktop-git </dev/null
-    assert_rc 0 "link ($ERR)"
-    gsg status
-    assert_rc 0 "status"
-    assert_contains "$OUT" "  ok       GitHub Desktop: linked (git $DG_VER); the 27 wrappers, the shared file and the launcher entry are current" "active"
-}
-
 test_status_reports_missing_and_stale_parts_as_a_mismatch_with_the_command_to_run() {
     local fix=install\ --link-desktop-git
     dg_install_begin || return 1
-    gsg install --link-desktop-git </dev/null
-    assert_rc 0 "link ($ERR)"
+    gsg install </dev/null
+    assert_rc 0 "install ($ERR)"
+    dg_link_files
+    gsg status
+    assert_rc 0 "status"
+    assert_contains "$OUT" "  ok       GitHub Desktop: linked (git $DG_VER); the 27 wrappers, the shared file and the launcher entry are current" "active"
     rm -f -- "$DG_HOOKS/post-merge" || return 1
     dg_expect_mismatch "the hooks directory is missing or has changed files (post-merge)" "$fix"
-    dg_repair
+    dg_link_files
+    gsg status
+    assert_rc 0 "status after the wrapper was written again"
+    assert_contains "$OUT" "GitHub Desktop: linked" "the link is current again"
     rm -f -- "$DG_LAUNCHER_USER" || return 1
     dg_expect_mismatch "the launcher entry is missing" "$fix"
-    dg_repair
+    dg_link_files
+    gsg status
+    assert_rc 0 "status after the launcher was written again"
+    assert_contains "$OUT" "GitHub Desktop: linked" "the link is current again"
     printf 'Comment[de]=Zusammenarbeit\n' >>"$DG_LAUNCHER_SYS" || return 1
     dg_expect_mismatch "the launcher entry differs from the system entry it is made from" "$fix"
     dg_repair
@@ -95,8 +96,7 @@ test_doctor_reports_the_desktop_link_as_info_ok_or_a_problem() {
     gsg doctor --roots "$SANDBOX/roots"
     assert_rc 0 "doctor with Desktop not linked: the link is opt-in"
     assert_contains "$OUT" "info     GitHub Desktop: git $DG_VER is not linked" "information"
-    gsg install --link-desktop-git </dev/null
-    assert_rc 0 "link ($ERR)"
+    dg_link_files
     gsg doctor --roots "$SANDBOX/roots"
     assert_rc 0 "doctor with an active link"
     assert_contains "$OUT" "ok       GitHub Desktop: linked (git $DG_VER)" "ok"
@@ -117,8 +117,9 @@ test_doctor_calls_a_launcher_that_no_longer_sets_the_hooks_path_a_problem() {
     local line text=""
     dg_install_begin || return 1
     mkdir -p -- "$SANDBOX/roots" || return 1
-    gsg install --link-desktop-git </dev/null
-    assert_rc 0 "link ($ERR)"
+    gsg install </dev/null
+    assert_rc 0 "install ($ERR)"
+    dg_link_files
     while IFS= read -r line || [ -n "$line" ]; do
         if [[ $line == Exec=* ]]; then line='Exec=github-desktop %U'; fi
         text+="$line"$'\n'

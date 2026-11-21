@@ -312,7 +312,9 @@ install_downloads_needed() {
     local tool plat row os arch
     if [ -z "${INSTALL_TIMEOUT_BIN:-}" ]; then return 0; fi
     if tools_is_windows && [ -z "$INSTALL_JQ_BIN" ]; then return 0; fi
-    os="$(uname -s)" && arch="$(uname -m)" || return 1
+    gsg_os_fill && gsg_arch_fill || return 1
+    os="$GSG_UNAME_S"
+    arch="$GSG_UNAME_M"
     for tool in "${GSG_TOOL_NAMES[@]}"; do
         plat="$(tools_platform_key "$tool" "$os" "$arch" 2>/dev/null)" || return 1
         row="$(tools_lock_lookup "$(tools_lock_path)" "$tool" "$plat" 2>/dev/null)" || return 1
@@ -390,8 +392,10 @@ install_find_timer_bin() {
 
 install_check_platform() {
     local tool
-    GSG_OS="$(uname -s)" || return 1
-    GSG_ARCH="$(uname -m)" || return 1
+    gsg_os_fill || return 1
+    gsg_arch_fill || return 1
+    GSG_OS="$GSG_UNAME_S"
+    GSG_ARCH="$GSG_UNAME_M"
     for tool in trufflehog betterleaks; do
         tools_platform_key "$tool" "$GSG_OS" "$GSG_ARCH" >/dev/null || return 1
     done

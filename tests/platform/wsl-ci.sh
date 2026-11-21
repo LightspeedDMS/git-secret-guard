@@ -130,8 +130,8 @@ phase_facts() {
         printf 'python3 pty: [%s]\n' "$(timeout 20 python3 -c 'import pty,sys; sys.exit(pty.spawn(["/bin/echo","via-python-pty"]))' 2>&1 </dev/null | tr '\r\n' '  ')"
     } 2>&1 | tee "$LOGS/pty-probe.log"
     # ^ invariant what the product's own detection says on this machine; a wrong answer fails the job
-    check "wsl_is says WSL" bash -c 'source "$1/lib/platform/wsl.sh" && wsl_is' _ "$WS"
-    info "wsl_version says $(bash -c 'source "$1/lib/platform/wsl.sh" && wsl_version && echo "$REPLY"' _ "$WS")"
+    check "wsl_is says WSL" bash -c 'source "$1/lib/core/common.sh" && source "$1/lib/platform/wsl.sh" && wsl_is' _ "$WS"
+    info "wsl_version says $(bash -c 'source "$1/lib/core/common.sh" && source "$1/lib/platform/wsl.sh" && wsl_version && echo "$REPLY"' _ "$WS")"
 }
 
 # ^ external renaming the directory of a running script fails on WSL 1 (4.4.0-20348-Microsoft, rc 1) and works on WSL 2 (6.18.54.1-microsoft-standard-WSL2)

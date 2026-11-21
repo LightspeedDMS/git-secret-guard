@@ -11,10 +11,11 @@ SMARTGIT_LINUX_PATH_SUFFIX=/usr/local/bin:/usr/bin:/bin
 # ^ invariant prints the macOS suffix for uname -m (arm64 the measured one, x86_64 with /usr/local/bin); another value or a failing uname is rc 1
 smartgit_macos_path_suffix() {
     local arch
-    arch="$(uname -m)" || {
+    gsg_arch_fill || {
         printf '%s: uname -m failed, so the architecture of this Mac is unknown and the PATH SmartGit gives git cannot be built\n' "$GSG_NAME" >&2
         return 1
     }
+    arch="$GSG_UNAME_M"
     case "$arch" in
         arm64) printf '%s' "$SMARTGIT_LAUNCHD_PATH_SUFFIX" ;;
         x86_64) printf '%s' "$SMARTGIT_LAUNCHD_INTEL_PATH_SUFFIX" ;;

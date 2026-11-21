@@ -314,7 +314,9 @@ doctor_check_hook_config() {
 # ^ invariant prints the version tools.lock pins for this platform; rc 1 when there is no row
 doctor_pinned() {
     local plat row
-    GSG_OS="$(uname -s)" && GSG_ARCH="$(uname -m)" || return 1
+    gsg_os_fill && gsg_arch_fill || return 1
+    GSG_OS="$GSG_UNAME_S"
+    GSG_ARCH="$GSG_UNAME_M"
     plat="$(tools_platform_key "$1" "$GSG_OS" "$GSG_ARCH" 2>/dev/null)" || return 1
     row="$(tools_lock_lookup "$(tools_lock_path)" "$1" "$plat" 2>/dev/null)" || return 1
     printf '%s' "${row%% *}"
@@ -337,6 +339,8 @@ doctor_check_tools() {
         doctor_machine_line PROBLEM "settings: DOCTOR_TIMEOUT_SECONDS must be a positive integer, got [$REPLY]; fix or remove it in $GSG_SHARE/settings"
         DR_LIMIT=""
     fi
+    # ^ why filled here, not in doctor_pinned; a fill inside its $(...) dies, a failure here is refused again by doctor_pinned in the loop
+    gsg_os_fill && gsg_arch_fill || true
     for tool in "${GSG_TOOL_NAMES[@]}"; do
         bin="$(settings_tool_bin "$tool")"
         if msg="$(tool_unusable "$tool" "$bin")"; then

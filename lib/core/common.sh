@@ -217,9 +217,24 @@ settings_tool_bin() {
     esac
 }
 
+# ^ invariant GSG_UNAME_S and GSG_UNAME_M hold the answers of uname -s and uname -m for this process only; never exported, never read from the environment
+# ^ invariant a fill runs in the shell of its caller, not inside $(...) (the copy dies there); a failing uname leaves it empty with rc 1, never cached
+# ^ coupled the CLI bootstrap library keeps a copy of both fills (it sources nothing); the entry points unset both variables first
+gsg_os_fill() {
+    if [ -n "${GSG_UNAME_S:-}" ]; then return 0; fi
+    GSG_UNAME_S="$(uname -s)" || { GSG_UNAME_S=""; return 1; }
+}
+
+gsg_arch_fill() {
+    if [ -n "${GSG_UNAME_M:-}" ]; then return 0; fi
+    GSG_UNAME_M="$(uname -m)" || { GSG_UNAME_M=""; return 1; }
+}
+
 # ^ external Windows means Git for Windows bash (uname -s MINGW64_NT-*) running native .exe scanners; every other platform keeps the Linux code paths
+# ^ invariant a failing uname is not Windows, rc 1 as before
 gsg_is_windows() {
-    case "$(uname -s)" in
+    gsg_os_fill || return 1
+    case "$GSG_UNAME_S" in
         MINGW64_NT-*) return 0 ;;
     esac
     return 1

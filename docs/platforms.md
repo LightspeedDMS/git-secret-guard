@@ -636,6 +636,29 @@ Result: not yet recorded.
 
 ## Maintainer notes
 
+- **One `uname` answer per process (#35).** Every platform check (`gsg_is_windows`, its wrappers `proc_is_windows` and `tools_is_windows`, `wsl_is`,
+  `brew_is_macos`, `brew_is_intel_mac`, the platform key of install, status and doctor, the SmartGit launch path) reads `GSG_UNAME_S` (`uname -s`) and
+  `GSG_UNAME_M` (`uname -m`), filled by `gsg_os_fill` and `gsg_arch_fill` in `lib/core/common.sh`. Before, each check forked `uname` (57 `uname -s` in one
+  install, 17 in one commit). Rules: (1) **never exported and never read from the environment**: `bin/git-secret-guard` and `hooks/secret-scan` `unset` both
+  before anything is sourced, so a value a caller exports is ignored, and every new process (the bootstrap's `exec` of a newer bash, the hook worker, the two
+  scanner runners) asks `uname` itself; a commit therefore runs `uname -s` four times, once per hook process, and never `uname -m`. (2) **The fill must run
+  in the shell that needs the answer**: a fill inside `$(...)` dies with the subshell, so a function reached only through `$(...)` pays a `uname` per call
+  until some earlier code in the main shell has filled it (the CLI does by its first check). `uname -m` is filled only by the code that needs it:
+  install and status fill it in their main shell, and `doctor_check_tools` fills both before its scanner loop, because `doctor_pinned` runs inside `$(...)`
+  once per scanner. The SmartGit launch path (`smartgit_macos_path_suffix`, reached through `$(...)`) asks `uname -m` on every call
+  (`smartgit_lfs_launch_path` and its callers run inside `$(...)`), on a Mac only; this path is not filled early.
+  (3) **A failing `uname` is never cached**: the fill returns 1 and leaves the variable empty, the next check asks again, and every caller keeps its refusal
+  (`install_check_platform` and `doctor_pinned` return 1, `smartgit_macos_path_suffix` prints its own message). (4) `lib/platform/brew.sh` loads first, sources nothing
+  and must run under bash 3.2, so it holds its own copy of both fills (`brew_os_fill`, `brew_arch_fill`, marked `# ^ coupled`) over the same variables, and the CLI still runs
+  `uname -s` once. (5) **Tests that fake the platform** keep their two ways: a `uname` on `PATH` before the process starts (`lc_fake_uname`), or a `uname` function defined
+  **before** the libraries are sourced. The libraries fill at the first check, never at load, so a `uname` function redefined after sourcing but before any check still wins
+  (`tests/platform/test_windows.sh` does this in a fresh `bash -c` per call); one redefined after a check already ran in the same shell is not seen,
+  because the answer is cached. (6) **Load order:** `proc.sh`, `tools.sh` and `wsl.sh` call functions of `common.sh` and refuse to load without it
+  (`return 1` with a message), so a missing `common.sh` never reads as "not Windows" or "not WSL"; every sourcer loads `lib/core/common.sh` first.
+  Tests: `tests/core/test_platform_fill.sh` (one `uname` for eleven checks through subshells, the failure never cached, never exported, a replaced wrapper
+  still wins, the load guards) and `tests/install/test_platform_once.sh` (install, commit and doctor counted through a `uname` on `PATH`, an inherited
+  `GSG_UNAME_S` ignored by the CLI and the hook).
+
 - **The hook interpreter on Windows (#28, #31).** A git without its own `bash` (MinGit has only `sh`) used to run the script through its
   `#!/usr/bin/env bash` shebang, which searches the Windows `PATH` and finds `C:\Windows\System32\bash.exe`, the WSL launcher. The hook command
   now names the bash install recorded: `BASH_BIN` is the Git for Windows bash that ran install (`$BASH`, with `.exe` added where the file exists),

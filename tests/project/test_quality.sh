@@ -55,14 +55,37 @@ test_the_shellcheck_gate_skips_with_the_version_found_when_it_is_not_pinned() {
 
 test_every_comment_follows_the_coded_comments_rules() {
     cd -- "$GSG_PROJECT" || return 1
-    local f
     local -a files
     mapfile -t files < <(project_scripts; printf '%s\n' lib/scan/extract.awk tests/*.awk)
-    for f in "${files[@]}"; do
-        run_cap awk -f tests/comment-rules.awk "$f"
+    [ "${#files[@]}" -ge 10 ] || { fail "only ${#files[@]} files found"; return 1; }
+    run_cap awk -f tests/comment-rules.awk "${files[@]}"
+    assert_rc 0 "one awk over every script"
+    assert_empty "$OUT" "comment rules in every script"
+}
+
+# ^ invariant one awk run over many files prints what a run per file prints, each finding with its own file and line, no state crossing a file
+test_one_comment_lint_run_over_several_files_reports_what_a_run_per_file_reports() {
+    local d="$SANDBOX/lint-many" f want=""
+    local rules="$GSG_PROJECT/tests/comment-rules.awk"
+    mkdir -p -- "$d" || return 1
+    printf '%s\n' 'x=1' >"$d/a-clean.sh"
+    printf '%s\n' 'x=1' 'echo "never closed' >"$d/b-open-quote.sh"
+    printf '%s\n' 'x=1' 'cat <<EOT' 'body' >"$d/c-open-heredoc.sh"
+    printf '%s\n' '# free comment on line 1' 'y=2' '# ^ unknown tag here' >"$d/d-bad.sh"
+    printf '%s\n' "echo 'open single" >"$d/e-open-single.sh"
+    printf '%s\n' 'z=3 #glued trailing prose' >"$d/f-bad-after.sh"
+    for f in "$d"/*.sh; do
+        run_cap awk -f "$rules" "$f"
         assert_rc 0 "awk over $f"
-        assert_empty "$OUT" "comment rules in $f"
+        if [ -n "$OUT" ]; then want="$want${want:+$'\n'}$OUT"; fi
     done
+    run_cap awk -f "$rules" "$d"/*.sh
+    assert_rc 0 "awk over all files at once"
+    assert_eq "$OUT" "$want" "one run reports what a run per file reports"
+    assert_contains "$OUT" "$d/d-bad.sh:1: free comment" "the finding on line 1 of the file after open quotes and an open heredoc"
+    assert_contains "$OUT" "$d/d-bad.sh:3: unknown tag" "the finding names its own line"
+    assert_contains "$OUT" "$d/f-bad-after.sh:1: trailing comment" "the finding after a file that ends inside a single quote"
+    assert_eq "$(printf '%s\n' "$OUT" | wc -l | tr -d ' ')" 3 "three findings and nothing else"
 }
 
 GSG_LINT_MAX_CHARS=160
@@ -135,13 +158,38 @@ case "$x" in '#'*) : ;; esac
 EOF
 }
 
+# ^ invariant ts_line_count_findings FILE... prints "FILE has N lines" per file of 1000 lines or more, from one wc -l; rc 1 when wc cannot read a file
+# ^ external wc -l prints a "total" line only when it is given more than one file
+ts_line_count_findings() {
+    local n name
+    wc -l -- "$@" >"$SANDBOX/wc.out" 2>/dev/null || return 1
+    while read -r n name; do
+        if [ "$name" = total ] && [ "$#" -gt 1 ]; then continue; fi
+        if [ "$n" -ge 1000 ]; then printf '%s has %s lines\n' "$name" "$n"; fi
+    done <"$SANDBOX/wc.out"
+}
+
+test_the_line_count_check_reports_exactly_the_files_of_1000_lines_or_more() {
+    local d="$SANDBOX/lines"
+    mkdir -p -- "$d" || return 1
+    seq 1 999 >"$d/a-short.sh" && seq 1 1000 >"$d/b-limit.sh" && seq 1 1001 >"$d/c-over.sh" && printf 'no newline' >"$d/d-none.sh" || return 1
+    assert_eq "$(ts_line_count_findings "$d/a-short.sh" "$d/b-limit.sh" "$d/c-over.sh" "$d/d-none.sh")" \
+        "$d/b-limit.sh has 1000 lines"$'\n'"$d/c-over.sh has 1001 lines" "several files: the total line is not a finding"
+    assert_eq "$(ts_line_count_findings "$d/b-limit.sh")" "$d/b-limit.sh has 1000 lines" "one file prints no total line"
+    assert_empty "$(ts_line_count_findings "$d/a-short.sh")" "999 lines pass"
+    if ts_line_count_findings "$d/missing.sh" >/dev/null 2>&1; then fail "a file that cannot be counted must fail the check"; fi
+}
+
 test_no_source_file_reaches_1000_lines() {
-    local f n
+    local line out
+    local -a files
     cd -- "$GSG_PROJECT" || return 1
-    while IFS= read -r f; do
-        n="$(wc -l <"$f")"
-        [ "$n" -lt 1000 ] || fail "$f has $n lines"
-    done < <(project_scripts; printf '%s\n' lib/scan/extract.awk)
+    mapfile -t files < <(project_scripts; printf '%s\n' lib/scan/extract.awk)
+    [ "${#files[@]}" -ge 10 ] || { fail "only ${#files[@]} files found"; return 1; }
+    out="$(ts_line_count_findings "${files[@]}")" || { fail "the line count could not run"; return 1; }
+    while IFS= read -r line; do
+        if [ -n "$line" ]; then fail "$line"; fi
+    done <<<"$out"
 }
 
 test_the_exit_trap_is_set_before_the_work_dir_is_created() {
@@ -582,7 +630,7 @@ test_no_file_sits_directly_in_lib() {
     [ "$dirs" -ge "$DEP_MIN_CONTEXT_DIRS" ] || fail "only $dirs context folders under lib/"
 }
 
-TS_TOP_ALLOWED=" run.sh run.cmd fetch-test-tools.sh comment-rules.awk coverage.sh coverage.awk coverage-env.sh windows-skips.list macos-only.list herestring-bounded.list herestring-tokens.awk "
+TS_TOP_ALLOWED=" run.sh run.cmd fetch-test-tools.sh comment-rules.awk coverage.sh coverage.awk coverage-env.sh windows-skips.list macos-only.list herestring-bounded.list herestring-tokens.awk test-costs.list "
 TS_MIN_TOP_FILES=8
 TS_MIN_TOP_DIRS=10
 TS_MIN_TEST_FILES=80

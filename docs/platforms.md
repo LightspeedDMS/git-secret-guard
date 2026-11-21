@@ -644,7 +644,10 @@ Result: not yet recorded.
   Windows tree) blocks with `cannot start the bash the install recorded (<bash>); nothing was scanned; run git-secret-guard install`, and
   never reaches `System32\bash.exe`. The command is not the only script that starts a bash: the jq wrapper (see File names above) and doctor's git shim
   name the recorded or running bash in their shebangs too, found by the first windows-suite run, which failed `test_recorded_bash.sh` until the
-  wrapper stopped using `env bash`. `tests/install/test_recorded_bash.sh` puts a script named `bash` first on `PATH` and asserts it is never
+  wrapper stopped using `env bash`. Both use the POSIX form of the bash (`shebang_path`: `cygpath -u`, `/usr/bin/bash.exe`): after the hook's `exec`
+  of the mixed path `$BASH` reads `C:/Program Files/Git/usr/bin/bash.exe`, and the space would stop a shebang (the first push of this change made
+  `doctor --recheck` exit 2 and broke the coverage reminder). `install_record_bash` converts the same way, so an install started through a mixed or
+  spaced path (the update task) records `/usr/bin/bash.exe`; `shebang_unusable` stays the last guard. `tests/install/test_recorded_bash.sh` puts a script named `bash` first on `PATH` and asserts it is never
   started; it never starts WSL (no `wsl.exe`, `wsl`, `ubuntu.exe`, no real `bash.exe` from `System32`) and runs in `windows-suite`. Not shown
   by any run here; `windows-suite` shows it for Git for Windows' own git only (no workflow uses MinGit). **Untested Hook gap:** a MinGit beside a
   full Git for Windows starting that tree's `bash.exe` with MinGit's own `sh` (different msys runtimes), and whether a script named `bash.exe`

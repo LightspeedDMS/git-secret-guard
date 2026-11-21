@@ -471,25 +471,31 @@ doctor_print_repo() {
 # ^ why a shim script, not a git() function; hp_records and the shared exempt.sh code call git by path and by name, and the hook must not learn about doctor
 # ^ invariant the shim prints "timed out after Ns" on exit 124 or 137 and, when timeout or DOCTOR_TIMEOUT_SECONDS is unusable, runs no git at all (exit 125)
 doctor_bound_git() {
-    local real="$GSG_GIT" shim="$DR_WORK/bin/git" why
+    local real="$GSG_GIT" shim="$DR_WORK/bin/git" why sb
     # ^ why the running bash in the shebang, not env bash; env takes the first bash on PATH => a stand-in answers for git in doctor (#31)
-    if why="$(shebang_unusable "${BASH:-}")"; then
+    # ^ external on Windows the hook's exec of a mixed path makes $BASH C:/Program Files/...; its POSIX form has no space
+    sb="$(shebang_path "${BASH:-}")" || sb=""
+    if [ -z "$sb" ]; then
+        printf '%s: doctor cannot write its git shim: the form of the bash running it for a shebang line is unknown\n' "$GSG_NAME" >&2
+        return 1
+    fi
+    if why="$(shebang_unusable "$sb")"; then
         printf '%s: doctor cannot write its git shim: the bash running it (%s) is not usable in a shebang line: a shebang cannot hold it (%s)\n' \
-            "$GSG_NAME" "${BASH//[^[:print:]]/?}" "$why" >&2
+            "$GSG_NAME" "${sb//[^[:print:]]/?}" "$why" >&2
         return 1
     fi
     mkdir -p -- "$DR_WORK/bin" || return 1
     if [ "$DR_TIMEOUT_OK" -eq 1 ] && [ -n "$DR_LIMIT" ]; then
         # shellcheck disable=SC2016
         {
-            printf '#!%s\n' "$BASH"
+            printf '#!%s\n' "$sb"
             # ^ hazard --foreground here => a timed-out git leaves its own children running; test:test_a_timed_out_doctor_run_leaves_no_process_behind
             # ^ why no --foreground, not the hook adapters' choice; doctor never needs the tty and timeout's own group is signalled whole
             printf '%q -k 5 %q %q "$@"\n' "$TIMEOUT_BIN" "$DR_LIMIT" "$real"
             printf 'rc=$?\nif [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then echo "timed out after %ss" >&2; fi\nexit "$rc"\n' "$DR_LIMIT"
         } >"$shim" || return 1
     else
-        printf '#!%s\necho "git was not run: timeout or DOCTOR_TIMEOUT_SECONDS is unusable (see machine section)" >&2\nexit 125\n' "$BASH" >"$shim" || return 1
+        printf '#!%s\necho "git was not run: timeout or DOCTOR_TIMEOUT_SECONDS is unusable (see machine section)" >&2\nexit 125\n' "$sb" >"$shim" || return 1
     fi
     chmod 755 -- "$shim" || return 1
     GSG_GIT="$shim"

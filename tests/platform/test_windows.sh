@@ -8,6 +8,7 @@ GSG_ROOT="$1"
 GSG_NAME=git-secret-guard
 GSG_UNINSTALL_ACTIONS=0
 uname() { if [ "${1:-}" = -m ]; then echo x86_64; else echo MINGW64_NT-10.0-26200; fi; }
+command -v cygpath >/dev/null 2>&1 || cygpath() { printf "%s\n" "${!#}"; }
 for lib in platform/brew core/common core/state install/tools install/hookspath scan/exempt autoupdate/timer platform/launchd platform/wsl install/install install/install_cmd install/install_tools install/uninstall inspect/status inspect/doctor inspect/doctor_repos inspect/doctor_findings core/proc integrations/desktop/desktop_git integrations/desktop/desktop_git_check integrations/desktop/desktop_git_report; do
     source "$1/lib/$lib.sh" || exit 9
 done

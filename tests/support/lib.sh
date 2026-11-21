@@ -142,7 +142,7 @@ sandbox_create() {
         TEST_SANDBOX_MIXED="$(cygpath -m "$SANDBOX")" || exit 2
         GSG_ENV+=(SYSTEMROOT="$SYSTEMROOT")
         TEST_JQ="$SANDBOX/jq-binary-mode"
-        printf '#!/usr/bin/env bash\nexec %q -b "$@"\n' "$TEST_JQ_EXE" >"$TEST_JQ" || exit 2
+        printf '#!%s\nexec %q -b "$@"\n' "$TEST_RECORDED_BASH" "$TEST_JQ_EXE" >"$TEST_JQ" || exit 2
         chmod 755 "$TEST_JQ" || exit 2
     fi
     # ^ invariant the stand-ins keep the jq they used before; on Windows the plain jq.exe of jqbin, never the -b wrapper TEST_JQ names there

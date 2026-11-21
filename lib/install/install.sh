@@ -240,6 +240,8 @@ install_resolve_bins() {
 install_record_bash() {
     local b="${BASH:-}" why
     INSTALL_BASH_BIN=""
+    # ^ why the POSIX form first on Windows, not $BASH as is; a mixed path (update task) reads C:/Program Files/... and a shebang holds no space
+    if tools_is_windows; then b="$(shebang_path "$b")" || b=""; fi
     if tools_is_windows && [ "${b%.exe}" = "$b" ] && [ -f "$b.exe" ]; then b="$b.exe"; fi
     if why="$(tool_unusable bash "$b")"; then
         printf '%s: %s; the hook command must name the bash it runs under\n' "$GSG_NAME" "$why" >&2

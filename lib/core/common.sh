@@ -230,6 +230,14 @@ gsg_proc_tool_name() {
     if gsg_is_windows; then printf 'taskkill\n'; else printf 'setsid\n'; fi
 }
 
+# ^ invariant shebang_path PATH prints PATH as a shebang can hold it, the POSIX form on Git for Windows (cygpath -u), unchanged elsewhere; rc 1 = cygpath failed
+# ^ external after the hook's exec of a mixed path, $BASH on Windows is C:/Program Files/Git/usr/bin/bash.exe; its POSIX form is /usr/bin/bash.exe, no space
+shebang_path() {
+    local p="$1"
+    if gsg_is_windows; then p="$(cygpath -u -- "$1")" || return 1; fi
+    printf '%s' "$p"
+}
+
 # ^ invariant shebang_unusable PATH prints why a shebang line cannot name PATH (whitespace, longer than 100 characters) and returns 0; returns 1 when it can
 shebang_unusable() {
     if [[ $1 == *[[:space:]]* ]]; then

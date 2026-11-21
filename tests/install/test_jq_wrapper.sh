@@ -11,7 +11,8 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/../support/lib.sh"
 inst() {
     local code
     code='GSG_ROOT="$1"; GSG_NAME=git-secret-guard
-if [ "$WINDOWS" = 1 ]; then uname() { if [ "${1:-}" = -m ]; then echo x86_64; else echo MINGW64_NT-10.0-26200; fi; }; fi
+uname() { if [ "${1:-}" = -m ]; then echo x86_64; elif [ "$WINDOWS" = 1 ]; then echo MINGW64_NT-10.0-26200; else echo Linux; fi; }
+if [ "$WINDOWS" = 1 ]; then cygpath() { printf "%s\n" "${!#}"; }; fi
 for lib in platform/brew core/common install/tools install/install inspect/doctor_repos; do source "$GSG_ROOT/lib/$lib.sh" || exit 9; done
 '"$1"
     run_cap env -i "${GSG_ENV[@]}" WINDOWS="${WINDOWS:-0}" bash -c "$code" _ "$GSG_PROJECT" "${@:2}"
@@ -36,7 +37,8 @@ test_a_bash_first_on_path_is_never_started_by_the_jq_wrapper() {
     [ -x "$REAL_TRUFFLEHOG" ] || skip_test "trufflehog not found at $REAL_TRUFFLEHOG"
     [ -x "$REAL_BETTERLEAKS" ] || skip_test "betterleaks not found at $REAL_BETTERLEAKS"
     fake_bash "$standin" ": >\"$log\"" || return 1
-    inst 'install_write_jq_wrapper "$2" "$3" "$4"' "$SANDBOX/jqw" "$TEST_JQ" "$TEST_RECORDED_BASH"
+    # ^ why jq.exe on Windows, not TEST_JQ; the harness TEST_JQ there is a script, its own shebang could reach the stand-in
+    inst 'install_write_jq_wrapper "$2" "$3" "$4"' "$SANDBOX/jqw" "${TEST_JQ_EXE:-$TEST_JQ}" "$TEST_RECORDED_BASH"
     assert_rc 0 "written"
     use_real_tools "JQ_BIN=$SANDBOX/jqw"
     set_env HTTPS_PROXY=http://127.0.0.1:9 HTTP_PROXY=http://127.0.0.1:9 https_proxy=http://127.0.0.1:9 http_proxy=http://127.0.0.1:9
@@ -60,6 +62,23 @@ test_an_install_refuses_a_recorded_bash_a_shebang_cannot_hold_on_windows() {
     assert_contains "$ERR" "a shebang cannot hold it (longer than 100 characters)" "says why"
     inst "$record" "$spaced/bash"
     assert_contains "$OUT" "rc=0" "off Windows no wrapper exists and the same path is fine"
+}
+
+# ^ hazard after the hook's exec of a mixed path, $BASH on Windows is C:/Program Files/...; a shebang cannot hold the space, the POSIX form can
+# ^ external cygpath is faked to answer the POSIX form of a real file; the real one answers /usr/bin/bash.exe for Git for Windows' own bash
+test_install_takes_a_mixed_form_windows_bash_in_posix_form() {
+    fake_bash "$SANDBOX/usr/bin" || return 1
+    WINDOWS=1 inst 'FAKE="$3"; cygpath() { printf "%s\n" "$FAKE"; }; BASH="$2"; install_record_bash; echo "rc=$? bin=[$INSTALL_BASH_BIN]"' \
+        "C:/Program Files/Git/usr/bin/bash.exe" "$SANDBOX/usr/bin/bash"
+    assert_contains "$OUT" "rc=0 bin=[$SANDBOX/usr/bin/bash]" "the POSIX form is recorded, the spaced mixed form is not refused"
+}
+
+test_the_doctor_shim_takes_a_mixed_form_windows_bash_in_posix_form() {
+    fake_bash "$SANDBOX/usr/bin" || return 1
+    WINDOWS=1 inst 'FAKE="$4"; cygpath() { printf "%s\n" "$FAKE"; }; BASH="$2"; DR_WORK="$3"; DR_TIMEOUT_OK=1; DR_LIMIT=5; TIMEOUT_BIN=/usr/bin/timeout; GSG_GIT=/usr/bin/git; doctor_bound_git; echo "rc=$?"' \
+        "C:/Program Files/Git/usr/bin/bash.exe" "$SANDBOX/drw4" "$SANDBOX/usr/bin/bash"
+    assert_contains "$OUT" "rc=0" "the shim is written"
+    assert_eq "$(head -n 1 "$SANDBOX/drw4/bin/git")" "#!$SANDBOX/usr/bin/bash" "with the POSIX form in its shebang"
 }
 
 # ^ hazard the doctor git shim ran through env bash too; doctor also runs in the hook's coverage re-check, where a stand-in bash would answer for git

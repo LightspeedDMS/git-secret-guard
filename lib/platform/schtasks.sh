@@ -54,8 +54,16 @@ schtasks_cmd_text() {
     for n in "${GSG_TIMER_ENV_NAMES[@]}"; do
         if [ -n "${!n:-}" ]; then printf 'set "%s=%s"\r\n' "$n" "${!n//%/%%}"; fi
     done
-    printf '"%s" "%s/bin/%s" update > "%s" 2>&1\r\n' "${1//%/%%}" "${share//%/%%}" "$GSG_NAME" "${log//%/%%}"
-    printf 'exit /b %%errorlevel%%\r\n'
+    # ^ hazard cmd reopens a running wrapper by name and seeks to the offset saved after the update line; the child install rewrites it mid-run
+    # ^ invariant every header line and the update line stay where they were, the line one byte longer (> to >>) => the old offset lands on its last byte
+    # ^ invariant everything new comes after the update line; the old offset resumes on set; the transition run neither repeats update nor loses its status
+    printf '"%s" "%s/bin/%s" update >> "%s" 2>&1\r\n' "${1//%/%%}" "${share//%/%%}" "$GSG_NAME" "${log//%/%%}"
+    printf 'set "GSG_RC=%%errorlevel%%"\r\n'
+    # ^ why cmd rotates, not update; this wrapper held the log open during the run and Windows refuses to rename an open file; the log moves after the run
+    # ^ external for a missing file %%~zF is empty and the if is a syntax error => the if exist comes first; GTR compares numbers
+    printf 'if exist "%s" for %%%%F in ("%s") do if %%%%~zF GTR %s move /y "%s" "%s.1" >nul 2>&1\r\n' \
+        "${log//%/%%}" "${log//%/%%}" "$GSG_UPDATE_LOG_MAX" "${log//%/%%}" "${log//%/%%}"
+    printf 'exit /b %%GSG_RC%%\r\n'
 }
 
 # ^ invariant sets REPLY = the Windows path of the bash install runs in, as install_cli_cmd_text names it

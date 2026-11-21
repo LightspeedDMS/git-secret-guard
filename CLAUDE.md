@@ -122,7 +122,9 @@ This file is an index: each topic states what must not break and links the doc h
   `lib/autoupdate/install_timer.sh`, LaunchAgent `lib/platform/launchd.sh`):
   only the checkout's owner fetches (tags never forced) and fast-forwards, to the peeled commit of the newest valid tag, never past it; every user
   installs from a `git archive` export of the tag by a foreground child `install` without flags, nothing is sourced after it; a doubtful case is a
-  recorded skip (exit 0); "needs install" = newer than the state's version or the share's `VERSION`; the lock lets in only its holder's child:
+  recorded skip (exit 0); "needs install" = newer than the state's version or the share's `VERSION`; the lock lets in only its holder's child;
+  `update` stamps its output only when stdout and stderr are both `update.log` (macOS, Windows): the logged child is a fresh bash under a pipe plus
+  `PIPESTATUS`, never a subshell (the lock names `$$`), and Windows rotates the log in the `.cmd` wrapper, macOS in `autoupdate_log_rotate`:
   [install.md](docs/install.md#auto-update---auto-update-and-update) ([maintainer notes](docs/autoupdate-maintainer.md)).
   **Windows (`lib/platform/schtasks.sh`, `lib/platform/winupdate.sh`):** an hourly Task Scheduler task runs a `.cmd` wrapper in the state dir (never in
   the share; it sets HOME and the XDG variables of the install); `update` `exec`s a private copy of the share first (a running script or cwd

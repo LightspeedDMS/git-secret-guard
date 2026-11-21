@@ -164,6 +164,11 @@ uninstall_agent() {
         rm -f -- "$LJ_LOG" || return 1
         uninstall_say "removed the $LJ_LONG log $LJ_LOG"
     fi
+    # ^ coupled lib/autoupdate/autoupdate.sh (autoupdate_log_rotate) keeps one previous log of the update job as update.log.1; the doctor agent has none
+    if [ "$1" = update ] && [ -f "$LJ_LOG.1" ] && [ ! -L "$LJ_LOG.1" ]; then
+        rm -f -- "$LJ_LOG.1" || return 1
+        uninstall_say "removed the $LJ_LONG log $LJ_LOG.1"
+    fi
 }
 
 # ^ order the update agent goes first => the updater is stopped before anything else of the install is removed, as with the systemd pair
@@ -338,10 +343,11 @@ uninstall_findings() {
 # ^ coupled lib/autoupdate/autoupdate.sh makes update-tmp.XXXXXX (the record before its rename) and update-work.XXXXXX (a directory holding the export)
 # ^ security rm -rf only on a real directory named update-work.?????? in the state dir, never through a link; the caller holds the update lock
 uninstall_update_record() {
-    local f logf=""
+    local f logf="" logf1=""
     # ^ coupled GSG_UPDATE_AGENT_LOG is this same path on macOS; uninstall_agent update owns it there (it leaves a foreign plist's or a linked log)
-    tools_is_windows && logf="$GSG_UPDATE_LOG"
-    for f in "$GSG_UPDATE_RECORD" "$logf" "$GSG_STATE_DIR"/update-tmp.??????; do
+    # ^ coupled the wrapper of schtasks.sh moves a long log to update.log.1; it goes with the log
+    if tools_is_windows; then logf="$GSG_UPDATE_LOG" logf1="$GSG_UPDATE_LOG.1"; fi
+    for f in "$GSG_UPDATE_RECORD" "$logf" "$logf1" "$GSG_STATE_DIR"/update-tmp.??????; do
         [ -n "$f" ] || continue
         if [ -f "$f" ] || [ -L "$f" ]; then
             rm -f -- "$f" || {

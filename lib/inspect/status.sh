@@ -338,7 +338,9 @@ status_tools() {
         status_line PROBLEM "timeout" "${TIMEOUT_BIN:-} (MISSING or not executable)"
         return 0
     fi
-    GSG_OS="$(uname -s)" && GSG_ARCH="$(uname -m)" || return 1
+    gsg_os_fill && gsg_arch_fill || return 1
+    GSG_OS="$GSG_UNAME_S"
+    GSG_ARCH="$GSG_UNAME_M"
     for tool in "${GSG_TOOL_NAMES[@]}"; do
         plat="$(tools_platform_key "$tool" "$GSG_OS" "$GSG_ARCH" 2>/dev/null)" || plat=""
         row="$(tools_lock_lookup "$(tools_lock_path)" "$tool" "$plat" 2>/dev/null)" || row="none none"

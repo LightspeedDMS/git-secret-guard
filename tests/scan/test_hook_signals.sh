@@ -205,7 +205,7 @@ SIG_GRACE_MAX_MS=14000
 SIG_RACE_HOLD_S=1
 SIG_RACE_SIGNAL_AFTER_S=0.4
 SIG_SETTLE_S=0.5
-unit_write() { printf 'source "%s/lib/core/proc.sh" || exit 9\n%s\n' "$SHARE" "$1" >"$SANDBOX/unit.sh"; }
+unit_write() { printf 'source "%s/lib/core/common.sh" && source "%s/lib/core/proc.sh" || exit 9\n%s\n' "$SHARE" "$SHARE" "$1" >"$SANDBOX/unit.sh"; }
 unit_command() { UNIT_CMD=(env -i "${GSG_ENV[@]}" SETSID_BIN="$TEST_SETSID" "$@" bash "$SANDBOX/unit.sh" "$SIGDUR"); }
 unit_run() {
     unit_command "$TEST_TIMEOUT" "$SIG_UNIT_TIMEOUT_S"

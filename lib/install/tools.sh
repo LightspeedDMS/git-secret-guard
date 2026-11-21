@@ -1,5 +1,11 @@
 # shellcheck shell=bash disable=SC2034
 
+# ^ security a missing common.sh stops the load, never reads as not Windows; every sourcer loads lib/core/common.sh first
+if ! declare -F gsg_is_windows >/dev/null; then
+    printf 'lib/install/tools.sh: lib/core/common.sh must be sourced first\n' >&2
+    return 1
+fi
+
 GSG_LOCK_MAX_LINES=1000
 GSG_VERSION_PROBE_SECONDS=20
 GSG_VERSION_OUTPUT_MAX=4096
@@ -18,12 +24,7 @@ tools_announce_overrides() {
 }
 
 # ^ external Windows means Git for Windows bash (uname -s MINGW64_NT-*) running the native .exe scanners; WSL is Linux and takes the Linux rows
-tools_is_windows() {
-    case "$(uname -s)" in
-        MINGW64_NT-*) return 0 ;;
-    esac
-    return 1
-}
+tools_is_windows() { gsg_is_windows; }
 
 # ^ invariant the file name of a scanner on this platform; callers build "$dir/$(tools_binary_name "$tool")", never "$dir/$tool"
 # ^ external trufflehog restarts itself by its own path and Go cannot start a Windows file without .exe (probed) => the scanners keep the .exe name

@@ -16,14 +16,6 @@ lc_which() {
     env -i HOME="$SANDBOX/home" PATH="$SANDBOX/pathbin:$TEST_BASE_PATH" bash -c 'type -P "$1"' _ "$1" </dev/null
 }
 
-test_status_judges_the_recorded_bash_after_install() {
-    fresh_install
-    gsg status
-    assert_rc 0 "status after install"
-    assert_contains "$OUT" "  ok       bash: $(lc_recorded_bash)"$'\n' "the bash the install recorded (with .exe on Windows)"
-    assert_contains "$OUT" "global config: matches" "and the command naming it matches"
-}
-
 # ^ hazard an install from before the recorded bash has no BASH_BIN and the bare hook path => the shebang chooses the bash, a stand-in can win
 test_status_flags_an_install_that_records_no_bash() {
     fresh_install

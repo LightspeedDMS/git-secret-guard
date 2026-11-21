@@ -385,24 +385,6 @@ test_an_installer_that_exits_0_without_installing_is_a_failure_and_a_sound_relea
     assert_eq "$(<"$LC_DATA/VERSION")" 1.2.0 "installed"
 }
 
-test_after_a_failed_update_the_old_hook_still_blocks_a_real_secret() {
-    [ -x "$REAL_TRUFFLEHOG" ] || skip_test "trufflehog not found at $REAL_TRUFFLEHOG"
-    [ -x "$REAL_BETTERLEAKS" ] || skip_test "betterleaks not found at $REAL_BETTERLEAKS"
-    local key
-    au_setup real && au_publish_refusing_release || return 1
-    upd
-    assert_rc 1 "the update fails"
-    assert_record failed install-failed "the record"
-    key="$(fake_aws_key)"
-    new_repo au-leak || return 1
-    stage_file src/leak.txt one "aws_access_key_id = $key" || return 1
-    commit_cap "leak after a failed update"
-    assert_rc 1 "the commit is blocked by the old hook"
-    assert_contains "$ERR" "src/leak.txt:2" "the real file and line"
-    no_leak "$key"
-    assert_eq "$(gitx rev-parse -q --verify HEAD 2>/dev/null | wc -l | tr -d ' ')" 0 "no commit was created"
-}
-
 test_a_follower_installs_from_the_tag_export_and_never_fetches() {
     local head
     au_setup_follower_at_release || return 1

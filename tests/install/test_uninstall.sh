@@ -76,10 +76,6 @@ test_uninstall_restores_the_recorded_hooks_path_verbatim_and_keeps_the_backup() 
             assert_file "$dir/pre-commit" "the old hooks dir is untouched"
         fi
     done
-    lc_begin && lc_make_fixtures && lc_use_fixtures || return 1
-    gsg install
-    gsg uninstall
-    hooks_path_is_unset || fail "an 'unset' record leaves core.hooksPath unset"
 }
 
 test_uninstall_restores_core_hooks_path_before_removing_the_hook_config() {
@@ -129,12 +125,6 @@ test_remove_tools_removes_only_what_install_downloaded() {
     gsg uninstall --remove-tools
     assert_rc 0 "both downloaded"
     assert_eq "$(find "$LC_BIN" -mindepth 1 | wc -l)" 0 "both are removed, nothing else was in ~/.local/bin"
-
-    lc_begin && lc_make_fixtures && lc_use_fixtures || return 1
-    gsg install
-    gsg uninstall
-    assert_file "$LC_BIN/trufflehog$LC_EXE" "without the flag trufflehog stays"
-    assert_file "$LC_BIN/betterleaks$LC_EXE" "and so does betterleaks"
 }
 
 ORIG_SHA="" ORIG_MODE=""

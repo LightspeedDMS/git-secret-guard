@@ -113,10 +113,10 @@ test_load_settings_rejects_bad_timeouts() {
     done
 }
 
-test_hook_blocks_on_a_padded_or_oversized_timeout_setting() {
+test_hook_blocks_on_a_padded_oversized_or_non_numeric_timeout_setting() {
     local bad
     new_repo zeropad || return 1
-    for bad in 00 000 007 1000000; do
+    for bad in 00 000 007 1000000 soon; do
         use_stubs "SCAN_TIMEOUT_SECONDS=$bad"
         stage_file a.txt one
         commit_cap "x"
@@ -175,16 +175,6 @@ test_report_results_refuses_a_missing_work_dir() {
     run_cap env -i "${GSG_ENV[@]}" bash -c 'source "$1/lib/core/common.sh"; source "$1/lib/scan/report.sh"; report_results ""' _ "$SHARE"
     assert_rc 1 "no work dir"
     assert_contains "$ERR" "failing closed" "says why"
-}
-
-test_hook_blocks_on_an_invalid_timeout_setting() {
-    new_repo badtimeout || return 1
-    use_stubs "SCAN_TIMEOUT_SECONDS=soon"
-    stage_file a.txt one
-    commit_cap "x"
-    assert_rc 1 "blocked"
-    assert_contains "$ERR" "SCAN_TIMEOUT_SECONDS" "names the setting"
-    assert_contains "$ERR" "nothing was scanned" "says nothing was scanned"
 }
 
 run_file_tests

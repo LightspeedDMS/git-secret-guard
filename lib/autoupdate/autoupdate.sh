@@ -304,7 +304,7 @@ autoupdate_owner_checks() {
 }
 
 # ^ external timeout without --foreground signals its whole group; under setsid git has no controlling terminal => ssh cannot prompt
-# ^ invariant no --force for tags; a tag moved on origin is rejected, the fetch exits non-zero, the local tag stays (tests/autoupdate/test_autoupdate_probes.sh)
+# ^ invariant no --force for tags; a moved tag on origin fails the fetch, the local tag stays; test:test_a_moved_tag_is_a_failed_fetch_and_the_local_tag_stays
 # ^ external Windows has no setsid (probed); GNU timeout alone ends git and every process below it (probed), winupdate.sh sets GCM_INTERACTIVE=never
 autoupdate_fetch() {
     local -a launcher=()

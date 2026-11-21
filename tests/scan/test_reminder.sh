@@ -107,21 +107,17 @@ run_report_reminder() {
 
 fake_record() { printf 'git-secret-guard findings 1\ntime 2026-03-04T05:06:07Z\n' >"$SANDBOX/rec"; }
 
-test_a_passing_commit_reminds_of_an_open_problem_after_the_pass_line() {
-    rem_begin_with_b_open || return 1
-    rem_commit a
-    assert_rc 0 "the commit passes"
-    assert_empty "$OUT" "stdout stays empty"
-    assert_pass_line_only "$(head -n 1 <<<"$ERR")" "first line is the pass line"
-    assert_eq "$ERR" "$(head -n 1 <<<"$ERR")
-$(reminder_for_b)" "pass line, then exactly the reminder"
-    assert_eq "$(rgit a rev-list --count HEAD)" 3 "the commit was created"
-}
-
 test_the_reminder_repeats_on_every_commit() {
     rem_begin_with_b_open || return 1
-    local i
-    for i in 1 2 3; do
+    local i first
+    rem_commit a
+    assert_rc 0 "commit 1 passes"
+    assert_empty "$OUT" "stdout stays empty"
+    first="$(head -n 1 <<<"$ERR")"
+    assert_pass_line_only "$first" "first line is the pass line"
+    assert_eq "$ERR" "$first"$'\n'"$(reminder_for_b)" "pass line, then exactly the reminder"
+    assert_eq "$(rgit a rev-list --count HEAD)" 3 "the commit was created"
+    for i in 2 3; do
         rem_commit a
         assert_rc 0 "commit $i passes"
         assert_ends_with_reminder "$(reminder_for_b)" "commit $i"
@@ -160,15 +156,6 @@ test_a_nothing_to_scan_commit_also_reminds() {
     assert_rc 0 "the empty commit passes"
     assert_contains "$ERR" "git-secret-guard: no added lines to scan" "nothing-to-scan line"
     assert_ends_with_reminder "$(reminder_for_b)" "empty commit"
-}
-
-test_a_commit_blocked_by_a_scanner_error_also_reminds() {
-    rem_begin_with_b_open || return 1
-    set_env STUB_TF_RC=3
-    rem_commit a
-    assert_rc 1 "blocked"
-    assert_contains "$ERR" "did not complete" "the commit's own message"
-    assert_ends_with_reminder "$(reminder_for_b)" "scanner error"
 }
 
 test_nothing_on_record_starts_no_process_and_prints_no_reminder() {

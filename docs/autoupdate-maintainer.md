@@ -30,9 +30,9 @@ Behaviour: [Auto-update](install.md#auto-update---auto-update-and-update). Inter
   taken, never a process substitution.
 - **The fetch refspecs** (`autoupdate_fetch`): `'+refs/heads/main:refs/remotes/origin/main' 'refs/tags/v*:refs/tags/v*'` with
   `--no-recurse-submodules`. The `+` is on the branch only; **tags are never forced**, which is what turns a tag moved on
-  `origin` into a non-zero fetch with the local tag unchanged (`test_moved_tag_fetch_is_rejected_without_force`,
-  `test_a_moved_tag_is_a_failed_fetch_and_the_local_tag_stays`). The fetch is not atomic: with a rejected tag
-  `refs/remotes/origin/main` still advances (observed); `HEAD`, the tags and the install do not. It runs as
+  `origin` into a non-zero fetch with the local tag unchanged (`test_a_moved_tag_is_a_failed_fetch_and_the_local_tag_stays`).
+  The fetch is not atomic: with a rejected tag `refs/remotes/origin/main` still advances (observed); `HEAD`, the tags and the
+  install do not. It runs as
   `timeout -k 10 120 setsid git ...` with stdin from `/dev/null`: `setsid` leaves git without a controlling terminal, so ssh
   cannot prompt, and `timeout` **without** `--foreground` signals the whole group. This is the opposite of the scan adapters
   and `hooklist_bind_timeout`, which keep `--foreground`: do not "align" them.
@@ -43,9 +43,8 @@ Behaviour: [Auto-update](install.md#auto-update---auto-update-and-update). Inter
   `1.0` for `1.0.0`).
 - **The merge target is the peeled commit**, `git merge --ff-only refs/tags/<tag>^{commit}`, after
   `merge-base --is-ancestor HEAD <tag>^{commit}` and followed by the assertion that `HEAD` is that commit
-  (`autoupdate_at_commit` peels both sides, so an annotated tag is compared by its commit). Probed with git 2.56.0: no merge
-  commit either way (`test_ff_only_peeled_annotated_tag_and_tag_object_observation`); the peeled form does not depend on
-  that. Nothing turns the owner's hooks off.
+  (`autoupdate_at_commit` peels both sides, so an annotated tag is compared by its commit). The fast-forward makes no merge
+  commit (`test_the_owner_moves_to_the_newest_released_tag_and_installs_from_its_export`). Nothing turns the owner's hooks off.
 - **The version-gap rule** (`autoupdate_needs_install`). `install_write_state` records the new `version` before
   `install_copy_share` runs, so after a failed copy the state names a version that is not installed. "Needs install" is
   therefore: newer than the state's `version` **or** newer than `$GSG_SHARE/VERSION`, and an installed copy without a
@@ -69,9 +68,9 @@ Behaviour: [Auto-update](install.md#auto-update---auto-update-and-update). Inter
   enables nothing. **Nothing is sourced after the child returns:** the installer has replaced the share tree the running
   shell's libraries came from. `updated` needs exit 0 **and** `$GSG_SHARE/VERSION` equal to `X`
   (`test_an_installer_that_exits_0_without_installing_is_a_failure_and_a_sound_release_recovers`); the old copy keeps
-  scanning after a failure (`test_after_a_failed_update_the_old_hook_still_blocks_a_real_secret`, real scanners). bash runs a
-  trap only after its foreground child returns, so a signal during the child install waits for it, at most the 1800 second
-  bound.
+  scanning after a failure (`test_a_failed_child_install_keeps_the_old_copy_and_the_next_run_retries`: the installed files, the
+  state, the global hook config and the tool files are byte-identical). bash runs a trap only after its foreground child
+  returns, so a signal during the child install waits for it, at most the 1800 second bound.
 - **The lock and its let-in rule** (`autoupdate_lock_take`: 0 taken or let in, 1 held by a live run or a directory in the
   way, see [doctor.md maintainer notes](doctor.md), 2 the lock could not be made). The lock is `doctor_rec_lock` with a
   path (`lib/inspect/doctor_findings.sh`, whose defaults are still the findings lock): one attempt, a live holder refuses unless

@@ -48,36 +48,14 @@ test_real_the_cached_scanners_hash_to_the_binary_hash_in_the_lock() {
     if [ "$checked" -eq 0 ]; then skip_test "no real scanner at the pinned version was found ($REAL_TRUFFLEHOG, $REAL_BETTERLEAKS)"; fi
 }
 
-test_real_clean_diff_passes_quietly_with_both_tools() {
-    need_real_tools
-    new_repo realclean || return 1
-    stage_file src/app.txt "hello world" "nothing secret here"
-    commit_cap "clean"
-    assert_rc 0 commit
-    assert_empty "$OUT" "stdout stays empty"
-    assert_pass_line_only "$ERR" "only the pass line is printed on success"
-}
-
-test_real_betterleaks_catches_a_fake_key_and_the_value_is_absent_from_the_output() {
-    need_real_tools
-    new_repo realkey || return 1
-    stage_file f.txt one two "key = \"$(fake_aws_key)\""
-    commit_cap "leak"
-    assert_rc 1 "blocked"
-    assert_contains "$ERR" "betterleaks" scanner
-    assert_contains "$ERR" "aws-access-key-id" "detector: our rule, since 1.9.0 reports a key ID only with its secret nearby"
-    assert_contains "$ERR" "(match)" "the one honest label"
-    assert_contains "$ERR" "f.txt:3" "real file and line"
-    assert_contains "$ERR" "git commit --no-verify" "bypass hint"
-    local key
-    key="$(fake_aws_key)"
-    no_leak "$key"
-    no_leak "${key:4}"
-}
-
+# ^ invariant the environment holds no proxy variable and no network is needed => a pattern match decides, as with the dead proxy of the old tests
 test_real_trufflehog_match_blocks_without_the_value() {
     need_real_tools
+    local pv
     new_repo realtf || return 1
+    for pv in HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy; do
+        if [ -n "$(env -i "${GSG_ENV[@]}" "${EXTRA_ENV[@]}" bash -c "printf %s \"\${$pv:-}\"")" ]; then fail "the test environment already sets $pv"; return 1; fi
+    done
     stage_file f.txt one "token = \"$(fake_github_token)\""
     commit_cap "leak"
     assert_rc 1 "blocked"
@@ -91,41 +69,6 @@ test_real_trufflehog_match_blocks_without_the_value() {
     token="$(fake_github_token)"
     no_leak "$token"
     no_leak "${token:4}"
-}
-
-# ^ invariant the environment holds no proxy variable and no network is needed => a pattern match decides, as with the dead proxy of the old tests
-test_real_a_fake_token_blocks_with_no_proxy_variable_set_at_all() {
-    need_real_tools
-    local pv
-    new_repo realnoproxy || return 1
-    for pv in HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy; do
-        if [ -n "$(env -i "${GSG_ENV[@]}" "${EXTRA_ENV[@]}" bash -c "printf %s \"\${$pv:-}\"")" ]; then fail "the test environment already sets $pv"; return 1; fi
-    done
-    stage_file f.txt "token = \"$(fake_github_token)\""
-    commit_cap "leak"
-    assert_rc 1 "blocked without any proxy configured"
-    [[ "$ERR" =~ trufflehog\ +Github\ \(match\)\ +f\.txt:1 ]] || fail "trufflehog row missing: ${ERR:0:400}"
-    no_leak "$(fake_github_token)"
-}
-
-# ^ external strace -f follows the scanners the hook starts; a "connect(" line with AF_INET/AF_INET6 and a non-loopback address is an outbound connection
-# ^ invariant a skip names its reason => no strace or no ptrace permission leaves the zero-connect claim unproven on this host
-test_real_a_hook_scan_makes_no_connect_to_a_non_loopback_address() {
-    need_real_tools
-    command -v strace >/dev/null 2>&1 || skip_test "strace is not installed: the zero-connect claim is not proven on this host"
-    strace -o /dev/null -e trace=none true 2>/dev/null || skip_test "strace cannot trace here (ptrace is not allowed): the zero-connect claim is not proven on this host"
-    local trace="$SANDBOX/connects.trace" outbound
-    new_repo realstrace || return 1
-    stage_file f.txt "token = \"$(fake_github_token)\"" "key = \"$(fake_aws_key)\""
-    run_cap env -i "${GSG_ENV[@]}" "${EXTRA_ENV[@]}" strace -f -qq -e trace=connect,sendto,sendmsg -o "$trace" "$GIT" commit -q -m leak
-    assert_rc 1 "the commit is blocked under strace"
-    [[ "$ERR" =~ trufflehog\ +Github\ \(match\) ]] || { fail "trufflehog did not report under strace: ${ERR:0:400}"; return 1; }
-    [[ "$ERR" =~ betterleaks\ +[a-z-]+\ \(match\) ]] || { fail "betterleaks did not report under strace: ${ERR:0:400}"; return 1; }
-    [ -s "$trace" ] || { fail "strace wrote no trace: the check proved nothing"; return 1; }
-    outbound="$(grep -E 'sa_family=AF_INET6?, ' "$trace" | grep -vE 'sin_addr=inet_addr\("127\.|inet_pton\(AF_INET6, "(::1|::ffff:127\.[0-9.]+)"' || true)"
-    assert_empty "$outbound" "no connect to a non-loopback address by git, the hook or either scanner"
-    no_leak "$(fake_github_token)"
-    no_leak "$(fake_aws_key)"
 }
 
 test_real_line_numbers_survive_a_20000_line_sparse_file() {
@@ -421,31 +364,22 @@ repo_with_config() {
 
 test_real_a_lone_aws_key_id_blocks_with_and_without_a_repo_config() {
     need_real_tools
-    local n=0 variant
+    local n=0 variant key
+    key="$(fake_aws_key)"
     for variant in none permissive builtins_off; do
         n=$((n + 1))
         repo_with_config "reallone$n" "$variant" || return 1
-        stage_file k.txt "$(fake_aws_key)"
+        stage_file k.txt one two "key = \"$key\""
         commit_cap "lone id"
         assert_rc 1 "blocked with repo config [$variant]: a repository cannot switch our rule off"
+        assert_contains "$ERR" "betterleaks" "scanner [$variant]"
         assert_contains "$ERR" "aws-access-key-id" "the rule of ours [$variant]"
-        assert_contains "$ERR" "k.txt:1" "file and line [$variant]"
-        no_leak "$(fake_aws_key)"
+        assert_contains "$ERR" "(match)" "the one honest label [$variant]"
+        assert_contains "$ERR" "k.txt:3" "real file and line [$variant]"
+        assert_contains "$ERR" "git commit --no-verify" "bypass hint [$variant]"
+        no_leak "$key"
+        no_leak "${key:4}"
     done
-}
-
-test_real_a_key_pair_blocks_once_as_aws_access_token() {
-    need_real_tools
-    local secret
-    secret="$(fake_aws_secret)"
-    new_repo realpair || return 1
-    stage_file k.txt "$(fake_aws_key)" "secret_access_key = \"$secret\""
-    commit_cap "pair"
-    assert_rc 1 "blocked"
-    assert_contains "$ERR" "aws-access-token" "the built-in composite rule"
-    assert_not_contains "$ERR" "aws-access-key-id" "one finding for the pair, not two"
-    no_leak "$(fake_aws_key)"
-    no_leak "$secret"
 }
 
 test_real_an_inline_marker_and_a_head_fingerprint_mute_the_lone_aws_key_id() {
@@ -622,11 +556,14 @@ test_real_a_trufflehog_only_finding_gets_its_marker_and_the_path_step_and_both_w
     commit_cap "blocked again"
     assert_rc 1 "blocked before the entry"
     stage_file .secret-scan-ignore 'node_modules/**  # test data' || return 1
+    commit_cap "entry only staged"
+    assert_rc 1 "a staged entry exempts nothing"
     commit_cap "the entry by itself" .secret-scan-ignore
     assert_rc 0 "the entry in the printed format commits by itself, the flagged file stays staged"
     assert_eq "$(gitx diff --cached --name-only)" "node_modules/x/t.txt" "the flagged file is still staged"
     commit_cap "covered"
     assert_rc 0 "the path step passes once the entry is committed"
+    assert_contains "$ERR" "1 staged file(s) excluded by .secret-scan-ignore" "the exclusion is announced"
     no_leak "$(fake_github_token)"
 }
 

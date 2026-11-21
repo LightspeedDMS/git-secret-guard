@@ -23,17 +23,6 @@ need_real_tools() {
 # ^ invariant ssn_dashed [AREA [GROUP [SERIAL]]]; a part left out is the sample part above
 ssn_dashed() { printf '%s-%s-%s' "${1:-$SSN_AREA}" "${2:-$SSN_GROUP}" "${3:-$SSN_SERIAL}"; }
 
-test_real_pii_a_dashed_ssn_blocks_on_its_own() {
-    need_real_tools
-    new_repo pssn1 || return 1
-    stage_file f.txt "employee $(ssn_dashed)" || return 1
-    commit_cap "dashed ssn"
-    assert_rc 1 "a dashed SSN blocks with no keyword"
-    [[ "$ERR" =~ betterleaks\ +pii-us-ssn\ \(match\)\ +f\.txt:1 ]] || fail "pii-us-ssn with file and line is missing: ${ERR:0:PII_EXCERPT}"
-    no_leak "$(ssn_dashed)"
-    no_leak "$SSN_AREA$SSN_GROUP$SSN_SERIAL"
-}
-
 CASES=()
 # ^ invariant case_file NAME EXPECT LINE... stages cases/NAME.txt; EXPECT is a rule ID or "none"; a staging failure fails the test, the case is never dropped
 case_file() {
@@ -105,6 +94,7 @@ test_real_pii_invalid_ssn_structures_and_ssn_like_numbers_never_match() {
     check_cases
     assert_contains "$ERR" "1 potential secret(s)" "the control row is the only one"
     no_leak "$(ssn_dashed)"
+    no_leak "$SSN_AREA$SSN_GROUP$SSN_SERIAL"
 }
 
 # ^ invariant luhn_complete PREFIX LENGTH pads PREFIX with zeros to LENGTH-1 digits and appends the check digit of a Luhn-valid number
@@ -283,46 +273,6 @@ test_real_pii_phone_numbers_need_a_phone_keyword_on_the_line() {
     no_leak "$intl"
 }
 
-# ^ invariant the path blocks, stays blocked with the entry only staged, and passes with the entry committed (exemptions come from HEAD)
-test_real_pii_a_false_positive_is_accepted_through_a_committed_ignore_entry() {
-    need_real_tools
-    local card
-    card="$(luhn_complete 4 16)"
-    new_repo pfp1 || return 1
-    stage_file base.txt hello && gitx commit -q --no-verify -m base || return 1
-    stage_file fixtures/card.txt "test card $card" || return 1
-    commit_cap "control"
-    assert_rc 1 "the fixture card blocks"
-    [[ "$ERR" =~ betterleaks\ +pii-credit-card\ \(match\)\ +fixtures/card\.txt:1 ]] || fail "pii-credit-card row missing: ${ERR:0:PII_EXCERPT}"
-    stage_file .secret-scan-ignore 'fixtures/**   # published test card numbers for the parser tests' || return 1
-    commit_cap "entry only staged"
-    assert_rc 1 "a staged entry exempts nothing"
-    gitx rm -q --cached fixtures/card.txt || return 1
-    commit_cap "the entry on its own"
-    assert_rc 0 "the ignore file alone commits"
-    stage_file fixtures/card.txt "test card $card" || return 1
-    commit_cap "entry committed"
-    assert_rc 0 "once the entry is committed the same fixture passes"
-    assert_contains "$ERR" "1 staged file(s) excluded by .secret-scan-ignore" "the exclusion is announced"
-    no_leak "$card"
-}
-
-test_real_pii_an_inline_betterleaks_allow_accepts_a_card_line() {
-    need_real_tools
-    local card
-    card="$(luhn_complete 4 16)"
-    new_repo pfp2 || return 1
-    stage_file plain.txt "test card $card" || return 1
-    commit_cap "control"
-    assert_rc 1 "the card line blocks without the marker"
-    gitx reset -q || return 1
-    rm -f -- plain.txt || return 1
-    stage_file marked.txt "test card $card # betterleaks:allow" || return 1
-    commit_cap "marked"
-    assert_rc 0 "the marker on the same line accepts it"
-    no_leak "$card"
-}
-
 # ^ invariant stage_samples stages one file each for a dashed SSN, a Luhn-valid card, a lone AWS key ID and a fake GitHub token
 stage_samples() {
     stage_file s/ssn.txt "employee $(ssn_dashed)" &&
@@ -355,7 +305,7 @@ test_real_pii_the_isolated_aws_run_reports_no_pii_and_existing_detection_is_unch
     no_leak "$(luhn_complete 4 16)"
 }
 
-# ^ external same probe as test:test_real_a_hook_scan_makes_no_connect_to_a_non_loopback_address; the filters are expressions, none opens a socket
+# ^ external strace -f follows the scanners the hook starts; a "connect(" line with AF_INET/AF_INET6 and a non-loopback address is an outbound connection
 # ^ invariant a skip names its reason => no strace or no ptrace permission leaves the zero-connect claim unproven on this host
 test_real_pii_a_commit_holding_the_samples_makes_no_connect_to_a_non_loopback_address() {
     need_real_tools
@@ -375,10 +325,13 @@ test_real_pii_a_commit_holding_the_samples_makes_no_connect_to_a_non_loopback_ad
     tail_from=$((${#ERR} > PII_EXCERPT ? ${#ERR} - PII_EXCERPT : 0))
     [[ "$ERR" =~ betterleaks\ +pii-credit-card\ \(match\) ]] || fail "the Luhn filter did not run under strace: ${ERR:tail_from}"
     [[ "$ERR" =~ betterleaks\ +pii-iban\ \(match\) ]] || fail "the mod-97 filter did not run under strace: ${ERR:tail_from}"
+    [[ "$ERR" =~ trufflehog\ +Github\ \(match\) ]] || fail "trufflehog did not report under strace: ${ERR:tail_from}"
     [ -s "$trace" ] || { fail "strace wrote no trace: the check proved nothing"; return 1; }
     outbound="$(grep -E 'sa_family=AF_INET6?, ' "$trace" | grep -vE 'sin_addr=inet_addr\("127\.|inet_pton\(AF_INET6, "(::1|::ffff:127\.[0-9.]+)"' || true)"
     assert_empty "$outbound" "no connect to a non-loopback address by git, the hook or either scanner"
     no_leak "$(iban_valid)"
+    no_leak "$(fake_github_token)"
+    no_leak "$(fake_aws_key)"
 }
 
 run_file_tests

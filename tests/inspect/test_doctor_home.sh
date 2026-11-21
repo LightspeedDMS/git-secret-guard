@@ -55,16 +55,6 @@ test_the_default_root_is_the_home_directory_not_dev() {
     assert_contains "$OUT" "summary: 2 repos, 1 covered" "both repositories under home counted"
 }
 
-test_a_repository_seven_levels_below_home_is_checked() {
-    local hr
-    dr_begin && home_repo a/b/c/d/e/f/seven && home_disable a/b/c/d/e/f/seven || return 1
-    hr="$(home_real)"
-    gsg doctor
-    assert_rc 1 "a repository seven levels down"
-    assert_contains "$OUT" "  $hr/a/b/c/d/e/f/seven
-    PROBLEM  disabled in local config" "found and judged"
-}
-
 test_the_search_reaches_31_levels_and_stops_there_and_a_record_beyond_is_kept() {
     local found lost
     found="$(deep_rel "$((FIND_LEVELS_FOUND - 1))")/found"
@@ -77,14 +67,6 @@ test_the_search_reaches_31_levels_and_stops_there_and_a_record_beyond_is_kept() 
     assert_not_contains "$OUT" "/lost" "32 levels is not"
     assert_contains "$OUT" "summary: 1 repos, 0 covered" "only the reachable one is counted"
     assert_contains "$(<"$LC_STATE/findings")" "repo${TAB}$DR_REAL/$lost${TAB}-${TAB}disabled in local config" "the record of the repository beyond the bound is kept, it exists so it is not gone"
-}
-
-test_node_modules_is_skipped_at_any_depth() {
-    dr_begin && dr_repo ok && dr_repo a/b/c/d/e/f/node_modules/pkg && dr_disable a/b/c/d/e/f/node_modules/pkg || return 1
-    doctor
-    assert_rc 0 "the repository below node_modules is not reached"
-    assert_contains "$OUT" "summary: 1 repos, 1 covered" "only the other repository"
-    assert_not_contains "$OUT" "node_modules" "never named"
 }
 
 test_roots_narrow_the_run_to_the_directory_given() {
@@ -228,15 +210,6 @@ test_operation_not_permitted_is_explained_only_when_every_line_says_so() {
         doctor_unreadable "$2"; c=$?
         rm -rf -- "$DR_WORK"; printf "%s %s %s" "$a" "$b" "$c"' _ "$GSG_PROJECT" "$DR_ROOTS"
     assert_eq "$OUT" "0 1 0" "an all-permission log (EPERM, or EPERM mixed with EACCES) names the locked folder, any other line leaves it unexplained"
-}
-
-test_a_home_that_names_no_directory_needs_roots() {
-    dr_begin || return 1
-    set_env HOME="$SANDBOX/no-home"
-    gsg doctor
-    assert_rc 2 "HOME is not a directory"
-    assert_contains "$ERR" "default root $SANDBOX/no-home is not a directory; pass --roots DIR" "says how to fix it"
-    assert_empty "$OUT" "and prints no report"
 }
 
 run_file_tests

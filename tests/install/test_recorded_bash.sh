@@ -42,17 +42,6 @@ test_install_records_the_bash_that_runs_it_and_names_it_in_the_hook_command() {
     assert_contains "$cmd" "exec '$shown' '$(git_path "$LC_DATA")/hooks/secret-scan'" "and starts the hook with it"
 }
 
-test_a_bash_found_on_path_is_never_started_after_install() {
-    rb_install || return 1
-    rb_standin_first_on_path || return 1
-    new_repo standin || return 1
-    stage_file a.txt one || return 1
-    commit_cap "after install"
-    assert_no_file "$STANDIN_LOG" "the stand-in bash on PATH was never started"
-    assert_contains "$ERR" "git-secret-guard:" "the hook ran (the fixture scanners are not real, so it blocks)"
-    assert_rc 1 "blocked, not passed in silence"
-}
-
 # ^ why the command is built for a missing bash, not a removed link; under MSYS a link is a copy
 # ^ invariant the message shows the path in the form the command holds it, the mixed C:/ form on Windows (git_path)
 test_a_recorded_bash_that_is_gone_blocks_with_our_message_and_starts_nothing() {
@@ -100,6 +89,7 @@ test_an_install_that_predates_the_recorded_bash_is_upgraded_by_the_next_install(
     stage_file b.txt two || return 1
     commit_cap "after the upgrade"
     assert_no_file "$STANDIN_LOG" "the stand-in bash on PATH was never started"
+    assert_contains "$ERR" "git-secret-guard:" "the hook ran (the fixture scanners are not real, so it blocks)"
     assert_rc 1 "scanned (the fixture scanners block)"
 }
 

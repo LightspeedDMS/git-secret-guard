@@ -67,7 +67,10 @@ test_a_missing_jq_is_no_refusal_on_windows_and_asks_for_a_download() {
     mkdir -p "$bin" || return 1
     printf '#!/bin/sh\n' >"$bin/taskkill" && printf '#!/bin/sh\n' >"$bin/timeout" || return 1
     chmod 755 "$bin/taskkill" "$bin/timeout" || return 1
-    win 'PATH="$1"; GSG_SHARE=/s; install_resolve_bins; echo "rc=$? jq=[$INSTALL_JQ_BIN]"; install_downloads_needed; echo "needed=$?"' "$bin"
+    # ^ why a wrapper on the absolute path, not the narrowed PATH; install_record_bash runs cygpath, and Git for Windows has the real one only outside this dir
+    # ^ why only an absolute result is wrapped, not the bare name; on Linux command -v names the prelude function and a wrapper of it would call itself
+    win 'c="$(command -v cygpath)"; case "$c" in /*) cygpath() { "$c" "$@"; } ;; esac
+PATH="$1"; GSG_SHARE=/s; install_resolve_bins; echo "rc=$? jq=[$INSTALL_JQ_BIN]"; install_downloads_needed; echo "needed=$?"' "$bin"
     assert_contains "$OUT" "rc=0 jq=[]" "not counted as missing"
     assert_contains "$OUT" "needed=0" "curl is then required"
     assert_empty "$ERR" "no hint is printed"

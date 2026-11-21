@@ -168,10 +168,10 @@ the other entry points stay directly in `tests/`; nothing else does. `tests/proj
    all have a module except `other) REPLY="" ;;`, the one reserved line left: a module for `other` replaces its `REPLY=""` by `REPLY=<module>`. A new class also needs
    `gitup_os_class` to detect it, and adds its own `name) REPLY=<module> ;;` line before `other)`. **Keep the comment line between the entries:** git treats two changed
    lines that touch as one conflict (real merges showed it); with a comment line between them, branches that each change a different existing line merge cleanly. Two
-   branches that both add a line at the same place still conflict. `test_branches_that_each_take_one_reserved_registry_line_merge_without_conflicts` (`tests/gitup/test_gitup_round2.sh`) runs those merges
-   over the lines still reserved (`REPLY=""`) and skips while fewer than two are, so with only `other` reserved it is dormant. The registry is a plain `case`; there is no globbing and no
+   branches that both add a line at the same place still conflict. `test_branches_that_each_take_one_reserved_registry_line_merge_without_conflicts` (`tests/gitup/test_gitup_contract.sh`) runs those merges
+   on a copy of the registry where every class line is made reserved (`REPLY=""`), so it always runs and needs no reserved line in the library. The registry is a plain `case`; there is no globbing and no
    generated name outside `gitup_call`. `gitup_os_class` already detects every class, WSL (class `wsl`, the wrapper module `lib/gitup/gitup_wsl.sh`) included. Shared files a module branch does
-   not edit: `tests/coverage.sh` globs `lib/gitup/gitup*.sh`, the registry test reads the class list from the library, the merge test (`test_branches_that_each_take_one_reserved_registry_line_merge_without_conflicts`) takes the classes still reserved from the library, the CLI loads only the shared `gitup` and
+   not edit: `tests/coverage.sh` globs `lib/gitup/gitup*.sh`, the registry test reads the class list from the library, the merge test (`test_branches_that_each_take_one_reserved_registry_line_merge_without_conflicts`) takes the class lines from the library, the CLI loads only the shared `gitup` and
    `gitup_source`, a module sources its own helper libraries (`gitup_rpm.sh` does it for `gitup_takeover.sh`), and the contract tests use synthetic classes
    (`gu_tree_add_class` in `tests/support/gitup.sh`), so they need no edit. **What a class branch does edit:** the tests that pin today's refusal for that class, because the
    refusal goes away when the class gets a module (`test_a_class_with_no_module_keeps_todays_refusal_and_offers_nothing` in `tests/gitup/test_gitup.sh`, the cases of that class

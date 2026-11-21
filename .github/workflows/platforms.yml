@@ -154,7 +154,7 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/logs"
           set -o pipefail
-          bash tests/run.sh tests/project/test_platform.sh tests/project/test_mac_runner.sh tests/project/test_platform_rpm.sh tests/project/test_platform_vm.sh tests/gitup/test_gitup_rpm.sh tests/gitup/test_gitup_followups.sh tests/gitup/test_gitup_contract.sh tests/install/test_prerequisites.sh tests/gitup/test_gitup_takeover.sh tests/gitup/test_gitup_apt.sh tests/gitup/test_gitup_round3.sh tests/gitup/test_gitup_robust.sh tests/inspect/test_status.sh tests/inspect/test_doctor.sh 2>&1 | tee "$RUNNER_TEMP/logs/platform-unit.log"
+          bash tests/run.sh tests/project/test_platform.sh tests/project/test_mac_runner.sh tests/project/test_platform_rpm.sh tests/project/test_platform_vm.sh tests/gitup/test_gitup_rpm.sh tests/gitup/test_gitup_messages.sh tests/gitup/test_gitup_contract.sh tests/install/test_prerequisites.sh tests/gitup/test_gitup_takeover.sh tests/gitup/test_gitup_apt.sh tests/gitup/test_gitup_plan_and_restore.sh tests/gitup/test_gitup_source_route.sh tests/gitup/test_gitup_partial.sh tests/install/test_install_other_gits.sh tests/install/test_install_written_files.sh tests/inspect/test_doctor_bundled_git.sh tests/cli/test_cli_interrupt.sh tests/inspect/test_status.sh tests/inspect/test_doctor.sh 2>&1 | tee "$RUNNER_TEMP/logs/platform-unit.log"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:

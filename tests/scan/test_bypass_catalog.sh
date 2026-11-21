@@ -184,7 +184,15 @@ test_real_catalog_b01_aws_documentation_keys_and_placeholders() {
         'password = changeme' 'token = <TOKEN>'
     commit_cap B01
     catalog B01 Allow 'git commit (AWS documentation example keys and placeholders)'
+    # ^ why the whole commit is only recorded, not asserted; the row says Record for the rest and betterleaks 1.9.0 flags the unquoted password placeholder
     [ "$(catalog_actual)" != Error ] || fail "B01 the hook errored: ${ERR:0:300}"
+    new_repo b01b || return 1
+    stage_file docs.md "aws_access_key_id = $(aws_doc_key_id)" "aws_secret_access_key = $(aws_doc_secret)" \
+        "$(printf '%s = "%s"' pa"ss" change"me")" 'token = <TOKEN>'
+    commit_cap B01b
+    catalog B01b Allow 'git commit (AWS documentation example keys, quoted placeholder, angle-bracket placeholder)'
+    assert_rc 0 "B01b commits"
+    assert_pass_line_only "$ERR" "B01b pass line"
     no_leak "$(aws_doc_secret)"
 }
 
@@ -332,6 +340,12 @@ test_real_catalog_d11_a_hook_without_its_exec_bit_still_stops_the_commit() {
     restore_hook_files || return 1
     catalog D11 Detect 'chmod -x <share>/hooks/secret-scan && git commit'
     [ "$RC" -ne 0 ] || fail "D11 a hook git cannot start let the commit through"
+    # ^ why two texts, not one; the recorded bash runs a script without its exec bit and the finding blocks, a bare script path gives git's cannot exec
+    case "$ERR" in
+        *"cannot exec '$SHARE/hooks/secret-scan'"* | *"potential secret(s)"*) ;;
+        *) fail "D11 the commit stopped for another reason: ${ERR:0:300}" ;;
+    esac
+    if gitx rev-parse -q --verify HEAD >/dev/null 2>&1; then fail "D11 a commit was created"; fi
 }
 
 test_real_catalog_d12_scanners_shadowed_on_path_are_not_used() {

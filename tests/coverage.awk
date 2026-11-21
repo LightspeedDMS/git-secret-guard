@@ -1,5 +1,8 @@
 # ^ external bash -x prints a command at the line where it starts; later lines of a multi-line command are never traced
+# ^ why the checkout root first, not only /share/ and /git-secret-guard/; a worktree or another directory name has neither, a parent called share cuts too early
+# ^ invariant without -v root= (an older caller) an installed copy (/share/) and a checkout named git-secret-guard map as before
 function relpath(p,    i) {
+    if (root != "" && index(p, root "/") == 1) return substr(p, length(root) + 2)
     i = index(p, "/share/")
     if (i > 0) return substr(p, i + 7)
     sub(/^.*\/git-secret-guard\//, "", p)

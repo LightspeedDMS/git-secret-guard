@@ -109,10 +109,23 @@ test_a_new_os_module_plugs_in_without_touching_the_core() {
 }
 
 test_every_registered_module_implements_the_contract() {
+    local class module seen=" " checked
+    local -a want=()
     lc_begin || return 1
+    # shellcheck disable=SC2016
+    gu_run 'for c in "${GITUP_CLASSES[@]}"; do gitup_registry "$c" || exit 1; printf "%s %s\n" "$c" "$REPLY"; done'
+    assert_rc 0 "the registry answers for every class"
+    while read -r class module; do
+        if [ -z "$module" ] || [[ $seen == *" $module "* ]]; then continue; fi
+        seen+="$module "
+        want+=("checked the git upgrade module $module (class $class)")
+    done <<<"$OUT"
+    if [ "${#want[@]}" -lt 1 ]; then fail "the registry names no module"; return 1; fi
     gu_call gitup_check_registered_modules
     assert_rc 0 "the modules in the registry"
-    assert_contains "$OUT" "rpm" "the rpm module is checked"
+    checked="$OUT"
+    for module in "${want[@]}"; do assert_contains "$checked" "$module" "the registry's module is checked"; done
+    assert_eq "$(grep -c '^checked the git upgrade module ' <<<"$checked")" "${#want[@]}" "and no registered module is skipped or checked twice"
 }
 
 test_the_contract_check_names_the_module_and_the_missing_function() {

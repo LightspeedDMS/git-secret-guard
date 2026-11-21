@@ -234,9 +234,9 @@ test_every_missing_tool_is_listed() {
     stage_file a.txt one
     commit_cap "x"
     assert_rc 1 "blocked"
-    assert_contains "$ERR" "trufflehog" t
-    assert_contains "$ERR" "betterleaks" g
-    assert_contains "$ERR" "jq" j
+    assert_contains "$ERR" "$HOOK_NAME: trufflehog is missing or not executable ($SANDBOX/m/t)" "trufflehog line"
+    assert_contains "$ERR" "$HOOK_NAME: betterleaks is missing or not executable ($SANDBOX/m/g)" "betterleaks line"
+    assert_contains "$ERR" "$HOOK_NAME: jq is missing or not executable ($SANDBOX/m/j)" "jq line"
 }
 
 test_relative_tool_path_is_refused_no_path_lookup() {
@@ -445,6 +445,7 @@ test_missing_scan_script_fails_the_commit() {
     stage_file a.txt one
     commit_cap "x"
     [ "$RC" -ne 0 ] || fail "commit succeeded without the scan script"
+    assert_contains "$ERR" "cannot exec '$SANDBOX/no/such/secret-scan'" "git names the script it could not run"
     assert_no_commit
 }
 
@@ -514,7 +515,11 @@ SIGDUR=""
 # ^ security match on this sandbox's temp path and a per-test sleep duration, never on shared paths => stubs of a concurrent run or sandbox are not counted
 scanner_processes() { pgrep -f -- "$TEST_WORK_BASE|sleep $SIGDUR" | wc -l; }
 
+# ^ why under 3000 ms, not 5 s; TERM stops both scanner groups at once, a dropped TERM waits the 5 s grace of lib/core/proc.sh and the KILL
+# ^ why 4000 to 9000 ms for the stubborn scanner, not 3000; it ignores TERM and the stop is the whole 5 s grace and the KILL
+NS_PER_MS=1000000 SIG_MAX_MS=3000 SIG_MIN_MS=0
 signal_test() {
+    local max_ms="$SIG_MAX_MS" min_ms="$SIG_MIN_MS" t0 t1 ms
     begin "$1" || return 1
     SIGDUR="6.$RANDOM"
     set_env STUB_TF_SLEEP="$SIGDUR" STUB_GL_SLEEP="$SIGDUR" "${@:3}"
@@ -525,8 +530,13 @@ signal_test() {
     while { [ "$(tf_runs)" -lt 1 ] || [ "$(gl_runs)" -lt 1 ]; } && [ "$tries" -lt 150 ]; do sleep 0.1; tries=$((tries + 1)); done
     assert_eq "$(find "$TEST_WORK_BASE" -maxdepth 1 -name 'git-secret-guard.*' | wc -l)" 1 "work dir exists during the scan"
     [ "$(scanner_processes)" -ge 2 ] || fail "sanity: scanners are not running before the signal"
+    t0="$(date +%s%N)"
     pkill "-$2" -f "$SHARE/hooks/secret-scan"
     wait "$cpid"
+    t1="$(date +%s%N)"
+    ms=$(((t1 - t0) / NS_PER_MS))
+    [ "$ms" -lt "$max_ms" ] || fail "the hook took $ms ms to end after $2; expected under $max_ms ms"
+    [ "$ms" -ge "$min_ms" ] || fail "the hook ended $ms ms after $2; expected at least $min_ms ms (the grace, then the KILL)"
     assert_empty "$(workdirs)" "work dir removed right after $2"
     assert_eq "$(scanner_processes)" 0 "no scanner, timeout or sleep process survives $2"
     sleep 2
@@ -536,7 +546,7 @@ signal_test() {
 
 test_term_signal_stops_the_scanners_and_removes_the_private_temp_dir() { signal_test term TERM; }
 test_int_signal_stops_the_scanners_and_removes_the_private_temp_dir() { signal_test int INT; }
-test_a_scanner_that_ignores_term_is_killed_before_the_temp_dir_is_removed() { signal_test stubborn TERM STUB_TF_STUBBORN=1; }
+test_a_scanner_that_ignores_term_is_killed_before_the_temp_dir_is_removed() { SIG_MAX_MS=9000 SIG_MIN_MS=4000 signal_test stubborn TERM STUB_TF_STUBBORN=1; }
 
 # ^ external macOS has no /proc; ps -p reports the state letter on both, Z (zombie) counts as gone
 proc_alive() {

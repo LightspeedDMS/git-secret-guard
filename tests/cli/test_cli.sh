@@ -17,16 +17,56 @@ test_version_prints_the_package_version() {
     assert_eq "$OUT" "git-secret-guard $want" "--version output"
 }
 
+# ^ why the case labels of bin/git-secret-guard, not a list here; a command or flag missing from the help, or only in the help, fails
+# ^ invariant bin_case_labels FUNCTION prints the case labels inside the function FUNCTION, one per line; an arm "a | b)" prints "a | b"
+bin_case_labels() {
+    sed -n "/^$1() {/,/^}/p" "$GSG_PROJECT/bin/git-secret-guard" |
+        sed -n 's/^[[:space:]]*\(-*[a-z][-a-z]*\( | -*[a-z][-a-z]*\)*\))\([[:space:]].*\)\{0,1\}$/\1/p'
+}
+# ^ invariant help_section COMMAND prints the $OUT lines from its two-space heading to the next heading; doctor --recheck belongs to doctor
+help_section() { awk -v c="$1" '/^  [a-z]/ { cur = $1 } cur == c { print }' <<<"$OUT"; }
+# ^ invariant help_headings prints the command word of every heading line of $OUT once
+help_headings() { awk '/^  [a-z]/ { print $1 }' <<<"$OUT" | sort -u; }
+
+# ^ why a floor, not nothing; a sed reading no labels would pass every loop with nothing checked (10 commands and 12 flags exist)
+HELP_MIN_COMMANDS=10 HELP_MIN_FLAGS=12
+
 test_help_lists_every_command_and_flag() {
     lc_begin || return 1
-    local arg word
+    local arg label cmd alias flag fn section n_cmds n_flags known
+    local -a parts=()
     for arg in help --help -h; do
         gsg "$arg"
         assert_rc 0 "$arg"
         assert_empty "$ERR" "$arg prints nothing on stderr"
-        for word in "install" "--replace-hooks-path" "--with-timer" "uninstall" "--remove-tools" "status" "doctor" "--roots" "--recheck" "version" "help"; do
-            assert_contains "$OUT" "$word" "$arg mentions $word"
+        n_cmds=0 n_flags=0 known=" "
+        while IFS= read -r label; do
+            IFS='|' read -r -a parts <<<"${label// /}"
+            cmd="${parts[0]}"
+            known+="$cmd "
+            n_cmds=$((n_cmds + 1))
+            section="$(help_section "$cmd")"
+            [ -n "$section" ] || fail "$arg: the help has no heading for the command $cmd"
+            for alias in "${parts[@]:1}"; do
+                assert_contains "$section" "$alias" "$arg: the section of $cmd names its alias $alias"
+            done
+        done < <(bin_case_labels main)
+        for fn in cmd_install cmd_uninstall cmd_doctor; do
+            cmd="${fn#cmd_}"
+            section="$(help_section "$cmd")"
+            while IFS= read -r flag; do
+                n_flags=$((n_flags + 1))
+                assert_contains "$section" "$flag" "$arg: the section of $cmd lists $flag"
+            done < <(bin_case_labels "$fn")
         done
+        while IFS= read -r cmd; do
+            case "$known" in
+                *" $cmd "*) ;;
+                *) fail "$arg: the help describes $cmd, which the dispatcher does not know" ;;
+            esac
+        done < <(help_headings)
+        [ "$n_cmds" -ge "$HELP_MIN_COMMANDS" ] || fail "$arg: only $n_cmds commands read from bin/git-secret-guard, expected $HELP_MIN_COMMANDS or more"
+        [ "$n_flags" -ge "$HELP_MIN_FLAGS" ] || fail "$arg: only $n_flags flags read from bin/git-secret-guard, expected $HELP_MIN_FLAGS or more"
     done
 }
 

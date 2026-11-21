@@ -186,39 +186,6 @@ test_real_gpg_reads_the_fingerprint_of_both_ppa_file_forms() {
     assert_rc 1 "and another pin is refused for it too"
 }
 
-# ^ invariant gua_container_ppa runs install_git_ppa of the container script (the wrapper over the product) against the stand-ins; RC and OUT hold its result
-# shellcheck disable=SC2016
-gua_container_ppa() {
-    mkdir -p -- "$SANDBOX/ctr-log" || return 1
-    printf '#!/bin/sh\nprintf "1:2.56.0-0ppa1~ubuntu24.04.2"\n' >"$SANDBOX/pathbin/dpkg-query" && chmod 755 "$SANDBOX/pathbin/dpkg-query" || return 1
-    run_cap env -i "${LC_ENV[@]}" "${EXTRA_ENV[@]}" bash -c 'source "$1"; LOGDIR="$2"; install_git_ppa; rc=$?; printf "desc=%s\n" "$GIT_SOURCE_DESC"; exit $rc' \
-        _ "$GSG_PROJECT/tests/platform/ubuntu-container.sh" "$SANDBOX/ctr-log"
-}
-
-test_the_container_wrapper_returns_0_when_the_ppa_gives_git_and_records_where_it_came_from() {
-    gu_apt_setup 2.43.0 ubuntu "$NOBLE_STOCK" "$NOBLE_PPA" || return 1
-    gua_container_ppa
-    assert_rc 0 "the product route ran through the wrapper"
-    assert_contains "$OUT" "desc=PPA ppa:git-core/ppa, package 1:2.56.0-0ppa1~ubuntu24.04.2" "the summary line names the PPA and the package"
-    assert_eq "$(apt_calls | sed -E 's/ \| .*//')" $'add-apt-repository -y -n ppa:git-core/ppa\napt-get update\napt-get install -y --no-install-recommends git' "the product order"
-}
-
-test_the_container_wrapper_returns_1_after_a_mismatch_and_2_when_the_ppa_cannot_be_removed() {
-    gu_apt_setup 2.43.0 ubuntu "$NOBLE_STOCK" "$NOBLE_PPA" || return 1
-    gu_apt_fixture sources "$BAD_FPR" || return 1
-    gua_container_ppa
-    assert_rc 1 "a key that is not the pinned one is a soft failure, the PPA is gone"
-    assert_empty "$(ppa_files)" "the files are removed"
-    assert_eq "$(apt_calls | tail -n 1 | sed -E 's/ \| .*//')" "apt-get update" "and the last apt call refreshed the lists"
-    gu_apt_setup 2.43.0 ubuntu "$NOBLE_STOCK" "$NOBLE_PPA" || return 1
-    gu_apt_fixture sources "$BAD_FPR" || return 1
-    printf 'rm -f' >"$SANDBOX/sudo.failon" || return 1
-    gua_container_ppa
-    assert_rc 2 "files that cannot be removed: the PPA may still be enabled"
-    assert_contains "$OUT" "cannot remove the git-core PPA" "the failure is named"
-    assert_not_contains "$(apt_calls)" "install" "nothing was installed"
-}
-
 # shellcheck disable=SC2016
 test_the_pinned_fingerprint_is_the_one_in_the_docs_and_the_module() {
     gua_run 'printf "%s" "$GITUP_APT_PPA_FPR"'

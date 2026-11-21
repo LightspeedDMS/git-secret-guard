@@ -181,12 +181,15 @@ test_a_refusal_for_a_libexec_link_never_prints_its_control_characters() {
 }
 
 test_the_takeover_states_its_cost_before_asking() {
+    local before_prompt cost
     gu_tk_start || return 1
-    gsg install </dev/null
-    assert_contains "$OUT" "dnf stops updating git" "dnf stops"
-    assert_contains "$OUT" "pin bump in tools.lock and install --upgrade-git" "updates need a pin bump"
-    assert_contains "$OUT" "rpm -V will report these" "rpm -V"
-    assert_contains "$OUT" "git-secret-guard restore-system-git" "and how to undo it"
+    gsg_pty $'\n' install
+    assert_rc 0 "Enter at the takeover prompt"
+    assert_contains "$OUT" "[y/N]" "the question is asked"
+    before_prompt="${OUT%%\[y/N\]*}"
+    for cost in "dnf stops updating git" "pin bump in tools.lock and install --upgrade-git" "rpm -V will report these" "git-secret-guard restore-system-git"; do
+        assert_contains "$before_prompt" "$cost" "before the question: $cost"
+    done
 }
 
 test_the_takeover_refuses_an_unsafe_target_and_changes_nothing() {
@@ -351,6 +354,58 @@ test_the_takeover_exists_only_for_classes_whose_module_provides_it() {
     gsg restore-system-git </dev/null
     assert_rc 0 "restore on a system without takeover"
     assert_contains "$OUT" "nothing to restore" "says so"
+}
+
+test_a_rebuild_under_an_active_takeover_is_refused_before_anything_is_copied() {
+    GU_TK_PIN=2.57.0 gu_tk_start || return 1
+    gsg install --take-over-system-git </dev/null
+    assert_rc 0 "takeover (the build is older than the pin, which only a rebuild would fix)"
+    rm -f -- "$SANDBOX/gitup.log"
+    gsg install --upgrade-git </dev/null
+    assert_rc 1 "a rebuild under an active takeover is refused"
+    assert_contains "$ERR" "restore-system-git" "the way out is named"
+    assert_not_contains "$(gu_log)" "cp -dR" "nothing was copied"
+    assert_not_contains "$(gu_log)" "dnf install" "and no dependency was installed"
+    gu_all_symlinks || fail "the takeover is still in place"
+    gsg install </dev/null
+    assert_rc 0 "without the flag the install goes on"
+    assert_contains "$ERR" "restore-system-git" "and still says why the rebuild is not offered"
+}
+
+test_a_foreign_program_with_a_missing_library_in_usr_local_bin_does_not_block_the_takeover() {
+    gu_tk_start || return 1
+    mkdir -p -- "$GU_ROOT/usr/local/bin/other-tool" || return 1
+    printf '#!/bin/sh\nexit 0\n' >"$GU_ROOT/usr/local/bin/other-tool/libother.so" && chmod 755 "$GU_ROOT/usr/local/bin/other-tool/libother.so" || return 1
+    printf '\tlibmissing.so.1 => not found\n' >"$SANDBOX/ldd.out"
+    printf 'libother.so' >"$SANDBOX/ldd.only"
+    gsg install </dev/null
+    assert_contains "$OUT" "install --take-over-system-git" "the offer is printed although an unrelated program has a missing library"
+    gsg install --take-over-system-git </dev/null
+    assert_rc 0 "an unrelated program in the prefix bin directory is not the takeover's business"
+    gu_all_symlinks || fail "the six files are links of ours"
+    gsg restore-system-git </dev/null
+    printf 'git-shell' >"$SANDBOX/ldd.only"
+    gsg install --take-over-system-git </dev/null
+    assert_rc 1 "a missing library in a program the MANIFEST lists still refuses"
+    assert_contains "$ERR" "git-shell has a missing library" "and names it"
+}
+
+# shellcheck disable=SC2016
+test_root_run_tools_are_looked_up_in_the_sbin_directories_and_restorecon_is_run() {
+    gu_tk_start || return 1
+    gu_run 'unset GSG_GITUP_BUILD_PATH; gitup_paths; printf "%s|%s" "$GITUP_SYSTEM_PATH" "$GITUP_BUILD_PATH"'
+    assert_eq "$OUT" "/usr/bin:/bin:/usr/sbin:/sbin|/usr/bin:/bin" "root-run tools include sbin; the build PATH does not"
+    mkdir -p -- "$SANDBOX/sbin" && mv -- "$SANDBOX/pathbin/restorecon" "$SANDBOX/sbin/restorecon" || return 1
+    set_env GSG_GITUP_BUILD_PATH="$SANDBOX/pathbin:$SANDBOX/sbin"
+    gsg install --take-over-system-git </dev/null
+    assert_rc 0 "takeover with restorecon found in an sbin directory"
+    assert_contains "$(gu_log)" "restorecon" "restorecon ran"
+    assert_not_contains "$ERR" "restorecon was not found" "with no warning"
+    gsg restore-system-git </dev/null
+    rm -f -- "$SANDBOX/sbin/restorecon"
+    gsg install --take-over-system-git </dev/null
+    assert_rc 0 "takeover without restorecon anywhere"
+    assert_contains "$ERR" "restorecon was not found" "says so once instead of skipping silently"
 }
 
 run_file_tests

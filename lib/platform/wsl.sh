@@ -2,6 +2,12 @@
 # ^ coupled install-time only; the CLI loads it before gitup.sh and the hook never does (test:test_the_hook_never_loads_the_install_time_libraries)
 # ^ coupled behaviour is in docs/platforms.md#wsl-windows-subsystem-for-linux; tests are tests/platform/test_wsl.sh
 
+# ^ security a missing common.sh stops the load, never reads as not WSL; every sourcer loads lib/core/common.sh first
+if ! declare -F gsg_os_fill >/dev/null; then
+    printf 'lib/platform/wsl.sh: lib/core/common.sh must be sourced first\n' >&2
+    return 1
+fi
+
 # ^ external WSL 1 reports 4.4.0-17763-Microsoft (capital M); WSL 2 reports 5.15.x-microsoft-standard-WSL2 or 4.19.x-microsoft-standard (lower case)
 # ^ external a Linux container on a WSL 2 host shows the same kernel text and counts as WSL; it only gains the WSL notes and the timer check
 # ^ invariant GSG_WSL_OSRELEASE, GSG_WSL_INTEROP and GSG_WSL_SYSTEMD_DIR move the kernel files for tests only; the harness sets them to a plain kernel
@@ -31,7 +37,7 @@ wsl_kernel_text() {
 # ^ why microsoft in any case or the interop file, not WSL_DISTRO_NAME; the variable is not set at all on WSL 1 (probed)
 wsl_is() {
     local found=1
-    if [ "$(uname -s)" != Linux ]; then return 1; fi
+    if ! gsg_os_fill || [ "$GSG_UNAME_S" != Linux ]; then return 1; fi
     wsl_kernel_text
     case "${REPLY,,}" in
         *microsoft*) found=0 ;;

@@ -9,10 +9,22 @@ BREW_BASH_MIN_MINOR=4
 BREW_SETTINGS_MAX_LINES=500
 BREW_REEXEC_MAX=2
 
-brew_is_macos() { [ "$(uname -s)" = Darwin ]; }
+# ^ coupled gsg_os_fill and gsg_arch_fill in lib/core/common.sh; the same variables GSG_UNAME_S and GSG_UNAME_M, a failing uname never cached
+# ^ why a copy, not the common.sh functions; this file loads first and sources nothing, and the CLI still runs uname -s once when common.sh follows
+brew_os_fill() {
+    if [ -n "${GSG_UNAME_S:-}" ]; then return 0; fi
+    GSG_UNAME_S="$(uname -s)" || { GSG_UNAME_S=""; return 1; }
+}
+
+brew_arch_fill() {
+    if [ -n "${GSG_UNAME_M:-}" ]; then return 0; fi
+    GSG_UNAME_M="$(uname -m)" || { GSG_UNAME_M=""; return 1; }
+}
+
+brew_is_macos() { brew_os_fill && [ "$GSG_UNAME_S" = Darwin ]; }
 
 # ^ invariant true only on macOS with an x86_64 CPU; Homebrew has no bottles for most of these Macs and its installer may refuse to run (docs/platforms.md)
-brew_is_intel_mac() { brew_is_macos && [ "$(uname -m)" = x86_64 ]; }
+brew_is_intel_mac() { brew_is_macos && brew_arch_fill && [ "$GSG_UNAME_M" = x86_64 ]; }
 
 # ^ invariant BREW_INSTALLED = the formulae a brew install put on this machine during this invocation, bootstrap included; "" = brew install never ran
 BREW_INSTALLED=""

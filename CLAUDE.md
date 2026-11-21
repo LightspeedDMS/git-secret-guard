@@ -140,6 +140,7 @@ This file is an index: each topic states what must not break and links the doc h
 - **macOS:** `/bin/bash` 3.2 cannot parse the libs (bootstrap re-exec, two loop bounds); every install refusal uses `brew_unchanged_text`;
   `hooks/secret-scan` and `bin/git-secret-guard` find their location with `cd -P` plus plain `readlink`, never `realpath` (none on macOS 12).
   **Windows:** three path forms, compare in one (`cygpath -m -l`); no process groups: [platforms.md#maintainer-notes](docs/platforms.md#maintainer-notes).
+  **Platform checks** read `GSG_UNAME_S`/`GSG_UNAME_M` (one `uname` per process, filled in the caller's shell, never exported, never read from the environment).
 - **Git upgrade** (`lib/gitup/gitup*.sh`): one module file plus one registry line, only `other` still reserved
   ([CONTRIBUTING.md#adding-an-os-module](CONTRIBUTING.md#adding-an-os-module)); privileged tools only through `gitup_system_bin`, the printed
   plan is what runs; partly applied states are tested contracts; the PPA key check precedes `apt-get update`; on Windows bash never runs

@@ -76,6 +76,8 @@ test_message_real - 88
 test_path_tool_gaps - 1
 test_pii_real - 40
 test_platform - 7
+test_platform_fill - 0
+test_platform_once - 2
 test_platform_podman6 - 5
 test_platform_rpm - 1
 test_platform_vm - 0

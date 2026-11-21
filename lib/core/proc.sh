@@ -1,12 +1,14 @@
 # shellcheck shell=bash
 
-# ^ external Windows means Git for Windows bash (uname -s MINGW64_NT-*); no setsid, no process groups, native .exe scanners
-proc_is_windows() {
-    case "$(uname -s)" in
-        MINGW64_NT-*) return 0 ;;
-    esac
+# ^ security a missing common.sh stops the load, never reads as not Windows; every sourcer loads lib/core/common.sh first
+if ! declare -F gsg_is_windows >/dev/null; then
+    printf 'lib/core/proc.sh: lib/core/common.sh must be sourced first\n' >&2
     return 1
-}
+fi
+
+# ^ external Windows means Git for Windows bash (uname -s MINGW64_NT-*); no setsid, no process groups, native .exe scanners
+# ^ invariant needs lib/core/common.sh loaded first (the hook and the CLI load it first); the answer is the one gsg_is_windows keeps for the process
+proc_is_windows() { gsg_is_windows; }
 
 GSG_PROC_MAX_TREE=512
 

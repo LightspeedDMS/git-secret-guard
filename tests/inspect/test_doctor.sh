@@ -14,7 +14,7 @@ test_a_healthy_machine_exits_0_and_shows_the_machine_section() {
     assert_rc 0 "healthy machine"
     assert_contains "$OUT" "machine:" "the machine section comes first"
     assert_contains "$OUT" "  ok       installed: version $want" "installed"
-    assert_contains "$OUT" "  ok       hook: hook.git-secret-guard.event=pre-commit and commit-msg, command=$LC_DATA/hooks/secret-scan (executable)" "hook config"
+    assert_contains "$OUT" "  ok       hook: hook.git-secret-guard.event=pre-commit and commit-msg, command=$(lc_hook_command "$LC_DATA") (executable)" "hook config"
     assert_contains "$OUT" "  ok       trufflehog: $LC_BIN/trufflehog$LC_EXE 3.99.2 (pinned 3.99.2)" "trufflehog at the pin"
     assert_contains "$OUT" "  ok       betterleaks: $LC_BIN/betterleaks$LC_EXE 1.9.0 (pinned 1.9.0)" "betterleaks at the pin"
     assert_contains "$OUT" "  ok       jq: $(lc_expected_jq)" "jq"
@@ -44,13 +44,30 @@ test_a_doctor_that_cannot_run_exits_2_and_says_why() {
     assert_empty "$OUT" "and no report is printed"
 }
 
+test_doctor_judges_the_recorded_bash_on_every_platform() {
+    dr_begin || return 1
+    doctor
+    assert_rc 0 "a fresh install"
+    assert_contains "$OUT" "  ok       bash: $(lc_recorded_bash)"$'\n' "the bash the install recorded (#28, #31; with .exe on Windows)"
+}
+
+# ^ hazard an install from before the recorded bash has no BASH_BIN and the bare hook path => the shebang picks the bash
+test_doctor_flags_an_install_that_records_no_bash() {
+    dr_begin || return 1
+    sed -i '/^BASH_BIN=/d' "$LC_DATA/settings" || return 1
+    gitx config --global --replace-all hook.git-secret-guard.command "$(git_path "$LC_DATA")/hooks/secret-scan" || return 1
+    doctor
+    assert_rc 1 "a problem"
+    assert_contains "$OUT" "  PROBLEM  bash: BASH_BIN is not in the settings file, so the hook command is the bare hook path and the script's shebang chooses the bash; run git-secret-guard install" "says what to do"
+}
+
 test_a_missing_hook_config_is_a_problem_that_says_what_to_do() {
     dr_begin || return 1
     gitx config --global --remove-section hook.git-secret-guard || return 1
     doctor
     assert_rc 1 "no hook config"
     assert_contains "$OUT" "  PROBLEM  hook: hook.git-secret-guard.event is [unset], want exactly [pre-commit, commit-msg]; run git-secret-guard install" "event"
-    assert_contains "$OUT" "  PROBLEM  hook: hook.git-secret-guard.command is [unset], want exactly [$LC_DATA/hooks/secret-scan]; run git-secret-guard install" "command"
+    assert_contains "$OUT" "  PROBLEM  hook: hook.git-secret-guard.command is [unset], want exactly [$(lc_hook_command "$LC_DATA")]; run git-secret-guard install" "command"
     assert_not_contains "$OUT" "  ok       hook:" "and no ok line for the hook"
 }
 
@@ -100,9 +117,9 @@ test_a_duplicated_or_disabled_hook_config_is_a_problem() {
     gitx config --global --add hook.git-secret-guard.command /elsewhere/secret-scan || return 1
     doctor
     assert_rc 1 "two commands"
-    assert_contains "$OUT" "hook.git-secret-guard.command has 2 values (global $SANDBOX/gitconfig; global $SANDBOX/gitconfig), 1 of them the installed hook, want exactly one, the installed hook [$LC_DATA/hooks/secret-scan]; run git-secret-guard install" "count, scope and file, and whether one is the installed hook"
+    assert_contains "$OUT" "hook.git-secret-guard.command has 2 values (global $SANDBOX/gitconfig; global $SANDBOX/gitconfig), 1 of them the installed hook, want exactly one, the installed hook [$(lc_hook_command "$LC_DATA")]; run git-secret-guard install" "count, scope and file, and whether one is the installed hook"
     assert_not_contains "$OUT" "/elsewhere/secret-scan" "the foreign value is not printed"
-    gitx config --global --replace-all hook.git-secret-guard.command "$LC_DATA/hooks/secret-scan" || return 1
+    gitx config --global --replace-all hook.git-secret-guard.command "$(lc_hook_command "$LC_DATA")" || return 1
     gitx config --global hook.git-secret-guard.enabled false || return 1
     doctor
     assert_rc 1 "disabled in the global config"

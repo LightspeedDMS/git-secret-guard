@@ -63,7 +63,11 @@ status_hook_files() {
 
 status_config() {
     local events commands want_cmd diff=""
-    want_cmd="$(hook_command_text "$GSG_SHARE" "$(share_recorded_bash "$GSG_SHARE")")" || return 1
+    # ^ why a PROBLEM line, not a silent return; a relative recorded bash is refused by hook_command_text and the config cannot be judged
+    want_cmd="$(hook_command_text "$GSG_SHARE" "$(share_recorded_bash "$GSG_SHARE")" 2>/dev/null)" || {
+        status_line PROBLEM "global config" "MISMATCH (the wanted command cannot be built: the recorded bash is not an absolute path; run: $GSG_NAME install)"
+        return 0
+    }
     events="$("$GSG_GIT" config --global --get-all hook.git-secret-guard.event 2>/dev/null | tr '\n' ' ')"
     commands="$("$GSG_GIT" config --global --get-all hook.git-secret-guard.command 2>/dev/null | tr '\n' ' ')"
     # ^ why either order, not only the order install writes; git lists both events in any order, a hand edit swapping them is no fault
@@ -267,17 +271,17 @@ status_tool() {
     fi
 }
 
-# ^ invariant macOS only; doctor's two checks (tool_unusable, brew_bash_ok asks the binary for its version), stdin closed
+# ^ invariant every platform; doctor's two checks (tool_unusable, brew_bash_ok asks the binary for its version), stdin closed
 # ^ hazard BASH_BIN naming a non-bash program with exit 0 => git counts the hook as passed, the commit lands unscanned; doc:docs/platforms.md
 status_bash() {
     local msg why shown="${BASH_BIN:-}"
     if msg="$(tool_unusable bash "$shown")"; then
         msg="${msg//[[:cntrl:]]/?}"
-        # ^ external measured with a bash 5 on PATH, an unset or relative BASH_BIN still starts the hook; the reasons say what bash 3.2 would do
+        # ^ why the unset reason names the shebang, not a platform; an install from before the recorded bash has the bare hook path everywhere (#28, #31)
         case "$shown" in
-            "") why="the hook command is the bare hook path, so a git client with /bin/bash 3.2 first on PATH runs it under bash 3.2 and the hook blocks every commit" ;;
-            /*) why="git cannot start the hook with it and the commit fails" ;;
-            *) why="git runs whichever bash its PATH finds first, and under bash 3.2 the hook blocks every commit" ;;
+            "") why="the hook command is the bare hook path, so the bash the script's shebang finds first on PATH runs the hook (an old bash blocks every commit, a stand-in or a program that is not bash can let commits pass unscanned)" ;;
+            /*) why="the hook command stops with its own message and the commit is blocked: nothing is scanned" ;;
+            *) why="the hook command cannot be written with it (a relative bash is refused), so install and doctor fail until it is fixed" ;;
         esac
         status_line PROBLEM bash "MISMATCH ($msg; $why; run: $GSG_NAME install)"
     elif ! brew_bash_ok "$shown" </dev/null; then
@@ -315,10 +319,10 @@ status_launchctl() {
     status_plain_tool launchctl "$(settings_tool_bin launchctl)"
 }
 
-# ^ invariant GNUBIN_DIR is judged on every platform, the hook blocks on it everywhere; BASH_BIN and LAUNCHCTL_BIN are macOS-only lines
+# ^ invariant BASH_BIN and GNUBIN_DIR are judged on every platform, the hook command and the hook block on them everywhere; LAUNCHCTL_BIN is a macOS-only line
 # ^ order bash, GNUBIN_DIR, launchctl, after status_tools loaded the settings
 status_settings_keys() {
-    if brew_is_macos; then status_bash; fi
+    status_bash
     status_gnubin
     if brew_is_macos; then status_launchctl; fi
 }

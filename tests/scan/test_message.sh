@@ -305,7 +305,44 @@ fix: both hooks" "and the config hook scanned the message"
     assert_eq "$(grep -c '^== COMMIT_EDITMSG' "$SANDBOX/record-hookdir.trufflehog")" 2 "the config hook still scanned this message"
 }
 
-# ^ external the macOS form is "'<bash>' '<hook>'" (hook_command_text with a recorded bash); git appends the message path as the last argument
+# ^ invariant args = tool name; a script exiting 0 with no output goes first on PATH for the hook run after it (#31)
+shadow_tool_on_path() {
+    mkdir -p -- "$SANDBOX/shadow-$1" || return 1
+    rm -f -- "$SANDBOX/ran-$1"
+    printf '#!/bin/sh\n: >"%s"\nexit 0\n' "$SANDBOX/ran-$1" >"$SANDBOX/shadow-$1/$1" && chmod 755 -- "$SANDBOX/shadow-$1/$1" || return 1
+    set_env PATH="$SANDBOX/shadow-$1:$PATH"
+}
+
+# ^ security a no-op cat made the scanned copy of the message empty and the hook exit 0; a non-empty message with an empty copy blocks (#31)
+test_a_no_op_cat_on_path_blocks_instead_of_scanning_an_empty_copy() {
+    begin nocat || return 1
+    shadow_tool_on_path cat || return 1
+    printf 'subject\nline two %s\n' "$MARKER" >"$SANDBOX/msg-nocat"
+    run_message_hook nocat "$SANDBOX/msg-nocat"
+    if gnubin_has cat; then
+        # ^ external on macOS the hook puts GNUBIN_DIR first => cat is the GNU one and the stand-in is never reached
+        assert_no_file "$SANDBOX/ran-cat" "the stand-in cat was never run"
+        assert_rc 0 "the message is decided normally"
+        assert_contains "$(<"$SANDBOX/record-nocat.trufflehog")" "line two $MARKER" "and scanned"
+        return 0
+    fi
+    assert_file "$SANDBOX/ran-cat" "the stand-in cat ran, the shadow took effect"
+    assert_rc 1 "blocked"
+    assert_contains "$ERR" "cannot read the commit message file git passed; nothing was scanned" "says nothing was scanned"
+}
+
+# ^ security a no-op cmp said "equal" for a hand-written block below a cut line, and its text was not scanned; bash confirms every equality (#31)
+test_a_no_op_cmp_on_path_does_not_hide_text_below_a_forged_cut_line() {
+    begin nocmp || return 1
+    verbose_repo || return 1
+    shadow_tool_on_path cmp || return 1
+    { printf '+hand written line %s\n' "$MARKER"; } | verbose_message "$SANDBOX/msg-nocmp"
+    run_message_hook nocmp "$SANDBOX/msg-nocmp"
+    assert_file "$SANDBOX/ran-cmp" "the stand-in cmp ran (cmp is not in the GNU directory, on macOS too)"
+    assert_contains "$(<"$SANDBOX/record-nocmp.trufflehog")" "hand written line $MARKER" "the text below the forged cut line is scanned"
+}
+
+# ^ external the command is the check and "exec '<bash>' '<hook>'" (hook_command_text with a recorded bash); git appends the message path last
 test_the_macos_command_form_hands_the_message_file_to_the_hook() {
     begin macform || return 1
     local cmd

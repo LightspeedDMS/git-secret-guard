@@ -359,14 +359,15 @@ doctor_check_tools() {
             doctor_machine_line ok "$tool: $bin"
         fi
     done
-    if [ -n "${BASH_BIN:-}" ]; then
-        if msg="$(tool_unusable bash "$BASH_BIN")"; then
-            doctor_machine_line PROBLEM "bash: $msg; run git-secret-guard install"
-        elif ! brew_bash_ok "$BASH_BIN"; then
-            doctor_machine_line PROBLEM "bash: $BASH_BIN is older than bash $BREW_BASH_MIN_MAJOR.$BREW_BASH_MIN_MINOR; run git-secret-guard install"
-        else
-            doctor_machine_line ok "bash: $BASH_BIN"
-        fi
+    # ^ why every platform, not macOS only; the hook command starts the hook with the recorded bash everywhere, an old install has none (#28, #31)
+    if [ -z "${BASH_BIN:-}" ]; then
+        doctor_machine_line PROBLEM "bash: BASH_BIN is not in the settings file, so the hook command is the bare hook path and the script's shebang chooses the bash; run git-secret-guard install"
+    elif msg="$(tool_unusable bash "$BASH_BIN")"; then
+        doctor_machine_line PROBLEM "bash: $msg; run git-secret-guard install"
+    elif ! brew_bash_ok "$BASH_BIN" </dev/null; then
+        doctor_machine_line PROBLEM "bash: $BASH_BIN is older than bash $BREW_BASH_MIN_MAJOR.$BREW_BASH_MIN_MINOR; run git-secret-guard install"
+    else
+        doctor_machine_line ok "bash: $BASH_BIN"
     fi
     if [ "$timeout_ok" -eq 1 ] && [ -n "$DR_LIMIT" ] && ! tool_unusable betterleaks "$BETTERLEAKS_BIN" >/dev/null; then DR_BETTERLEAKS_OK=1; fi
 }

@@ -52,6 +52,8 @@ scan_trufflehog() {
     if [ "$rc" -eq 124 ]; then
         printf 'trufflehog: timed out after %ss; the scan did not complete\n' "$SCAN_TIMEOUT_SECONDS" >>"$errs" || return 1
     elif [ "$rc" -eq 183 ]; then
+        # ^ security the exit status said findings; a builtin records it for report_results; the commit blocks when the rows never arrive (#31)
+        : >"$out/trufflehog.found" || return 1
         if [ "$nrows" -eq 0 ] && [ "$parse_failed" -eq 0 ]; then
             printf 'trufflehog: reported findings (exit 183) but returned no readable results\n' >>"$errs" || return 1
         fi

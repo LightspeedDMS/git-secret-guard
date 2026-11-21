@@ -126,6 +126,8 @@ betterleaks_collect() {
     local label="$1" rc="$2" report="$3" scan_dir="$4" rows="$5" errs="$6" nrows windows=0
     if gsg_is_windows; then windows=1; fi
     : >"$rows" || return 1
+    # ^ security the exit status said findings; a builtin records it in the out dir (both runs share the marker) for report_results (#31)
+    if [ "$rc" -eq "$GSG_BETTERLEAKS_LEAK_RC" ]; then : >"${rows%/*}/betterleaks.found" || return 1; fi
     if [ "$rc" -eq "$GSG_BETTERLEAKS_TIMEOUT_RC" ]; then
         printf '%s: timed out after %ss; the scan did not complete\n' "$label" "$SCAN_TIMEOUT_SECONDS" >>"$errs" || return 1
     elif [ "$rc" -ne 0 ] && [ "$rc" -ne "$GSG_BETTERLEAKS_LEAK_RC" ]; then

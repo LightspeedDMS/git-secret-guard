@@ -8,6 +8,7 @@ GSG_ROOT="$1"
 GSG_NAME=git-secret-guard
 GSG_UNINSTALL_ACTIONS=0
 uname() { if [ "${1:-}" = -m ]; then echo x86_64; else echo MINGW64_NT-10.0-26200; fi; }
+command -v cygpath >/dev/null 2>&1 || cygpath() { printf "%s\n" "${!#}"; }
 for lib in platform/brew core/common core/state install/tools install/hookspath scan/exempt autoupdate/timer platform/launchd platform/wsl install/install install/install_cmd install/install_tools install/uninstall inspect/status inspect/doctor inspect/doctor_repos inspect/doctor_findings core/proc integrations/desktop/desktop_git integrations/desktop/desktop_git_check integrations/desktop/desktop_git_report; do
     source "$1/lib/$lib.sh" || exit 9
 done
@@ -66,7 +67,10 @@ test_a_missing_jq_is_no_refusal_on_windows_and_asks_for_a_download() {
     mkdir -p "$bin" || return 1
     printf '#!/bin/sh\n' >"$bin/taskkill" && printf '#!/bin/sh\n' >"$bin/timeout" || return 1
     chmod 755 "$bin/taskkill" "$bin/timeout" || return 1
-    win 'PATH="$1"; GSG_SHARE=/s; install_resolve_bins; echo "rc=$? jq=[$INSTALL_JQ_BIN]"; install_downloads_needed; echo "needed=$?"' "$bin"
+    # ^ why a wrapper on the absolute path, not the narrowed PATH; install_record_bash runs cygpath, and Git for Windows has the real one only outside this dir
+    # ^ why only an absolute result is wrapped, not the bare name; on Linux command -v names the prelude function and a wrapper of it would call itself
+    win 'c="$(command -v cygpath)"; case "$c" in /*) cygpath() { "$c" "$@"; } ;; esac
+PATH="$1"; GSG_SHARE=/s; install_resolve_bins; echo "rc=$? jq=[$INSTALL_JQ_BIN]"; install_downloads_needed; echo "needed=$?"' "$bin"
     assert_contains "$OUT" "rc=0 jq=[]" "not counted as missing"
     assert_contains "$OUT" "needed=0" "curl is then required"
     assert_empty "$ERR" "no hint is printed"

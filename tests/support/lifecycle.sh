@@ -504,6 +504,25 @@ lc_lock_binary_sha() {
     )
 }
 
+# ^ invariant lc_hook_command SHARE_DIR prints the command install writes for the share, from the production function
+# ^ external a Mac records Homebrew's bash, others the first bash on the lifecycle PATH (a .exe on Windows)
+lc_hook_command() {
+    local b="${2:-}"
+    if [ -z "$b" ]; then b="$(lc_recorded_bash)" || return 1; fi
+    # ^ why the fake uname directory first, not the plain PATH; install ran with it, and on Windows the real uname adds cygpath -m to the text
+    # shellcheck disable=SC2016
+    env PATH="$SANDBOX/pathbin:$PATH" bash -c 'source "$1/lib/core/common.sh" && hook_command_text "$2" "$3"' _ "$GSG_PROJECT" "$1" "$b"
+}
+
+# ^ invariant prints the bash an install under the lifecycle PATH records, as the settings hold it (POSIX form, .exe on Git for Windows)
+lc_recorded_bash() {
+    local b
+    # shellcheck disable=SC2016
+    b="${TEST_BASH:-$(env -i PATH="$SANDBOX/pathbin:$TEST_BASE_PATH" bash -c 'printf %s "$BASH"' </dev/null)}" || return 1
+    if [ "$TEST_IS_WINDOWS" -eq 1 ] && [ -f "$b.exe" ]; then b="$b.exe"; fi
+    printf '%s' "$b"
+}
+
 lc_asset_name() { (source "$GSG_PROJECT/lib/core/common.sh" && source "$GSG_PROJECT/lib/install/tools.sh" && tools_tarball_name "$@"); }
 
 # ^ security the fakes print the version and nothing else => a passing test never needed the real tool

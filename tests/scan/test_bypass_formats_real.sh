@@ -444,4 +444,31 @@ test_real_formats_n02_a_no_op_find_first_on_path_still_blocks_a_token() {
     no_leak "$(fake_github_token)"
 }
 
+# ^ security a no-op tool between the scanners and the verdict loses the rows; the exit status said findings => the commit blocks (#31)
+# ^ invariant args = catalog id (upper case), tool name; the stand-in exits 0 and prints nothing, first on PATH
+assert_lost_rows_block() {
+    need_real_tools
+    mkdir -p -- "$SANDBOX/shadow-$2"
+    rm -f -- "$SANDBOX/ran-$2"
+    printf '#!/bin/sh\n: >"%s"\nexit 0\n' "$SANDBOX/ran-$2" >"$SANDBOX/shadow-$2/$2" && chmod 755 -- "$SANDBOX/shadow-$2/$2" || return 1
+    set_env PATH="$SANDBOX/shadow-$2:$REAL_HOME/.local/bin:$TEST_BASE_PATH"
+    commit_sample "${1,,}" k.env "$(token_line)" || return 1
+    catalog "$1" Block "PATH=<dir with a no-op $2>:<PATH> git commit"
+    assert_rc 1 "$1 blocked"
+    assert_not_contains "$ERR" ": no findings" "$1 no pass line"
+    if gnubin_has "$2"; then
+        # ^ external on macOS the hook puts GNUBIN_DIR first => this coreutils tool is the GNU one and the stand-in is never reached
+        assert_no_file "$SANDBOX/ran-$2" "$1 the stand-in was never run (the recorded GNU directory comes first)"
+        assert_contains "$ERR" "potential secret(s)" "$1 the findings are reported normally"
+        assert_not_contains "$ERR" "none reached the report" "$1 no cross-check line"
+    else
+        assert_file "$SANDBOX/ran-$2" "$1 the stand-in ran, the shadow took effect"
+        assert_contains "$ERR" "reported findings but none reached the report" "$1 the cross-check names the lost findings"
+    fi
+    no_leak "$(fake_github_token)"
+}
+
+test_real_formats_n09_a_no_op_cat_first_on_path_still_blocks_a_token() { assert_lost_rows_block N09 cat; }
+test_real_formats_n10_a_no_op_sort_first_on_path_still_blocks_a_token() { assert_lost_rows_block N10 sort; }
+
 run_file_tests

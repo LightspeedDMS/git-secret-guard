@@ -19,12 +19,17 @@ how to run the tests, and the limits of the scan. Exemptions have their own page
    executable (<path>)`), then `git-secret-guard: commit blocked; nothing was scanned.` Two more checks come first: a bash
    older than 4.4 blocks with `this hook needs bash 4.4 or newer and is running under bash <version>; run git-secret-guard
    install again ...`, and a `GNUBIN_DIR` that is not an absolute directory blocks with `GNUBIN_DIR in the settings file is
-   not an absolute directory (...)`. **Everything
-   else the hook runs is found through `PATH`**: `bash` itself on Linux (the `#!/usr/bin/env bash` shebang of the
-   hook), `git`, `awk`, `sed`, `cp`, `rm`, `mkdir`, `mktemp` and the other coreutils (not `find`: the hook runs none, it reads the scan tree with bash globs, so a `find` that prints nothing cannot make a commit look empty; not `realpath`: macOS 12 has none, the hook walks its own links with `readlink`). Git prepends
+   not an absolute directory (...)`. **`bash` itself comes from the settings
+   file too**: install records the bash that ran it as `BASH_BIN` on every platform (Homebrew's on macOS), and the hook command checks it
+   and starts the hook with it (`[ -f '<bash>' ] && [ -x '<bash>' ] || { <message>; exit 1; }; exec '<bash>' '<hook>'`), so the
+   `#!/usr/bin/env bash` shebang never chooses the interpreter: a `bash` earlier on `PATH` (a stand-in, an old bash, the WSL launcher on
+   Windows, #28, #31) is never started, and a recorded bash that is gone blocks with `cannot start the bash the install recorded (<bash>);
+   nothing was scanned; run git-secret-guard install`. **Everything
+   else the hook runs is found through `PATH`**: `git`, `awk`, `sed`, `cp`, `rm`, `mkdir`, `mktemp` and the other coreutils (not `find`: the hook runs none, it reads the scan tree with bash globs, so a `find` that prints nothing cannot make a commit look empty; not `realpath`: macOS 12 has none, the hook walks its own links with `readlink`). Git prepends
    its own exec-path to `PATH` when it runs a hook, which puts git's directory first; a `PATH` you control decides the
-   rest. The shebang is not pinned to an absolute `bash`. On macOS the hook command names the recorded `BASH_BIN`
-   instead. Child scripts (`lib/scan/run-scanner.sh`, the coverage re-check) run under the same bash binary as the hook
+   rest, so a no-op `awk`, `head`, `mv` or `wc` earlier on it is still used (on macOS the coreutils among them come from the recorded `GNUBIN_DIR`, which the hook puts first on `PATH`, so of the tools in the #31 rows only `awk` and `cmp`, which are not coreutils, can be shadowed there; `git`, `sed` and the other non-coreutils tools still come from your `PATH`); the rows that are left open are Hook gaps in
+   [bypass-detection-scenarios.md](bypass-detection-scenarios.md) (N11, N12). Two losses are closed by a cross-check instead of a trusted
+   `PATH`: see step 5. Child scripts (`lib/scan/run-scanner.sh`, the coverage re-check) run under the same bash binary as the hook
    (`$BASH`), not through a new lookup.
 3. The staged content (the index written as a tree, diffed against HEAD's tree; fixed flags, `-U0`) is turned into a private scan tree under `${TMPDIR:-$HOME/.tmp}`
    (on Windows a `TMPDIR` outside your home is ignored and `~/.tmp` is used, because NTFS ignores `chmod` and only your
@@ -89,6 +94,13 @@ To bypass this check for one commit: git commit --no-verify
    the flagged file staged (`test_real_the_printed_fingerprint_committed_by_itself_with_the_flagged_file_staged_lets_the_change_pass`).
    The icon and the colour stay on the heading; no guidance line has either. A "nothing was scanned" block prints no guidance.
    If the awk run fails, `report_results` returns 1 after the rows, so the commit stays blocked.
+
+   **Cross-check (#31).** Before it decides, `report_results` checks, with bash builtins only, that nothing was lost between the scanners
+   and the verdict. A scanner whose exit status said findings (trufflehog 183, betterleaks 42) leaves a `<scanner>.found` marker, and
+   one of its rows must be in the sorted rows; a scanner whose own errors file is not empty needs a non-empty collected errors file.
+   Otherwise the commit is blocked with `<scanner> reported findings but none reached the report; nothing was decided` (or `recorded
+   errors but none reached the report`). A no-op `cat` or `sort` earlier on `PATH` empties the merged files and used to read as a clean
+   scan.
 
    A scanner error prints `git-secret-guard: a scanner did not complete, so the commit is blocked:` and one indented line
    per error (`trufflehog: timed out after 300s; the scan did not complete`, `betterleaks: scan failed (exit <n>)`, ...); the
@@ -241,9 +253,9 @@ git-secret-guard: 2 coverage problems still open (doctor run 2026-11-03):
 
 The hook reads `<share>/settings` (`<share>` = two levels above the resolved script path), written by `install` (`install_write_settings`, with `printf %q`, because the hook sources it):
 absolute `TRUFFLEHOG_BIN`, `BETTERLEAKS_BIN`, `JQ_BIN`, `SETSID_BIN` (`TASKKILL_BIN` on Windows), `TIMEOUT_BIN`, the pinned `TRUFFLEHOG_VERSION` and
-`BETTERLEAKS_VERSION` (shown on the pass line only) and `SCAN_TIMEOUT_SECONDS`, plus the platform keys `BASH_BIN` and `GNUBIN_DIR` (macOS)
+`BETTERLEAKS_VERSION` (shown on the pass line only) and `SCAN_TIMEOUT_SECONDS`, `BASH_BIN` (every platform), plus the macOS key `GNUBIN_DIR`
 and the timer key `SYSTEMCTL_BIN`, `LAUNCHCTL_BIN` (macOS) or `SCHTASKS_BIN` (Windows) (see [install.md](install.md)). On Windows `JQ_BIN` is the
-wrapper `<share>/jq` that install writes, which runs the `jq` it found or installed with `-b`. `DOCTOR_TIMEOUT_SECONDS` is read when present
+wrapper `<share>/jq` that install writes, whose shebang is the recorded `BASH_BIN` (never `env bash`) and which runs the `jq` it found or installed with `-b`. `DOCTOR_TIMEOUT_SECONDS` is read when present
 (by `doctor`, see [doctor.md](doctor.md)) but install never writes it. A missing,
 relative or non-executable tool path blocks the commit and says nothing was scanned. A missing `SCAN_TIMEOUT_SECONDS`
 means 300; only an integer from 1 to 999999 written without a leading zero is accepted, anything else blocks (empty, a non-digit, `0`, `00`, `007`, `1000000`). GNU `timeout` reads `00` as no limit and fails open on a value of about 20 digits, so those must never reach it; `007` would mean 7 and is refused only to keep one strict form, the same as the pre-flight; missing or non-numeric versions only drop the versions from
@@ -532,6 +544,15 @@ PII detection together with its own config can put the same rules into that conf
 ## Maintainer notes
 
 Why the scan code is shaped this way; each point was probed on the pinned versions.
+
+- **Tools lost on `PATH` (#31, #28).** A tool the hook takes from `PATH` can be shadowed by a no-op that exits 0. Closed: (1) the
+  cross-check above (`_report_cross_check`, `<scanner>.found` written by `scan_trufflehog` and `betterleaks_collect`, no `cat`, `sort`,
+  `wc`, `grep` or `awk` in it) covers `cat` and `sort` of `report_results`, a no-op `awk` of `betterleaks_drop_pair_key_rows` and any later
+  tool that loses rows; (2) `bash` is named by the hook command (`hook_command_text`: check, then `exec '<bash>' '<hook>'`; git appends
+  ` "$@"` after the exec, so `commit-msg` still gets the message file); (3) commit-msg `cat` (`message_scan_prepare`: a non-empty source with
+  an empty copy fails) and `cmp` (`_message_matches_git`: an "equal" is confirmed by comparing `$(<a)` and `$(<b)` in bash). Open, pinned
+  by `tests/scan/test_path_tool_gaps.sh`: a counts-lying `awk` (N11) and the LFS `mv` and `head` (N12; a no-op `tr` or a `wc` printing 0 block, with
+  misleading reasons, and are pinned as blocks); a lying answer there has no second reading to check against (on macOS the coreutils tools come first from `GNUBIN_DIR` and a user-`PATH` stand-in is never run; the tests assert that), a stand-in must know the hook's own arguments, and a trusted `PATH` for every tool is out of scope.
 
 - **The hook runs no `find`** (#25). `find` came from `PATH`, and a no-op one printed nothing and exited 0, which read as "the scan tree
   holds no file": the commit passed with `no added lines to scan` (`extract_lfs_objects` skipped the LFS swap the same way, and the

@@ -74,6 +74,14 @@ case "$TEST_OS" in
         ;;
 esac
 
+# ^ invariant the bash the settings record and the hook command names on every platform (#28, #31); Homebrew's on macOS, else the suite's own bash
+# ^ external Git for Windows keeps bash.exe beside the path $BASH names without the suffix
+TEST_RECORDED_BASH="${TEST_BASH:-$BASH}"
+if [ "$TEST_IS_WINDOWS" -eq 1 ] && [ -f "$TEST_RECORDED_BASH.exe" ]; then TEST_RECORDED_BASH="$TEST_RECORDED_BASH.exe"; fi
+
+# ^ invariant gnubin_has TOOL is true when the settings' GNUBIN_DIR holds TOOL; the hook puts it first on PATH => a user-PATH stand-in never runs
+gnubin_has() { [ -n "$TEST_GNUBIN" ] && [ -x "$TEST_GNUBIN/$1" ]; }
+
 # ^ external BSD sed wants a suffix argument after -i where GNU sed takes none; the suites use the GNU spelling and only this wrapper adapts it
 if [ "$TEST_OS" = Darwin ]; then
     sed() {
@@ -134,7 +142,7 @@ sandbox_create() {
         TEST_SANDBOX_MIXED="$(cygpath -m "$SANDBOX")" || exit 2
         GSG_ENV+=(SYSTEMROOT="$SYSTEMROOT")
         TEST_JQ="$SANDBOX/jq-binary-mode"
-        printf '#!/usr/bin/env bash\nexec %q -b "$@"\n' "$TEST_JQ_EXE" >"$TEST_JQ" || exit 2
+        printf '#!%s\nexec %q -b "$@"\n' "$TEST_RECORDED_BASH" "$TEST_JQ_EXE" >"$TEST_JQ" || exit 2
         chmod 755 "$TEST_JQ" || exit 2
     fi
     # ^ invariant the stand-ins keep the jq they used before; on Windows the plain jq.exe of jqbin, never the -b wrapper TEST_JQ names there
@@ -153,8 +161,10 @@ sandbox_create() {
 }
 
 configure_hook() {
-    local cmd="$SHARE/hooks/secret-scan"
-    if [ -n "$TEST_BASH" ]; then cmd="'$TEST_BASH' '$cmd'"; fi
+    local cmd
+    # ^ why the production function, not a copy of its text; every hook test runs through the command install writes (the check, the exec)
+    # shellcheck disable=SC2016
+    cmd="$(bash -c 'source "$1/lib/core/common.sh" && hook_command_text "$2" "$3"' _ "$GSG_PROJECT" "$SHARE" "$TEST_RECORDED_BASH")" || exit 2
     # ^ why --replace-all, not a plain set; a test before this one may have added the commit-msg event and git refuses to overwrite two values
     env -i "${GSG_ENV[@]}" "$GIT" config --global --replace-all "hook.$HOOK_NAME.event" pre-commit || exit 2
     env -i "${GSG_ENV[@]}" "$GIT" config --global "hook.$HOOK_NAME.command" "$cmd" || exit 2
@@ -184,10 +194,8 @@ write_settings() {
         printf 'TIMEOUT_BIN=%q\n' "$TEST_TIMEOUT"
         printf 'TRUFFLEHOG_VERSION=%q\n' "$TEST_TF_VERSION"
         printf 'BETTERLEAKS_VERSION=%q\n' "$TEST_GL_VERSION"
-        if [ -n "$TEST_BASH" ]; then
-            printf 'BASH_BIN=%q\n' "$TEST_BASH"
-            printf 'GNUBIN_DIR=%q\n' "$TEST_GNUBIN"
-        fi
+        printf 'BASH_BIN=%q\n' "$TEST_RECORDED_BASH"
+        if [ -n "$TEST_BASH" ]; then printf 'GNUBIN_DIR=%q\n' "$TEST_GNUBIN"; fi
         if [ -n "${4:-}" ]; then printf '%s\n' "$4"; fi
     } >"$SHARE/settings"
 }

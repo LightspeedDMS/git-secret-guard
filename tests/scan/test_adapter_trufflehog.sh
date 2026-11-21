@@ -29,23 +29,12 @@ test_clean_scan_yields_no_rows_and_no_errors() {
     assert_empty "$(errors)" errors
 }
 
+# ^ external 3.99.2 filters with --results even under --no-verification; every result is Verified=false => only "unverified" lets a match through
 test_invocation_uses_the_pinned_flags_on_the_scan_dir() {
     prepare flags
     run_adapter trufflehog "$SCAN" "$OUTD"
     assert_eq "$(head -n 1 "$SANDBOX/calls-flags")" \
         "trufflehog filesystem $SCAN --results=verified,unverified,unknown --fail --fail-on-scan-errors --no-verification --no-update --json --no-color" flags
-}
-
-# ^ external 3.99.2 filters with --results even under --no-verification; every result is Verified=false => only "unverified" lets a match through
-test_the_results_filter_lets_unverified_matches_through_and_verification_is_off() {
-    prepare noverify
-    run_adapter trufflehog "$SCAN" "$OUTD"
-    local call
-    call="$(head -n 1 "$SANDBOX/calls-noverify")"
-    assert_contains "$call" " --no-verification " "no vendor call is made to test a credential"
-    assert_contains "$call" " --no-update " "no update check"
-    assert_contains "$call" " --results=verified,unverified,unknown " "every result is returned"
-    assert_not_contains "$call" " --results=verified,unknown " "the old filter returns nothing under --no-verification"
 }
 
 test_the_scanner_runs_with_a_dead_proxy_and_no_proxy_exemption() {
@@ -157,12 +146,6 @@ test_a_completion_line_with_zero_chunks_is_an_error_for_a_non_empty_tree() {
     set_env STUB_TF_CHUNKS=0
     run_adapter trufflehog "$SCAN" "$OUTD"
     assert_contains "$(errors)" "did not report a completed scan" "nothing was actually scanned"
-}
-
-test_a_completion_line_with_chunks_counts_as_a_completed_scan() {
-    prepare chunks
-    run_adapter trufflehog "$SCAN" "$OUTD"
-    assert_empty "$(errors)" "the stand-in reports its chunks like the real tool"
 }
 
 test_a_missing_binary_is_an_error_not_a_pass() {

@@ -39,6 +39,7 @@ test_real_the_message_guidance_is_printed_and_both_markers_on_the_token_line_mak
     stage_file src/app.txt "clean content" || return 1
     run_cap gitx commit -q -F "$SANDBOX/msg-guide"
     assert_message_blocked "-F" 4
+    if has_head; then fail "a commit was created"; fi
     assert_contains "$ERR" "(trufflehog: trufflehog:ignore, betterleaks: betterleaks:allow). The marker stays in the commit message." "the message guidance"
     assert_not_contains "$ERR" ".secret-scan-ignore" "no path exemption for a message"
     assert_not_contains "$ERR" ".gitleaksignore" "no fingerprint file"
@@ -47,15 +48,6 @@ test_real_the_message_guidance_is_printed_and_both_markers_on_the_token_line_mak
     run_cap gitx commit -q -F "$SANDBOX/msg-guide2"
     assert_rc 0 "both markers on the token line of the message pass"
     no_leak "$(fake_github_token)"
-}
-
-test_real_a_token_in_dash_f_blocks_on_its_line() {
-    begin_real dashf || return 1
-    printf 'fix: rotate\n\nthe old credential was\n%s\n' "$(token_line)" >"$SANDBOX/msg-f"
-    stage_file src/app.txt "clean content"
-    run_cap gitx commit -q -F "$SANDBOX/msg-f"
-    assert_message_blocked "-F" 4
-    if has_head; then fail "a commit was created"; fi
 }
 
 # ^ invariant prints the path of a GIT_EDITOR script putting its arguments (one per line) above what git wrote into the message file
@@ -112,6 +104,7 @@ test_real_a_token_only_in_the_removed_lines_of_a_commit_v_diff_does_not_block() 
     set_env GIT_EDITOR="$(editor_that_writes "fix: remove the old token")"
     run_cap gitx commit -q -v
     assert_rc 0 "the removed line sits below the scissors line"
+    assert_empty "$OUT" "stdout stays empty"
     assert_not_contains "$ERR" "potential secret" "no finding"
     assert_pass_line_only "$ERR" "only the lines run's pass line"
 }
@@ -205,15 +198,6 @@ test_real_amend_v_passes_a_token_removed_since_the_parent() {
     run_cap gitx commit -q --amend -v
     assert_rc 0 "an amend -v diff starts at HEAD^, where the token is a removed line"
     assert_not_contains "$ERR" "potential secret" "no finding"
-}
-
-test_real_a_clean_message_adds_no_output_line_to_the_pass_line() {
-    begin_real cleanmsg || return 1
-    stage_file src/app.txt "hello world"
-    commit_cap "fix: a clean subject" -m "and a clean body"
-    assert_rc 0 commit
-    assert_empty "$OUT" "stdout stays empty"
-    assert_pass_line_only "$ERR" "one line, from the lines run"
 }
 
 test_real_no_verify_skips_the_message_scan_as_it_skips_the_lines_scan() {

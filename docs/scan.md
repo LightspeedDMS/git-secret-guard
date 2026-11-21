@@ -579,8 +579,8 @@ Why the scan code is shaped this way; each point was probed on the pinned versio
   `scanner_dead_proxy_env` (`lib/core/common.sh`) exports `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY` and the lowercase forms as
   `http://127.0.0.1:9` and empties `NO_PROXY`/`no_proxy`, inside the subshell that starts each scanner (both betterleaks
   runs and the pre-flight probe, trufflehog), never in the hook itself; a real proxy in the user's environment never reaches
-  a scanner. Tests need no proxy: `test_real_a_fake_token_blocks_with_no_proxy_variable_set_at_all`, the zero-connect proof is
-  `test_real_a_hook_scan_makes_no_connect_to_a_non_loopback_address` (skips, naming why, without strace or ptrace), and
+  a scanner. Tests need no proxy: `test_real_trufflehog_match_blocks_without_the_value` checks none is set, the zero-connect proof is
+  `test_real_pii_a_commit_holding_the_samples_makes_no_connect_to_a_non_loopback_address` (skips, naming why, without strace or ptrace), and
   `test_real_a_fake_credential_blocks_even_with_network_access` skips offline. `DEAD_PROXY` arrays left in other test files
   are extra isolation only.
 - **betterleaks 1.9.0 exit codes and logs.** Clean is 0 and `[]`. The default leak status 1 equals the fatal status, so the

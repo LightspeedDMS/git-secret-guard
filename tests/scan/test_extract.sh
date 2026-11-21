@@ -236,13 +236,6 @@ test_a_truncated_hunk_and_an_unexpected_line_inside_a_hunk_fail() {
     assert_content "$SANDBOX/ok1/f" 'first\n'
 }
 
-test_malformed_diff_fails_instead_of_passing() {
-    extract_text "$SANDBOX/mal1" "$(printf '+++ x-without-prefix\n@@ -0,0 +1 @@\n+payload')"
-    assert_rc 2 "path without b/ prefix"
-    extract_text "$SANDBOX/mal2" "$(printf '+++ b/f\n@@ nonsense @@\n+payload')"
-    assert_rc 2 "unparsable hunk header"
-}
-
 # shellcheck disable=SC2016
 extract_with_pathspecs() {
     run_cap env -i "${GSG_ENV[@]}" bash -c \

@@ -15,7 +15,7 @@ test_autoupdate_units - 36
 test_autoupdate_windows - 0
 test_awk_portability - 3
 test_bypass_catalog - 81
-test_bypass_formats_real 162 172
+test_bypass_formats_real 162 61
 test_ci_plan - 0
 test_cli - 3
 test_coexist - 4
@@ -61,14 +61,14 @@ test_guidance - 1
 test_hook - 28
 test_hook_signals - 39
 test_hookspath 120 10
-test_inherited_config 108 19
-test_install 390 32
+test_inherited_config 108 3
+test_install 390 35
 test_install_adopt - 6
 test_install_network - 22
 test_jq_wrapper - 4
 test_launchd - 17
 test_launchd_update - 13
-test_lfs - 46
+test_lfs - 39
 test_lifecycle_e2e - 18
 test_mac_runner - 0
 test_macos - 21
@@ -98,7 +98,7 @@ test_smartgit_linux - 265
 test_smartgit_record_refusals - 4
 test_smartgit_windows 642 2
 test_state - 1
-test_status 216 72
+test_status 216 45
 test_status_bash - 3
 test_timer - 27
 test_tools - 1

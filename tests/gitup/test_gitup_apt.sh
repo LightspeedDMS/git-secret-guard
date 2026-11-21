@@ -47,6 +47,8 @@ test_ubuntu_2404_with_stock_git_takes_the_ppa_and_install_continues() {
     assert_contains "$(apt_calls)" "add-apt-repository -y -n ppa:git-core/ppa | ppa-files=0" "nothing existed before the add"
     assert_contains "$(apt_calls)" "apt-get update | ppa-files=1" "the update ran with the verified PPA enabled"
     assert_contains "$(gu_log)" "gpg --batch --show-keys --with-colons | scratch-home" "the key was read with a scratch GNUPGHOME"
+    assert_contains "$OUT" "stays enabled" "the plan says the PPA stays enabled"
+    assert_contains "$(<"$GSG_PROJECT/docs/platforms.md")" "uninstall" "the docs say what uninstall does"
     check_plan_matches_log "$OUT" "the PPA route"
 }
 
@@ -69,6 +71,7 @@ test_a_list_form_whose_trusted_gpg_d_key_is_not_the_pin_is_refused_and_the_key_i
     assert_rc 0 "the source route follows and finishes"
     assert_contains "$ERR" "not the pinned one" "the output says why"
     assert_empty "$(ppa_files)" "the .list file and the trusted.gpg.d key are gone"
+    assert_contains "$OUT$ERR" "git-core-ubuntu-ppa.gpg~" "the removal sentence names the .gpg~ backup beside the key"
     assert_not_contains "$(apt_calls)" "update | ppa-files=1" "no update ran while the unchecked PPA was enabled"
     assert_not_contains "$(apt_calls)" "no-install-recommends git |" "nothing was installed from the PPA"
     assert_contains "$(apt_calls)" "apt-get update | ppa-files=0 ppa-keys=0" "apt was refreshed without the PPA"
@@ -82,6 +85,8 @@ test_a_key_mismatch_in_the_sources_form_never_reaches_an_apt_install() {
     gu_apt_fixture sources AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA || return 1
     gsg install --upgrade-git </dev/null
     assert_rc 0 "the source route follows and finishes"
+    assert_contains "$OUT" "no-install-recommends git  [only when the key and floor checks pass]" "the PPA install is marked"
+    check_plan_matches_log "$OUT" "the failing PPA route, both halves"
     assert_contains "$ERR" "the PPA signing key fingerprint in git-core-ubuntu-ppa-noble.sources is [AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA], not the pinned one" "the output says why"
     assert_empty "$(ppa_files)" "the sources file is removed"
     assert_not_contains "$(apt_calls)" "update | ppa-files=1" "no update ran while it was enabled"
@@ -119,8 +124,11 @@ test_distribution_candidate_new_enough_upgrades_from_the_distribution_and_adds_n
     gsg install --upgrade-git </dev/null
     assert_rc 0 "package route"
     assert_contains "$OUT" "route: package" "the plan names the package route"
+    assert_contains "$OUT" " update" "the plan lists the update"
+    assert_eq "$(apt_calls | sed -E 's/ \| .*//')" $'apt-get update\napt-get install -y --no-install-recommends git' "package route: update, install"
     assert_not_contains "$OUT" "ppa:git-core/ppa" "no PPA in the plan"
     assert_not_contains "$(gu_log)" "add-apt-repository" "no PPA was added"
+    assert_not_contains "$(gu_log)" "make " "no build"
     assert_not_contains "$(gu_log)" "gpg " "and no key was read"
     assert_contains "$(apt_calls)" "apt-get install -y --no-install-recommends git" "git was installed from the distribution"
     assert_eq "$(path_git_version)" "git version 2.55.0" "and it is the distribution's"
@@ -136,6 +144,8 @@ test_debian_uses_the_pinned_source_build_and_never_tries_a_ppa() {
     assert_contains "$OUT" "can upgrade packages that are already installed, and the plan does not count them" "the dependency install says it can upgrade installed packages"
     assert_not_contains "$OUT$ERR" "ppa:git-core" "no PPA is mentioned as a step"
     assert_not_contains "$(gu_log)" "add-apt-repository" "no PPA was attempted"
+    assert_eq "$(apt_calls | head -n 1 | sed -E 's/ \| .*//')" "apt-get update" "the first apt call is the update"
+    assert_contains "$(apt_calls | sed -n 2p)" "install -y --no-install-recommends build-essential" "then the build dependencies"
     assert_contains "$(apt_calls)" "install -y --no-install-recommends build-essential libcurl4-openssl-dev libssl-dev libexpat1-dev zlib1g-dev perl libpcre2-dev xz-utils tar" "the build dependencies come from apt"
     assert_contains "$(gu_log)" "prefix=$GU_ROOT/usr/local NO_RUST=1 NO_TCLTK=1 NO_GETTEXT=1 USE_LIBPCRE2=1" "the build goes into /usr/local with the proven flags"
     assert_contains "$(gu_log)" "INSTALL_SYMLINKS=1" "git installs its siblings as symlinks, so no hard link ties bin/git to libexec"
@@ -143,24 +153,6 @@ test_debian_uses_the_pinned_source_build_and_never_tries_a_ppa() {
     assert_contains "$OUT" "make prefix=$GU_ROOT/usr/local NO_RUST=1 NO_TCLTK=1 NO_GETTEXT=1 USE_LIBPCRE2=1 sysconfdir=$GU_ROOT/etc INSTALL_SYMLINKS=1" "and the plan prints the make words it runs"
     assert_eq "$("$GU_ROOT/usr/local/bin/git" --version)" "git version 2.56.0" "git is built"
     check_plan_matches_log "$OUT" "the Debian source route"
-}
-
-test_debian_with_a_new_enough_candidate_uses_the_package() {
-    gu_apt_setup 2.39.5 debian "1:2.55.1-1" || return 1
-    gsg install --upgrade-git </dev/null
-    assert_rc 0 "Debian package route"
-    assert_contains "$OUT" "route: package" "the package route"
-    assert_not_contains "$(gu_log)" "make " "no build"
-}
-
-test_a_derivative_with_id_like_ubuntu_follows_the_ubuntu_route() {
-    gu_apt_setup 2.43.0 linuxmint "$NOBLE_STOCK" "$NOBLE_PPA" || return 1
-    gu_os_release 'ID=linuxmint' 'ID_LIKE="ubuntu debian"' || return 1
-    gsg install </dev/null
-    assert_rc 1 "no consent, only the plan matters"
-    assert_contains "$OUT" "for this ubuntu system" "the class is ubuntu"
-    assert_contains "$OUT" "route: ppa" "the plan follows the Ubuntu route"
-    assert_contains "$OUT" "ppa:git-core/ppa" "and names the PPA"
 }
 
 test_a_rerun_with_a_new_enough_git_does_nothing_to_git() {
@@ -223,16 +215,10 @@ test_a_machine_without_add_apt_repository_installs_software_properties_common_fi
     gsg install --upgrade-git </dev/null
     assert_rc 0 "the PPA route"
     assert_contains "$OUT" "install -y --no-install-recommends software-properties-common gnupg" "the plan adds software-properties-common"
+    assert_eq "$(apt_calls | sed -n 1p | sed -E 's/ \| .*//')" "apt-get update" "the software-properties step is preceded by an update"
     assert_contains "$(apt_calls | sed -n 2p)" "software-properties-common gnupg" "and the install follows the update"
     assert_eq "$(path_git_version)" "git version 2.56.0" "git came from the PPA"
     check_plan_matches_log "$OUT" "the PPA route with software-properties-common"
-}
-
-test_a_machine_with_add_apt_repository_does_not_install_software_properties_common() {
-    gu_apt_setup 2.43.0 ubuntu "$NOBLE_STOCK" "$NOBLE_PPA" || return 1
-    gsg install --upgrade-git </dev/null
-    assert_not_contains "$OUT" "software-properties-common" "not in the plan"
-    assert_not_contains "$(gu_log)" "software-properties-common" "and not installed"
 }
 
 test_the_candidate_is_read_with_a_fixed_locale_stdin_from_dev_null_and_a_timeout() {

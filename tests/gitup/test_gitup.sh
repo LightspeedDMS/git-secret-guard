@@ -205,6 +205,7 @@ test_answering_yes_at_the_prompt_upgrades_and_install_continues() {
     gu_core_setup || return 1
     gsg_pty $'y\n' install
     assert_rc 0 "yes at the prompt"
+    assert_contains "$OUT" "Upgrade git now with the plan above?" "the question"
     assert_eq "$(<"$SANDBOX/testmod.log")" apply "apply ran once"
     assert_contains "$OUT" "installed git-secret-guard" "install went on"
 }

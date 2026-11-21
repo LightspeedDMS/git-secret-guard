@@ -170,27 +170,6 @@ test_a_deleted_excludepkgs_line_is_reported_and_the_entry_comes_back() {
     gu_untouched "restore after the entry came back"
 }
 
-test_a_broken_record_prints_the_commands_to_undo_by_hand() {
-    local line
-    gu_tk_start || return 1
-    gsg install --take-over-system-git </dev/null
-    assert_rc 0 "takeover"
-    printf 'garbage\n' >"$GU_TK_DIR/record" || return 1
-    gsg restore-system-git </dev/null
-    assert_rc 1 "restore refuses a record it cannot read"
-    assert_contains "$ERR" "cp -a --remove-destination -- $GU_TK_DIR/orig/scalar " "and prints the by-hand command for every saved original"
-    gsg install --take-over-system-git </dev/null
-    assert_rc 1 "install refuses too"
-    assert_contains "$ERR" "cp -a --remove-destination -- $GU_TK_DIR/orig/git " "and prints the way out instead of only pointing at restore"
-    while IFS= read -r line; do
-        line="${line#"${line%%[![:space:]]*}"}"
-        bash -c "${line#sudo }" || fail "the printed command failed: $line"
-    done < <(grep 'cp -a --remove-destination' <<<"$ERR")
-    assert_eq "$(gu_hashes)" "$GU_BEFORE" "running the printed commands brings the six originals back"
-    gsg install --take-over-system-git </dev/null
-    assert_rc 0 "and the takeover works again"
-}
-
 test_the_default_betterleaks_is_the_one_fetch_test_tools_downloads() {
     local home="$SANDBOX/bl-home" cache="$SANDBOX/bl-cache/git-secret-guard-test-tools" got
     [ "$TEST_OS" != Darwin ] || skip_test "the ~/.local/bin fallback is the Linux branch of tests/support/lib.sh; macOS always uses the cache path"

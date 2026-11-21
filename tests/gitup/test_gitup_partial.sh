@@ -54,7 +54,7 @@ test_finishing_the_takeover_after_an_interrupted_restore_keeps_the_saved_origina
 }
 
 test_a_broken_record_never_lets_install_replace_the_saved_originals() {
-    local ids
+    local ids line install_err
     gu_tk_start || return 1
     gsg install --take-over-system-git </dev/null
     assert_rc 0 "takeover"
@@ -62,11 +62,21 @@ test_a_broken_record_never_lets_install_replace_the_saved_originals() {
     printf 'garbage\n' >"$GU_TK_DIR/record"
     gsg install --take-over-system-git </dev/null
     assert_rc 1 "a damaged record with links of ours is refused"
+    install_err="$ERR"
     assert_contains "$ERR" "$GU_TK_DIR/orig" "and the refusal names where the originals are"
+    assert_contains "$ERR" "cp -a --remove-destination -- $GU_TK_DIR/orig/git " "and prints the way out instead of only pointing at restore"
     assert_eq "$(gu_orig_ids)" "$ids" "the saved originals are untouched by install"
     gsg restore-system-git </dev/null
     assert_rc 1 "restore refuses a record it cannot read"
+    assert_contains "$ERR" "cp -a --remove-destination -- $GU_TK_DIR/orig/scalar " "and prints the by-hand command for every saved original"
     assert_eq "$(gu_orig_ids)" "$ids" "and touches nothing either"
+    while IFS= read -r line; do
+        line="${line#"${line%%[![:space:]]*}"}"
+        bash -c "${line#sudo }" || fail "the printed command failed: $line"
+    done < <(grep 'cp -a --remove-destination' <<<"$install_err")
+    assert_eq "$(gu_hashes)" "$GU_BEFORE" "running the printed commands brings the six originals back"
+    gsg install --take-over-system-git </dev/null
+    assert_rc 0 "and the takeover works again"
 }
 
 test_restore_puts_a_missing_file_back_and_ends_with_the_six_rpm_files() {

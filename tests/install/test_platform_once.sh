@@ -4,15 +4,23 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/../support/lib.sh"
 # shellcheck source=tests/support/lifecycle.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/../support/lifecycle.sh"
 
-# ^ invariant puts a uname on the sandbox PATH; it appends its first argument to $SANDBOX/uname.log and runs the host's own uname
-# ^ why a PATH stand-in, not a function; the CLI and the hook are separate processes, and each uname they start must show in one log
+# ^ invariant puts a uname on the sandbox PATH; it appends its first argument to $SANDBOX/uname.log and runs the uname the sandbox had, else the host's own
+# ^ why wrap the sandbox uname, not the host's; lc_begin puts a fake Linux one there on a Mac, and dropping it made install run the real Darwin flow
+# ^ invariant placing the counter again only starts a new log => the counter never wraps itself
 uc_counter() {
-    local real
-    real="$(type -P uname)" || return 1
+    local real bin="$SANDBOX/pathbin/uname"
     rm -f -- "${SANDBOX:?}/uname.log"
+    if [ -e "$bin" ] && grep -q 'uname[.]log' "$bin"; then return 0; fi
+    rm -f -- "${SANDBOX:?}/uname.wrapped"
+    if [ -e "$bin" ]; then
+        mv -f -- "$bin" "$SANDBOX/uname.wrapped" || return 1
+        real="$SANDBOX/uname.wrapped"
+    else
+        real="$(type -P uname)" || return 1
+    fi
     # shellcheck disable=SC2016
-    printf '#!/bin/sh\nprintf "%%s\\n" "$1" >>"%s/uname.log"\nexec "%s" "$@"\n' "$SANDBOX" "$real" >"$SANDBOX/pathbin/uname" || return 1
-    chmod 755 "$SANDBOX/pathbin/uname"
+    printf '#!/bin/sh\nprintf "%%s\\n" "$1" >>"%s/uname.log"\nexec "%s" "$@"\n' "$SANDBOX" "$real" >"$bin" || return 1
+    chmod 755 "$bin"
 }
 
 # ^ invariant prints how many times uname ran with the argument $1; 0 when it never ran
@@ -61,6 +69,16 @@ test_an_inherited_value_is_not_trusted_by_the_cli_or_the_hook() {
     uc_counter || return 1
     uc_commit inherited || return 1
     assert_eq "$(uc_count -s)" 4 "the hook asked uname -s itself in each of its four processes"
+}
+
+# ^ invariant the counter wraps the uname the sandbox PATH already has (lc_begin puts a fake Linux one there on a Mac), once, placed twice or not
+# ^ why a fake riscv64 answer, not the host's; the host answers x86_64 or arm64, and a counter dropping the fake would let the install pass
+test_the_counter_wraps_the_uname_the_sandbox_already_has() {
+    lc_begin && lc_make_fixtures && lc_use_fixtures && lc_fake_uname Linux riscv64 && uc_counter && uc_counter || return 1
+    gsg install
+    assert_rc 1 "the fake riscv64 answer is still the one the install reads"
+    assert_contains "$ERR" "got Linux on riscv64" "the refusal names the faked platform"
+    assert_eq "$(uc_count -s)" 1 "one uname -s, so the counter was not wrapped around itself"
 }
 
 # ^ invariant doctor checks each scanner against the pin of this platform; the architecture is asked once, not once per scanner

@@ -72,13 +72,18 @@ test_an_inherited_value_is_not_trusted_by_the_cli_or_the_hook() {
 }
 
 # ^ invariant the counter wraps the uname the sandbox PATH already has (lc_begin puts a fake Linux one there on a Mac), once, placed twice or not
-# ^ why a fake riscv64 answer, not the host's; the host answers x86_64 or arm64, and a counter dropping the fake would let the install pass
+# ^ why uname run directly, not an install; a Linux fake sends install down the Linux path, where Windows refuses for setsid before it reads the platform
+# ^ why a fake riscv64 answer, not the host's; the host answers x86_64 or arm64, and a counter dropping the fake would show the host's
 test_the_counter_wraps_the_uname_the_sandbox_already_has() {
-    lc_begin && lc_make_fixtures && lc_use_fixtures && lc_fake_uname Linux riscv64 && uc_counter && uc_counter || return 1
-    gsg install
-    assert_rc 1 "the fake riscv64 answer is still the one the install reads"
-    assert_contains "$ERR" "got Linux on riscv64" "the refusal names the faked platform"
-    assert_eq "$(uc_count -s)" 1 "one uname -s, so the counter was not wrapped around itself"
+    lc_begin && lc_fake_uname Linux riscv64 && uc_counter && uc_counter || return 1
+    run_cap env -i PATH="$SANDBOX/pathbin:$TEST_BASE_PATH" uname -s
+    assert_rc 0 "uname -s"
+    assert_eq "$OUT" Linux "the fake system answer reaches the caller"
+    run_cap env -i PATH="$SANDBOX/pathbin:$TEST_BASE_PATH" uname -m
+    assert_rc 0 "uname -m"
+    assert_eq "$OUT" riscv64 "the fake architecture answer reaches the caller, not the host's"
+    assert_eq "$(uc_count -s)" 1 "one log line for uname -s: the counter is not wrapped around itself"
+    assert_eq "$(uc_count -m)" 1 "one log line for uname -m"
 }
 
 # ^ invariant doctor checks each scanner against the pin of this platform; the architecture is asked once, not once per scanner

@@ -160,4 +160,58 @@ test_parallel_mode_reports_a_file_whose_worker_died_instead_of_waiting_forever()
     assert_contains "$OUT" "SUMMARY: 1 passed, 1 failed, 0 skipped (total 2)" "the dead file is one failure"
 }
 
+COST_FILES=(a b c d e f g h i)
+COST_WAIT_TENTHS=300
+
+# ^ why the fixtures log to a file, not to the clock; the holder keeps one job until every file has started, and the log is the start order
+# ^ invariant cost_fixture NAME HOLD LOG COUNT prints a test file; HOLD 1 logs and waits for COUNT lines, HOLD 0 waits for a line and logs; bounded
+# ^ hazard a serial run must not wait, with GSG_TEST_JOBS 1 the file prints its PASS line and ends
+# shellcheck disable=SC2016
+cost_fixture() {
+    printf '%s\n' '#!/usr/bin/env bash' \
+        "name=$1 hold=$2 log='$3' count=$4 limit=$COST_WAIT_TENTHS" \
+        'if [ "${GSG_TEST_JOBS:-1}" -le 1 ]; then printf "PASS    %s::ran\n" "$name"; exit 0; fi' \
+        'lines=0' \
+        'wait_for() { local i=0 l=(); while [ "$i" -lt "$limit" ]; do l=(); [ -f "$log" ] && mapfile -t l <"$log"; lines=${#l[@]}; [ "$lines" -ge "$1" ] && return 0; sleep 0.1; i=$((i + 1)); done; return 1; }' \
+        'ok=0' \
+        'if [ "$hold" = 1 ]; then printf "%s\n" "$name" >>"$log"; wait_for "$count" || ok=1; else wait_for 1 || ok=1; [ "$ok" = 0 ] && printf "%s\n" "$name" >>"$log"; fi' \
+        '[ "$ok" = 0 ] || { printf "FAIL    %s::gave up waiting (%s lines)\n" "$name" "$lines"; exit 1; }' \
+        'printf "PASS    %s::ran\n" "$name"'
+}
+
+# ^ invariant cost_make builds $SANDBOX/rc/tests with run.sh, a fetch stub, a cost list and test_a..test_i; test_e is unlisted, test_g is malformed, h and i tie
+cost_make() {
+    local root="$SANDBOX/rc" n hold
+    rm -rf -- "$root"
+    mkdir -p -- "$root/tests/ctx" "$SANDBOX/tmp" || return 1
+    cp -- "$GSG_PROJECT/tests/run.sh" "$root/tests/run.sh" || return 1
+    printf '#!/usr/bin/env bash\nexit 0\n' >"$root/tests/fetch-test-tools.sh" || return 1
+    chmod 755 "$root/tests/run.sh" "$root/tests/fetch-test-tools.sh" || return 1
+    printf '%s\n' '# test costs: name, Windows seconds, Linux seconds' '' 'test_a - 10' 'test_b 500 5' 'test_c 100 300' 'test_d 100 1' \
+        'test_f - 0' 'test_g oops' 'test_h 7 50' 'test_i 7 50' >"$root/tests/test-costs.list" || return 1
+    for n in "${COST_FILES[@]}"; do
+        hold=0
+        if [ "$n" = e ]; then hold=1; fi
+        cost_fixture "test_$n" "$hold" "$root/start.log" "${#COST_FILES[@]}" >"$root/tests/ctx/test_$n.sh" || return 1
+    done
+}
+
+# ^ invariant unlisted and malformed files start first in argument order; Windows follows its column and the Linux column breaks ties, elsewhere Linux
+test_parallel_mode_starts_the_costliest_files_first_and_prints_in_argument_order() {
+    local want="test_e test_g test_c test_h test_i test_a test_b test_d test_f" serial n
+    local -a args=()
+    if [ "$TEST_IS_WINDOWS" -eq 1 ]; then want="test_e test_g test_b test_c test_d test_h test_i test_a test_f"; fi
+    cost_make || return 1
+    for n in "${COST_FILES[@]}"; do args+=("$SANDBOX/rc/tests/ctx/test_$n.sh"); done
+    run_cap timeout "$RUNNER_BOUND_SECONDS" env GSG_TEST_JOBS=1 TMPDIR="$SANDBOX/tmp" bash "$SANDBOX/rc/tests/run.sh" "${args[@]}"
+    serial="$OUT"
+    assert_rc 0 "serial run"
+    run_cap timeout "$RUNNER_BOUND_SECONDS" env GSG_TEST_JOBS=2 TMPDIR="$SANDBOX/tmp" bash "$SANDBOX/rc/tests/run.sh" "${args[@]}"
+    assert_rc 0 "parallel run (124 means a wait never ended)"
+    assert_eq "$(tr '\n' ' ' <"$SANDBOX/rc/start.log")" "$want " "the start order"
+    assert_eq "$(rt_ran)" "test_a test_b test_c test_d test_e test_f test_g test_h test_i" "the print order is the argument order"
+    assert_eq "$OUT" "$serial" "the parallel output is the serial output"
+    assert_contains "$OUT" "SUMMARY: 9 passed, 0 failed, 0 skipped (total 9)" "counts"
+}
+
 run_file_tests

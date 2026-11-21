@@ -18,8 +18,10 @@ if [ "$(uname -s)" = Darwin ]; then
 fi
 
 # ^ external on Windows the pinned jq and scanners live in a test cache, fetched and SHA-256 checked once; a failed fetch leaves the real-scanner tests to skip
+COST_COLUMN=linux
 case "$(uname -s)" in
     MINGW64_NT-*)
+        COST_COLUMN=windows
         FILE_TIMEOUT_SECONDS="${GSG_TEST_FILE_TIMEOUT:-2400}"
         JOBS="${GSG_TEST_JOBS:-$(nproc)}"
         tools_cache="${XDG_CACHE_HOME:-$HOME/.cache}/git-secret-guard-test-tools"
@@ -83,11 +85,41 @@ passed=0
 failed=0
 skipped=0
 
+# ^ why start in cost order, not name order; a long file started late stretches the end of the run (the printer below still goes by index)
+# ^ invariant order_by_cost sets start_order to the file indices, unlisted files first, after them the costliest in COST_COLUMN, ties by index
+# ^ why a malformed list line counts as missing, not as an error; the file starts early and test_cost_list checks the list
+order_by_cost() {
+    local list="$TESTS_DIR/test-costs.list" i
+    start_order=()
+    while read -r _ _ _ i; do
+        start_order+=("$i")
+    done < <(
+        { if [ -f "$list" ]; then cat -- "$list" || exit 1; fi; printf '%s\n' '@files'; printf '%s\n' "${files[@]}"; } |
+            LC_ALL=C awk -v col="$COST_COLUMN" '
+                $0 == "@files" && !seen { seen = 1; idx = 0; next }
+                !seen {
+                    if (NF == 3 && $1 !~ /^#/ && $3 ~ /^[0-9]+$/ && ($2 ~ /^[0-9]+$/ || $2 == "-")) {
+                        win[$1] = ($2 == "-") ? 0 : $2
+                        lin[$1] = $3
+                    }
+                    next
+                }
+                {
+                    n = $0; sub(/^.*\//, "", n); sub(/\.sh$/, "", n)
+                    if (n in lin) printf "1 %d %d %d\n", (col == "windows") ? win[n] : 0, lin[n], idx
+                    else printf "0 0 0 %d\n", idx
+                    idx++
+                }' |
+            LC_ALL=C sort -k1,1n -k2,2nr -k3,3nr -k4,4n
+    )
+    [ "${#start_order[@]}" -eq "${#files[@]}" ] || { printf 'FAIL    could not order the test files by cost\n'; exit 2; }
+}
+
 # ^ why parallel only on request off Windows, not everywhere; each file has its own sandbox, the Linux and macOS output stays as it always was
 # ^ external starting a process costs far more on Windows; the suite takes hours one file at a time
 start_files() {
     local i running=0
-    for i in "${!files[@]}"; do
+    for i in "${start_order[@]}"; do
         while [ "$running" -ge "$JOBS" ]; do
             wait -n
             running=$((running - 1))
@@ -117,6 +149,7 @@ wait_for_status() {
 if [ "$JOBS" -gt 1 ]; then
     out_dir="$(mktemp -d)" || exit 2
     trap 'rm -rf -- "$out_dir"' EXIT
+    order_by_cost
     start_files &
     starter=$!
 fi

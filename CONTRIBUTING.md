@@ -63,6 +63,13 @@ The runner takes folders and files; an argument that is neither fails by name be
 `test_*.sh` one and two levels below `tests/`, ordered by base name (`tests/project/test_quality.sh` checks that no test file
 sits where it would not be found).
 
+With more than one job (`GSG_TEST_JOBS`, the CPU count on Windows) the runner starts the files with the highest known cost first, so a long file does
+not start behind short ones and stretch the end of the run. The costs are the seconds per file in `tests/test-costs.list` (Windows column on
+Windows, Linux column elsewhere and as the tie-break); a file missing from the list, or on a malformed line, starts first. Only the start order
+changes: the results are still printed in the order the files were given (by base name when no argument names them), and a run with one job is untouched. To update a value, take the
+per-file time from a CI log or time `tests/run.sh FILE`, and edit that line; `tests/project/test_cost_list.sh` fails on a test file without a
+line, a line for a file that is gone, a repeated name and a malformed line.
+
 Always go through the runner on macOS and Windows: on macOS it puts Homebrew's bash and the GNU tools first on `PATH`, on
 Windows it fetches the test tools and `tests\run.cmd` finds Git for Windows' bash (never the WSL one in `System32`).
 
@@ -142,7 +149,8 @@ A library the CLI loads is added to the list in `bin/git-secret-guard` by its pa
 repository itself goes in `tests/project/`. Read the folder's README first. The file name stays `test_<name>.sh`, unique across all
 folders, because a test's identity in the output, in `tests/windows-skips.list` and in `tests/macos-only.list` is `file::test` with the
 base name. A helper that tests of more than one folder load goes in `tests/support/`; one that a single folder loads lives in that folder;
-a test or helper loads helpers only from `tests/support/` and its own folder. `tests/run.sh`, `tests/coverage.sh`, the skip lists and
+a test or helper loads helpers only from `tests/support/` and its own folder. A new test file also gets a line in `tests/test-costs.list`
+(its base name, the Windows seconds or `-`, the Linux seconds, as measured: `tests/project/test_cost_list.sh` fails without it). `tests/run.sh`, `tests/coverage.sh`, the skip lists and
 the other entry points stay directly in `tests/`; nothing else does. `tests/project/test_quality.sh` enforces this
 (`test_no_test_file_or_helper_sits_directly_in_tests`, `test_every_test_helper_source_resolves_to_tests_support_or_the_files_own_folder`,
 `test_test_file_base_names_are_unique`, `test_every_folder_holding_test_files_has_a_readme`,

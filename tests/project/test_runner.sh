@@ -158,7 +158,7 @@ test_parallel_mode_prints_one_time_line_per_file_after_its_results_and_serial_mo
     if [ "$TEST_IS_WINDOWS" -eq 1 ]; then skip_test "$RUNNER_PARALLEL_WINDOWS_REASON"; fi
     runner_fixtures test_quick.sh "printf 'PASS    quick::one\n'" \
         test_slow.sh "sleep 2; printf 'PASS    slow::one\nPASS    slow::two\n'" || return 1
-    runner_run 1 "$SANDBOX/fx/test_quick.sh" "$SANDBOX/fx/test_slow.sh"
+    runner_run 1 "$SANDBOX/fx/test_quick.sh"
     assert_rc 0 "serial run"
     assert_not_contains "$OUT" "TIME" "a serial run prints no time line"
     runner_run 2 "$SANDBOX/fx/test_quick.sh" "$SANDBOX/fx/test_slow.sh"

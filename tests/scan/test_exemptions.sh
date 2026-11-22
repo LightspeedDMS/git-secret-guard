@@ -36,6 +36,7 @@ test_an_exemption_staged_in_the_same_commit_does_not_apply_but_the_next_commit_i
     assert_rc 1 "the finding is reported: only HEAD's file counts"
     assert_contains "$ERR" "secret/k.txt:1" "reported"
     assert_contains "$(seen_by betterleaks)" "secret/k.txt" "the path was scanned"
+    assert_contains "$(seen_by trufflehog)" "secret/k.txt" "trufflehog scanned it too"
     assert_not_contains "$ERR" "excluded by .secret-scan-ignore" "nothing was excluded"
     no_leak "$MARKER"
 

@@ -101,15 +101,23 @@ test_an_old_git_on_an_rpm_system_names_upgrade_git_and_the_platform_doc() {
     done
 }
 
+# ^ invariant snapshot_config copies the global config; config_unchanged compares every byte => a refusal wrote nothing, not even a key outside hook.*
+snapshot_config() { cp -- "$SANDBOX/gitconfig" "$SANDBOX/gitconfig.before"; }
+config_unchanged() {
+    cmp -s -- "$SANDBOX/gitconfig" "$SANDBOX/gitconfig.before"
+    assert_eq "$?" 0 "$1: global config unchanged"
+}
+
 test_a_missing_tool_on_an_rpm_system_names_the_dnf_package() {
     local pair tool pkg
     for pair in jq:jq setsid:util-linux timeout:coreutils; do
         tool="${pair%%:*}" pkg="${pair#*:}"
-        lc_begin && lc_path_without "$tool" && os_release 'ID="rocky"' 'ID_LIKE="rhel centos fedora"' || return 1
+        lc_begin && lc_path_without "$tool" && os_release 'ID="rocky"' 'ID_LIKE="rhel centos fedora"' && snapshot_config || return 1
         gsg install
         assert_rc 1 "$tool missing"
         assert_contains "$ERR" "$tool is required but was not found on PATH; install it with: sudo dnf install $pkg" "the exact line for $tool"
         nothing_changed "$tool missing"
+        config_unchanged "$tool missing"
     done
 }
 
@@ -117,11 +125,12 @@ test_a_missing_jq_setsid_timeout_or_curl_on_ubuntu_names_the_apt_package() {
     local pair tool pkg
     for pair in jq:jq setsid:util-linux timeout:coreutils; do
         tool="${pair%%:*}" pkg="${pair#*:}"
-        lc_begin && lc_path_without "$tool" && ubuntu_release || return 1
+        lc_begin && lc_path_without "$tool" && ubuntu_release && snapshot_config || return 1
         gsg install
         assert_rc 1 "$tool missing"
         assert_contains "$ERR" "$tool is required but was not found on PATH; install it with: sudo apt install $pkg" "the exact line for $tool"
         nothing_changed "$tool missing"
+        config_unchanged "$tool missing"
     done
     lc_begin && lc_make_fixtures && lc_use_fixtures && lc_path_without curl && ubuntu_release || return 1
     gsg install

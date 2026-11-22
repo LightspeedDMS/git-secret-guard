@@ -18,7 +18,7 @@ scan_trufflehog() {
     fi
 
     # ^ why timeout --foreground, not plain timeout; plain timeout makes its own process group => the hook's group kill misses it
-    # ^ see test:test_term_signal_stops_the_scanners_and_removes_the_private_temp_dir
+    # ^ see test:test_int_signal_stops_the_scanners_and_removes_the_private_temp_dir
 
     # ^ why unverified in --results, not the old value; 3.99.2 still filters and every result is Verified=false, the old value returns nothing at rc 0
     # ^ security --no-verification => no credential is tested against a vendor; the dead proxy is the second line

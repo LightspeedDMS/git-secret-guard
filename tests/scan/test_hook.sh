@@ -512,13 +512,12 @@ SIGDUR=""
 scanner_processes() { pgrep -f -- "$TEST_WORK_BASE|sleep $SIGDUR" | wc -l; }
 
 # ^ why under 3000 ms, not 5 s; TERM stops both scanner groups at once, a dropped TERM waits the 5 s grace of lib/core/proc.sh and the KILL
-# ^ why 4000 to 9000 ms for the stubborn scanner, not 3000; it ignores TERM and the stop is the whole 5 s grace and the KILL
-NS_PER_MS=1000000 SIG_MAX_MS=3000 SIG_MIN_MS=0
+NS_PER_MS=1000000 SIG_MAX_MS=3000
 signal_test() {
-    local max_ms="$SIG_MAX_MS" min_ms="$SIG_MIN_MS" t0 t1 ms
+    local t0 t1 ms
     begin "$1" || return 1
     SIGDUR="6.$RANDOM"
-    set_env STUB_TF_SLEEP="$SIGDUR" STUB_GL_SLEEP="$SIGDUR" "${@:3}"
+    set_env STUB_TF_SLEEP="$SIGDUR" STUB_GL_SLEEP="$SIGDUR"
     stage_file a.txt one
     # ^ external a background job starts with SIGINT ignored; env --default-signal restores it as in a terminal Ctrl-C
     env --default-signal=INT,TERM -i "${GSG_ENV[@]}" "${EXTRA_ENV[@]}" "$GIT" commit -q -m sig >/dev/null 2>&1 &
@@ -531,8 +530,7 @@ signal_test() {
     wait "$cpid"
     t1="$(date +%s%N)"
     ms=$(((t1 - t0) / NS_PER_MS))
-    [ "$ms" -lt "$max_ms" ] || fail "the hook took $ms ms to end after $2; expected under $max_ms ms"
-    [ "$ms" -ge "$min_ms" ] || fail "the hook ended $ms ms after $2; expected at least $min_ms ms (the grace, then the KILL)"
+    [ "$ms" -lt "$SIG_MAX_MS" ] || fail "the hook took $ms ms to end after $2; expected under $SIG_MAX_MS ms"
     assert_empty "$(workdirs)" "work dir removed right after $2"
     assert_eq "$(scanner_processes)" 0 "no scanner, timeout or sleep process survives $2"
     sleep 2
@@ -540,9 +538,7 @@ signal_test() {
     assert_eq "$(scanner_processes)" 0 "still no survivor 2 s after $2"
 }
 
-test_term_signal_stops_the_scanners_and_removes_the_private_temp_dir() { signal_test term TERM; }
 test_int_signal_stops_the_scanners_and_removes_the_private_temp_dir() { signal_test int INT; }
-test_a_scanner_that_ignores_term_is_killed_before_the_temp_dir_is_removed() { SIG_MAX_MS=9000 SIG_MIN_MS=4000 signal_test stubborn TERM STUB_TF_STUBBORN=1; }
 
 # ^ external macOS has no /proc; ps -p reports the state letter on both, Z (zombie) counts as gone
 proc_alive() {

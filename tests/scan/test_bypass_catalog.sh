@@ -252,10 +252,12 @@ test_real_catalog_d01_d02_no_verify_skips_the_scan() {
     commit_cap D01 --no-verify
     catalog D01 Detect 'git commit --no-verify'
     assert_hook_never_ran D01
+    gitx rev-parse -q --verify HEAD >/dev/null 2>&1 || fail "D01 no commit was created"
     gitx update-ref -d HEAD
     commit_cap D02 -n
     catalog D02 Detect 'git commit -n'
     assert_hook_never_ran D02
+    gitx rev-parse -q --verify HEAD >/dev/null 2>&1 || fail "D02 no commit was created"
 }
 
 test_real_catalog_d03_to_d08_core_hooks_path_cannot_switch_the_config_hook_off() {

@@ -190,6 +190,8 @@ test_a_failing_global_config_read_shows_git_s_reason_and_names_GIT_CONFIG() {
         assert_rc 1 "$cmd over a broken global config"
         assert_contains "$ERR" "cannot read the global git config" "$cmd: says what failed"
         assert_contains "$ERR" "bad config" "$cmd: and carries git's own reason"
+        assert_no_file "$LC_DATA" "$cmd: no share dir"
+        assert_no_file "$LC_BIN" "$cmd: no tools"
     done
     lc_begin && lc_make_fixtures && lc_use_fixtures || return 1
     gsg install

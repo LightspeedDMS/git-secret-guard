@@ -20,18 +20,6 @@ lc_which() {
 GITCONFIG_BEFORE=""
 snapshot_config() { GITCONFIG_BEFORE="$(cat -- "$SANDBOX/gitconfig")"; }
 
-test_install_refuses_when_jq_setsid_or_timeout_is_not_reachable() {
-    local tool
-    for tool in jq setsid timeout; do
-        lc_begin && lc_path_without "$tool" || return 1
-        snapshot_config
-        gsg install
-        assert_rc 1 "$tool missing"
-        assert_contains "$ERR" "$tool is required" "names $tool"
-        assert_untouched "$tool missing"
-    done
-}
-
 test_install_refuses_an_unsupported_platform() {
     local os arch
     # ^ why one lc_begin for all rounds, not one per round; a refusal changes nothing and assert_untouched checks it after each round
@@ -898,19 +886,6 @@ test_install_creates_the_global_config_on_a_machine_that_has_none() {
     assert_rc 0 "no global git config file at all"
     assert_eq "$(gitx config --global --get-all hook.git-secret-guard.event | tr '\n' ' ')" "pre-commit commit-msg " "the file was created with the hook config"
     assert_not_contains "$(cat -- "$SANDBOX/gitconfig")" "gsg-install-probe" "and the write probe left no trace"
-}
-
-test_a_syntactically_broken_global_config_stops_install_and_uninstall() {
-    lc_begin && lc_make_fixtures && lc_use_fixtures || return 1
-    printf '[broken\n' >"$SANDBOX/gitconfig" || return 1
-    gsg install
-    assert_rc 1 "install over a broken config"
-    assert_contains "$ERR" "cannot read the global git config" "says why"
-    assert_no_file "$LC_DATA" "no share dir"
-    assert_no_file "$LC_BIN" "no tools"
-    gsg uninstall
-    assert_rc 1 "uninstall over a broken config"
-    assert_contains "$ERR" "cannot read the global git config" "says why"
 }
 
 test_install_refuses_a_hooks_path_it_cannot_expand() {

@@ -48,7 +48,9 @@ test_ubuntu_2404_with_stock_git_takes_the_ppa_and_install_continues() {
     assert_contains "$(apt_calls)" "apt-get update | ppa-files=1" "the update ran with the verified PPA enabled"
     assert_contains "$(gu_log)" "gpg --batch --show-keys --with-colons | scratch-home" "the key was read with a scratch GNUPGHOME"
     assert_contains "$OUT" "stays enabled" "the plan says the PPA stays enabled"
-    assert_contains "$(<"$GSG_PROJECT/docs/platforms.md")" "uninstall" "the docs say what uninstall does"
+    assert_contains "$OUT" "uninstall leaves the PPA and git as they are" "and what uninstall does"
+    # shellcheck disable=SC2016
+    assert_contains "$(<"$GSG_PROJECT/docs/platforms.md")" '`uninstall` leaves the PPA, a `ppa-aside-*` directory and git as they are' "the docs say the same"
     check_plan_matches_log "$OUT" "the PPA route"
 }
 

@@ -156,7 +156,7 @@ test_docs_tests_on_the_real_repo_lists_every_known_reader_of_markdown() {
     assert_eq "${OUT%%$'\n'*}" "tests/project/test_quality.sh" "quality is first"
     assert_contains "$OUT" "tests/project/test_dco.sh" "dco"
     assert_contains "$OUT" "tests/scan/test_reminder.sh" "reminder"
-    assert_contains "$OUT" "tests/gitup/test_gitup_apt_state.sh" "gitup apt state"
+    assert_contains "$OUT" "tests/gitup/test_gitup_apt.sh" "gitup apt"
     assert_contains "$OUT" "tests/gitup/test_gitup_apt_ppa.sh" "gitup apt ppa"
     assert_not_contains "$OUT" "tests/project/test_ci_plan.sh" "this file reads no project Markdown"
 }

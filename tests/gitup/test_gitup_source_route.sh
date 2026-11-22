@@ -63,20 +63,27 @@ test_a_failed_removal_of_obsolete_files_after_a_good_copy_still_says_git_was_ins
     assert_eq "$("$GU_ROOT/usr/local/bin/git" --version)" "git version 2.56.0" "and it is"
 }
 
-test_a_rebuild_under_an_active_takeover_is_refused_before_anything_is_copied() {
-    GU_TK_PIN=2.57.0 gu_tk_start || return 1
-    gsg install --take-over-system-git </dev/null
-    assert_rc 0 "takeover (the build is older than the pin, which only a rebuild would fix)"
-    rm -f -- "$SANDBOX/gitup.log"
-    gsg install --upgrade-git </dev/null
-    assert_rc 1 "a rebuild under an active takeover is refused"
-    assert_contains "$ERR" "restore-system-git" "the way out is named"
-    assert_not_contains "$(gu_log)" "cp -dR" "nothing was copied"
-    assert_not_contains "$(gu_log)" "dnf install" "and no dependency was installed"
-    gu_all_symlinks || fail "the takeover is still in place"
-    gsg install </dev/null
-    assert_rc 0 "without the flag the install goes on"
-    assert_contains "$ERR" "restore-system-git" "and still says why the rebuild is not offered"
+test_a_timer_refusal_comes_before_the_git_upgrade_offer() {
+    local case_name expect
+    for case_name in percent-in-state-dir foreign-unit; do
+        gu_rpm_setup || return 1
+        case "$case_name" in
+            percent-in-state-dir)
+                set_env XDG_STATE_HOME="$SANDBOX/xdg%state"
+                expect="cannot be written into a systemd unit"
+                ;;
+            foreign-unit)
+                mkdir -p -- "$LC_HOME/.config/systemd/user" && printf 'not ours\n' >"$LC_HOME/.config/systemd/user/git-secret-guard-doctor.timer" || return 1
+                expect="was not written by git-secret-guard"
+                ;;
+        esac
+        gsg install --upgrade-git --with-timer </dev/null
+        assert_rc 1 "refused [$case_name]"
+        assert_contains "$ERR" "$expect" "the timer problem is named [$case_name]"
+        assert_not_contains "$(gu_log)" "sudo " "no privileged command ran before the refusal [$case_name]"
+        assert_not_contains "$(gu_log)" "make " "and nothing was built [$case_name]"
+        assert_contains "$ERR" "nothing was changed" "and the claim is true [$case_name]"
+    done
 }
 
 test_a_relative_tmpdir_is_refused_instead_of_hanging() {

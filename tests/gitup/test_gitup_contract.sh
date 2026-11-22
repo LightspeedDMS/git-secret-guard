@@ -263,4 +263,58 @@ test_the_warning_explains_what_stays_unscanned_and_names_the_git_in_use() {
     assert_contains "$ERR" "install --take-over-system-git can point it at the new git" "and how to fix it"
 }
 
+# shellcheck disable=SC2016
+test_a_direct_root_run_uses_the_system_path_not_the_callers_path() {
+    gu_rpm_setup || return 1
+    mkdir -p -- "$SANDBOX/poison" || return 1
+    printf '#!/bin/sh\n: >"%s/poison-ran"\n' "$SANDBOX" >"$SANDBOX/poison/touch" && chmod 755 "$SANDBOX/poison/touch" || return 1
+    set_env PATH="$SANDBOX/poison:$SANDBOX/pathbin:$TEST_BASE_PATH"
+    gu_run 'gitup_paths; gitup_is_root() { return 0; }; gitup_elevate touch "$1"; printf "rc=%s" "$?"' "$SANDBOX/created"
+    assert_contains "$OUT" "rc=0" "root run succeeded"
+    assert_file "$SANDBOX/created" "through the system path touch"
+    assert_no_file "$SANDBOX/poison-ran" "and the caller's PATH was not used"
+    gu_run 'gitup_paths; gitup_is_root() { return 0; }; gitup_elevate no-such-tool-here "$1"; printf "rc=%s" "$?"' "$SANDBOX/created2"
+    assert_contains "$OUT" "rc=1" "a tool outside the system path is refused"
+    assert_contains "$ERR" "no-such-tool-here was not found in the system path" "and the message names it"
+}
+
+# ^ invariant set_registry_reply FILE CLASS VALUE rewrites the REPLY of CLASS in FILE to VALUE (a bare word, or "" = reserved); no sed -i, BSD and GNU differ
+set_registry_reply() {
+    sed -E "s/^( +)$2\\) REPLY=[^ ;]* ;;\$/\\1$2) REPLY=$3 ;;/" "$1" >"$1.new" && mv -- "$1.new" "$1"
+}
+
+# ^ why a synthetic base with every class line reserved, not the lines reserved in the library; one reserved line (other) leaves nothing to merge
+test_branches_that_each_take_one_reserved_registry_line_merge_without_conflicts() {
+    local repo="$SANDBOX/merge" file="$SANDBOX/merge/lib/gitup/gitup.sh" classes=() a b merged
+    lc_begin || return 1
+    mapfile -t classes < <(sed -nE 's/^ +([a-z]+)\) REPLY=[^ ;]+ ;;$/\1/p' "$GSG_PROJECT/lib/gitup/gitup.sh")
+    if [ "${#classes[@]}" -lt 3 ]; then fail "gitup_registry has fewer than three class lines (${#classes[@]}), nothing to merge"; return 1; fi
+    rm -rf -- "$repo" && mkdir -p -- "$repo/lib/gitup" && cp -- "$GSG_PROJECT/lib/gitup/gitup.sh" "$file" || return 1
+    for a in "${classes[@]}"; do set_registry_reply "$file" "$a" '""' || return 1; done
+    assert_eq "$(grep -c '^ *[a-z]*) REPLY="" ;;$' "$file")" "${#classes[@]}" "every class line of the base is reserved"
+    gitx -C "$repo" init -q -b main && gitx -C "$repo" add lib/gitup/gitup.sh && gitx -C "$repo" commit -q -m base || return 1
+    for a in "${classes[@]}"; do
+        gitx -C "$repo" checkout -q -b "mod-$a" main || return 1
+        set_registry_reply "$file" "$a" "${a}mod" || return 1
+        grep -q "^ *$a) REPLY=${a}mod ;;\$" "$file" || { fail "no reserved line for $a"; return 1; }
+        gitx -C "$repo" commit -q -am "module for $a" || return 1
+    done
+    for a in "${classes[@]}"; do
+        for b in "${classes[@]}"; do
+            if [[ $a == "$b" || $a > "$b" ]]; then continue; fi
+            gitx -C "$repo" checkout -q -b "pair-$a-$b" "mod-$a" || return 1
+            gitx -C "$repo" merge -q --no-edit "mod-$b" >/dev/null 2>&1
+            assert_eq "$?" "0" "the branches for $a and $b merge without a conflict"
+            gitx -C "$repo" merge --abort >/dev/null 2>&1
+        done
+    done
+    gitx -C "$repo" checkout -q -b all "mod-${classes[0]}" || return 1
+    for b in "${classes[@]:1}"; do
+        gitx -C "$repo" merge -q --no-edit "mod-$b" >/dev/null 2>&1
+        assert_eq "$?" "0" "and the branch for $b joins the others"
+    done
+    merged="$(<"$file")"
+    for a in "${classes[@]}"; do assert_contains "$merged" "$a) REPLY=${a}mod" "$a is in the merged registry"; done
+}
+
 run_file_tests

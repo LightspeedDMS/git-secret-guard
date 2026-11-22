@@ -257,4 +257,78 @@ test_untrusted_saved_originals_with_links_of_ours_in_place_are_never_replaced() 
     assert_eq "$(readlink "$GU_ROOT/usr/bin/scalar")" "$GU_ROOT/usr/local/bin/scalar" "and the links of ours are still there"
 }
 
+test_a_partial_manifest_next_to_an_older_finished_one_makes_the_takeover_target_unfinished() {
+    gu_tk_start || return 1
+    mkdir -p -- "$GU_ROOT/usr/local/share/doc/git-2.57.0-local" || return 1
+    printf '%s\n' "$GU_ROOT/usr/local/bin/git" >"$GU_ROOT/usr/local/share/doc/git-2.57.0-local/MANIFEST.partial" || return 1
+    gsg install --take-over-system-git </dev/null
+    assert_rc 1 "a half-copied rebuild"
+    assert_contains "$ERR" "unfinished" "is refused as unfinished"
+    gu_untouched "refusal over a partial MANIFEST"
+}
+
+test_uninstall_stops_for_a_partial_or_broken_takeover() {
+    local case_name
+    for case_name in partial broken; do
+        gu_tk_start || return 1
+        gsg install --take-over-system-git </dev/null
+        assert_rc 0 "takeover [$case_name]"
+        case "$case_name" in
+            partial) printf '%s\n' "$GU_CONF_BEFORE" >"$GU_ROOT/etc/dnf/dnf.conf" || return 1 ;;
+            broken) printf 'garbage\n' >"$GU_TK_DIR/record" || return 1 ;;
+        esac
+        gsg uninstall </dev/null
+        assert_rc 1 "uninstall stops [$case_name]"
+        assert_file "$LC_STATE/state" "and nothing was uninstalled [$case_name]"
+        assert_contains "$ERR" "restore-system-git" "the way out is named [$case_name]"
+        gsg uninstall --keep-system-git </dev/null
+        assert_rc 0 "uninstall --keep-system-git goes on [$case_name]"
+        assert_contains "$OUT" "cp -a --remove-destination -- $GU_TK_DIR/orig/git " "and prints the undo by hand [$case_name]"
+    done
+}
+
+test_a_deleted_excludepkgs_line_is_reported_and_the_entry_comes_back() {
+    gu_tk_start || return 1
+    gsg install --take-over-system-git </dev/null
+    assert_rc 0 "takeover"
+    grep -v '^excludepkgs' "$GU_ROOT/etc/dnf/dnf.conf" >"$SANDBOX/dnf.conf.cut" && cp -- "$SANDBOX/dnf.conf.cut" "$GU_ROOT/etc/dnf/dnf.conf" || return 1
+    assert_contains "$(gu_conf)" "git-secret-guard: takeover" "the marker comment is still there"
+    gsg status
+    assert_not_contains "$OUT" "active (" "status no longer says active while dnf can overwrite git"
+    assert_contains "$OUT" "the dnf entry is gone" "and says the entry is gone"
+    gsg install --take-over-system-git </dev/null
+    assert_rc 0 "the rerun puts the entry back"
+    assert_eq "$(grep -c '^excludepkgs=' "$GU_ROOT/etc/dnf/dnf.conf")" "1" "one excludepkgs line"
+    assert_eq "$(grep -c 'git-secret-guard: takeover' "$GU_ROOT/etc/dnf/dnf.conf")" "1" "behind one marker"
+    assert_contains "$(grep '^excludepkgs=' "$GU_ROOT/etc/dnf/dnf.conf")" "git-core" "naming git-core"
+    gsg status
+    assert_contains "$OUT" "active (" "and status is active again"
+    gsg restore-system-git </dev/null
+    assert_rc 0 "restore"
+    gu_untouched "restore after the entry came back"
+}
+
+test_an_interrupted_copy_says_what_is_in_the_prefix_and_the_next_step_and_status_and_doctor_show_it() {
+    gu_rpm_setup || return 1
+    gu_interrupt_run 'cp -dR' 0 INT "$GSG_PROJECT/bin/git-secret-guard" install --upgrade-git || return 1
+    assert_contains "$OUT" "partly copied" "the message says files may be in the prefix"
+    assert_contains "$OUT" "MANIFEST.partial" "and names the partial manifest"
+    assert_contains "$OUT" "install --upgrade-git" "and the next step"
+    gsg status
+    assert_contains "$OUT" "MANIFEST.partial" "status shows the unfinished copy"
+    gsg install --upgrade-git </dev/null
+    assert_rc 0 "the rerun finishes the copy"
+    gsg status
+    assert_not_contains "$OUT" "MANIFEST.partial" "and status stops mentioning it"
+    mkdir -p -- "$SANDBOX/roots" "$GU_ROOT/usr/local/share/doc/git-2.99.0-local" || return 1
+    printf '%s\n' "$GU_ROOT/usr/local/bin/git" >"$GU_ROOT/usr/local/share/doc/git-2.99.0-local/MANIFEST.partial" || return 1
+    gsg status
+    assert_contains "$OUT" "MANIFEST.partial" "status shows a later unfinished copy"
+    gsg doctor --roots "$SANDBOX/roots"
+    assert_rc 0 "doctor does not exit 1 because of an unfinished copy"
+    assert_contains "$OUT" "MANIFEST.partial" "doctor shows it"
+    assert_contains "$OUT" "WARNING" "as a warning"
+    assert_not_contains "$OUT" "PROBLEM" "not as a problem"
+}
+
 run_file_tests

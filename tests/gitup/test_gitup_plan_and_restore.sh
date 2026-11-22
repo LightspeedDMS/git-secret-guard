@@ -9,29 +9,6 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/../support/gitup.sh"
 # ^ external the takeover, restore and privileged tool flows are Linux package-manager code
 if [ "$TEST_IS_WINDOWS" -eq 1 ]; then FILE_SKIP_REASON="Linux package manager flows"; fi
 
-test_an_old_git_refusal_leaves_no_global_config_behind() {
-    gu_rpm_setup || return 1
-    mkdir -p -- "$SANDBOX/fresh" || return 1
-    set_env GIT_CONFIG_GLOBAL="$SANDBOX/fresh/gitconfig"
-    gsg install </dev/null
-    assert_rc 1 "old git, no terminal, explicit config path"
-    assert_contains "$ERR" "nothing was changed" "the claim"
-    assert_no_file "$SANDBOX/fresh/gitconfig" "is true: no config file appeared"
-    gu_rpm_setup || return 1
-    lc_real_lookup
-    rm -f -- "$LC_HOME/.gitconfig" "$LC_HOME/.config/git/config"
-    gsg install </dev/null
-    assert_rc 1 "old git, no terminal, git's own lookup"
-    assert_contains "$ERR" "nothing was changed" "the claim again"
-    assert_no_file "$LC_HOME/.gitconfig" "no ~/.gitconfig appeared"
-    assert_no_file "$LC_HOME/.config/git/config" "and no XDG config"
-    gu_rpm_setup || return 1
-    printf '[user]\n\tname = Keep Me\n' >"$SANDBOX/gitconfig" || return 1
-    cp -- "$SANDBOX/gitconfig" "$SANDBOX/gitconfig.before" || return 1
-    gsg install </dev/null
-    assert_eq "$(<"$SANDBOX/gitconfig")" "$(<"$SANDBOX/gitconfig.before")" "an existing config is byte for byte the same"
-}
-
 # ^ invariant the tool paths of the 'as root:' lines of a plan, one per line, sorted and unique
 plan_tools() { grep -E '^  as root: ' <<<"$1" | sed -E 's/^  as root: ([^ ]+).*/\1/' | LC_ALL=C sort -u; }
 # ^ invariant the tool paths sudo was asked to run, from the stand-in's log
@@ -90,21 +67,6 @@ test_the_conditional_plan_line_that_removes_leftover_files_is_listed_and_runs() 
     assert_no_file "$GU_ROOT/usr/bin/.scalar.gsg-new" "the leftover link is gone"
 }
 
-# shellcheck disable=SC2016
-test_a_direct_root_run_uses_the_system_path_not_the_callers_path() {
-    gu_rpm_setup || return 1
-    mkdir -p -- "$SANDBOX/poison" || return 1
-    printf '#!/bin/sh\n: >"%s/poison-ran"\n' "$SANDBOX" >"$SANDBOX/poison/touch" && chmod 755 "$SANDBOX/poison/touch" || return 1
-    set_env PATH="$SANDBOX/poison:$SANDBOX/pathbin:$TEST_BASE_PATH"
-    gu_run 'gitup_paths; gitup_is_root() { return 0; }; gitup_elevate touch "$1"; printf "rc=%s" "$?"' "$SANDBOX/created"
-    assert_contains "$OUT" "rc=0" "root run succeeded"
-    assert_file "$SANDBOX/created" "through the system path touch"
-    assert_no_file "$SANDBOX/poison-ran" "and the caller's PATH was not used"
-    gu_run 'gitup_paths; gitup_is_root() { return 0; }; gitup_elevate no-such-tool-here "$1"; printf "rc=%s" "$?"' "$SANDBOX/created2"
-    assert_contains "$OUT" "rc=1" "a tool outside the system path is refused"
-    assert_contains "$ERR" "no-such-tool-here was not found in the system path" "and the message names it"
-}
-
 test_a_stopped_restore_reports_the_state_and_the_next_command_and_leaves_no_temp_dir() {
     local sig
     for sig in INT TERM; do
@@ -124,29 +86,6 @@ test_a_stopped_restore_reports_the_state_and_the_next_command_and_leaves_no_temp
         assert_rc 0 "repeating the restore finishes it [$sig]"
         gu_untouched "restore after a stopped restore [$sig]"
     done
-}
-
-test_an_interrupted_copy_says_what_is_in_the_prefix_and_the_next_step_and_status_and_doctor_show_it() {
-    gu_rpm_setup || return 1
-    gu_interrupt_run 'cp -dR' 0 INT "$GSG_PROJECT/bin/git-secret-guard" install --upgrade-git || return 1
-    assert_contains "$OUT" "partly copied" "the message says files may be in the prefix"
-    assert_contains "$OUT" "MANIFEST.partial" "and names the partial manifest"
-    assert_contains "$OUT" "install --upgrade-git" "and the next step"
-    gsg status
-    assert_contains "$OUT" "MANIFEST.partial" "status shows the unfinished copy"
-    gsg install --upgrade-git </dev/null
-    assert_rc 0 "the rerun finishes the copy"
-    gsg status
-    assert_not_contains "$OUT" "MANIFEST.partial" "and status stops mentioning it"
-    mkdir -p -- "$SANDBOX/roots" "$GU_ROOT/usr/local/share/doc/git-2.99.0-local" || return 1
-    printf '%s\n' "$GU_ROOT/usr/local/bin/git" >"$GU_ROOT/usr/local/share/doc/git-2.99.0-local/MANIFEST.partial" || return 1
-    gsg status
-    assert_contains "$OUT" "MANIFEST.partial" "status shows a later unfinished copy"
-    gsg doctor --roots "$SANDBOX/roots"
-    assert_rc 0 "doctor does not exit 1 because of an unfinished copy"
-    assert_contains "$OUT" "MANIFEST.partial" "doctor shows it"
-    assert_contains "$OUT" "WARNING" "as a warning"
-    assert_not_contains "$OUT" "PROBLEM" "not as a problem"
 }
 
 test_restore_removes_the_empty_state_parent_and_leaves_a_used_one() {
@@ -183,24 +122,6 @@ test_the_by_hand_undo_covers_original_none_and_removes_the_backup() {
     assert_rc 0 "after the by-hand steps"
     assert_contains "$OUT" "nothing to restore" "status has nothing left to warn about"
     gu_untouched "by-hand undo"
-}
-
-test_the_make_log_is_kept_when_the_build_fails_and_is_not_named_otherwise() {
-    local kept
-    gu_rpm_setup || return 1
-    gsg install --upgrade-git </dev/null
-    assert_rc 0 "a good build"
-    assert_not_contains "$OUT$ERR" "make.log" "names no log file that is about to be deleted"
-    assert_eq "$(ls -A "$SANDBOX/tmp")" "" "and leaves nothing in TMPDIR"
-    gu_rpm_setup || return 1
-    : >"$SANDBOX/make.fail" || return 1
-    gsg install --upgrade-git </dev/null
-    assert_rc 1 "a failing build"
-    kept="$(grep -oE "kept in [^ ]+" <<<"$OUT$ERR" | head -n 1)"
-    kept="${kept#kept in }"
-    assert_contains "$kept" "$SANDBOX/tmp/" "the message names a kept log in TMPDIR"
-    assert_file "$kept" "which exists"
-    assert_contains "$(<"$kept")" "injected failure" "and holds the make output"
 }
 
 test_a_hand_edited_comma_list_of_excluded_packages_is_read_and_removed() {

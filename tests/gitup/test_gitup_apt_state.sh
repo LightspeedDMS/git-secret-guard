@@ -51,8 +51,7 @@ test_a_pre_existing_ppa_with_a_wrong_key_is_moved_aside_and_named_not_deleted() 
     assert_not_contains "$OUT$ERR" "files this run added were removed" "nothing is claimed as removed"
     assert_contains "$OUT$ERR" "to put them back" "the output says how to restore"
     assert_contains "$OUT$ERR" "mv -n -- $aside/sources.list.d/git-core-ubuntu-ppa-jammy.list" "with the real command"
-    assert_contains "$(<"$GSG_PROJECT/docs/platforms.md")" "ppa-aside" "the docs name the directory"
-    assert_contains "$(<"$GSG_PROJECT/docs/platforms.md")" "uninstall keeps" "and say uninstall keeps it"
+    assert_contains "$aside" "$GU_ROOT/var/lib/git-secret-guard/ppa-aside-" "the files are kept in a ppa-aside directory of the state directory"
 }
 
 path_git() { "$SANDBOX/pathbin/git" --version; }
@@ -574,14 +573,6 @@ test_an_interrupt_leaves_a_neighbours_files_alone_too() {
     assert_not_contains "$(gu_log)" "vendor" "no root command names a vendor file"
     assert_contains "$OUT" "vendor.gpg" "the output names the key it left"
     assert_contains "$OUT" "route was interrupted by a signal" "the wording says what happened"
-}
-
-test_install_keeps_a_stricter_umask_of_the_caller() {
-    if [ "$TEST_IS_WINDOWS" -eq 1 ]; then skip_test "NTFS has no unix modes"; fi
-    lc_begin && lc_make_fixtures && lc_use_fixtures || return 1
-    run_cap bash -c 'umask 077; exec "$@"' _ env -i "${LC_ENV[@]}" "${EXTRA_ENV[@]}" "$GSG_PROJECT/bin/git-secret-guard" install
-    assert_rc 0 "install under umask 077"
-    assert_eq "$(stat -c %a "$LC_DATA/settings")" 600 "the caller's stricter umask is kept for the settings file"
 }
 
 test_a_large_new_file_in_trusted_gpg_d_is_not_fed_to_gpg_and_is_left_alone() {

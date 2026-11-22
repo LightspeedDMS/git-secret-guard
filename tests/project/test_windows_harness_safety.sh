@@ -6,7 +6,7 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/../support/lifecycle.sh"
 # shellcheck source=tests/support/gitup_windows.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/../support/gitup_windows.sh"
 
-# ^ coupled the safety nets of the upgrade tests, path guards, never-start guards, certificate hygiene; tests/gitup/test_gitup_windows.sh holds the behaviour
+# ^ coupled the safety nets of the Windows upgrade tests (path and never-start guards, certificate hygiene); a self-test of the harness gitup_windows.sh
 # ^ invariant the entries at the root of the file system when this file was loaded (on Git Bash the Git for Windows install); the last test compares them
 WU_ROOT_NAMES="$(wu_names /)"
 

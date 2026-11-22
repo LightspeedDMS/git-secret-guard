@@ -161,6 +161,9 @@ test_the_failed_repository_line_says_the_user_could_not_read_it_and_keeps_dnfs_c
     assert_not_contains "$(gu_log)" "sudo" "no privileged command ran before consent"
 }
 
+# ^ invariant true once the dnf stand-in logged the query of the repository named slow, the one to hang (it logs before it hangs)
+slow_query_started() { gu_log | grep -q -- '--enablerepo=slow .*repoquery'; }
+
 test_a_signal_during_the_query_leaves_no_dnf_text_in_tmpdir() {
     local pid
     gu_rpm_setup || return 1
@@ -168,7 +171,8 @@ test_a_signal_during_the_query_leaves_no_dnf_text_in_tmpdir() {
     printf 'baseos\nslow\n' >"$SANDBOX/dnf.repos"
     env -i "${LC_ENV[@]}" "${EXTRA_ENV[@]}" "$GSG_PROJECT/bin/git-secret-guard" install </dev/null >/dev/null 2>&1 &
     pid=$!
-    sleep 3
+    gu_poll "$GU_STALL_WAIT_TICKS" slow_query_started || { kill -KILL "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; fail "install never started the query of the repository that hangs"; return 1; }
+    sleep 1
     assert_eq "$(find "$SANDBOX/tmp" -maxdepth 1 -name 'gsg-dnf*' | wc -l)" 0 "no file with dnf's output exists during the query"
     kill -TERM "$pid" 2>/dev/null
     wait "$pid" 2>/dev/null
@@ -509,6 +513,24 @@ test_a_build_that_is_not_ours_is_never_offered_a_rebuild() {
     assert_rc 0 "an older git in /usr/local without a MANIFEST of ours"
     assert_not_contains "$OUT$ERR" "pins" "no offer"
     assert_eq "$("$GU_ROOT/usr/local/bin/git" --version)" "git version 2.55.0" "git is untouched"
+}
+
+test_the_make_log_is_kept_when_the_build_fails_and_is_not_named_otherwise() {
+    local kept
+    gu_rpm_setup || return 1
+    gsg install --upgrade-git </dev/null
+    assert_rc 0 "a good build"
+    assert_not_contains "$OUT$ERR" "make.log" "names no log file that is about to be deleted"
+    assert_eq "$(ls -A "$SANDBOX/tmp")" "" "and leaves nothing in TMPDIR"
+    gu_rpm_setup || return 1
+    : >"$SANDBOX/make.fail" || return 1
+    gsg install --upgrade-git </dev/null
+    assert_rc 1 "a failing build"
+    kept="$(grep -oE "kept in [^ ]+" <<<"$OUT$ERR" | head -n 1)"
+    kept="${kept#kept in }"
+    assert_contains "$kept" "$SANDBOX/tmp/" "the message names a kept log in TMPDIR"
+    assert_file "$kept" "which exists"
+    assert_contains "$(<"$kept")" "injected failure" "and holds the make output"
 }
 
 run_file_tests

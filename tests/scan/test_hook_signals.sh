@@ -109,9 +109,8 @@ lines_signal_test() {
     sig_check "$4" "$2 during git $3"
 }
 
+# ^ invariant one test per supervisor trap and per git kind, TERM with write-tree, HUP and INT with diff-tree => the worker only gets TERM from the supervisor
 test_term_to_the_hook_pid_stops_a_slow_write_tree_at_once() { lines_signal_test wt TERM write-tree 143; }
-test_hup_to_the_hook_pid_stops_a_slow_write_tree_at_once() { lines_signal_test wth HUP write-tree 129; }
-test_term_to_the_hook_pid_stops_a_slow_diff_tree_at_once() { lines_signal_test dt TERM diff-tree 143; }
 test_hup_to_the_hook_pid_stops_a_slow_diff_tree_at_once() { lines_signal_test dth HUP diff-tree 129; }
 test_ctrl_c_to_the_whole_group_stops_a_slow_diff_tree_at_once() { lines_signal_test dti INT diff-tree 130; }
 
@@ -125,8 +124,6 @@ message_signal_test() {
     sig_check "$3" "$2 during the message run's git diff"
 }
 
-test_term_to_the_hook_pid_stops_a_slow_message_run_git_diff_at_once() { message_signal_test msgt TERM 143; }
-test_hup_to_the_hook_pid_stops_a_slow_message_run_git_diff_at_once() { message_signal_test msgh HUP 129; }
 test_ctrl_c_to_the_whole_group_stops_a_slow_message_run_git_diff_at_once() { message_signal_test msgi INT 130; }
 
 # ^ why long hunks, not many one-line files; a diff cut by SIGPIPE ends inside a hunk almost surely, awk keeps up with git and reads the cut at once

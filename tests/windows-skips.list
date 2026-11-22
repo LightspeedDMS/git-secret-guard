@@ -80,12 +80,8 @@ test_lfs::test_a_symlink_object_blocks | ln -s makes no symlink native git or th
 test_lfs::test_an_unreadable_object_blocks | NTFS ignores chmod, so a file cannot be made unreadable
 test_lfs::test_a_fifo_object_blocks_without_hanging | Git for Windows cannot create a FIFO for native git
 test_hook_signals::test_term_to_the_hook_pid_stops_a_slow_write_tree_at_once | needs setsid and process groups to inspect; the Windows stop is test_windows::test_stopping_a_worker_on_windows_*
-test_hook_signals::test_hup_to_the_hook_pid_stops_a_slow_write_tree_at_once | needs setsid and process groups to inspect; the Windows stop is test_windows::test_stopping_a_worker_on_windows_*
-test_hook_signals::test_term_to_the_hook_pid_stops_a_slow_diff_tree_at_once | needs setsid and process groups to inspect; the Windows stop is test_windows::test_stopping_a_worker_on_windows_*
 test_hook_signals::test_hup_to_the_hook_pid_stops_a_slow_diff_tree_at_once | needs setsid and process groups to inspect; the Windows stop is test_windows::test_stopping_a_worker_on_windows_*
 test_hook_signals::test_ctrl_c_to_the_whole_group_stops_a_slow_diff_tree_at_once | no process groups on Windows; a signal cannot be sent to the group of one run
-test_hook_signals::test_term_to_the_hook_pid_stops_a_slow_message_run_git_diff_at_once | needs setsid and process groups to inspect; the Windows stop is test_windows::test_stopping_a_worker_on_windows_*
-test_hook_signals::test_hup_to_the_hook_pid_stops_a_slow_message_run_git_diff_at_once | needs setsid and process groups to inspect; the Windows stop is test_windows::test_stopping_a_worker_on_windows_*
 test_hook_signals::test_ctrl_c_to_the_whole_group_stops_a_slow_message_run_git_diff_at_once | no process groups on Windows; a signal cannot be sent to the group of one run
 test_hook_signals::test_a_hup_right_after_a_term_cannot_cut_the_stop_short | needs setsid (TEST_SETSID is empty on Windows) and pgrep, which Git for Windows lacks
 test_hook_signals::test_a_term_right_after_a_term_cannot_cut_the_stop_short | needs setsid (TEST_SETSID is empty on Windows) and pgrep, which Git for Windows lacks

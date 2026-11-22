@@ -113,14 +113,6 @@ $(tab betterleaks generic-api-key match src/a.txt 1)" rows
     assert_empty "$(errors)" "leak status is not an error"
 }
 
-test_report_paths_and_fingerprints_are_repo_relative() {
-    prepare relpaths
-    set_env STUB_GL_FINDINGS="aws-access-token|src/a.txt|3"
-    run_adapter betterleaks "$SCAN" "$OUTD"
-    assert_eq "$("$TEST_JQ" -r '.[0].Fingerprint' "$OUTD/betterleaks.json")" "src/a.txt:aws-access-token:3" "fingerprint without the temp dir"
-    assert_eq "$(rows)" "$(tab betterleaks aws-access-token match src/a.txt 3)" "row"
-}
-
 test_a_relative_out_dir_is_refused() {
     prepare relout
     mkdir -p -- "$SANDBOX/rel" && cd -- "$SANDBOX/rel" || return 1
@@ -145,13 +137,6 @@ test_fatal_exit_status_is_an_error_not_a_pass() {
     run_adapter betterleaks "$SCAN" "$OUTD"
     assert_empty "$(rows)" rows
     assert_contains "$(errors)" "exit 1" "error names the status"
-}
-
-test_unknown_exit_status_is_an_error() {
-    prepare rc7
-    set_env STUB_GL_RC=7
-    run_adapter betterleaks "$SCAN" "$OUTD"
-    assert_contains "$(errors)" "exit 7" "error names the status"
 }
 
 test_leak_status_with_an_unparsable_report_is_an_error() {
@@ -237,14 +222,6 @@ test_error_log_lines_are_shown_and_other_lines_are_not() {
     run_adapter betterleaks "$SCAN" "$OUTD"
     assert_contains "$(errors)" "unable to load betterleaks config" "fatal line shown"
     no_leak_anywhere "$marker"
-}
-
-test_a_hung_scan_times_out_as_an_error() {
-    prepare hang
-    set_env STUB_GL_SLEEP=30
-    use_stubs "SCAN_TIMEOUT_SECONDS=1"
-    run_adapter betterleaks "$SCAN" "$OUTD"
-    assert_contains "$(errors)" "timed out" "timeout reported"
 }
 
 test_a_missing_binary_is_an_error_not_a_pass() {

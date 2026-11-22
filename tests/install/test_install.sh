@@ -50,8 +50,9 @@ test_install_refuses_when_jq_setsid_or_timeout_is_not_reachable() {
 
 test_install_refuses_an_unsupported_platform() {
     local os arch
+    # ^ why one lc_begin for all rounds, not one per round; a refusal changes nothing and assert_untouched checks it after each round
+    lc_begin || return 1
     while read -r os arch; do
-        lc_begin || return 1
         # shellcheck disable=SC2016
         printf '#!/bin/sh\nif [ "$1" = "-s" ]; then echo %s; else echo %s; fi\n' "$os" "$arch" >"$SANDBOX/pathbin/uname" || return 1
         chmod 755 "$SANDBOX/pathbin/uname" || return 1
@@ -69,9 +70,9 @@ EOF
 
 test_install_refuses_a_relative_home_or_xdg_dir() {
     local setting
+    lc_begin || return 1
     for setting in HOME= HOME=relative/home XDG_DATA_HOME=relative/data XDG_STATE_HOME=relative/state; do
-        lc_begin || return 1
-        set_env "$setting"
+        EXTRA_ENV=("$setting")
         snapshot_config
         gsg install
         assert_rc 1 "$setting"
@@ -82,9 +83,9 @@ test_install_refuses_a_relative_home_or_xdg_dir() {
 
 test_install_refuses_a_global_hooks_path_without_the_flag_and_changes_nothing() {
     local value
+    lc_begin || return 1
     # shellcheck disable=SC2088
     for value in '~/.config/git/hooks' '/abs/hooks dir' ''; do
-        lc_begin || return 1
         mkdir -p -- "$LC_HOME/.config/git/hooks" && printf 'echo old\n' >"$LC_HOME/.config/git/hooks/pre-commit" || return 1
         git_literal_config --global core.hooksPath "$value" || return 1
         snapshot_config
@@ -284,16 +285,31 @@ test_curl_is_run_with_q_first_so_the_users_curlrc_is_ignored() {
     assert_eq "$("$LC_BIN/betterleaks$LC_EXE" --version)" "betterleaks version 1.9.0" "the real tarball arrived"
 }
 
+# ^ invariant fresh_install leaves a healthy install; the first call builds it and saves a copy, every later one restores a fresh copy of it after lc_begin
+# ^ why a copy on disk at the same paths, not shell state; each test runs in its own subshell and the install records absolute paths under the fixed SANDBOX
+# ^ invariant install touches home, xdg and the global config only (a listing of the sandbox before and after shows it); fixtures feed GSG_TOOLS_* only
+FI_TEMPLATE_ITEMS=(home xdg gitconfig fixtures)
+
 fresh_install() {
-    lc_begin && lc_make_fixtures && lc_use_fixtures || return 1
-    gsg install
+    local tpl="$SANDBOX/fi-template" item
+    lc_begin || { fail "fresh_install: lc_begin"; return 1; }
+    if [ ! -d "$tpl" ]; then
+        { lc_make_fixtures && lc_use_fixtures; } || { fail "fresh_install: fixtures"; return 1; }
+        gsg install
+        assert_rc 0 "fresh install" || return 1
+        { rm -rf -- "${tpl:?}.part" && mkdir -p -- "$tpl.part"; } || { fail "fresh_install: template dir"; return 1; }
+        for item in "${FI_TEMPLATE_ITEMS[@]}"; do cp -a -- "$SANDBOX/$item" "$tpl.part/" || { fail "save the install ($item)"; return 1; }; done
+        mv -- "$tpl.part" "$tpl" || { fail "save the install (mv)"; return 1; }
+        return
+    fi
+    for item in "${FI_TEMPLATE_ITEMS[@]}"; do { rm -rf -- "${SANDBOX:?}/$item" && cp -a -- "$tpl/$item" "$SANDBOX/"; } || { fail "restore the saved install ($item)"; return 1; }; done
+    lc_use_fixtures || { fail "fresh_install: fixtures"; return 1; }
 }
 
 gsg_installed() { run_cap env -i "${LC_ENV[@]}" "${EXTRA_ENV[@]}" "$LC_BIN/git-secret-guard" "$@"; }
 
 test_fresh_install_copies_the_package_into_the_share_dir_and_links_the_cli() {
-    fresh_install
-    assert_rc 0 "fresh install"
+    fresh_install || return 1
     local f
     for f in hooks/secret-scan lib/core/common.sh lib/scan/run-scanner.sh lib/scan/exempt.sh lib/scan/extract.sh lib/scan/extract.awk lib/scan/report.sh lib/install/tools.sh \
         lib/install/install.sh lib/core/state.sh lib/cli/usage.md lib/scan/scanners/trufflehog.sh lib/scan/scanners/betterleaks.sh bin/git-secret-guard tools.lock VERSION; do
@@ -309,8 +325,7 @@ test_fresh_install_copies_the_package_into_the_share_dir_and_links_the_cli() {
 }
 
 test_install_writes_the_settings_the_hook_reads_with_absolute_tool_paths() {
-    fresh_install
-    assert_rc 0 "fresh install"
+    fresh_install || return 1
     assert_file "$LC_DATA/settings" "settings next to hooks/ and lib/"
     # shellcheck disable=SC2016
     run_cap env -i "${GSG_ENV[@]}" bash -c '
@@ -331,8 +346,7 @@ test_install_writes_the_settings_the_hook_reads_with_absolute_tool_paths() {
 }
 
 test_install_records_the_pinned_scanner_versions_in_the_settings() {
-    fresh_install
-    assert_rc 0 "fresh install"
+    fresh_install || return 1
     assert_eq "$(grep -c '^TRUFFLEHOG_VERSION=' "$LC_DATA/settings")" 1 "one trufflehog version line"
     # shellcheck disable=SC2016
     run_cap env -i "${GSG_ENV[@]}" TRUFFLEHOG_VERSION=0.0.1 bash -c '
@@ -349,8 +363,7 @@ test_install_records_the_pinned_scanner_versions_in_the_settings() {
 cfg_count() { gitx config --global --get-all "$1" 2>/dev/null | wc -l; }
 
 test_fresh_install_sets_exactly_the_two_events_and_one_absolute_command() {
-    fresh_install
-    assert_rc 0 "fresh install"
+    fresh_install || return 1
     assert_eq "$(gitx config --global --get-all hook.git-secret-guard.event | tr '\n' ' ')" "pre-commit commit-msg " "the two events, lines first"
     assert_eq "$(cfg_count hook.git-secret-guard.event)" 2 "one value per event"
     assert_eq "$(gitx config --global --get-all hook.git-secret-guard.command)" "$(lc_hook_command "$LC_DATA")" "command starts the installed hook, absolute, with the recorded bash"
@@ -390,8 +403,7 @@ test_install_repairs_an_old_install_that_has_only_the_pre_commit_event() {
 }
 
 test_fresh_install_records_the_state() {
-    fresh_install
-    assert_rc 0 "fresh install"
+    fresh_install || return 1
     assert_file "$LC_STATE/state" "state file"
     assert_eq "$(state_value version)" "$(<"$GSG_PROJECT/VERSION")" "installed version"
     assert_eq "$(state_value previous_hooks_path_set)" no "no previous core.hooksPath"
@@ -571,23 +583,43 @@ test_the_resolver_refuses_root_before_anything_could_back_it_up() {
     done
 }
 
-tree_digest() { (cd -- "$1" && find . -type f -o -type l | LC_ALL=C sort | xargs -d '\n' sha256sum 2>&1 | sha256sum); }
+# ^ why find -exec sha256sum, not the xargs delimiter option; BSD xargs (macOS) lacks it and its usage text was what got hashed (#48)
+# ^ invariant prints one digest of every file and symlink target (sha256sum follows links) under $1; rc 1 and no output when find or sha256sum fails
+# ^ coupled tests/install/test_hookspath.sh keeps an identical copy and the same test of it
+tree_digest() {
+    local sums
+    sums="$(cd -- "$1" && find . \( -type f -o -type l \) -exec sha256sum {} +)" || return 1
+    printf '%s\n' "$sums" | LC_ALL=C sort | sha256sum
+}
+
+test_the_tree_digest_changes_with_a_file_and_fails_loudly_on_an_unreadable_one() {
+    local d1 d2 d3
+    mkdir -p -- "$SANDBOX/dg/sub" && printf 'one\n' >"$SANDBOX/dg/sub/f" || return 1
+    d1="$(tree_digest "$SANDBOX/dg")" || return 1
+    assert_eq "$(tree_digest "$SANDBOX/dg")" "$d1" "the same tree digests the same"
+    printf 'two\n' >"$SANDBOX/dg/sub/f" || return 1
+    d2="$(tree_digest "$SANDBOX/dg")" || return 1
+    [ "$d2" != "$d1" ] || fail "a changed file did not change the digest"
+    printf 'two\n' >"$SANDBOX/dg/sub/g" || return 1
+    d3="$(tree_digest "$SANDBOX/dg")" || return 1
+    [ "$d3" != "$d2" ] || fail "an added file did not change the digest"
+    ln -s "$SANDBOX/dg/nowhere" "$SANDBOX/dg/dangling" || return 1
+    if tree_digest "$SANDBOX/dg" >/dev/null 2>&1; then fail "a link sha256sum cannot read still produced a digest"; fi
+}
 
 test_a_second_install_changes_nothing_and_downloads_nothing() {
-    fresh_install
-    assert_rc 0 "first install"
     local cfg state share tools
+    fresh_install || return 1
     cfg="$(cat -- "$SANDBOX/gitconfig")"
     state="$(cat -- "$LC_STATE/state")"
-    share="$(tree_digest "$LC_DATA")"
-    tools="$(tree_digest "$LC_BIN")"
+    share="$(tree_digest "$LC_DATA")" && tools="$(tree_digest "$LC_BIN")" || return 1
     recording_curl || return 1
     gsg install
     assert_rc 0 "second install"
     assert_eq "$(cat -- "$SANDBOX/gitconfig")" "$cfg" "global config is identical"
     assert_eq "$(cat -- "$LC_STATE/state")" "$state" "state is identical, both tools are still ours"
-    assert_eq "$(tree_digest "$LC_DATA")" "$share" "share dir is identical"
-    assert_eq "$(tree_digest "$LC_BIN")" "$tools" "tools and link are identical"
+    assert_eq "$(tree_digest "$LC_DATA" || echo failed)" "$share" "share dir is identical"
+    assert_eq "$(tree_digest "$LC_BIN" || echo failed)" "$tools" "tools and link are identical"
     assert_no_file "$SANDBOX/curl.log" "nothing was downloaded"
     assert_empty "$(find "$LC_DATA/.." -maxdepth 1 -name 'git-secret-guard.*')" "no staging leftovers beside the share dir"
 }
@@ -612,8 +644,7 @@ make_newer_checkout() {
 }
 
 test_an_install_from_a_newer_checkout_replaces_the_files_and_keeps_the_record() {
-    fresh_install
-    assert_rc 0 "first install"
+    fresh_install || return 1
     printf 'stale\n' >"$LC_DATA/lib/stale-from-0.1.0.sh" || return 1
     printf '# local edit\n' >>"$LC_DATA/lib/core/common.sh" || return 1
     make_newer_checkout || return 1
@@ -644,9 +675,8 @@ test_a_failed_copy_leaves_no_staging_dir_beside_the_share_dir() {
 
 test_a_failed_swap_of_the_share_dir_rolls_back_to_the_old_tree() {
     local before
-    fresh_install
-    assert_rc 0 "first install"
-    before="$(tree_digest "$LC_DATA")"
+    fresh_install || return 1
+    before="$(tree_digest "$LC_DATA")" || return 1
     # shellcheck disable=SC2016
     printf '#!/bin/sh\nfor a; do last=$a; case "$a" in *.new.*) isnew=1 ;; esac; done\nif [ "$last" = "%s" ] && [ -n "$isnew" ]; then echo "mv: injected failure" >&2; exit 1; fi\nexec %s "$@"\n' \
         "$LC_DATA" "$(type -P mv)" >"$SANDBOX/pathbin/mv" || return 1
@@ -654,13 +684,12 @@ test_a_failed_swap_of_the_share_dir_rolls_back_to_the_old_tree() {
     gsg install
     assert_rc 1 "the new tree cannot be renamed onto the share dir"
     assert_contains "$ERR" "restored the previous share dir" "says the old tree is back"
-    assert_eq "$(tree_digest "$LC_DATA")" "$before" "the share dir is back, byte-identical"
+    assert_eq "$(tree_digest "$LC_DATA" || echo failed)" "$before" "the share dir is back, byte-identical"
     assert_eq "$(find "$SANDBOX/xdg/data" -mindepth 1 -maxdepth 1 | wc -l)" 1 "nothing is left beside it: no .new. and no .old. directory"
 }
 
 test_a_leftover_old_tree_that_cannot_be_removed_is_reported() {
-    fresh_install
-    assert_rc 0 "first install"
+    fresh_install || return 1
     chmod 555 "$LC_DATA/lib/scan/scanners" || return 1
     gsg install
     chmod -R u+rwX "$LC_DATA/.." 2>/dev/null
@@ -674,13 +703,12 @@ test_an_install_run_from_the_installed_copy_upgrades_in_place() {
     if grep -q 'Microsoft' /proc/sys/kernel/osrelease 2>/dev/null; then
         skip_test "real WSL 1 (4.4.0-20348-Microsoft): mv of the directory of a running script fails with Permission denied; the next test runs the WSL 1 path through the fixture seams"
     fi
-    fresh_install
-    assert_rc 0 "first install"
+    fresh_install || return 1
     local before
-    before="$(tree_digest "$LC_DATA")"
+    before="$(tree_digest "$LC_DATA")" || return 1
     gsg_installed install
     assert_rc 0 "install run through the symlink, replacing the tree it runs from"
-    assert_eq "$(tree_digest "$LC_DATA")" "$before" "the source is the installed copy itself, so the tree is identical"
+    assert_eq "$(tree_digest "$LC_DATA" || echo failed)" "$before" "the source is the installed copy itself, so the tree is identical"
     gsg_installed version
     assert_rc 0 "the CLI still runs afterwards"
     assert_empty "$(find "$LC_DATA/.." -maxdepth 1 -name 'git-secret-guard.*')" "no staging or old-tree leftovers"
@@ -690,8 +718,7 @@ test_an_install_run_from_the_installed_copy_upgrades_in_place() {
 # ^ invariant the WSL 1 kernel text comes through the fixture seams => the pinned path runs on any host, real WSL 1 included
 test_an_install_run_from_the_installed_copy_on_wsl1_rewrites_only_the_settings_and_never_renames_the_tree() {
     printf '%s\n' "4.4.0-20348-Microsoft" >"$SANDBOX/wsl1-kernel" || return 1
-    fresh_install
-    assert_rc 0 "first install"
+    fresh_install || return 1
     set_env GSG_WSL_OSRELEASE="$SANDBOX/wsl1-kernel"
     printf 'kept\n' >"$LC_DATA/sentinel" || return 1
     printf 'stale\n' >"$LC_DATA/settings" || return 1
@@ -769,8 +796,7 @@ test_a_second_takeover_with_a_different_value_is_refused_and_changes_nothing() {
 }
 
 test_a_hooks_path_taken_over_after_a_plain_install_is_recorded() {
-    fresh_install
-    assert_rc 0 "plain install, nothing to record"
+    fresh_install || return 1
     assert_eq "$(state_value previous_hooks_path_set)" no "recorded as unset"
     seed_old_hooks "$LC_HOME/late hooks" || return 1
     git_literal_config --global core.hooksPath "$LC_HOME/late hooks" || return 1

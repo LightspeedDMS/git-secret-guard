@@ -171,6 +171,7 @@ test_status_plain_output_has_sections_levels_and_a_summary() {
     assert_contains "$OUT" "  ok       hook command: $LC_DATA/hooks/secret-scan" "hook command is ok"
     assert_contains "$OUT" "  ok       hook libraries: " "hook libraries are ok"
     assert_contains "$OUT" "  ok       global config: matches" "global config is ok"
+    assert_contains "$OUT" "  ok       bash: $(lc_recorded_bash)"$'\n' "the bash the install recorded (with .exe on Windows)"
     assert_contains "$OUT" "  info     share dir: $LC_DATA" "share dir is info"
     assert_contains "$OUT" "  ok       trufflehog: $LC_BIN/trufflehog$LC_EXE 3.99.2 (pinned 3.99.2)" "a tool is ok"
     assert_not_contains "$OUT" "(pinned 3.99.2) ok" "no trailing ok, the level says it"

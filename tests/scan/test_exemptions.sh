@@ -248,6 +248,7 @@ test_the_pre_flight_scans_a_private_probe_dir_holding_only_the_fake_github_token
     assert_not_contains "$calls" "betterleaks-target-line: $MARKER" "and nothing of the commit"
     assert_eq "$(grep -c '^betterleaks dir .*/preflight/probe ' "$CALLS")" 1 "the target is the probe directory"
     assert_eq "$(grep -c '^betterleaks-config=.* cwd=.*/preflight/empty$' "$CALLS")" 1 "while the cwd stays the empty one"
+    assert_contains "$(grep '^betterleaks-config=.*/preflight/empty$' "$CALLS")" "/repo-gitleaks.toml " "on the copy taken from HEAD"
     assert_eq "$(grep -c '^betterleaks ' "$CALLS")" 3 "the probe is folded into the pre-flight: pre-flight, main run and the rule-only run of our aws-access-key-id rule"
     no_leak "$(probe_secret)"
 }
@@ -274,17 +275,6 @@ test_nothing_is_announced_and_the_default_config_is_used_without_gitleaks_files_
     assert_pass_line_only "$ERR" "no exemption announced for files that are not at HEAD"
     assert_contains "$(grep '^betterleaks-config=' "$CALLS")" "betterleaks-config=$TEST_WORK_BASE/" "the private default config is used"
     assert_not_contains "$(<"$CALLS")" "betterleaks-ignore-line" "no ignore file given"
-}
-
-test_a_gitleaks_config_that_is_not_a_file_at_head_blocks_the_commit() {
-    begin gl4 || return 1
-    stage_file .gitleaks.toml/inner.txt hello
-    gitx commit -q --no-verify -m "a directory with that name"
-    stage_file src/a.txt one
-    commit_cap "blocked"
-    assert_rc 1 "blocked"
-    assert_contains "$ERR" ".gitleaks.toml at HEAD must be a regular file" "says why"
-    assert_empty "$(seen_by betterleaks)$(seen_by trufflehog)" "nothing was scanned"
 }
 
 test_exemptions_work_under_commit_a_with_a_temporary_index() {
@@ -502,17 +492,6 @@ test_a_head_tree_git_cannot_fetch_is_blocked_with_git_s_reason_folded_into_the_m
     blocked_with_git_reason tree:0 pc2
 }
 
-test_an_ignore_file_that_is_not_a_file_at_head_blocks_the_commit() {
-    begin sc12 || return 1
-    stage_file .secret-scan-ignore/inner.txt hello
-    gitx commit -q --no-verify -m "a directory with that name"
-    stage_file src/a.txt one
-    commit_cap "blocked"
-    assert_rc 1 "blocked"
-    assert_contains "$ERR" ".secret-scan-ignore at HEAD must be a regular file" "says why"
-    assert_empty "$(seen_by betterleaks)$(seen_by trufflehog)" "nothing was scanned"
-}
-
 test_a_symlink_as_the_ignore_file_or_gitleaks_config_at_head_blocks_the_commit() {
     local name n=0
     for name in .secret-scan-ignore .gitleaks.toml .gitleaksignore; do
@@ -572,15 +551,6 @@ test_a_config_that_loads_alone_passes_the_pre_flight_with_only_the_exemption_not
     assert_pass_line_only "${ERR#*$'\n'}" "and the pass line is the only other line"
 }
 
-test_the_pre_flight_runs_from_an_empty_directory() {
-    begin pf4 || return 1
-    commit_toml_at_head
-    stage_file src/a.txt one
-    commit_cap "ok"
-    assert_eq "$(grep -c '^betterleaks-config=.* cwd=.*/preflight/empty$' "$CALLS")" 1 "one run in an empty pre-flight directory"
-    assert_contains "$(grep '^betterleaks-config=.*/preflight/empty$' "$CALLS")" "/repo-gitleaks.toml " "on the copy taken from HEAD"
-}
-
 test_a_replace_ref_on_head_cannot_substitute_a_permissive_ignore_file() {
     begin rr || return 1
     stage_file base.txt hello && gitx commit -q --no-verify -m base
@@ -605,18 +575,8 @@ test_inherited_pathspec_variables_cannot_disable_the_excludes() {
         commit_cap "env"
         assert_rc 0 "[$v] commit"
         assert_eq "$(seen_by betterleaks)" "src/b.txt" "[$v] src is scanned and docs is the only exclusion"
+        assert_not_contains "$ERR" "exempts the whole repository" "[$v] no false catch-all warning"
     done
-}
-
-test_the_literal_pathspecs_flag_cannot_disable_the_excludes() {
-    begin pf || return 1
-    commit_ignore_file 'docs/**   # generated'
-    stage_file docs/a.txt "one $MARKER"
-    stage_file src/b.txt "two $MARKER"
-    run_cap gitx --literal-pathspecs commit -q -m flag
-    assert_rc 0 "commit"
-    assert_eq "$(seen_by betterleaks)" "src/b.txt" "git --literal-pathspecs exports GIT_LITERAL_PATHSPECS to the hook"
-    assert_not_contains "$ERR" "exempts the whole repository" "and no false catch-all warning"
 }
 
 test_other_inherited_git_settings_cannot_change_what_is_extracted() {

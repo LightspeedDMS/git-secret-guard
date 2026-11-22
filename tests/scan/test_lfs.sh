@@ -395,20 +395,25 @@ test_real_every_pointer_form_git_lfs_accepts_is_blocked_end_to_end() {
         "git-media|version http://git-media.io/v/2\noid sha256:@O@\nsize @S@\n"
         "blank lines and trailing spaces|\n$ver\n\noid sha256:@O@\nsize @S@  \n\n"
     )
+    # ^ why one commit, not seven; each form is its own file and needs its own finding row at line 1, the object's line
     for form in "${forms[@]}"; do
         n=$((n + 1))
-        name="${form%%|*}"
         text="${form#*|}"
         text="${text//@O@/$LFS_OID}"
         text="${text//@S@/$size}"
         printf '%b' "$text" >"form$n.dat" || return 1
         gitx add -f -- "form$n.dat" || return 1
-        commit_cap "form $name"
-        assert_rc 1 "$name: blocked"
-        assert_contains "$ERR" "form$n.dat:1" "$name: the finding is in the object"
-        no_leak "$key"
-        gitx reset -q || return 1
     done
+    commit_cap "every form"
+    assert_rc 1 "blocked"
+    n=0
+    local end='([^0-9]|$)'
+    for form in "${forms[@]}"; do
+        n=$((n + 1))
+        name="${form%%|*}"
+        [[ $ERR =~ (betterleaks|trufflehog)\ +[^\ ]+\ \(match\)\ +"form$n.dat:1"$end ]] || fail "$name: no finding row at form$n.dat:1, the form was not followed to its object; rows: [$(printf '%s\n' "$ERR" | grep -F -- ' form' | head -n 8 || true)]"
+    done
+    no_leak "$key"
 }
 
 # ^ invariant prints the storage path of the object lfs_stage stored last (LFS_OID), in the default storage of the repository

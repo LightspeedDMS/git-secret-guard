@@ -36,6 +36,7 @@ test_a_doctor_that_cannot_run_exits_2_and_says_why() {
     gsg doctor
     assert_rc 2 "the default root, the home directory, does not exist"
     assert_contains "$ERR" "default root $SANDBOX/no-home is not a directory; pass --roots DIR" "says how to fix it"
+    assert_empty "$OUT" "and prints no report"
     set_env HOME="$LC_HOME"
     lc_fake_git 2.40.0 || return 1
     doctor

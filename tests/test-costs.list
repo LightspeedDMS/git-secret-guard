@@ -4,19 +4,19 @@
 # Windows = the per-file time on Windows CI, a lower bound, measured only for the files over about 1.8 minutes there; - = not measured or under that.
 # Linux = the per-file seconds measured on Linux, used on macOS too and as the tie-break on Windows. A file not listed starts first; a malformed line counts as not listed.
 # To update a value, read the per-file time from a CI log or time `tests/run.sh FILE`; to add a file, add a line with its measured seconds.
-test_adapter_betterleaks - 5
+test_adapter_betterleaks - 4
 test_adapter_trufflehog - 2
-test_autoupdate 630 43
+test_autoupdate 630 36
 test_autoupdate_git_env - 4
-test_autoupdate_probes - 2
+test_autoupdate_probes - 0
 test_autoupdate_report - 33
 test_autoupdate_schtasks - 0
 test_autoupdate_units - 36
 test_autoupdate_windows - 0
 test_awk_portability - 3
 test_betterleaks_lookup - 0
-test_bypass_catalog - 121
-test_bypass_formats_real 162 172
+test_bypass_catalog - 102
+test_bypass_formats_real 162 61
 test_ci_plan - 0
 test_cli - 3
 test_cli_interrupt - 0
@@ -34,13 +34,13 @@ test_doctor_betterleaks - 12
 test_doctor_bundled_git - 0
 test_doctor_exempt - 11
 test_doctor_findings 1020 162
-test_doctor_home - 22
+test_doctor_home - 17
 test_doctor_info - 3
 test_doctor_readonly - 17
 test_doctor_record_refusals - 2
 test_doctor_repos - 34
 test_exempt - 1
-test_exemptions - 18
+test_exemptions - 17
 test_exemptions_real - 126
 test_extract - 2
 test_frameworks - 1
@@ -61,10 +61,10 @@ test_gitup_windows - 3
 test_gitup_windows_cmd - 0
 test_guidance - 1
 test_hook - 32
-test_hook_signals - 39
+test_hook_signals - 33
 test_hookspath 120 10
-test_inherited_config 108 19
-test_install 390 32
+test_inherited_config 108 3
+test_install 390 35
 test_install_adopt - 6
 test_install_network - 22
 test_install_other_gits - 0
@@ -72,17 +72,17 @@ test_install_written_files - 2
 test_jq_wrapper - 4
 test_launchd - 17
 test_launchd_update - 13
-test_lfs - 46
+test_lfs - 39
 test_lifecycle_e2e - 18
 test_mac_runner - 0
 test_macos - 21
 test_macos_ci - 0
 test_macos_intel - 5
 test_message - 14
-test_message_real - 88
+test_message_real - 79
 test_message_third_block - 0
 test_path_tool_gaps - 1
-test_pii_real - 40
+test_pii_real - 27
 test_platform - 7
 test_platform_fill - 0
 test_platform_once - 2
@@ -91,9 +91,9 @@ test_platform_rpm - 1
 test_platform_vm - 0
 test_prerequisites - 10
 test_quality 150 318
-test_real 168 107
+test_real 168 95
 test_recorded_bash - 5
-test_reminder 162 30
+test_reminder 162 28
 test_report_collect - 0
 test_runner - 3
 test_share_permissions - 0
@@ -102,7 +102,7 @@ test_smartgit_linux - 265
 test_smartgit_record_refusals - 4
 test_smartgit_windows 642 2
 test_state - 1
-test_status 216 72
+test_status 216 45
 test_status_bash - 3
 test_timer - 27
 test_timer_refusals - 0
@@ -114,7 +114,7 @@ test_ui_lifecycle - 4
 test_ui_restore - 11
 test_ui_status - 0
 test_ui_update - 6
-test_uninstall - 21
+test_uninstall - 20
 test_update_log - 48
 test_upgrade - 12
 test_windows - 9

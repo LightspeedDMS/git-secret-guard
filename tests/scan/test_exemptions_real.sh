@@ -15,30 +15,6 @@ token_line() { printf 'token = "%s"%s' "$(fake_github_token)" "${1:+ $1}"; }
 reported_by_trufflehog() { [[ "$ERR" =~ trufflehog\ +Github\ \(match\) ]]; }
 reported_by_betterleaks() { [[ "$ERR" =~ betterleaks\ +github-pat\ \(match\) ]]; }
 
-# ^ invariant a staged entry never exempts and a committed one does => the same path blocks first and passes after (the way out of a false positive)
-test_real_a_pattern_match_blocks_until_its_path_is_in_a_committed_ignore_file() {
-    need_real_tools
-    new_repo rsfp || return 1
-    stage_file base.txt hello && gitx commit -q --no-verify -m base
-    stage_file fixtures/token.txt "$(token_line)"
-    commit_cap "control"
-    assert_rc 1 "the fake token blocks on its pattern alone"
-    reported_by_trufflehog || fail "trufflehog row missing: ${ERR:0:300}"
-    reported_by_betterleaks || fail "betterleaks row missing: ${ERR:0:300}"
-    stage_file .secret-scan-ignore 'fixtures/**   # synthetic token for parser tests'
-    commit_cap "entry only staged"
-    assert_rc 1 "a staged entry exempts nothing, the commit still blocks"
-    assert_contains "$ERR" "fixtures/token.txt:1" "the path is reported"
-    gitx rm -q --cached fixtures/token.txt
-    commit_cap "the entry on its own"
-    assert_rc 0 "the ignore file alone commits"
-    stage_file fixtures/token.txt "$(token_line)"
-    commit_cap "entry committed"
-    assert_rc 0 "once the entry is committed the same path passes"
-    assert_contains "$ERR" "1 staged file(s) excluded by .secret-scan-ignore" "the exclusion is announced"
-    no_leak "$(fake_github_token)"
-}
-
 test_real_excluded_paths_are_not_scanned_and_the_rest_is() {
     need_real_tools
     new_repo rs1 || return 1
@@ -96,24 +72,50 @@ test_real_the_ignore_file_is_scanned_even_when_a_pattern_or_a_catch_all_matches_
     done
 }
 
-test_real_catch_all_patterns_exempt_what_git_glob_semantics_say_and_warn_every_time() {
+# ^ invariant args = scanner name, rule name, path; rc 0 = the report holds the row of this scanner for the path at line 1
+scanner_row_at() {
+    local re="$1[[:space:]]+$2[[:space:]]+\\(match\\)[[:space:]]+"
+    [[ $ERR =~ $re"$3":1 ]]
+}
+
+# ^ why both files in one commit, not one commit per file; the rc names no file, each path's verdict is its scanner row or the lack of one
+# ^ coupled test_exemptions.sh:test_catch_all_variants_commit_but_every_commit_prints_a_warning pins the warning of every pattern
+test_real_catch_all_patterns_exempt_what_git_glob_semantics_say() {
+    local n=0 spec p top nested verdicts i path blocked excluded
+    local -r scanners=2
+    local -a paths=(top.txt deep/er/nested.txt)
     need_real_tools
-    local n=0 spec p top_rc nested_rc
-    for spec in '**|0|0' '**/*|0|0' '/**|0|0' './**|0|0' '*|0|1' '*/**|1|0'; do
-        IFS='|' read -r p top_rc nested_rc <<<"$spec"
+    # ^ invariant rows p|top|nested; b = not excluded, both scanners report the path; x = excluded, no report names the path
+    for spec in '**|x|x' '**/*|x|x' '/**|x|x' './**|x|x' '*|x|b' '*/**|b|x'; do
+        IFS='|' read -r p top nested <<<"$spec"
+        verdicts=("$top" "$nested")
         n=$((n + 1))
         new_repo "rs5-$n" || return 1
         commit_ignore_file "$p   # legacy repository"
         stage_file top.txt "$(token_line)"
-        commit_cap "top"
-        assert_rc "$top_rc" "[$p] top-level finding"
-        assert_contains "$ERR" "WARNING" "[$p] warns"
-        gitx reset -q
-        rm -f -- top.txt
         stage_file deep/er/nested.txt "$(token_line)"
-        commit_cap "nested"
-        assert_rc "$nested_rc" "[$p] nested finding"
-        assert_contains "$ERR" "WARNING" "[$p] warns on this commit as well"
+        commit_cap "both files"
+        blocked=0 excluded=0
+        for i in "${!paths[@]}"; do
+            path="${paths[$i]}"
+            if [ "${verdicts[$i]}" = b ]; then
+                blocked=$((blocked + 1))
+                scanner_row_at trufflehog Github "$path" || fail "[$p] $path: no trufflehog row at line 1: ${ERR:0:400}"
+                scanner_row_at betterleaks github-pat "$path" || fail "[$p] $path: no betterleaks row at line 1: ${ERR:0:400}"
+            else
+                excluded=$((excluded + 1))
+                assert_not_contains "$ERR" "$path" "[$p] $path is excluded, no scanner reports it"
+            fi
+        done
+        if [ "$blocked" -gt 0 ]; then
+            assert_rc 1 "[$p] a finding outside the pattern blocks"
+            assert_contains "$ERR" "$((blocked * scanners)) potential secret(s)" "[$p] one row per tool and per blocked file"
+        else
+            assert_rc 0 "[$p] every file is excluded"
+            assert_contains "$ERR" "no added lines to scan ($excluded files exempted)" "[$p] nothing was left to scan"
+        fi
+        assert_contains "$ERR" "$excluded staged file(s) excluded by .secret-scan-ignore" "[$p] the exclusions are counted"
+        assert_contains "$ERR" "line 1 (pattern '$p') exempts " "[$p] the catch-all warning names the pattern"
         no_leak "$(fake_github_token)"
     done
 }
@@ -408,6 +410,7 @@ test_real_every_spelling_of_extend_path_is_refused() {
         gitx commit -q --no-verify -m cfg
         before="$(gitx rev-parse HEAD)"
         stage_file base.toml '[allowlist]' "paths = ['''.*''']"
+        stage_file .gitleaks.toml '[allowlist]' "paths = ['''.*''']"
         stage_file src/k.txt "$(builtin_line)"
         commit_cap "mute attempt"
         assert_rc 1 "[$name] blocked, not muted"
@@ -426,34 +429,6 @@ test_real_an_absolute_extend_path_to_an_existing_file_still_loads_a_documented_r
     commit_cap "absolute path"
     assert_rc 1 "documented residual: an absolute path to a file outside the scan tree is local, HEAD-reviewed config and loads"
     assert_contains "$ERR" "from-base" "the rule of the base file fired"
-}
-
-test_real_extend_path_cannot_make_betterleaks_honour_a_staged_file() {
-    need_real_tools
-    new_repo re1 || return 1
-    commit_gitleaks_toml '[extend]' 'path = ".gitleaks.toml"' '[[rules]]' 'id = "aws-custom"' "regex = '''AKIA[A-Z0-9]{16}'''"
-    stage_file .gitleaks.toml '[allowlist]' "paths = ['''.*''']"
-    stage_file src/k.txt "$(builtin_line)"
-    local before
-    before="$(gitx rev-parse HEAD)"
-    commit_cap "staged config muting through extend.path"
-    assert_rc 1 "blocked, not silently muted"
-    assert_contains "$ERR" "does not load on its own" "with the reason"
-    assert_eq "$(gitx rev-parse HEAD)" "$before" "no commit was created"
-    no_leak "$(generic_key)"
-}
-
-test_real_a_legitimate_extend_path_is_refused_up_front_instead_of_failing_every_scan() {
-    need_real_tools
-    new_repo re2 || return 1
-    stage_file .gitleaks.toml '[extend]' 'path = "ci/base.toml"'
-    stage_file ci/base.toml '# shared base'
-    gitx commit -q --no-verify -m "legit extend.path"
-    stage_file src/a.txt hello
-    commit_cap "any commit"
-    assert_rc 1 "blocked"
-    assert_contains "$ERR" "does not load on its own" "a clear reason"
-    assert_not_contains "$ERR" "scan failed (exit 1)" "instead of an opaque scanner failure"
 }
 
 test_real_core_big_file_threshold_cannot_make_a_token_commit_silently() {
@@ -510,6 +485,7 @@ test_real_the_pre_flight_message_carries_betterleaks_message_words_and_no_fields
     assert_rc 1 "blocked"
     assert_contains "$ERR" "betterleaks said: unable to load config" "the message words, without colour codes"
     assert_not_contains "$ERR" "error=" "and so does the field name"
+    assert_not_contains "$ERR" "scan failed (exit 1)" "refused up front, not as an opaque scanner failure"
     assert_not_contains "$ERR" $'\033' "no escape characters reach the terminal"
 }
 

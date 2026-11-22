@@ -5,12 +5,6 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/../support/lib.sh"
 # shellcheck source=tests/support/lifecycle.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/../support/lifecycle.sh"
 
-fresh_install() {
-    lc_begin && lc_make_fixtures && lc_use_fixtures || return 1
-    gsg install
-    assert_rc 0 "install"
-}
-
 lc_which() {
     # shellcheck disable=SC2016
     env -i HOME="$SANDBOX/home" PATH="$SANDBOX/pathbin:$TEST_BASE_PATH" bash -c 'type -P "$1"' _ "$1" </dev/null

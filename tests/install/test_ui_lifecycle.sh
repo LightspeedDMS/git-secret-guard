@@ -7,12 +7,6 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/../support/lifecycle.sh"
 ESC=$'\e'
 OK_ICON="${ESC}[32m✓${ESC}[0m"
 
-fresh_install() {
-    lc_begin && lc_make_fixtures && lc_use_fixtures || return 1
-    gsg install
-    assert_rc 0 "install"
-}
-
 # ^ invariant the last line of a text
 last_line() { printf '%s' "${1##*$'\n'}"; }
 

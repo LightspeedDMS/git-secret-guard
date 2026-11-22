@@ -807,7 +807,12 @@ Why the scan code is shaped this way; each point was probed on the pinned versio
   `$SANDBOX/systemctl.log`, failures from `$SANDBOX/systemctl.fail`) and `lc_brew_standin` (`brew.map`, `brew.fail`,
   `brew.failon`, `brew.nopopulate`); `gsg` runs the CLI under `env -i`; also `lc_make_fixtures`/`lc_use_fixtures`,
   `lc_path_without TOOL`, `lc_git_wrapper '<sh condition>'` and `lc_real_lookup` with `gitreal`. Doctor (`tests/support/doctor.sh`):
-  `dr_begin`, `dr_repo NAME`, `doctor`. Stand-ins: betterleaks without `--report-path` is the pre-flight
+  `dr_begin`, `dr_repo NAME`, `doctor`. `fresh_install` (lifecycle) installs for real once per test file and restores a copy
+  for every later test: the template is `LC_TEMPLATE_ITEMS` (home, xdg, gitconfig, fixtures) under `$SANDBOX/lc-install-template`,
+  and `dr_begin` is `fresh_install` plus `dr_roots`. The first call lists the rest of the sandbox (`lc_outside_listing`) before and
+  after `gsg install` and fails if install changed anything outside the items (a stand-in log, `pathbin`), so an entry is added to
+  the items, never dropped. A test with other install inputs (fixture versions, `LC_BINSHA`, flags, `TEST_BASH`, a Mac flow) calls
+  `lc_begin` and `dr_install`, or its own install, instead. `tests/install/test_fresh_install.sh` proves a copy starts fresh. Stand-ins: betterleaks without `--report-path` is the pre-flight
   (`STUB_GL_PREFLIGHT_RC`, `STUB_GL_PREFLIGHT_ERROR`, `STUB_GL_PREFLIGHT_SLEEP`, which delays only the `dir` call); only
   real-betterleaks tests settle what a config means; `STUB_VERSION` makes `--version` answer that version (the pin, for a test
   whose machine section must be clean), and without it `--version` prints nothing. `tests/fixtures/husky/h` is husky

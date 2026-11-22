@@ -6,9 +6,10 @@
 DR_ROOTS="" DR_REAL=""
 
 # ^ external the fixtures install fake tools printing only their version; tests needing a real binary rewrite the settings
+# ^ why fresh_install, not dr_install; default inputs mean one install per file and a restored copy per test (tests/support/lifecycle.sh)
+# ^ hazard a test with other install inputs (fixture versions, LC_BINSHA, flags, a Mac flow) calls lc_begin and dr_install itself
 dr_begin() {
-    lc_begin || return 1
-    dr_install
+    fresh_install && dr_roots
 }
 
 # ^ external a Mac answers Darwin from the real uname, other hosts from a fake one (as_macos); install runs on this flow

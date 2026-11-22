@@ -44,6 +44,7 @@ test_exemptions - 17
 test_exemptions_real - 102
 test_extract - 2
 test_frameworks - 1
+test_fresh_install - 1
 test_gitup - 16
 test_gitup_apt - 30
 test_gitup_apt_ppa - 16

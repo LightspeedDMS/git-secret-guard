@@ -4,12 +4,6 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/../support/lib.sh"
 # shellcheck source=tests/support/lifecycle.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/../support/lifecycle.sh"
 
-fresh_install() {
-    lc_begin && lc_make_fixtures && lc_use_fixtures || return 1
-    gsg install
-    assert_rc 0 "install"
-}
-
 hooks_path_is_unset() {
     gitx config --global --get core.hooksPath >/dev/null
     [ "$?" -eq 1 ]

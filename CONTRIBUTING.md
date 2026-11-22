@@ -66,8 +66,11 @@ sits where it would not be found).
 With more than one job (`GSG_TEST_JOBS`, the CPU count on Windows) the runner starts the files with the highest known cost first, so a long file does
 not start behind short ones and stretch the end of the run. The costs are the seconds per file in `tests/test-costs.list` (Windows column on
 Windows, Linux column elsewhere and as the tie-break); a file missing from the list, or on a malformed line, starts first. Only the start order
-changes: the results are still printed in the order the files were given (by base name when no argument names them), and a run with one job is untouched. To update a value, take the
-per-file time from a CI log or time `tests/run.sh FILE`, and edit that line; `tests/project/test_cost_list.sh` fails on a test file without a
+changes: the results are still printed in the order the files were given (by base name when no argument names them), and a run with one job is untouched.
+A run with more than one job also prints one line `TIME    <name> <seconds>s` (for example `TIME    test_status 416s`) right after the results of each file: the
+whole seconds the file ran, measured in its worker from just before it starts to just after it ends, so the time of a file is not the time it is printed at. A log timestamp is
+the print time, which is why the Windows column comes from these lines in the `windows-suite` log. List them with `grep -E '(^| )TIME    '` (a raw CI log has a timestamp before each line). To update a value, take the
+per-file time from the `TIME` lines of a CI log or time `tests/run.sh FILE`, and edit that line; `tests/project/test_cost_list.sh` fails on a test file without a
 line, a line for a file that is gone, a repeated name and a malformed line.
 
 Always go through the runner on macOS and Windows: on macOS it puts Homebrew's bash and the GNU tools first on `PATH`, on

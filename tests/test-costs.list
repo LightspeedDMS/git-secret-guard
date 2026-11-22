@@ -1,9 +1,10 @@
 # Seconds each test file takes, read by tests/run.sh to start the costliest files first when it runs more than one at a time (GSG_TEST_JOBS > 1),
 # and checked by tests/project/test_cost_list.sh (every test file has a line, no line names a missing file). Printing order is not affected.
 # Format, one file per line: base name without .sh, Windows seconds, Linux seconds. Blank lines and lines starting with # are ignored.
-# Windows = the per-file time on Windows CI, a lower bound, measured only for the files over about 1.8 minutes there; - = not measured or under that.
+# Windows = the seconds a file ran on Windows CI, beside the other files of the run, from the `TIME    <name> <seconds>s` lines tests/run.sh prints in the windows-suite log;
+# given for the files over about 100 seconds there and the Windows-only files; - = under that or not measured.
 # Linux = the per-file seconds measured on Linux, used on macOS too and as the tie-break on Windows. A file not listed starts first; a malformed line counts as not listed.
-# To update a value, read the per-file time from a CI log or time `tests/run.sh FILE`; to add a file, add a line with its measured seconds.
+# To update a value, read the TIME line of a CI log or time `tests/run.sh FILE`; to add a file, add a line with its measured seconds.
 test_adapter_betterleaks - 4
 test_adapter_trufflehog - 2
 test_autoupdate 630 24

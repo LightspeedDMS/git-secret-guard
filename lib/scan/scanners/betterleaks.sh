@@ -34,6 +34,16 @@ scan_betterleaks() {
         printf 'betterleaks: the shipped rule file %s is unreadable; nothing was scanned\n' "$GSG_BETTERLEAKS_RULE_FILE" >"$errs" || return 1
         return 0
     fi
+    # ^ security only rc 0 (match) and rc 2 (no record, an old install keeps scanning) scan; rc 1 (differs) and any other code block, as status does
+    # ^ order before betterleaks_stage_tree and any scan => betterleaks never starts on an edited rule file
+    problem="$(rule_file_hash_check "$GSG_BETTERLEAKS_RULE_FILE")"
+    rc=$?
+    if [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ]; then
+        if [ "$rc" -ne 1 ]; then problem="cannot be checked (the hash check returned $rc)"; fi
+        printf 'betterleaks: the shipped rule file %s %s; nothing was scanned; reinstall git-secret-guard from a checkout or a release (bin/git-secret-guard install)\n' \
+            "$GSG_BETTERLEAKS_RULE_FILE" "$problem" >"$errs" || return 1
+        return 0
+    fi
 
     # ^ security explicit --config and --gitleaks-ignore-path => a commit cannot mute itself with its own .gitleaks.toml, .betterleaks.toml or ignore file
     # ^ security only copies the hook took from HEAD are honored; the staged or working-tree versions never reach --config / --gitleaks-ignore-path

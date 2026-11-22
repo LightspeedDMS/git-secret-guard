@@ -322,6 +322,20 @@ doctor_pinned() {
     printf '%s' "${row%% *}"
 }
 
+# ^ invariant the verdict is rule_file_hash_check (lib/core/common.sh), the hook's own, as status_rule_file; an unreadable file prints nothing here
+doctor_rule_file_line() {
+    local file="$GSG_SHARE/lib/scan/betterleaks-rule.toml" why rc
+    if [ ! -r "$file" ]; then return 0; fi
+    why="$(rule_file_hash_check "$file")"
+    rc=$?
+    file="${file//[[:cntrl:]]/?}"
+    case "$rc" in
+        0) doctor_machine_line ok "rule file: $file matches the SHA-256 install recorded" ;;
+        2) doctor_machine_line PROBLEM "rule file: no SHA-256 of $file is recorded in the settings file, an install from before this check, so an edit of it is not noticed; run git-secret-guard install" ;;
+        *) doctor_machine_line PROBLEM "rule file: $file $why; the hook blocks every commit: nothing is scanned; reinstall from a checkout or a release: bin/git-secret-guard install" ;;
+    esac
+}
+
 doctor_check_tools() {
     local tool bin msg pinned timeout_ok=0
     DR_BETTERLEAKS_OK=0 DR_TIMEOUT_OK=0 DR_LIMIT=""
@@ -373,6 +387,7 @@ doctor_check_tools() {
     else
         doctor_machine_line ok "bash: $BASH_BIN"
     fi
+    doctor_rule_file_line
     if [ "$timeout_ok" -eq 1 ] && [ -n "$DR_LIMIT" ] && ! tool_unusable betterleaks "$BETTERLEAKS_BIN" >/dev/null; then DR_BETTERLEAKS_OK=1; fi
 }
 

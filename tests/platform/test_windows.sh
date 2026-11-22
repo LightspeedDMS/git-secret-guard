@@ -222,7 +222,7 @@ ST_PLACED="trufflehog:abc"; install_adopt_scanners; echo "tools=[$ST_TOOLS] plac
 
 test_a_managed_jq_writes_no_version_key_to_the_settings() {
     win 'GSG_BIN_DIR=/b GSG_TOOL_NAMES+=(jq) GSG_TOOL_VER=(1 2 3) INSTALL_JQ_BIN=/b/jq.exe INSTALL_JQ_WRAPPER=/s/jq
-INSTALL_TIMEOUT_BIN=/t INSTALL_BASH_BIN="" INSTALL_GNUBIN_DIR="" INSTALL_TIMER_BIN=""
+INSTALL_TIMEOUT_BIN=/t INSTALL_BASH_BIN="" INSTALL_GNUBIN_DIR="" INSTALL_TIMER_BIN="" INSTALL_RULE_SHA=0000000000000000000000000000000000000000000000000000000000000000
 install_write_settings "$1" && cat -- "$1"' "$SANDBOX/settings"
     assert_rc 0 "settings written"
     assert_contains "$OUT" "JQ_BIN=/s/jq" "the wrapper"
@@ -364,7 +364,7 @@ test_an_install_from_the_installed_copy_never_renames_the_directory_it_runs_from
     mkdir -p "$share" || return 1
     printf 'old\n' >"$share/settings" || return 1
     win 'GSG_ROOT="$1" GSG_SHARE="$1" GSG_BIN_DIR=/b GSG_TOOL_VER=(1 2) INSTALL_JQ_BIN=/b/jq.exe INSTALL_JQ_WRAPPER="$1/jq"
-INSTALL_TIMEOUT_BIN=/t INSTALL_BASH_BIN="" INSTALL_GNUBIN_DIR="" INSTALL_TIMER_BIN=""; install_copy_share; echo "rc=$?"' "$share"
+INSTALL_TIMEOUT_BIN=/t INSTALL_BASH_BIN="" INSTALL_GNUBIN_DIR="" INSTALL_TIMER_BIN="" INSTALL_RULE_SHA=0000000000000000000000000000000000000000000000000000000000000000; install_copy_share; echo "rc=$?"' "$share"
     assert_contains "$OUT" "rc=0" "no rename is attempted"
     assert_contains "$(<"$share/settings")" "JQ_BIN=" "the settings are rewritten in place"
     assert_file "$share/jq" "and so is the jq wrapper"

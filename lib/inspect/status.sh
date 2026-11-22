@@ -304,6 +304,20 @@ status_gnubin() {
     fi
 }
 
+# ^ invariant the verdict is rule_file_hash_check (lib/core/common.sh), the hook's own; an unreadable file prints nothing here, the hook libraries line says so
+status_rule_file() {
+    local file="$GSG_SHARE/lib/scan/betterleaks-rule.toml" why rc
+    if [ ! -r "$file" ]; then return 0; fi
+    why="$(rule_file_hash_check "$file")"
+    rc=$?
+    file="${file//[[:cntrl:]]/?}"
+    case "$rc" in
+        0) status_line ok "rule file" "$file matches the SHA-256 install recorded" ;;
+        2) status_line PROBLEM "rule file" "MISMATCH (no SHA-256 of $file is recorded in the settings file, an install from before this check, so an edit of it is not noticed; run: $GSG_NAME install)" ;;
+        *) status_line PROBLEM "rule file" "MISMATCH ($file $why; the hook blocks every commit: nothing is scanned; reinstall from a checkout or a release: bin/$GSG_NAME install)" ;;
+    esac
+}
+
 # ^ invariant a tool without a version pin is usable (absolute, executable file) or gets a MISSING line and a problem
 status_plain_tool() {
     if tool_unusable "$1" "$2" >/dev/null; then
@@ -324,6 +338,7 @@ status_launchctl() {
 status_settings_keys() {
     status_bash
     status_gnubin
+    status_rule_file
     if brew_is_macos; then status_launchctl; fi
 }
 

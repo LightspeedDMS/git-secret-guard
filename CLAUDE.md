@@ -37,7 +37,8 @@ This file is an index: each topic states what must not break and links the doc h
 - **No real `brew` or `systemctl` in lifecycle tests** (`lc_begin` puts recording stand-ins first); the one real call is the read-only
   `systemctl show $GSG_TEST_SERVICE_UNIT` in `service_prepare`.
 - **Tool paths come only from the settings file** (`install_write_settings`; `load_settings` unsets every key before sourcing); an unusable
-  path blocks the commit ("nothing was scanned"). **The hook runs no `find`** (bash globs in `lib/scan/extract.sh`; counts above zero with an
+  path blocks the commit ("nothing was scanned"), and so does a shipped rule file whose SHA-256 differs from `BETTERLEAKS_RULE_SHA256` (#26).
+  **The hook runs no `find`** (bash globs in `lib/scan/extract.sh`; counts above zero with an
   empty scan tree block; `test_the_hook_runs_no_find_command`): [scan.md#maintainer-notes](docs/scan.md#maintainer-notes).
   **The hook command names the recorded `BASH_BIN` on every platform** (a check, then `exec`; `hook_command_text`), so the shebang never picks the
   bash (#28, #31); **`report_results` cross-checks** each scanner's exit status (`<scanner>.found`) and errors file with bash builtins only, so a

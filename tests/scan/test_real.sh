@@ -485,6 +485,14 @@ test_real_a_partial_commit_scans_the_temporary_index_not_the_real_one() {
     no_leak "$key"
     if gitx cat-file -e HEAD:a.key 2>/dev/null; then fail "a.key was committed"; fi
     if gitx diff --cached --quiet -- a.key; then fail "a.key is no longer staged"; fi
+    assert_eq "$(gitx show HEAD:b.txt)" "b1" "the partial commit holds the new b.txt"
+    # ^ why a second partial commit holding a key, not rc 0 alone; rc 0 cannot tell a clean scan from no scan
+    printf 'aws_key = "%s"\n' "$key" >b.txt || return 1
+    commit_cap "partial leak" -- b.txt
+    assert_rc 1 "the key in b.txt is part of this commit and is blocked"
+    assert_contains "$ERR" "b.txt:1" "the finding names b.txt and its line"
+    assert_not_contains "$ERR" "a.key" "the key staged in a.key is still not scanned"
+    no_leak "$key"
 }
 
 test_real_a_clean_filter_that_adds_content_cannot_hide_it_from_the_scan() {

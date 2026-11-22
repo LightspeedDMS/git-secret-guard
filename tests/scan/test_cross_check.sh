@@ -100,6 +100,8 @@ test_a_marker_with_an_unreadable_rows_file_blocks() {
     # shellcheck disable=SC2016
     report_with 'sort() { rm -f -- "$W/all.rows"; return 0; }'
     assert_rc 1 "blocked"
+    assert_contains "$ERR" "all.rows" "the block names the file it could not read (never a silent block)"
+    assert_not_contains "$ERR" "potential secret(s)" "nothing is reported as found"
 }
 
 run_file_tests

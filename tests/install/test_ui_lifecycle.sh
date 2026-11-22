@@ -36,21 +36,30 @@ test_install_in_plain_mode_prints_no_escape_sequence_and_no_extra_line() {
     assert_eq "$(head -n 1 <<<"$OUT")" "git-secret-guard: installed git-secret-guard $(<"$GSG_PROJECT/VERSION")" "first line as before"
 }
 
+# ^ invariant a refused global core.hooksPath prints exactly two lines after the GIT_CONFIG_GLOBAL note, nothing on stdout, no escape, nothing installed
+assert_the_hooks_path_refusal_alone() {
+    local want="git-secret-guard: the global core.hooksPath is set to [$LC_HOME/hooks-elsewhere]; install changes nothing and refuses.
+git-secret-guard: run install --replace-hooks-path to record it, back up the directory it points to, and unset it."
+    assert_rc 1 "refused without --replace-hooks-path"
+    assert_eq "$(tail -n 2 <<<"$ERR")" "$want" "the refusal says why and what to run, and ends there (no trailer line)"
+    assert_empty "$OUT" "nothing on stdout"
+    assert_not_contains "$ERR" "$ESC" "no escape sequence"
+    assert_no_file "$LC_STATE" "a refused install leaves no state"
+}
+
 test_a_refused_install_adds_no_line_in_terminal_mode() {
     lc_begin && lc_make_fixtures && lc_use_fixtures || return 1
     git_literal_config --global core.hooksPath "$LC_HOME/hooks-elsewhere" || return 1
     ui_force_terminal
     gsg install
-    assert_rc 1 "refused without --replace-hooks-path"
-    assert_not_contains "$ERR" "install failed or was refused" "no trailer line"
+    assert_the_hooks_path_refusal_alone
 }
 
 test_a_refused_install_in_plain_mode_has_no_trailer() {
     lc_begin && lc_make_fixtures && lc_use_fixtures || return 1
     git_literal_config --global core.hooksPath "$LC_HOME/hooks-elsewhere" || return 1
     gsg install
-    assert_rc 1 "refused"
-    assert_not_contains "$ERR" "install failed or was refused" "plain stderr is as before"
+    assert_the_hooks_path_refusal_alone
 }
 
 test_uninstall_marks_its_removed_the_state_line_and_adds_no_line() {

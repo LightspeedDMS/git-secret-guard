@@ -62,6 +62,9 @@ releases and finishing. Where [CONTRIBUTING.md](../CONTRIBUTING.md) already says
   - `GSG_TEST_FILE_TIMEOUT`: seconds before a test file is killed (default 900, 2400 on Windows). With other suites running on the
     machine a slow file can pass 900 s and exit 124 on `main` too: raise it (2400) for a full suite on a busy machine. A 124 is a failure
     until shown otherwise: rerun that file alone with the raised timeout, or run `main` beside it, before calling it load.
+  - `GSG_TEST_DETAIL`, `GSG_TEST_DETAIL_TAIL`: how much of a text a failed assertion prints (`detail_text` in `tests/support/lib.sh`). Up to
+    their sum (300, or 400 for `assert_contains`, plus 1500) the text is shown whole; above, the first `GSG_TEST_DETAIL` chars, a
+    `[... N chars cut ...]` marker and the last `GSG_TEST_DETAIL_TAIL` chars, so the error a command ends with is never cut away.
   - `GSG_TEST_JOBS`: test files run in parallel (default 1, the number of processors on Windows). Keep it low on a machine others use.
 
 ## Test machines for other platforms

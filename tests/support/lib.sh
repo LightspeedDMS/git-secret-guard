@@ -402,8 +402,21 @@ probe_secret() { (source "$GSG_PROJECT/lib/core/common.sh" && source "$GSG_PROJE
 
 fail() { printf '%s\n' "$*" >>"$SANDBOX/.fails"; return 1; }
 assert_eq() { [ "$1" = "$2" ] || fail "${3:-assert_eq}: expected [$2] got [$1]"; }
-assert_rc() { [ "$RC" -eq "$1" ] || fail "${2:-rc}: expected exit $1 got $RC (stderr: ${ERR:0:${GSG_TEST_DETAIL:-300}})"; }
-assert_contains() { case "$1" in *"$2"*) return 0 ;; esac; fail "${3:-assert_contains}: missing [$2] in [${1:0:${GSG_TEST_DETAIL:-400}}]"; }
+# ^ invariant detail_text TEXT [HEAD] prints TEXT whole up to HEAD + TAIL chars, else its first HEAD, a cut marker with the size, its last TAIL; bounded
+# ^ why the tail too, not the head only; a notice or two fills the head and the error a failing command ends with came last (bug #64)
+# ^ see knobs GSG_TEST_DETAIL (head, default HEAD or 300) and GSG_TEST_DETAIL_TAIL (default DETAIL_TAIL_DEFAULT)
+DETAIL_TAIL_DEFAULT=1500
+detail_text() {
+    local text="$1" keep_head="${GSG_TEST_DETAIL:-${2:-300}}" keep_tail="${GSG_TEST_DETAIL_TAIL:-$DETAIL_TAIL_DEFAULT}"
+    local size="${#1}"
+    if [ "$size" -le $((keep_head + keep_tail)) ]; then
+        printf '%s' "$text"
+    else
+        printf '%s[... %d chars cut ...]%s' "${text:0:keep_head}" $((size - keep_head - keep_tail)) "${text:size-keep_tail}"
+    fi
+}
+assert_rc() { [ "$RC" -eq "$1" ] || fail "${2:-rc}: expected exit $1 got $RC (stderr: $(detail_text "$ERR"))"; }
+assert_contains() { case "$1" in *"$2"*) return 0 ;; esac; fail "${3:-assert_contains}: missing [$2] in [$(detail_text "$1" 400)]"; }
 assert_not_contains() { case "$1" in *"$2"*) fail "${3:-assert_not_contains}: unexpected [$2]"; return 1 ;; esac; }
 # ^ why here too, not only in run_cap; many assertions read git or the state directly
 if [ "$TEST_IS_WINDOWS" -eq 1 ]; then
@@ -414,9 +427,9 @@ if [ "$TEST_IS_WINDOWS" -eq 1 ]; then
     assert_contains() { posix_assert_contains "$(windows_plain_text "$1")" "$(windows_plain_text "$2")" "${3:-assert_contains}"; }
     assert_not_contains() { posix_assert_not_contains "$(windows_plain_text "$1")" "$(windows_plain_text "$2")" "${3:-assert_not_contains}"; }
 fi
-assert_empty() { [ -z "$1" ] || fail "${2:-assert_empty}: got [${1:0:${GSG_TEST_DETAIL:-300}}]"; }
+assert_empty() { [ -z "$1" ] || fail "${2:-assert_empty}: got [$(detail_text "$1")]"; }
 PASS_LINE_RE='^git-secret-guard: scanned ([0-9]+) files?, ([0-9]+) added lines? \(([^)]*)\): no findings(, [0-9]+ files? exempted)?, [0-9]+s$'
-assert_pass_line_only() { [[ $1 =~ $PASS_LINE_RE ]] || fail "${2:-assert_pass_line_only}: expected exactly the pass line, got [${1:0:${GSG_TEST_DETAIL:-300}}]"; }
+assert_pass_line_only() { [[ $1 =~ $PASS_LINE_RE ]] || fail "${2:-assert_pass_line_only}: expected exactly the pass line, got [$(detail_text "$1")]"; }
 assert_file() { [ -e "$1" ] || fail "${2:-assert_file}: missing $1"; }
 assert_no_file() { [ ! -e "$1" ] || fail "${2:-assert_no_file}: unexpected $1"; }
 

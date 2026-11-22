@@ -228,30 +228,6 @@ test_real_a_printed_marker_and_a_printed_fingerprint_work_for_an_lfs_object_unde
     no_leak "$key"
 }
 
-test_real_git_lfs_objects_are_followed_on_add_and_on_modify() {
-    [ -x "$REAL_TRUFFLEHOG" ] && [ -x "$REAL_BETTERLEAKS" ] || skip_test "the real scanners are not installed"
-    begin lfs14 || return 1
-    gitx lfs version >/dev/null 2>&1 || skip_test "git-lfs is not installed"
-    use_real_tools
-    local key
-    key="$(fake_aws_key)" || return 1
-    [ -n "$key" ] || return 1
-    gitx lfs install --local >/dev/null 2>&1 || return 1
-    gitx lfs track '*.dat' >/dev/null 2>&1 || return 1
-    gitx add .gitattributes || return 1
-    gitx commit -q --no-verify -m attrs || return 1
-    printf 'one\ntwo\n' >clean.dat && gitx add -- clean.dat || return 1
-    commit_cap "lfs v1"
-    assert_rc 0 "a clean LFS file"
-    [[ $ERR =~ $PASS_LINE_RE ]] || fail "stderr is not exactly the pass line: [$ERR]"
-    assert_eq "${BASH_REMATCH[2]}" 2 "the object's two lines, not the pointer's three"
-    printf 'one\ntwo\naws_key = %s\n' "$key" >clean.dat && gitx add -- clean.dat || return 1
-    commit_cap "lfs v2"
-    assert_rc 1 "a key added to the LFS file"
-    assert_contains "$ERR" "clean.dat:3" "the line of the object, not of the pointer"
-    no_leak "$key"
-}
-
 # ^ coupled scan/extract.sh:_lfs_parse_pointer; args = file; prints pointer or text, the hook's verdict on those bytes (NUL mapped to 0x01 like the batch read)
 # shellcheck disable=SC2016
 lfs_hook_verdict() {

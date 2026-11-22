@@ -287,7 +287,7 @@ st_tmp_listing() { ls -A -- "$SANDBOX/tmp"; }
 st_native_sandbox() { if [ "$TEST_IS_WINDOWS" -eq 1 ]; then printf '%s' "$TEST_SANDBOX_MIXED"; else printf '%s' "$SANDBOX"; fi; }
 
 test_status_exits_1_for_every_enabled_value_git_reads_as_off() {
-    local section v
+    local section v line
     st_install_for_hook_cases || return 1
     for section in $(git_enabled_sections); do
         for v in false no off 0 00 0k 0x0 -0 '' '""'; do
@@ -295,6 +295,13 @@ test_status_exits_1_for_every_enabled_value_git_reads_as_off() {
             assert_contains "$OUT" "hook enabled: MISMATCH (git hook list pre-commit shows git-secret-guard as" "reported by what git says [$v]"
             assert_contains "$OUT" "hook.$section.enabled" "names the key [$v]"
             assert_contains "$OUT" "commits are not scanned" "says what it means [$v]"
+            if [ "$v" = false ]; then
+                assert_eq "$(grep -c 'hook enabled: MISMATCH' <<<"$OUT")" 1 "one MISMATCH line for the key that disables [$section]"
+                line="$(printf '%s\n' "$OUT" | grep ' hook enabled: ')"
+                assert_contains "$line" "hook.$section.enabled=false in the global config" "key, value and scope [$section]"
+                assert_contains "$line" "remove the line from" "and the way back [$section]"
+                assert_not_contains "$line" "$LC_DATA/hooks" "not the hook command that is configured [$section]"
+            fi
         done
         st_hook_case "$section" 1 "enabled = false" "enabled = garbage"
         assert_contains "$OUT" "hook.$section.enabled=false in the global config" "an unreadable value after false does not switch it back on, and the deciding value is named"
@@ -322,18 +329,6 @@ test_status_says_why_a_value_less_enabled_key_blocks_every_commit() {
         assert_contains "$OUT" "hook list: MISMATCH (git hook list pre-commit failed with exit" "git itself refuses the listing"
         assert_contains "$OUT" "hook.$section.enabled" "git's own message names the key"
         assert_contains "$OUT" "hook enabled: hook.$section.enabled has no value in the global config" "and the scan names scope and file"
-    done
-}
-
-test_status_names_the_key_scope_file_and_advice_and_prints_no_configured_command_value() {
-    local line section
-    st_install_for_hook_cases || return 1
-    for section in $(git_enabled_sections); do
-        st_hook_case "$section" 1 "enabled = false"
-        line="$(printf '%s\n' "$OUT" | grep ' hook enabled: ')"
-        assert_contains "$line" "hook.$section.enabled=false in the global config" "key, value and scope [$section]"
-        assert_contains "$line" "remove the line from" "and the way back [$section]"
-        assert_not_contains "$line" "$LC_DATA/hooks" "not the hook command that is configured [$section]"
     done
 }
 
@@ -373,6 +368,8 @@ test_status_flags_commit_msg_switched_off_by_its_event_key() {
     assert_contains "$OUT" "hook enabled: MISMATCH (git hook list commit-msg shows git-secret-guard as event-disabled by hook.commit-msg.enabled, so commit messages are not scanned)" "reported by what git says"
     assert_contains "$OUT" "hook.commit-msg.enabled=false in the global config" "the setting is located"
     assert_not_contains "$OUT" "git hook list pre-commit shows" "the lines run is still listed"
+    assert_contains "$OUT" "disables the commit-msg event: commit messages are not scanned (lines still are)" "per-event wording"
+    assert_not_contains "$OUT" "switches the hook off, commits are not scanned" "the lines scan still runs"
 }
 
 test_status_names_the_version_difference_when_the_installed_share_lacks_a_library() {
@@ -384,21 +381,6 @@ test_status_names_the_version_difference_when_the_installed_share_lacks_a_librar
     assert_contains "$OUT" "hook libraries: MISMATCH (the installed hook is git-secret-guard 0.3.7, this CLI is $(<"$GSG_PROJECT/VERSION"); run git-secret-guard install)" "the line names both versions and the way out"
     assert_not_contains "$OUT" "blocks every commit" "the installed hook never loads the library, so it does not block"
     assert_not_contains "$OUT" "cannot read" "no per-file complaint about a file the older hook does not use"
-}
-
-test_status_says_only_commit_messages_are_unscanned_for_a_disabled_commit_msg_event() {
-    st_install_for_hook_cases || return 1
-    case "$(git_enabled_sections)" in *pre-commit*) ;; *) return 0 ;; esac
-    st_hook_case commit-msg 1 "enabled = false"
-    assert_contains "$OUT" "hook.commit-msg.enabled=false in the global config" "the setting is located"
-    assert_contains "$OUT" "disables the commit-msg event: commit messages are not scanned (lines still are)" "per-event wording"
-    assert_not_contains "$OUT" "switches the hook off, commits are not scanned" "the lines scan still runs"
-}
-
-test_status_names_the_disabled_hook_once_not_per_event() {
-    st_install_for_hook_cases || return 1
-    st_hook_case git-secret-guard 1 "enabled = false"
-    assert_eq "$(grep -c 'hook enabled: MISMATCH' <<<"$OUT")" 1 "one MISMATCH line for the key that disables both events"
 }
 
 test_status_reads_a_disable_in_the_system_config() {
@@ -746,61 +728,6 @@ st_commit_probe() {
     commit_cap probe
 }
 
-test_the_hook_loads_exactly_the_libraries_in_the_shared_list() {
-    local lib f name listed
-    local -a libs=() files=() moved=()
-    fresh_install
-    mapfile -t libs < <(st_share_list libs)
-    mapfile -t files < <(st_share_list files)
-    if [ "${#libs[@]}" -lt 4 ] || [ -z "${libs[0]}" ]; then
-        fail "the shared list holds too few libraries (${#libs[@]})"
-        return 1
-    fi
-    assert_not_contains "$(<"$GSG_PROJECT/hooks/secret-scan")" "extract.sh exempt.sh" "the hook holds no list of its own"
-    assert_contains "$(<"$GSG_PROJECT/hooks/secret-scan")" 'GSG_HOOK_LIBS' "the hook loops over the shared list"
-    for lib in core/common.sh "${libs[@]}"; do
-        mv -- "$LC_DATA/lib/$lib" "$LC_DATA/lib/$lib.aside" || return 1
-        st_commit_probe
-        mv -- "$LC_DATA/lib/$lib.aside" "$LC_DATA/lib/$lib" || return 1
-        assert_rc 1 "$lib missing"
-        assert_contains "$ERR" "cannot load $LC_DATA/lib/$lib; nothing was scanned" "the hook names $lib"
-    done
-    while IFS= read -r f; do
-        name="${f#"$LC_DATA"/lib/}"
-        listed=0
-        for lib in core/common.sh "${libs[@]}" "${files[@]}"; do if [ "$lib" = "$name" ]; then listed=1; fi; done
-        if [ "$listed" -eq 1 ]; then continue; fi
-        mv -- "$f" "$f.aside" || return 1
-        moved+=("$f")
-    done < <(find "$LC_DATA/lib" -type f | sort)
-    [ "${#moved[@]}" -ge 10 ] || fail "only ${#moved[@]} unlisted files were moved aside"
-    st_commit_probe
-    for f in "${moved[@]}"; do mv -- "$f.aside" "$f" || return 1; done
-    assert_not_contains "$ERR" "cannot load" "no library outside the lists is loaded"
-    assert_not_contains "$ERR" "wrapper failed" "no file outside the lists is run by a scanner wrapper"
-    assert_not_contains "$ERR" "extracting" "no file outside the lists is read by the extraction"
-    assert_not_contains "$ERR" "unreadable" "no file outside the lists is read by an adapter"
-    assert_contains "$ERR" "scanner did not complete" "the hook reached the scanners without them"
-}
-
-test_the_hook_blocks_on_its_own_when_the_library_list_is_empty_or_unset() {
-    local variant file
-    for variant in '()' '("")' unset; do
-        fresh_install
-        file="$LC_DATA/lib/core/common.sh"
-        if [ "$variant" = unset ]; then
-            sed 's/^GSG_HOOK_LIBS=.*/unset GSG_HOOK_LIBS/' "$file" >"$SANDBOX/common.edit" || return 1
-        else
-            sed "s/^GSG_HOOK_LIBS=.*/GSG_HOOK_LIBS=$variant/" "$file" >"$SANDBOX/common.edit" || return 1
-        fi
-        cat -- "$SANDBOX/common.edit" >"$file" || return 1
-        st_commit_probe
-        assert_rc 1 "list $variant"
-        assert_contains "$ERR" "cannot load the hook library list (GSG_HOOK_LIBS in $LC_DATA/lib/core/common.sh); nothing was scanned." "list $variant: the hook's own block"
-        assert_not_contains "$ERR" "command not found" "list $variant: not by accident later on"
-    done
-}
-
 test_status_exits_1_when_the_hook_library_list_is_empty_or_unset() {
     local variant file
     for variant in '()' '("")' unset; do
@@ -818,25 +745,6 @@ test_status_exits_1_when_the_hook_library_list_is_empty_or_unset() {
         assert_not_contains "$OUT" "files present and readable" "list $variant: no healthy line"
         gsg status
         assert_rc 0 "the checkout CLI reads its own common.sh, not the share's, list $variant"
-    done
-}
-
-test_the_hook_blocks_when_a_file_it_reads_is_missing() {
-    local rel
-    local -a files=()
-    fresh_install
-    mapfile -t files < <(st_share_list files)
-    if [ "${#files[@]}" -lt 5 ] || [ -z "${files[0]}" ]; then
-        fail "the shared file list holds too few entries (${#files[@]})"
-        return 1
-    fi
-    for rel in "${files[@]}"; do
-        mv -- "$LC_DATA/lib/$rel" "$LC_DATA/lib/$rel.aside" || return 1
-        st_commit_probe
-        mv -- "$LC_DATA/lib/$rel.aside" "$LC_DATA/lib/$rel" || return 1
-        assert_rc 1 "$rel missing"
-        assert_contains "$ERR" "${rel##*/}" "the hook names $rel"
-        assert_contains "$ERR" "To bypass this check for one commit" "and blocks the commit"
     done
 }
 

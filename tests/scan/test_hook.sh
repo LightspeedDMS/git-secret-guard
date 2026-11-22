@@ -237,6 +237,8 @@ test_every_missing_tool_is_listed() {
     assert_contains "$ERR" "$HOOK_NAME: trufflehog is missing or not executable ($SANDBOX/m/t)" "trufflehog line"
     assert_contains "$ERR" "$HOOK_NAME: betterleaks is missing or not executable ($SANDBOX/m/g)" "betterleaks line"
     assert_contains "$ERR" "$HOOK_NAME: jq is missing or not executable ($SANDBOX/m/j)" "jq line"
+    assert_contains "$ERR" "nothing was scanned" "says nothing was scanned"
+    assert_no_commit
 }
 
 test_relative_tool_path_is_refused_no_path_lookup() {
@@ -320,16 +322,6 @@ test_the_pass_line_counts_files_and_added_lines_from_the_extraction() {
     assert_not_contains "$ERR" "a.txt" "no path in the line"
 }
 
-test_settings_without_versions_print_the_line_without_versions() {
-    begin nover || return 1
-    drop_versions || return 1
-    stage_file a.txt one
-    commit_cap "old settings"
-    assert_rc 0 "an older install still commits"
-    assert_pass_line_only "$ERR" "still the pass line"
-    assert_contains "$ERR" "(trufflehog, betterleaks)" "tool names without versions"
-}
-
 test_a_version_that_is_not_digits_and_dots_is_dropped_from_the_line() {
     begin badver || return 1
     use_stubs "TRUFFLEHOG_VERSION='9.9 FORGED all clear'"
@@ -348,6 +340,7 @@ test_an_inherited_version_variable_cannot_fill_a_version_the_settings_omit() {
     stage_file a.txt one
     commit_cap "inherited"
     assert_rc 0 commit
+    assert_pass_line_only "$ERR" "still the pass line"
     assert_contains "$ERR" "(trufflehog, betterleaks)" "no inherited version"
 }
 

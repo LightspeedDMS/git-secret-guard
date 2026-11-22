@@ -170,6 +170,13 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # The suite starts tens of thousands of processes, and a real-time scan of each one can double a file's CPU time (#61).
+      # The windows-2025 image had real-time protection off when this was added, so the suite needs no exclusion; this line shows if that changes.
+      - name: Antivirus real-time protection state
+        shell: pwsh
+        run: |
+          Write-Output "antivirus real-time protection enabled: $((Get-MpComputerStatus).RealTimeProtectionEnabled)"
+
       - name: Run the suite
         shell: cmd
         env:

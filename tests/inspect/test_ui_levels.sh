@@ -144,12 +144,6 @@ test_the_worst_level_picks_the_summary_icon_level() {
     assert_eq "$OUT" "PROBLEM WARNING ok" "problems first, then warnings, else ok"
 }
 
-fresh_install() {
-    lc_begin && lc_make_fixtures && lc_use_fixtures || return 1
-    gsg install
-    assert_rc 0 "install"
-}
-
 # ^ invariant args = the text after the summary label, an optional icon in front of it; the summary is the last line of the status output
 assert_summary() {
     local want="summary: $1"

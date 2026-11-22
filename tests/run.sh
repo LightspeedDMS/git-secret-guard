@@ -125,8 +125,16 @@ start_files() {
             running=$((running - 1))
         done
         (
+            worker_rc=0 t_start=0 t_end=0
+            printf -v t_start '%(%s)T' -1
             timeout "$FILE_TIMEOUT_SECONDS" bash "${files[$i]}" >"$out_dir/$i.log" 2>&1
-            echo "$?" >"$out_dir/$i.rc.tmp"
+            worker_rc="$?"
+            printf -v t_end '%(%s)T' -1
+            # ^ order the time file is written before the status file, and the printer reads it only after the status file exists; no rename is needed
+            # ^ why only builtins here, not date, expr or mv; a process start costs most of a second on Windows and this runs once per file
+            # ^ why a failed time write is ignored, not fatal; the time is a report, the status file decides the verdict
+            { echo "$((t_end - t_start))" >"$out_dir/$i.time"; } 2>/dev/null
+            echo "$worker_rc" >"$out_dir/$i.rc.tmp"
             mv -- "$out_dir/$i.rc.tmp" "$out_dir/$i.rc"
         ) &
         running=$((running + 1))
@@ -144,6 +152,18 @@ wait_for_status() {
         fi
         sleep 1
     done
+}
+
+# ^ invariant print_time_line INDEX PATH prints "TIME    <name without .sh> <seconds>s" from its time file; nothing when it is missing or not whole seconds
+# ^ why a bad time file prints nothing, not a failure; the time is a report, and the verdict of the file comes from its status file and its results
+# ^ external a CI log has no per-file run time, only the print time of each file; tests/test-costs.list takes its Windows column from these lines
+print_time_line() {
+    local secs name
+    [ -f "$out_dir/$1.time" ] || return 0
+    secs="$(<"$out_dir/$1.time")" || return 0
+    case "$secs" in '' | *[!0-9]*) return 0 ;; esac
+    name="${2##*/}"
+    printf 'TIME    %s %ss\n' "${name%.sh}" "$secs"
 }
 
 if [ "$JOBS" -gt 1 ]; then
@@ -166,6 +186,7 @@ for i in "${!files[@]}"; do
         fi
         cp -- "$out_dir/$i.log" "$results" || exit 2
         cat -- "$results"
+        print_time_line "$i" "$f"
         file_rc="$(<"$out_dir/$i.rc")"
     else
         timeout "$FILE_TIMEOUT_SECONDS" bash "$f" 2>&1 | tee "$results"

@@ -74,20 +74,14 @@ AU_TEMPLATE=0
 AU_TEMPLATE_ITEMS=(home xdg gitconfig fixtures au-src au-origin.git au-checkout)
 
 au_template_save() {
-    local tpl="$SANDBOX/au-template" item
-    rm -rf -- "${tpl:?}" "${tpl:?}.part" && mkdir -p -- "$tpl.part" || return 1
-    for item in "${AU_TEMPLATE_ITEMS[@]}"; do cp -a -- "$SANDBOX/$item" "$tpl.part/" || return 1; done
-    mv -- "$tpl.part" "$tpl"
+    lc_template_save au-template "${AU_TEMPLATE_ITEMS[@]}"
 }
 
 # ^ invariant sets what the build sets; AU_SRC, AU_ORIGIN, AU_CO, the lifecycle variables and the fixture environment, no leftover of an earlier test
 au_template_restore() {
-    local tpl="$SANDBOX/au-template" item
     lc_begin || return 1
     rm -rf -- "$SANDBOX"/au-extra-* "$SANDBOX"/au-child.* || return 1
-    for item in "${AU_TEMPLATE_ITEMS[@]}"; do
-        rm -rf -- "${SANDBOX:?}/$item" && cp -a -- "$tpl/$item" "$SANDBOX/" || return 1
-    done
+    lc_template_restore au-template "${AU_TEMPLATE_ITEMS[@]}" || return 1
     lc_use_fixtures
 }
 

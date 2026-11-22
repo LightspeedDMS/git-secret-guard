@@ -132,18 +132,48 @@ runner_run() {
     run_cap timeout "$RUNNER_BOUND_SECONDS" env GSG_TEST_JOBS="$jobs" TMPDIR="$SANDBOX/tmp" bash "$RUNNER" "$@"
 }
 
+# ^ invariant without_time TEXT prints TEXT minus the TIME lines the parallel mode adds after each file's results; rc 0 even when nothing is left
+without_time() {
+    printf '%s\n' "$1" | grep -v '^TIME    ' || [ "$?" -eq 1 ]
+}
+
 test_parallel_mode_prints_what_serial_mode_prints_for_normal_files() {
     local serial
     if [ "$TEST_IS_WINDOWS" -eq 1 ]; then skip_test "$RUNNER_PARALLEL_WINDOWS_REASON"; fi
     runner_fixtures test_a.sh "printf 'PASS    a::one\nSKIPPED a::two (why)\n'" \
         test_b.sh "printf 'PASS    b::one\nFAIL    b::two (test status 1)\n'; exit 1" || return 1
     runner_run 1 "$SANDBOX/fx/test_a.sh" "$SANDBOX/fx/test_b.sh"
-    serial="$OUT"
+    serial="$(without_time "$OUT")"
     assert_rc 1 "serial run with a failing file"
     runner_run 2 "$SANDBOX/fx/test_a.sh" "$SANDBOX/fx/test_b.sh"
     assert_rc 1 "parallel run with a failing file"
-    assert_eq "$OUT" "$serial" "the parallel output is the serial output"
+    assert_eq "$(without_time "$OUT")" "$serial" "the parallel output is the serial output, bar the time lines"
     assert_contains "$OUT" "SUMMARY: 2 passed, 1 failed, 1 skipped (total 4)" "counts"
+}
+
+# ^ why a sleeping file next to a quick one, not two quick ones; the seconds must differ and be plausible, not just present
+# ^ invariant a TIME line is "TIME    <base name without .sh> <whole seconds>s", printed right after its file's results, parallel mode only
+test_parallel_mode_prints_one_time_line_per_file_after_its_results_and_serial_mode_none() {
+    local line secs_quick="" secs_slow="" prev=""
+    if [ "$TEST_IS_WINDOWS" -eq 1 ]; then skip_test "$RUNNER_PARALLEL_WINDOWS_REASON"; fi
+    runner_fixtures test_quick.sh "printf 'PASS    quick::one\n'" \
+        test_slow.sh "sleep 2; printf 'PASS    slow::one\nPASS    slow::two\n'" || return 1
+    runner_run 1 "$SANDBOX/fx/test_quick.sh"
+    assert_rc 0 "serial run"
+    assert_not_contains "$OUT" "TIME" "a serial run prints no time line"
+    runner_run 2 "$SANDBOX/fx/test_quick.sh" "$SANDBOX/fx/test_slow.sh"
+    assert_rc 0 "parallel run"
+    while IFS= read -r line; do
+        case "$line" in
+            "TIME    test_quick "*) secs_quick="${line##* }"; assert_eq "$prev" "PASS    quick::one" "the quick time line follows its results" ;;
+            "TIME    test_slow "*) secs_slow="${line##* }"; assert_eq "$prev" "PASS    slow::two" "the slow time line follows its results" ;;
+        esac
+        prev="$line"
+    done <<<"$OUT"
+    case "$secs_quick" in 0s | 1s) ;; *) fail "the quick file's time is [$secs_quick], expected 0s or 1s" ;; esac
+    case "$secs_slow" in 2s | 3s | 4s) ;; *) fail "the sleeping file's time is [$secs_slow], expected 2s to 4s" ;; esac
+    assert_eq "$(printf '%s\n' "$OUT" | grep -c '^TIME    ')" "2" "one time line per file"
+    assert_contains "$OUT" "SUMMARY: 3 passed, 0 failed, 0 skipped (total 3)" "the summary is unchanged"
 }
 
 # ^ why the fixture kills its own worker, not a fault injected into run.sh; the real subshell dies as in a crash and writes no exit status
@@ -210,7 +240,7 @@ test_parallel_mode_starts_the_costliest_files_first_and_prints_in_argument_order
     assert_rc 0 "parallel run (124 means a wait never ended)"
     assert_eq "$(tr '\n' ' ' <"$SANDBOX/rc/start.log")" "$want " "the start order"
     assert_eq "$(rt_ran)" "test_a test_b test_c test_d test_e test_f test_g test_h test_i" "the print order is the argument order"
-    assert_eq "$OUT" "$serial" "the parallel output is the serial output"
+    assert_eq "$(without_time "$OUT")" "$(without_time "$serial")" "the parallel output is the serial output, bar the time lines"
     assert_contains "$OUT" "SUMMARY: 9 passed, 0 failed, 0 skipped (total 9)" "counts"
 }
 

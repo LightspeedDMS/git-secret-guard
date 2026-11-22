@@ -257,27 +257,6 @@ test_curl_is_run_with_q_first_so_the_users_curlrc_is_ignored() {
     assert_eq "$("$LC_BIN/betterleaks$LC_EXE" --version)" "betterleaks version 1.9.0" "the real tarball arrived"
 }
 
-# ^ invariant fresh_install leaves a healthy install; the first call builds it and saves a copy, every later one restores a fresh copy of it after lc_begin
-# ^ why a copy on disk at the same paths, not shell state; each test runs in its own subshell and the install records absolute paths under the fixed SANDBOX
-# ^ invariant install touches home, xdg and the global config only (a listing of the sandbox before and after shows it); fixtures feed GSG_TOOLS_* only
-FI_TEMPLATE_ITEMS=(home xdg gitconfig fixtures)
-
-fresh_install() {
-    local tpl="$SANDBOX/fi-template" item
-    lc_begin || { fail "fresh_install: lc_begin"; return 1; }
-    if [ ! -d "$tpl" ]; then
-        { lc_make_fixtures && lc_use_fixtures; } || { fail "fresh_install: fixtures"; return 1; }
-        gsg install
-        assert_rc 0 "fresh install" || return 1
-        { rm -rf -- "${tpl:?}.part" && mkdir -p -- "$tpl.part"; } || { fail "fresh_install: template dir"; return 1; }
-        for item in "${FI_TEMPLATE_ITEMS[@]}"; do cp -a -- "$SANDBOX/$item" "$tpl.part/" || { fail "save the install ($item)"; return 1; }; done
-        mv -- "$tpl.part" "$tpl" || { fail "save the install (mv)"; return 1; }
-        return
-    fi
-    for item in "${FI_TEMPLATE_ITEMS[@]}"; do { rm -rf -- "${SANDBOX:?}/$item" && cp -a -- "$tpl/$item" "$SANDBOX/"; } || { fail "restore the saved install ($item)"; return 1; }; done
-    lc_use_fixtures || { fail "fresh_install: fixtures"; return 1; }
-}
-
 gsg_installed() { run_cap env -i "${LC_ENV[@]}" "${EXTRA_ENV[@]}" "$LC_BIN/git-secret-guard" "$@"; }
 
 test_fresh_install_copies_the_package_into_the_share_dir_and_links_the_cli() {

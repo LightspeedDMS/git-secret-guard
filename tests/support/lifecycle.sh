@@ -617,3 +617,77 @@ lc_git_wrapper() {
 lc_file_url() { if [ "$TEST_IS_WINDOWS" -eq 1 ]; then printf 'file:///%s' "$(cygpath -m "$1")"; else printf 'file://%s' "$1"; fi; }
 lc_fixture_url() { lc_file_url "$LC_FIX"; }
 lc_use_fixtures() { set_env GSG_TOOLS_BASE_URL="$(lc_fixture_url)" GSG_TOOLS_LOCK="$LC_FIX/fixture.lock"; }
+
+# ^ invariant the template holds home, xdg and the global config, what install changes, plus fixtures (a restored copy needs GSG_TOOLS_* back)
+LC_TEMPLATE_ITEMS=(home xdg gitconfig fixtures)
+LC_TEMPLATE_NAME=lc-install-template
+
+# ^ invariant prints the path and the checksum of everything in the sandbox outside the template items, the template and the runner's own files
+# ^ why the harness files are left out, not listed; run_file_tests writes .fails .testout .skip and run_cap writes .out .err during a test
+lc_outside_listing() {
+    local e name names sums
+    local -a entries=()
+    for e in "$SANDBOX"/* "$SANDBOX"/.[!.]*; do
+        if [ ! -e "$e" ] && [ ! -L "$e" ]; then continue; fi
+        name="${e##*/}"
+        case " ${LC_TEMPLATE_ITEMS[*]} $LC_TEMPLATE_NAME $LC_TEMPLATE_NAME.part .fails .testout .skip .out .err " in *" $name "*) continue ;; esac
+        entries+=("$e")
+    done
+    if [ "${#entries[@]}" -eq 0 ]; then return 0; fi
+    # ^ why a variable each, not a pipe to sort; a pipe hides the exit status of find and cksum, a broken listing must fail the caller
+    names="$(find "${entries[@]}")" || return 1
+    sums="$(find "${entries[@]}" -type f -exec cksum {} +)" || return 1
+    printf '%s\n' "$names" | LC_ALL=C sort || return 1
+    printf '%s\n' "$sums" | LC_ALL=C sort
+}
+
+# ^ invariant lc_template_save NAME ITEM... copies the sandbox items into $SANDBOX/NAME through a .part dir and one mv => a template is whole or absent
+# ^ invariant lc_template_restore NAME ITEM... replaces each sandbox item by its template copy; both fail with a message and return 1
+# ^ security an empty name or item, or one with a slash, fails before any rm => no call can remove the sandbox itself
+lc_template_args_ok() {
+    local arg
+    if [ "$#" -lt 2 ]; then fail "template helper: a name and at least one item are needed"; return 1; fi
+    for arg in "$@"; do
+        case "$arg" in "" | */* | . | ..) fail "template helper: [$arg] is not a plain name"; return 1 ;; esac
+    done
+}
+
+# ^ why save clears an older template first, not only its .part; the autoupdate template is rebuilt in place
+lc_template_save() {
+    local tpl="$SANDBOX/$1" item
+    lc_template_args_ok "$@" || return 1
+    shift
+    { rm -rf -- "${tpl:?}" "${tpl:?}.part" && mkdir -p -- "$tpl.part"; } || { fail "save the install: template dir"; return 1; }
+    for item in "$@"; do cp -a -- "$SANDBOX/$item" "$tpl.part/" || { fail "save the install ($item)"; return 1; }; done
+    mv -- "$tpl.part" "$tpl" || { fail "save the install (mv)"; return 1; }
+}
+
+lc_template_restore() {
+    local tpl="$SANDBOX/$1" item
+    lc_template_args_ok "$@" || return 1
+    shift
+    for item in "$@"; do { rm -rf -- "${SANDBOX:?}/$item" && cp -a -- "$tpl/$item" "$SANDBOX/"; } || { fail "restore the saved install ($item)"; return 1; }; done
+}
+
+# ^ invariant fresh_install leaves a healthy install; the first call per file installs for real and saves a copy, later calls restore it after lc_begin
+# ^ why a copy on disk at the same paths, not shell state; each test runs in its own subshell and the install records absolute paths under the fixed SANDBOX
+# ^ invariant the first call fails when install changed anything outside the template items; a stand-in log written by install shows here, never as a stale copy
+fresh_install() {
+    local tpl="$SANDBOX/$LC_TEMPLATE_NAME" before after
+    lc_begin || { fail "fresh_install: lc_begin"; return 1; }
+    if [ ! -d "$tpl" ]; then
+        { lc_make_fixtures && lc_use_fixtures; } || { fail "fresh_install: fixtures"; return 1; }
+        before="$(lc_outside_listing)" || { fail "fresh_install: listing before install"; return 1; }
+        gsg install
+        assert_rc 0 "install" || return 1
+        after="$(lc_outside_listing)" || { fail "fresh_install: listing after install"; return 1; }
+        if [ "$after" != "$before" ]; then
+            fail "install changed the sandbox outside the template items (${LC_TEMPLATE_ITEMS[*]}); add the entry to LC_TEMPLATE_ITEMS: $(diff <(printf '%s\n' "$before") <(printf '%s\n' "$after") | tr '\n' ' ')"
+            return 1
+        fi
+        lc_template_save "$LC_TEMPLATE_NAME" "${LC_TEMPLATE_ITEMS[@]}" || return 1
+        return 0
+    fi
+    lc_template_restore "$LC_TEMPLATE_NAME" "${LC_TEMPLATE_ITEMS[@]}" || return 1
+    lc_use_fixtures || { fail "fresh_install: fixtures"; return 1; }
+}

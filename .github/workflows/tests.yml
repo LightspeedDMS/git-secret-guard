@@ -174,7 +174,8 @@ jobs:
       # The windows-2025 image had real-time protection off when this was added, so the suite needs no exclusion; this line shows if that changes.
       - name: Antivirus real-time protection state
         shell: pwsh
-        run: Write-Output "antivirus real-time protection enabled: $((Get-MpComputerStatus).RealTimeProtectionEnabled)"
+        run: |
+          Write-Output "antivirus real-time protection enabled: $((Get-MpComputerStatus).RealTimeProtectionEnabled)"
 
       - name: Run the suite
         shell: cmd

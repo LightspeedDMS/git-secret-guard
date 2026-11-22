@@ -4,27 +4,6 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/../support/lib.sh"
 # shellcheck source=tests/support/lifecycle.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/../support/lifecycle.sh"
 
-# ^ invariant fresh_install leaves a healthy install; the first call builds it and saves a copy, every later one restores a fresh copy of it after lc_begin
-# ^ why a copy on disk at the same paths, not shell state; each test runs in its own subshell and the install records absolute paths under the fixed SANDBOX
-# ^ invariant install touches home, xdg and the global config only (a listing of the sandbox before and after shows it); fixtures feed GSG_TOOLS_* only
-ST_TEMPLATE_ITEMS=(home xdg gitconfig fixtures)
-
-fresh_install() {
-    local tpl="$SANDBOX/st-template" item
-    lc_begin || { fail "fresh_install: lc_begin"; return 1; }
-    if [ ! -d "$tpl" ]; then
-        { lc_make_fixtures && lc_use_fixtures; } || { fail "fresh_install: fixtures"; return 1; }
-        gsg install
-        assert_rc 0 "install" || return 1
-        { rm -rf -- "${tpl:?}.part" && mkdir -p -- "$tpl.part"; } || { fail "fresh_install: template dir"; return 1; }
-        for item in "${ST_TEMPLATE_ITEMS[@]}"; do cp -a -- "$SANDBOX/$item" "$tpl.part/" || { fail "save the install ($item)"; return 1; }; done
-        mv -- "$tpl.part" "$tpl" || { fail "save the install (mv)"; return 1; }
-        return
-    fi
-    for item in "${ST_TEMPLATE_ITEMS[@]}"; do { rm -rf -- "${SANDBOX:?}/$item" && cp -a -- "$tpl/$item" "$SANDBOX/"; } || { fail "restore the saved install ($item)"; return 1; }; done
-    lc_use_fixtures || { fail "fresh_install: fixtures"; return 1; }
-}
-
 lc_which() {
     # shellcheck disable=SC2016
     env -i HOME="$SANDBOX/home" PATH="$SANDBOX/pathbin:$TEST_BASE_PATH" bash -c 'type -P "$1"' _ "$1" </dev/null

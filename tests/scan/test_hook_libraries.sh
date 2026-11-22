@@ -10,26 +10,6 @@ HL_MIN_LIBS=4
 HL_MIN_FILES=5
 HL_MIN_UNLISTED=10
 
-# ^ invariant fresh_install leaves a healthy install; the first call builds it and saves a copy, every later one restores a fresh copy of it after lc_begin
-# ^ why a copy on disk at the same paths, not shell state; each test runs in its own subshell and the install records absolute paths under the fixed SANDBOX
-HL_TEMPLATE_ITEMS=(home xdg gitconfig fixtures)
-
-fresh_install() {
-    local tpl="$SANDBOX/hl-template" item
-    lc_begin || { fail "fresh_install: lc_begin"; return 1; }
-    if [ ! -d "$tpl" ]; then
-        { lc_make_fixtures && lc_use_fixtures; } || { fail "fresh_install: fixtures"; return 1; }
-        gsg install
-        assert_rc 0 "install" || return 1
-        { rm -rf -- "${tpl:?}.part" && mkdir -p -- "$tpl.part"; } || { fail "fresh_install: template dir"; return 1; }
-        for item in "${HL_TEMPLATE_ITEMS[@]}"; do cp -a -- "$SANDBOX/$item" "$tpl.part/" || { fail "save the install ($item)"; return 1; }; done
-        mv -- "$tpl.part" "$tpl" || { fail "save the install (mv)"; return 1; }
-        return
-    fi
-    for item in "${HL_TEMPLATE_ITEMS[@]}"; do { rm -rf -- "${SANDBOX:?}/$item" && cp -a -- "$tpl/$item" "$SANDBOX/"; } || { fail "restore the saved install ($item)"; return 1; }; done
-    lc_use_fixtures || { fail "fresh_install: fixtures"; return 1; }
-}
-
 # ^ invariant the lists come out of lib/core/common.sh, the file the hook reads them from => this test holds no copy to drift
 hl_share_list() {
     # shellcheck disable=SC2016

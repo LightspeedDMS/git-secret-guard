@@ -445,7 +445,10 @@ test_missing_scan_script_fails_the_commit() {
     stage_file a.txt one
     commit_cap "x"
     [ "$RC" -ne 0 ] || fail "commit succeeded without the scan script"
-    assert_contains "$ERR" "cannot exec '$SANDBOX/no/such/secret-scan'" "git names the script it could not run"
+    local want="cannot exec '$SANDBOX/no/such/secret-scan'"
+    if [ "$TEST_IS_WINDOWS" -eq 1 ]; then want="cannot spawn $SANDBOX/no/such/secret-scan"; fi
+    # ^ external Git for Windows words it "cannot spawn <path>" (no quotes); Linux and macOS git say "cannot exec '<path>'"; both carry the full path
+    assert_contains "$ERR" "$want" "git names the script it could not run"
     assert_no_commit
 }
 

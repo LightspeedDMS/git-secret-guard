@@ -341,8 +341,9 @@ test_real_catalog_d11_a_hook_without_its_exec_bit_still_stops_the_commit() {
     catalog D11 Detect 'chmod -x <share>/hooks/secret-scan && git commit'
     [ "$RC" -ne 0 ] || fail "D11 a hook git cannot start let the commit through"
     # ^ why two texts, not one; the recorded bash runs a script without its exec bit and the finding blocks, a bare script path gives git's cannot exec
+    # ^ external Git for Windows words the failure "cannot spawn <path>" (no quotes), Linux and macOS git "cannot exec '<path>'"
     case "$ERR" in
-        *"cannot exec '$SHARE/hooks/secret-scan'"* | *"potential secret(s)"*) ;;
+        *"cannot exec '$SHARE/hooks/secret-scan'"* | *"cannot spawn $SHARE/hooks/secret-scan"* | *"potential secret(s)"*) ;;
         *) fail "D11 the commit stopped for another reason: ${ERR:0:300}" ;;
     esac
     if gitx rev-parse -q --verify HEAD >/dev/null 2>&1; then fail "D11 a commit was created"; fi

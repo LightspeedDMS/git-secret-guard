@@ -263,8 +263,9 @@ test_a_failed_verify_restores_the_original_preferences_and_says_what_was_changed
     assert_rc 1 "the fixture scanners cannot pass the verify commit"
     assert_contains "$ERR" "the commit of a fake token through $SANDBOX/pathbin/git failed, but not with the findings text of the hook" "the verify step that failed is the fake-token commit"
     assert_eq "$(sg_hash "$SG_PREFS")" "$h" "the preferences are byte-identical to the original again"
-    assert_contains "$ERR" "SmartGit was restored from its backup" "says the restore happened"
-    assert_contains "$ERR" "Homebrew install of git-lfs" "and names the change that stays"
+    assert_contains "$ERR" "git-secret-guard: SmartGit was restored from its backup; the only change made was the Homebrew install of git-lfs in this run" "says the restore happened and names the one change that stays"
+    assert_eq "$(sg_count_in "$SG_BACKUPS" 'manifest|preferences')" 0 "the restore removed the manifest and the backup"
+    assert_contains "$(gm_calls)" "install git-lfs" "the brew install the message names did happen"
 }
 
 # ^ invariant one configure; a second run, a rerun on a reverted file, a tampered backup and the restores follow on its state

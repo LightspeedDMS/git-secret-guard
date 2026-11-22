@@ -20,9 +20,14 @@ fixture() {
     printf '*.txt -diff\n* binary\n' >"$SANDBOX/attrs-hide" || return 1
     stage_file src/app.txt "app one" "app two" "app three" "app four" "" "app six" || return 1
     stage_file old/moved.txt "moved one" "moved two" "moved three" "moved four" "moved five" || return 1
+    stage_file "caf"$'\xc3\xa9'"/u.txt" "uni one" "uni two" "uni three" || return 1
     gitx commit -q --no-verify -m base || return 1
     EXTRA_ENV=(STUB_LOG="$SANDBOX/calls-$1" STUB_MARKER="$MARKER" STUB_RECORD="$SANDBOX/record-$1")
-    stage_file src/app.txt "app one" "app two" "app three" "changed four $MARKER" "" "app six" || return 1
+    # ^ why a non-ASCII path, not ASCII only; core.quotePath=true quotes it, only our -c core.quotePath=false keeps the path raw
+    # ^ external git diff-tree ignores diff.interHunkContext, color and prefix keys (probed on 2.56.1); only quotePath can change the text here
+    # ^ why two changed lines around the blank line 5, not one; two hunks in one file each keep their own line number
+    stage_file src/app.txt "app one" "app two" "app three" "changed four $MARKER" "" "changed six $MARKER" || return 1
+    stage_file "caf"$'\xc3\xa9'"/u.txt" "uni one" "uni two $MARKER" "uni three" || return 1
     mkdir -p new || return 1
     gitx mv old/moved.txt new/moved.txt || return 1
     stage_file new/moved.txt "moved one" "moved two $MARKER" "moved three" "moved four" "moved five" || return 1
@@ -32,7 +37,7 @@ fixture() {
 # ^ external git pairs same-basename files first and skips rename detection once the remaining pairs pass diff.renameLimit squared (more lines, never fewer)
 # ^ why the fixture creates only the renamed file, not a second one; a second created file with another basename can trip diff.renameLimit=1
 expected_scan() {
-    printf '== new/moved.txt\n\nmoved two %s\n== src/app.txt\n\n\n\nchanged four %s\n' "$MARKER" "$MARKER"
+    printf '== caf\xc3\xa9/u.txt\n\nuni two %s\n== new/moved.txt\n\nmoved two %s\n== src/app.txt\n\n\n\nchanged four %s\n\nchanged six %s\n' "$MARKER" "$MARKER" "$MARKER" "$MARKER"
 }
 
 apply_config() {

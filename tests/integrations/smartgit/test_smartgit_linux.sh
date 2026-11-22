@@ -691,10 +691,15 @@ test_a_major_with_an_absurd_number_is_skipped_without_a_shell_error() {
     sl_leftover_setup || return 1
     sl_extra_major "$LC_HOME/.config/smartgit" 99999999999999999999.1 linux-tarball-26.1 "$SL_INSTALL" || return 1
     gsg install </dev/null
+    assert_rc 0 "install next to the directory with the absurd number"
+    assert_not_contains "$ERR" "integer" "install: no shell arithmetic error"
+    assert_not_contains "$OUT$ERR" "99999999999999999999" "install: the directory is not taken for a SmartGit major"
     gsg status
     assert_not_contains "$ERR" "integer" "no shell arithmetic error"
     assert_not_contains "$OUT$ERR" "99999999999999999999" "the directory is not taken for a SmartGit major"
     assert_rc 0 "26.1 stays live next to the 25.1 leftover"
+    assert_contains "$OUT" "SmartGit settings: $SL_OLD (25.1): $(sl_leftover_tail 25.1 26.1)" "25.1 is the left-over directory and 26.1 the live one"
+    assert_not_contains "$OUT" "(26.1): left over" "26.1 is not reported as left over"
 }
 
 test_a_running_smartgit_with_no_startup_file_names_running_first_and_the_missing_setup() {

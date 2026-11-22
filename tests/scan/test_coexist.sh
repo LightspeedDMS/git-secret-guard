@@ -139,6 +139,16 @@ test_post_merge_gets_the_squash_flag() {
     assert_rc 0 merge
     assert_eq "$(hook_args post-merge)" "args: [0]" "post-merge receives the squash flag"
     assert_not_contains "$(<"$ORDER")" "trufflehog" "documented limit: a merge commit fires pre-merge-commit, not pre-commit"
+    # ^ why a second merge with --squash, not only the no-ff one; the flag is 1 for a squash merge alone
+    local branch
+    branch="$(gitx rev-parse --abbrev-ref HEAD)" || return 1
+    gitx checkout -q -b side2 || return 1
+    stage_file side2.txt side2 && commit_cap "side2"
+    gitx checkout -q "$branch" || return 1
+    : >"$HLOG/post-merge"
+    run_cap gitx merge --squash -q side2
+    assert_rc 0 "squash merge"
+    assert_eq "$(hook_args post-merge)" "args: [1]" "post-merge runs again and receives the squash flag 1"
 }
 
 test_pre_push_gets_remote_and_ref_lines_on_stdin_and_can_block() {

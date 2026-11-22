@@ -40,6 +40,22 @@ assert_blocked_by_both_scanners() {
     assert_eq "$(gitx rev-parse -q --verify HEAD 2>/dev/null | wc -l)" 0 "$1: no commit was created"
 }
 
+# ^ invariant prints the directory of a copy of the checkout whose VERSION is the current one with its patch number raised by one
+# ^ why a copy of the checkout, not the checkout itself; an upgrade is an install from a tree of another version, the test must not edit the project
+newer_checkout() {
+    local co="$SANDBOX/newer" item current major minor patch
+    current="$(<"$GSG_PROJECT/VERSION")" || return 1
+    IFS=. read -r major minor patch <<<"$current"
+    if [[ ! $patch =~ ^[0-9]+$ ]]; then
+        fail "VERSION [$current] is not x.y.z"
+        return 1
+    fi
+    mkdir -p -- "$co" || return 1
+    for item in bin hooks lib tools.lock; do cp -r -- "$GSG_PROJECT/$item" "$co/" || return 1; done
+    printf '%s.%s.%s\n' "$major" "$minor" "$((patch + 1))" >"$co/VERSION" || return 1
+    printf '%s' "$co"
+}
+
 test_install_block_upgrade_uninstall_and_uninstall_again_with_the_real_scanners() {
     [ -x "$REAL_TRUFFLEHOG" ] || skip_test "trufflehog not found at $REAL_TRUFFLEHOG"
     [ -x "$REAL_BETTERLEAKS" ] || skip_test "betterleaks not found at $REAL_BETTERLEAKS"
@@ -65,8 +81,14 @@ test_install_block_upgrade_uninstall_and_uninstall_again_with_the_real_scanners(
     assert_pass_line_only "$ERR" "one pass line"
     assert_contains "$ERR" "(trufflehog 3.99.2, betterleaks 1.9.0): no findings" "the versions install recorded"
 
-    gsg install
-    assert_rc 0 "upgrade (second install)"
+    assert_eq "$(state_value version)" "$(<"$GSG_PROJECT/VERSION")" "the state records the installed version"
+    local co
+    co="$(newer_checkout)" || return 1
+    run_cap env -i "${LC_ENV[@]}" "${EXTRA_ENV[@]}" "$co/bin/git-secret-guard" install
+    assert_rc 0 "upgrade: install from a checkout of a newer version"
+    assert_eq "$(<"$LC_DATA/VERSION")" "$(<"$co/VERSION")" "the share holds the newer version"
+    assert_eq "$(state_value version)" "$(<"$co/VERSION")" "and the state records it"
+    assert_eq "$(find "${LC_DATA%/*}" -maxdepth 1 -name "${LC_DATA##*/}.*" | wc -l | tr -d ' ')" 0 "no new or old tree is left beside the share"
     commit_secret upgraded
     assert_blocked_by_both_scanners "after the upgrade"
 

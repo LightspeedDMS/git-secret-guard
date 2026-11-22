@@ -201,6 +201,27 @@ test_the_exit_trap_is_set_before_the_work_dir_is_created() {
     [ "$trap_line" -lt "$mktemp_line" ] || fail "trap at line $trap_line comes after mktemp at line $mktemp_line"
 }
 
+# ^ why a name or value the code defines is looked up in the code too, not in the docs alone; a rename or a new limit in the code fails the docs gate
+# ^ invariant code_value FILE VAR prints the value of VAR=value at the start of a line of FILE (project-relative); rc 1 when missing or empty
+code_value() {
+    local v
+    v="$(sed -n "s/^$2=\\([^ ]*\\).*/\\1/p" "$GSG_PROJECT/$1" | head -n 1)"
+    [ -n "$v" ] || return 1
+    printf '%s' "$v"
+}
+
+# ^ invariant docs_tokens_in_code "DIR..." TOKEN... fails once for each TOKEN no file under any DIR holds (project-relative)
+docs_tokens_in_code() {
+    local dirs="$1" t
+    shift
+    cd -- "$GSG_PROJECT" || return 1
+    for t in "$@"; do
+        # shellcheck disable=SC2086
+        grep -rqF -- "$t" $dirs || fail "[$t] is in the docs but no file of $dirs has it any more"
+    done
+}
+
+# ^ why a prose gate, not a code-tied one; the scan tests (test_real.sh, test_inherited_config.sh) pin the UTF-16 behaviour, this pins the docs sentence
 test_the_docs_name_utf16_as_unscanned() {
     cd -- "$GSG_PROJECT" || return 1
     grep -q 'UTF-16' docs/scan.md || fail "docs/scan.md does not say that UTF-16 text counts as binary and is not scanned"
@@ -218,18 +239,24 @@ test_the_docs_document_every_exemption_mechanism_and_its_verified_syntax() {
         grep -qiF -- "$needle" docs/exemptions.md docs/scan.md || fail "docs/exemptions.md and docs/scan.md do not mention [$needle]"
     done
     grep -qiF 'absolute path' docs/install.md docs/doctor.md || fail "docs/install.md and docs/doctor.md do not mention [absolute path]"
+    docs_tokens_in_code "hooks lib bin" GIT_LITERAL_PATHSPECS GIT_NO_REPLACE_OBJECTS core.bigFileThreshold core.attributesFile=/dev/null --gitleaks-ignore-path \
+        trufflehog:ignore hook.git-secret-guard.enabled .secret-scan-ignore .gitleaksignore
 }
 
 test_the_docs_document_install_upgrade_and_uninstall() {
     cd -- "$GSG_PROJECT" || return 1
-    local needle
+    local needle backup_bytes backup_files mib=1048576
+    backup_bytes="$(code_value lib/install/install.sh GSG_BACKUP_MAX_BYTES)" || { fail "GSG_BACKUP_MAX_BYTES is not defined in lib/install/install.sh"; return 0; }
+    backup_files="$(code_value lib/install/install.sh GSG_BACKUP_MAX_FILES)" || { fail "GSG_BACKUP_MAX_FILES is not defined in lib/install/install.sh"; return 0; }
+    [ "$((backup_bytes % mib))" -eq 0 ] || { fail "GSG_BACKUP_MAX_BYTES ($backup_bytes) is not a whole number of MiB; the docs name it in MB"; return 0; }
+    docs_tokens_in_code "hooks lib bin" --replace-hooks-path --remove-tools hooks-path-backup- GSG_TOOLS_BASE_URL GSG_TOOLS_LOCK SETSID_BIN TIMEOUT_BIN gsg-replaced-
     # shellcheck disable=SC2088,SC2016
     for needle in '# Install, upgrade and uninstall' 'bin/git-secret-guard install' 'git-secret-guard uninstall' 'git-secret-guard status' \
         '--replace-hooks-path' '--remove-tools' 'hooks-path-backup-' 'previous `core.hooksPath`' 'verbatim' \
         'tools.lock' 'SHA-256' 'GSG_TOOLS_BASE_URL' 'GSG_TOOLS_LOCK' 'still verified' \
         'XDG_DATA_HOME' 'XDG_STATE_HOME' '~/.local/bin' 'SETSID_BIN' 'TIMEOUT_BIN' \
         '/usr/bin/git' '2.52' 'ignores config hooks' 'Linux' 'macOS' 'nothing to do' \
-        'gsg-replaced-' 'includeIf' 'XDG config' 'recorded value differs' '50 MB' '10000 files' 'curlrc' \
+        'gsg-replaced-' 'includeIf' 'XDG config' 'recorded value differs' "$((backup_bytes / mib)) MB" "$backup_bytes bytes" "more than $backup_files files" 'curlrc' \
         '%(prefix)/' '~user/' 'real directory' 'replaced in place' 'GIT_CONFIG_GLOBAL'; do
         grep -qF -- "$needle" docs/install.md || fail "docs/install.md does not mention [$needle]"
     done
@@ -238,9 +265,11 @@ test_the_docs_document_install_upgrade_and_uninstall() {
 
 test_the_docs_document_doctor_and_the_timer() {
     cd -- "$GSG_PROJECT" || return 1
-    local needle
+    local needle find_depth
+    find_depth="$(code_value lib/inspect/doctor_repos.sh GSG_DOCTOR_FIND_DEPTH)" || { fail "GSG_DOCTOR_FIND_DEPTH is not defined in lib/inspect/doctor_repos.sh"; return 0; }
+    docs_tokens_in_code "hooks lib bin" --roots --with-timer git-secret-guard-doctor.timer git-secret-guard-doctor.service OnCalendar=weekly SYSTEMCTL_BIN
     # shellcheck disable=SC2016
-    for needle in '# Coverage report: `doctor`' 'git-secret-guard doctor' '--roots' 'node_modules' '31 levels' '--git-common-dir' 'worktree' \
+    for needle in '# Coverage report: `doctor`' 'git-secret-guard doctor' '--roots' 'node_modules' "$((find_depth - 1)) levels" '--git-common-dir' 'worktree' \
         'git hook list pre-commit' 'disabled in local config' 'command overridden' 'pre-commit install not run' 'read-only' \
         'machine:' 'repos with findings:' 'summary:' 'exit status 0' 'exit status 1' 'exit status 2' 'PROBLEM' 'WARNING' 'info' \
         '/usr/bin/git' '.secret-scan-ignore' 'catch-all' '.gitleaks.toml' 'tools_placed' 'core.hooksPath' 'GIT_NO_REPLACE_OBJECTS' \
@@ -255,8 +284,10 @@ test_the_docs_document_doctor_and_the_timer() {
 
 test_the_docs_describe_the_launchd_agent_and_drop_the_macos_refusal() {
     cd -- "$GSG_PROJECT" || return 1
-    local needle
-    for needle in 'com.lightspeeddms.git-secret-guard.doctor.plist' 'LAUNCHCTL_BIN' 'launchctl bootstrap gui/' 'launchctl bootout' \
+    local needle label
+    label="$(code_value lib/core/state.sh GSG_LAUNCHD_LABEL)" || { fail "GSG_LAUNCHD_LABEL is not defined in lib/core/state.sh"; return 0; }
+    docs_tokens_in_code "hooks lib bin" LAUNCHCTL_BIN doctor.log
+    for needle in "$label.plist" 'LAUNCHCTL_BIN' 'launchctl bootstrap gui/' 'launchctl bootout' \
         'StartCalendarInterval' 'plutil -lint' 'doctor.log'; do
         grep -qF -- "$needle" docs/doctor.md || fail "docs/doctor.md does not mention [$needle]"
     done
@@ -265,6 +296,7 @@ test_the_docs_describe_the_launchd_agent_and_drop_the_macos_refusal() {
     fi
 }
 
+# ^ why a prose gate, not a code-tied one; tests/inspect/test_doctor_repos.sh pins the worktree behaviour, this pins the docs sentence
 test_the_docs_say_a_linked_worktree_outside_the_roots_is_not_checked() {
     cd -- "$GSG_PROJECT" || return 1
     # shellcheck disable=SC2016
@@ -273,18 +305,22 @@ test_the_docs_say_a_linked_worktree_outside_the_roots_is_not_checked() {
 
 test_the_docs_have_a_supported_platforms_chapter() {
     cd -- "$GSG_PROJECT" || return 1
-    local needle
+    local needle git_ver git_sha
+    read -r _ git_ver _ git_sha < <(awk '$1 == "git" && $3 == "source" { print; exit }' tools.lock)
+    [ -n "$git_ver" ] && [ -n "$git_sha" ] || { fail "tools.lock has no line 'git VERSION source SHA256'"; return 0; }
     # shellcheck disable=SC2016
     for needle in '# Supported platforms' 'RHEL 9' 'Ubuntu 24.04' 'tests/platform/ubuntu.sh' 'ppa:git-core/ppa' \
-        'sudo add-apt-repository ppa:git-core/ppa && sudo apt install git' 'sudo apt install jq' 'git-2.56.0.tar.xz' \
-        '26c56c296b38c0695b26fa95f475f1d01704d2d38e73465ca30b0b2f5dc789d3' 'NO_RUST=1' 'mawk' 'gawk' 'macOS arm64'; do
+        'sudo add-apt-repository ppa:git-core/ppa && sudo apt install git' 'sudo apt install jq' "git-$git_ver.tar.xz" \
+        "$git_sha" 'NO_RUST=1' 'mawk' 'gawk' 'macOS arm64'; do
         grep -qF -- "$needle" docs/platforms.md || fail "docs/platforms.md does not mention [$needle] in its supported platforms"
     done
 }
 
+# ^ why two variables looked up in the code, not every needle; the rest is prose on the tested machine and the tools brew supplies, defined by no file
 test_the_docs_state_exactly_what_macos_support_means() {
     cd -- "$GSG_PROJECT" || return 1
     local needle
+    docs_tokens_in_code "hooks lib bin" BASH_BIN GNUBIN_DIR
     for needle in '# macOS (Homebrew)' 'macOS 26.7.1' 'x86_64' 'not tested' 'brew install' 'coreutils' 'util-linux' 'bash 4.4' 'launchd' \
         'BASH_BIN' 'GNUBIN_DIR' 'never installed with brew'; do
         grep -qF -- "$needle" docs/platforms.md || fail "docs/platforms.md does not state [$needle] for macOS"
@@ -298,10 +334,12 @@ test_the_docs_state_exactly_what_macos_support_means() {
 
 test_the_docs_state_the_platform_test_trust_decisions() {
     cd -- "$GSG_PROJECT" || return 1
-    local needle
+    local needle image ppa_fpr
+    image="$(code_value tests/platform/ubuntu.sh IMAGE)" || { fail "IMAGE is not defined in tests/platform/ubuntu.sh"; return 0; }
+    ppa_fpr="$(code_value lib/gitup/gitup_apt.sh GITUP_APT_PPA_FPR)" || { fail "GITUP_APT_PPA_FPR is not defined in lib/gitup/gitup_apt.sh"; return 0; }
     grep -qF -- 'RHEL 9-compatible (tested on Rocky Linux 9.7)' docs/platforms.md || fail "docs/platforms.md does not state the tested RPM distribution"
-    for needle in 'sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852' \
-        'F911AB184317630C59970973E363C90F8F1B6217' 'env -i' '/run/secrets' '--init' 'not version-pinned' 'Launchpad'; do
+    for needle in "sha256:${image#*@sha256:}" \
+        "$ppa_fpr" 'env -i' '/run/secrets' '--init' 'not version-pinned' 'Launchpad'; do
         grep -qF -- "$needle" docs/platform-testing.md || fail "docs/platform-testing.md does not state [$needle]"
     done
     if grep -qF "tested on the maintainer's machine" README.md docs/*.md; then fail "the docs still say the maintainer's machine instead of the distribution"; fi
@@ -311,6 +349,7 @@ test_the_docs_state_the_platform_test_trust_decisions() {
 test_the_docs_state_the_container_config_copy_and_ppa_rules() {
     cd -- "$GSG_PROJECT" || return 1
     local needle
+    docs_tokens_in_code "tests/platform lib" 'add-apt-repository -y -n' /proc/self/mountinfo copy-file: hooks_dir 'podman rm -f'
     for needle in 'exact list of mount points' '/proc/self/mountinfo' 'volumes' 'devices' 'hooks_dir' 'containers.conf.d' '`copy-file:`' \
         'untracked files that are not ignored are copied' '.tmp/' '.analysis/' 'reports/' '.env*' 'add-apt-repository -y -n' '`podman rm -f` runs under `timeout`'; do
         grep -qF -- "$needle" docs/platform-testing.md || fail "docs/platform-testing.md does not state [$needle]"
@@ -324,6 +363,7 @@ test_the_docs_state_the_container_config_copy_and_ppa_rules() {
 test_the_docs_separate_what_the_platform_run_enforces_from_what_it_trusts() {
     cd -- "$GSG_PROJECT" || return 1
     local needle
+    docs_tokens_in_code "tests/platform lib" CONTAINERS_CONF default_mounts_file --host-ns fstype namespaces 'mounted more than once'
     for needle in '### What the platform run enforces' '### What the platform run trusts' 'CONTAINERS_CONF' 'ping_group_range' 'mounted more than once' \
         'fstype' 'namespaces' '--host-ns' 'reports/troubleshooting/' 'reports/bugs/' 'image digest' 'default_mounts_file' 'not compared'; do
         grep -qF -- "$needle" docs/platform-testing.md || fail "docs/platform-testing.md does not state [$needle]"
@@ -336,6 +376,7 @@ test_the_docs_separate_what_the_platform_run_enforces_from_what_it_trusts() {
 test_the_docs_do_not_claim_the_hook_has_no_PATH_lookup() {
     cd -- "$GSG_PROJECT" || return 1
     local needle
+    docs_tokens_in_code "hooks lib bin" realpath mktemp shebang
     # shellcheck disable=SC2016
     if grep -qF 'There is no `PATH` lookup' README.md docs/*.md; then fail "the docs still claim there is no PATH lookup"; fi
     for needle in 'shebang' 'exec-path' 'realpath' 'mktemp'; do

@@ -267,14 +267,19 @@ test_an_include_that_realpath_cannot_resolve_is_refused_with_a_message_of_ours()
 }
 
 test_the_global_config_read_does_not_need_a_realpath_that_knows_dash_m() {
-    local fake
+    local fake before
     lc_begin && lc_real_lookup && lc_make_fixtures && lc_use_fixtures || return 1
     fake="$(bsd_realpath_dir)" || return 1
     printf '[user]\n\tname = T\n[include]\n\tpath = extra.conf\n' >"$LC_HOME/.gitconfig" || return 1
-    printf '[user]\n\temail = t@example.invalid\n' >"$LC_HOME/extra.conf" || return 1
+    printf '[core]\n\thooksPath = /inc/hooks\n' >"$LC_HOME/extra.conf" || return 1
     EXTRA_ENV+=(PATH="$fake:$SANDBOX/pathbin:$TEST_BASE_PATH")
+    before="$(tree_digest "$LC_HOME")" || return 1
+    gsg install
+    assert_refused_and_untouched "$before" "$LC_HOME/extra.conf" "/inc/hooks" "the include was walked without realpath -m, so the value in it is seen"
+    printf '[user]\n\temail = t@example.invalid\n' >"$LC_HOME/extra.conf" || return 1
     gsg install
     assert_rc 0 "install on a machine whose realpath has no -m, with an include in the global config"
+    assert_file "$LC_DATA/hooks/secret-scan" "installed"
 }
 
 test_lifecycle_realpath_m_normalizes_a_missing_tail_and_resolves_a_symlinked_ancestor() {

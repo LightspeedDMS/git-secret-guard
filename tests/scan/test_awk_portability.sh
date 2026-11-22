@@ -4,9 +4,11 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/../support/lib.sh"
 
 CORPUS=""
 ODD_NAMES=($'tab\tx.txt' 'q"uote.txt' 'back\slash.txt' $'ctl\001x.txt' 'ünï/ƒ.txt' 'sp ace/a b.txt' $'nl\nname.txt')
-MALFORMED_WANT=("unsafe path refused" "absolute path refused" "diff path without the b/ prefix" "unsupported byte escape" "unknown escape"
-    "unterminated quoted path" "unparsable hunk header" "unexpected line inside a hunk" "diff ended inside a hunk" "file appears twice"
-    "added line outside any file" "empty path" "unsupported byte escape" "bad octal escape")
+MALFORMED_WANT=("unsafe path refused: ../x" "absolute path refused: /abs" "diff path without the b/ prefix: x/y"
+    "unsupported byte escape in a quoted path" "unknown escape in a quoted path" "unterminated quoted path" "unparsable hunk header"
+    "unexpected line inside a hunk" "diff ended inside a hunk" "file appears twice in the diff: a" "added line outside any file" "empty path"
+    "unsupported byte escape in a quoted path" "bad octal escape in a quoted path" "non-increasing line numbers in a"
+    "unsafe path refused: a/../?[31mx")
 
 # ^ external Ubuntu's default awk is mawk and RHEL's is gawk; code under test calls plain awk => a farm directory first on PATH picks the interpreter
 # ^ external macOS /usr/bin/awk is the one-true-awk (version 20200816 here), named bwk below; a Mac has no second awk of the family
@@ -81,6 +83,8 @@ check_tree() {
     for i in "${!ODD_NAMES[@]}"; do
         assert_eq "$(<"$tree/${ODD_NAMES[$i]}")" "odd $i" "$label: odd name $i"
     done
+    # ^ why a count of the files, not only the named absences; any file the extraction writes beyond the seven plain ones and the odd names fails here
+    assert_eq "$(find "$tree" -type f -print0 | tr -cd '\0' | wc -c | tr -d '[:space:]')" "$((7 + ${#ODD_NAMES[@]}))" "$label: the tree holds exactly the expected files"
     assert_no_file "$tree/del.txt" "$label: a deleted file adds nothing"
     assert_no_file "$tree/bin.dat" "$label: binary files add nothing"
     assert_no_file "$tree/bin2.dat" "$label: new binary files add nothing"
@@ -109,7 +113,7 @@ test_mawk_and_gawk_extract_identical_trees() {
     assert_rc 0 "the two trees differ: ${OUT:0:300}"
 }
 
-# ^ invariant diff_case N prints malformed diff number N (1 to 14); MALFORMED_WANT[N-1] is the start of the message lib/scan/extract.awk dies with
+# ^ invariant diff_case N prints malformed diff number N (1 to 16); MALFORMED_WANT[N-1] is the whole message extract.awk dies with
 diff_case() {
     case "$1" in
         1) printf '%s\n' '+++ b/../x' '@@ -0,0 +1 @@' '+a' ;;
@@ -126,15 +130,17 @@ diff_case() {
         12) printf '%s\n' '+++ b/' ;;
         13) printf '%s\n' '+++ "b/\000"' ;;
         14) printf '%s\n' '+++ "b/\1"' ;;
+        15) printf '%s\n' '+++ b/a' '@@ -0,0 +5 @@' '+x' '@@ -0,0 +2 @@' '+y' ;;
+        16) printf '%s\n' $'+++ b/a/../\033[31mx' '@@ -0,0 +1 @@' '+a' ;;
     esac
 }
 
-# ^ invariant malformed_report NAME writes "N rc=R err=TEXT" per case and for an unset GSG_SCAN_DIR, running lib/scan/extract.awk under interpreter NAME
+# ^ invariant malformed_report NAME writes "N rc=R err=TEXT" per MALFORMED_WANT case and for an unset GSG_SCAN_DIR, running extract.awk under NAME
 malformed_report() {
     local bin n rc out="$SANDBOX/malformed-$1"
     bin="$(awk_binary "$1")" || return 1
     : >"$out"
-    for n in $(seq 1 14); do
+    for n in $(seq 1 "${#MALFORMED_WANT[@]}"); do
         mkdir -p -- "$SANDBOX/malformed-scan-$1-$n" || return 1
         diff_case "$n" | env -i LC_ALL=C GSG_SCAN_DIR="$SANDBOX/malformed-scan-$1-$n" "$bin" -f "$GSG_PROJECT/lib/scan/extract.awk" >/dev/null 2>"$out.err"
         rc="${PIPESTATUS[1]}"
@@ -148,10 +154,13 @@ check_malformed_with() {
     local n
     awk_binary "$1" >/dev/null || skip_test "$1 is not installed"
     malformed_report "$1" || return 1
-    for n in $(seq 1 14); do
-        assert_contains "$(<"$SANDBOX/malformed-$1")" "$n rc=2 err=extract: ${MALFORMED_WANT[$((n - 1))]}" "$1: malformed diff $n is refused with exit 2"
+    # ^ why a whole-line match, not a substring; the path detail and the sanitising of control characters are part of the message
+    for n in $(seq 1 "${#MALFORMED_WANT[@]}"); do
+        if ! grep -Fxq -- "$n rc=2 err=extract: ${MALFORMED_WANT[$((n - 1))]}" "$SANDBOX/malformed-$1"; then
+            fail "$1: malformed diff $n is not refused with exit 2 and exactly [extract: ${MALFORMED_WANT[$((n - 1))]}]; got: $(grep -- "^$n rc=" "$SANDBOX/malformed-$1")"
+        fi
     done
-    assert_contains "$(<"$SANDBOX/malformed-$1")" "unset rc=2 err=extract: GSG_SCAN_DIR is not set" "$1: no scan directory"
+    if ! grep -Fxq -- "unset rc=2 err=extract: GSG_SCAN_DIR is not set" "$SANDBOX/malformed-$1"; then fail "$1: no scan directory is not refused with exit 2 and its message"; fi
 }
 
 test_malformed_diffs_fail_the_same_way_under_gawk() { check_malformed_with gawk; }

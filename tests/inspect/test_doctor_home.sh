@@ -124,8 +124,12 @@ test_a_recorded_repository_under_the_library_is_kept_by_a_default_macos_run() {
     hr="$(home_real)"
     record_repo "$hr/Library/proj" || return 1
     gsg doctor
+    assert_rc 0 "a library left out is no finding, and the kept record is not one in a full run"
     assert_not_contains "$OUT" "$hr/Library/proj" "not searched, so not listed"
+    assert_not_contains "$OUT" "cannot read" "and the folder left out is not reported as unreadable"
+    assert_contains "$OUT" "summary: 0 repos, 0 covered" "no repository was checked"
     assert_contains "$(<"$LC_STATE/findings")" "repo${TAB}$hr/Library/proj${TAB}-${TAB}disabled in local config" "not searched is not proven gone, the record stays"
+    assert_eq "$(grep -c "^repo${TAB}" "$LC_STATE/findings")" 1 "exactly one recorded repository line"
 }
 
 test_a_default_run_on_macos_leaves_out_the_trash_and_roots_can_name_it() {
@@ -174,8 +178,12 @@ test_a_recorded_repository_under_the_trash_is_kept_by_a_default_macos_run() {
     hr="$(home_real)"
     record_repo "$hr/.Trash/proj" || return 1
     gsg doctor
+    assert_rc 0 "a trash left out is no finding, and the kept record is not one in a full run"
     assert_not_contains "$OUT" "$hr/.Trash/proj" "not searched, so not listed"
+    assert_not_contains "$OUT" "cannot read" "and the folder left out is not reported as unreadable"
+    assert_contains "$OUT" "summary: 0 repos, 0 covered" "no repository was checked"
     assert_contains "$(<"$LC_STATE/findings")" "repo${TAB}$hr/.Trash/proj${TAB}-${TAB}disabled in local config" "not searched is not proven gone, the record stays"
+    assert_eq "$(grep -c "^repo${TAB}" "$LC_STATE/findings")" 1 "exactly one recorded repository line"
 }
 
 test_a_folder_find_calls_operation_not_permitted_is_listed_and_the_rest_is_checked() {

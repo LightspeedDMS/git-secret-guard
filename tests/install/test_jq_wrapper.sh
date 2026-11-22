@@ -99,10 +99,26 @@ test_a_bash_a_shebang_cannot_hold_stops_the_doctor_git_shim() {
 }
 
 # ^ invariant both writes of the wrapper in install_copy_share pass the recorded bash => every install runs it, an older install is upgraded by the next one
+# ^ why an empty install_write_settings, not the real one; it needs the whole install state, the share copy and the wrapper write stay real
 test_every_install_path_rewrites_the_wrapper_with_the_recorded_bash() {
-    local n
-    n="$(grep -c 'install_write_jq_wrapper "[^"]*" "\$INSTALL_JQ_BIN" "\$INSTALL_BASH_BIN"' "$GSG_PROJECT/lib/install/install.sh")"
-    assert_eq "$n" 2 "both the in-place and the new-tree write pass the recorded bash"
+    local share="$SANDBOX/share" old=$'#!/usr/bin/env bash\nexec /old/jq -b "$@"' run
+    run='source "$1/lib/platform/wsl.sh" && source "$1/lib/integrations/desktop/desktop_git.sh" || exit 9
+GSG_SHARE="$2"; INSTALL_JQ_WRAPPER="$2/jq"; INSTALL_JQ_BIN=/opt/real/jq; INSTALL_BASH_BIN="$3"
+install_write_settings() { : >"$1"; }
+install_copy_share; echo "rc=$?"'
+    WINDOWS=1 inst "$run" "$share" /usr/bin/first.exe
+    assert_contains "$OUT" "rc=0" "a first install copies the share"
+    assert_eq "$(head -n 1 "$share/jq")" "#!/usr/bin/first.exe" "a new tree gets the recorded bash in the wrapper shebang"
+    assert_eq "$(sed -n 2p "$share/jq")" 'exec /opt/real/jq -b "$@"' "and the recorded jq"
+    printf '%s\n' "$old" >"$share/jq" || return 1
+    WINDOWS=1 inst "$run" "$share" /usr/bin/second.exe
+    assert_contains "$OUT" "rc=0" "an install over an older share copies it again"
+    assert_eq "$(head -n 1 "$share/jq")" "#!/usr/bin/second.exe" "the older wrapper is replaced, with the bash of this install"
+    printf '%s\n' "$old" >"$share/jq" || return 1
+    WINDOWS=1 inst 'GSG_ROOT="$2"; '"$run" "$share" /usr/bin/third.exe
+    assert_contains "$OUT" "rc=0" "an install run from the installed copy rewrites its generated files in place"
+    assert_eq "$(head -n 1 "$share/jq")" "#!/usr/bin/third.exe" "the in-place write passes the recorded bash too"
+    assert_eq "$(sed -n 2p "$share/jq")" 'exec /opt/real/jq -b "$@"' "and the recorded jq"
 }
 
 run_file_tests

@@ -14,17 +14,11 @@ test_the_role_is_a_pure_function_of_the_two_paths() {
     local base="$SANDBOX/role"
     lc_begin || return 1
     # ^ why a real repository, not an empty .git directory; under MSYS the owner is asked of git itself
-    rm -rf -- "$base" && mkdir -p -- "$base/file" "$base/none" "$base/foreign" && gitx init -q "$base/own" || return 1
+    rm -rf -- "$base" && mkdir -p -- "$base/file" "$base/none" && gitx init -q "$base/own" || return 1
     printf 'gitdir: elsewhere\n' >"$base/file/.git" || return 1
-    ln -s /usr "$base/foreign/.git" || return 1
     au_lib "$GSG_PROJECT" 'lifecycle_require_git; autoupdate_role "$1"' "$base/own"
     assert_rc 0 "a checkout and a .git directory of this user"
     assert_eq "$OUT" owner "both paths are owned by this user"
-    if [ ! -O /usr ]; then
-        au_lib "$GSG_PROJECT" 'autoupdate_role "$1"' "$base/foreign"
-        assert_rc 0 "a .git directory of another user"
-        assert_eq "$OUT" follower "the .git directory is owned by root"
-    fi
     au_lib "$GSG_PROJECT" 'autoupdate_role "$1"' "$base/file"
     assert_rc 1 "a .git file (worktree or submodule)"
     assert_empty "$OUT" "no role for a .git file"
@@ -32,6 +26,17 @@ test_the_role_is_a_pure_function_of_the_two_paths() {
     assert_rc 1 "no .git at all"
     au_lib "$GSG_PROJECT" 'autoupdate_role "$1"' /
     assert_rc 1 "the root directory is not a checkout"
+}
+
+# ^ why a test of its own, not a branch of the role test; skip_test would hide the assertions before it, and a run owning /usr shows SKIPPED
+test_a_git_directory_of_another_user_is_a_follower() {
+    local base="$SANDBOX/role-foreign"
+    lc_begin || return 1
+    if [ -O /usr ]; then skip_test "this user owns /usr (root, or a shell that cannot tell owners), so there is no .git directory of another user to point at"; fi
+    rm -rf -- "$base" && mkdir -p -- "$base/foreign" && ln -s /usr "$base/foreign/.git" || return 1
+    au_lib "$GSG_PROJECT" 'autoupdate_role "$1"' "$base/foreign"
+    assert_rc 0 "a .git directory of another user"
+    assert_eq "$OUT" follower "the .git directory is owned by root"
 }
 
 test_needs_install_compares_with_the_state_and_with_the_installed_copy() {
@@ -565,6 +570,46 @@ test_no_git_call_of_the_update_bypasses_the_bounded_runner() {
     assert_empty "$unbounded" "every git call of lib/autoupdate/autoupdate.sh runs under a limit"
     bare="$(grep -v '^ *#' "$src" | grep -E '(^|[;|&({]|then|do|!)[[:space:]]*git[[:space:]]+')" || bare=""
     assert_empty "$bare" "and no git is run by its bare name"
+}
+
+# ^ invariant au_git_probe puts a git first on PATH logging "<starting command>|<arguments>" for each call outside the child install, and runs the real git
+# ^ why the parent's command name, not the arguments; a call under autoupdate_limited has timeout as parent, an unbounded one its shell (setsid is skipped)
+# ^ why GSG_UPDATE_LOCK_PID unset only, not every call; the child install carries it and runs git calls of its own
+au_git_probe() {
+    {
+        cat <<'EOF'
+#!/bin/sh
+if [ -z "${GSG_UPDATE_LOCK_PID:-}" ]; then
+    p=$PPID
+    c=$(ps -o comm= -p "$p" 2>/dev/null); c=${c##*/}
+    while [ "$c" = setsid ]; do
+        p=$(ps -o ppid= -p "$p" | tr -d ' ')
+        c=$(ps -o comm= -p "$p" 2>/dev/null); c=${c##*/}
+    done
+    printf '%s|%s\n' "$c" "$*" >>"$AU_GIT_LOG"
+fi
+EOF
+        printf 'exec %s "$@"\n' "$GIT"
+    } >"$SANDBOX/pathbin/git" || return 1
+    chmod 755 "$SANDBOX/pathbin/git" && : >"$SANDBOX/au-git.log" || return 1
+    set_env AU_GIT_LOG="$SANDBOX/au-git.log"
+}
+
+# ^ invariant an owner run and a follower run; every git call each makes is the child of timeout, and the log holds enough calls to show the probe saw them
+# ^ why besides the source test above, not instead of it; the source test reads one file for the forms it knows, this one sees what ran in any form
+test_every_git_call_of_an_update_run_is_started_by_the_bounded_runner() {
+    # ^ coupled one installing run makes 17 git calls as owner and 5 as follower (measured); the floors stay below them, a probe missing calls fails
+    local run unbounded min_calls=12
+    if [ "$TEST_IS_WINDOWS" -eq 1 ]; then skip_test "the parent of a call is read with ps -o, which Git for Windows lacks"; fi
+    for run in owner follower; do
+        if [ "$run" = owner ]; then au_setup_with_release; else au_setup_follower_at_release && min_calls=4; fi || return 1
+        au_git_probe || return 1
+        if [ "$run" = owner ]; then upd; else upd_follower; fi
+        assert_eq "$(rec result)" updated "[$run] the update ran to its end"
+        [ "$(wc -l <"$SANDBOX/au-git.log")" -ge "$min_calls" ] || fail "[$run] the probe saw $(wc -l <"$SANDBOX/au-git.log") git calls, expected at least $min_calls"
+        unbounded="$(grep -v '^timeout|' "$SANDBOX/au-git.log")" || unbounded=""
+        assert_empty "$unbounded" "[$run] every git call of the update is started by timeout"
+    done
 }
 
 test_a_child_install_that_outlives_its_limit_is_recorded_as_timed_out() {

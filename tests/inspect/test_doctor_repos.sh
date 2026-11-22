@@ -232,13 +232,22 @@ test_a_long_git_error_in_a_finding_is_cut_with_the_marker() {
     assert_not_contains "$OUT" "${msg:0:201}" "and nothing past the cut"
 }
 
-test_more_repositories_than_the_bound_is_a_discovery_error() {
-    dr_begin && dr_repo one && dr_repo two && dr_repo three || return 1
+# ^ invariant discover_with_bound N = doctor_discover with GSG_DOCTOR_MAX_ENTRIES=N and the harness git; OUT = "found <listed repositories>"
+discover_with_bound() {
     # shellcheck disable=SC2016
     run_cap env -i "${LC_ENV[@]}" bash -c '
         source "$1/lib/core/common.sh" && source "$1/lib/inspect/doctor_repos.sh" && source "$1/lib/inspect/doctor.sh"
-        GSG_GIT=/usr/local/bin/git; DR_WORK="$(mktemp -d)"; DR_ROOT_LIST=("$2"); GSG_DOCTOR_MAX_ENTRIES=2
-        doctor_discover; rc=$?; rm -rf -- "$DR_WORK"; exit "$rc"' _ "$GSG_PROJECT" "$DR_ROOTS"
+        GSG_GIT="$4"; DR_WORK="$(mktemp -d)"; DR_ROOT_LIST=("$2"); GSG_DOCTOR_MAX_ENTRIES="$3"
+        doctor_discover; rc=$?; echo "found ${#DR_SORTED[@]}"; rm -rf -- "$DR_WORK"; exit "$rc"' _ "$GSG_PROJECT" "$DR_ROOTS" "$1" "$GIT"
+}
+
+test_more_repositories_than_the_bound_is_a_discovery_error() {
+    dr_begin && dr_repo one && dr_repo two && dr_repo three || return 1
+    discover_with_bound 3
+    assert_rc 0 "three repositories against a bound of three: the bound itself is allowed"
+    assert_eq "$OUT" "found 3" "all three are listed"
+    assert_eq "$ERR" "" "and nothing is said"
+    discover_with_bound 2
     assert_rc 1 "three repositories against a bound of two"
     assert_contains "$ERR" "more than 2 repositories or worktrees under the roots; narrow --roots" "says what to do"
 }

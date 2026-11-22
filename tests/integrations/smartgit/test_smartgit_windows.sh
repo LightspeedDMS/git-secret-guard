@@ -375,7 +375,8 @@ test_a_failed_verify_restores_the_original_preferences_and_says_what_was_changed
     gsg install --configure-smartgit </dev/null
     assert_rc 1 "the fixture scanners cannot pass the verify commit"
     assert_eq "$(sg_hash "$SG_PREFS")" "$(sg_hash "$SANDBOX/prefs.orig")" "the preferences are byte-identical to the original again"
-    assert_contains "$ERR" "SmartGit was restored from its backup" "says the restore happened"
+    assert_contains "$ERR" "git-secret-guard: SmartGit was restored from its backup; nothing was changed" "says the restore happened and that nothing else was changed (no Homebrew, no git upgrade on Windows)"
+    assert_eq "$({ ls -A "$SG_BACKUPS" 2>/dev/null || true; } | grep -c -E 'manifest|preferences' || true)" 0 "the restore removed the manifest and the backup"
 }
 
 # ^ invariant sw_mark_pending edited|original LABEL = the manifest of a finished configure says pending (a stop before the final manifest, the file edited)

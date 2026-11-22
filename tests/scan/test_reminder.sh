@@ -335,6 +335,12 @@ test_control_characters_in_recheck_output_never_reach_the_reminder() {
     assert_contains "$ERR" "/r/b: bad ?[31mred?[0m text" "mapped to ?"
 }
 
+# ^ invariant paths_init_probe [VAR=value...] prints "<GSG_STATE_DIR> <GSG_FINDINGS_FILE> <state_dir_path>/findings" after paths_init under HOME=/h
+paths_init_probe() {
+    env -i PATH="$TEST_BASE_PATH" HOME=/h "$@" bash -c 'source "$1/lib/core/common.sh" && source "$1/lib/core/state.sh" && paths_init \
+        && printf "%s %s %s\n" "$GSG_STATE_DIR" "$GSG_FINDINGS_FILE" "$(state_dir_path)/findings"' _ "$GSG_PROJECT"
+}
+
 # ^ coupled lib/core/state.sh:paths_init takes the state dir from state_dir_path => the hook and doctor read one record
 test_the_state_dir_has_one_definition_shared_by_the_hook_and_doctor() {
     local got
@@ -344,7 +350,11 @@ test_the_state_dir_has_one_definition_shared_by_the_hook_and_doctor() {
     assert_eq "$got" "/h/.local/state/git-secret-guard" "default under HOME"
     env -i PATH="$TEST_BASE_PATH" bash -c 'source "$1/lib/core/common.sh" && state_dir_path' _ "$GSG_PROJECT" >/dev/null 2>&1
     assert_eq "$?" 1 "neither HOME nor XDG_STATE_HOME: refused"
-    grep -q 'state_dir_path' "$GSG_PROJECT/lib/core/state.sh" || fail "paths_init does not use state_dir_path"
+    # ^ why paths_init is run, not grepped; doctor reads GSG_FINDINGS_FILE, the hook reads state_dir_path/findings => one file
+    got="$(paths_init_probe XDG_STATE_HOME=/x)" || { fail "paths_init failed with XDG_STATE_HOME set"; return 1; }
+    assert_eq "$got" "/x/git-secret-guard /x/git-secret-guard/findings /x/git-secret-guard/findings" "doctor's dir and record file are the hook's [XDG_STATE_HOME]"
+    got="$(paths_init_probe)" || { fail "paths_init failed with only HOME set"; return 1; }
+    assert_eq "$got" "/h/.local/state/git-secret-guard /h/.local/state/git-secret-guard/findings /h/.local/state/git-secret-guard/findings" "doctor's dir and record file are the hook's [HOME]"
 }
 
 test_the_docs_show_the_reminder_and_doctor_md_links_to_it() {

@@ -98,9 +98,12 @@ test_a_root_gitleaksignore_in_the_commit_is_never_honored_but_still_scanned() {
 test_a_nested_gitleaksignore_needs_no_special_handling() {
     prepare nested
     mkdir -p -- "$SCAN/sub" && printf 'x:y:1\n' >"$SCAN/sub/.gitleaksignore"
-    set_env STUB_LOG="$SANDBOX/calls-nested"
+    set_env STUB_LOG="$SANDBOX/calls-nested" STUB_RECORD="$SANDBOX/rec-nested"
     run_adapter betterleaks "$SCAN" "$OUTD"
     assert_contains "$(sed -n 2p "$SANDBOX/calls-nested")" "cwd=$SCAN" "scanned in place"
+    assert_eq "$(<"$SCAN/sub/.gitleaksignore")" "x:y:1" "the nested file is still in the scan dir, unchanged"
+    if ! grep -qx '== sub/.gitleaksignore' "$SANDBOX/rec-nested.betterleaks"; then fail "the nested file was not scanned under its own name"; fi
+    assert_no_file "$OUTD/betterleaks-ignore/.gitleaksignore" "betterleaks is not handed an ignore file"
 }
 
 test_findings_become_normalized_rows() {

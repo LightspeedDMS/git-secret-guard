@@ -477,13 +477,38 @@ test_a_live_holder_whose_pid_names_a_directory_is_waited_for_and_the_directory_s
     assert_empty "$(ls -A -- "$dir/$holder")" "nothing was made inside the directory"
 }
 
+WATCH_POLL_SECONDS=0.01
+WATCH_POLL_SECONDS_WINDOWS=0.05
+# ^ why Windows polls at 0.05 s, not the 0.01 s of Linux; every poll forks a sleep, and slow MSYS forks would starve the racing runs past their lock wait
+# ^ invariant only the Linux rate is shown to catch an in-place record write; the record code is shared by every platform and Linux catches it
+if [ "${TEST_IS_WINDOWS:-0}" = 1 ]; then WATCH_POLL_SECONDS="$WATCH_POLL_SECONDS_WINDOWS"; fi
+WATCH_MAX_SECONDS=300
+# ^ invariant a record of two repositories has 4 lines (header, time, one per repository)
+RECORD_LINES_TWO_REPOS=4
+
+# ^ invariant watch_record FILE STOP LOG LINES = reads FILE until STOP exists or WATCH_MAX_SECONDS pass; a successful read of other than LINES lines goes to LOG
+# ^ why a reader of the final path, not a check after the runs; only a reader in the race sees a record written in place
+# ^ why a failed read is skipped, not logged; the record is replaced by a rename and a reader may meet it only where the platform briefly refuses the open
+watch_record() {
+    local file="$1" stop="$2" log="$3" want="$4" deadline=$((SECONDS + WATCH_MAX_SECONDS))
+    local -a seen
+    while [ ! -e "$stop" ] && [ "$SECONDS" -lt "$deadline" ]; do
+        if mapfile -t seen 2>/dev/null <"$file" && [ "${#seen[@]}" -ne "$want" ]; then
+            printf '%s lines, the first two [%s]\n' "${#seen[@]}" "${seen[*]:0:2}" >>"$log"
+        fi
+        sleep "$WATCH_POLL_SECONDS"
+    done
+}
+
 test_concurrent_full_runs_and_rechecks_always_leave_a_valid_record() {
-    local i rc bad=0
+    local i rc bad=0 watcher
     local -a pids=()
     dr_begin && dr_repo one && dr_repo two || return 1
     dr_disable one && dr_disable two || return 1
     doctor
     assert_rc 1 "the first full run"
+    watch_record "$(rec_file)" "$SANDBOX/watch.stop" "$SANDBOX/watch.log" "$RECORD_LINES_TWO_REPOS" &
+    watcher=$!
     for i in $(seq 1 "$CONCURRENT_PAIRS"); do
         gsg_bg "$SANDBOX/full.$i" --roots "$DR_ROOTS"
         pids+=("$BG_PID")
@@ -495,7 +520,11 @@ test_concurrent_full_runs_and_rechecks_always_leave_a_valid_record() {
         rc=$?
         if [ "$rc" -ne 1 ]; then bad=$((bad + 1)); fi
     done
+    : >"$SANDBOX/watch.stop" || kill "$watcher"
+    # ^ why the status is dropped, not checked; the watcher ends by the stop file or by kill and its only result is the log
+    wait "$watcher" 2>/dev/null
     assert_eq "$bad" 0 "every concurrent run finished with the expected status 1"
+    assert_no_file "$SANDBOX/watch.log" "a reader polling the record during the race never saw half of one"
     assert_valid_record "after the concurrent runs"
     assert_eq "$(rec_body | LC_ALL=C sort)" "repo${TAB}$DR_REAL/one${TAB}-${TAB}$(off_text one)
 repo${TAB}$DR_REAL/two${TAB}-${TAB}$(off_text two)" "a valid, complete file (the lock itself is proven by the racing-roots test)"

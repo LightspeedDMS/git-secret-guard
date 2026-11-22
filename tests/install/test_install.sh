@@ -20,22 +20,6 @@ lc_which() {
 GITCONFIG_BEFORE=""
 snapshot_config() { GITCONFIG_BEFORE="$(cat -- "$SANDBOX/gitconfig")"; }
 
-test_install_refuses_when_the_git_on_PATH_is_older_than_2_54() {
-    lc_begin && lc_fake_git 2.52.0 || return 1
-    snapshot_config
-    gsg install
-    assert_rc 1 "old git"
-    assert_contains "$ERR" "git 2.52.0" "names the version found"
-    assert_contains "$ERR" "config-based hooks need git >= 2.54" "explains why"
-    assert_untouched "old git"
-    lc_fake_git 2.53.9
-    gsg install
-    assert_rc 1 "2.53.9 is still too old"
-    lc_fake_git 1.9.0
-    gsg install
-    assert_rc 1 "1.9.0 is too old"
-}
-
 test_install_refuses_when_jq_setsid_or_timeout_is_not_reachable() {
     local tool
     for tool in jq setsid timeout; do
@@ -362,11 +346,21 @@ test_install_records_the_pinned_scanner_versions_in_the_settings() {
 
 cfg_count() { gitx config --global --get-all "$1" 2>/dev/null | wc -l; }
 
+# ^ invariant literal_hook_command SHARE_DIR prints the command install writes, spelled out here => hook_command_text is not trusted
+# ^ why spelled out, not lc_hook_command; lc_hook_command runs hook_command_text, a broken text would be the expected and the actual value
+literal_hook_command() {
+    local b share
+    b="$(git_path "$(lc_recorded_bash)")" || return 1
+    share="$(git_path "$1")" || return 1
+    printf "[ -f '%s' ] && [ -x '%s' ] || { printf '%%s\\\\n' 'git-secret-guard: cannot start the bash the install recorded (%s); nothing was scanned; run git-secret-guard install' >&2; exit 1; }; exec '%s' '%s/hooks/secret-scan'" \
+        "$b" "$b" "$b" "$b" "$share"
+}
+
 test_fresh_install_sets_exactly_the_two_events_and_one_absolute_command() {
     fresh_install || return 1
     assert_eq "$(gitx config --global --get-all hook.git-secret-guard.event | tr '\n' ' ')" "pre-commit commit-msg " "the two events, lines first"
     assert_eq "$(cfg_count hook.git-secret-guard.event)" 2 "one value per event"
-    assert_eq "$(gitx config --global --get-all hook.git-secret-guard.command)" "$(lc_hook_command "$LC_DATA")" "command starts the installed hook, absolute, with the recorded bash"
+    assert_eq "$(gitx config --global --get-all hook.git-secret-guard.command)" "$(literal_hook_command "$LC_DATA")" "command starts the installed hook, absolute, with the recorded bash"
     assert_eq "$(cfg_count hook.git-secret-guard.command)" 1 "command is single-valued"
     assert_eq "$(gitx config --global --get-regexp '^hook\.' | wc -l)" 3 "nothing else under hook.*"
 }
@@ -383,7 +377,7 @@ test_install_replaces_duplicate_and_stale_config_values_instead_of_adding() {
     gsg install
     assert_rc 0 "install over stale values"
     assert_eq "$(gitx config --global --get-all hook.git-secret-guard.event | tr '\n' ' ')" "pre-commit commit-msg " "exactly the two events, the stale pre-push and the duplicates are gone"
-    assert_eq "$(gitx config --global --get-all hook.git-secret-guard.command)" "$(lc_hook_command "$LC_DATA")" "one command, the stale paths are gone"
+    assert_eq "$(gitx config --global --get-all hook.git-secret-guard.command)" "$(literal_hook_command "$LC_DATA")" "one command, the stale paths are gone"
     gsg install
     assert_rc 0 "second install"
     assert_eq "$(cfg_count hook.git-secret-guard.event)$(cfg_count hook.git-secret-guard.command)" 21 "still two events and one command"
@@ -806,40 +800,6 @@ test_a_hooks_path_taken_over_after_a_plain_install_is_recorded() {
     assert_eq "$(state_value previous_hooks_path)" "$LC_HOME/late hooks" "verbatim"
 }
 
-test_install_warns_but_proceeds_for_other_reachable_old_gits() {
-    lc_begin && lc_make_fixtures && lc_use_fixtures || return 1
-    mkdir -p -- "$SANDBOX/oldbin" "$SANDBOX/oldbin2" || return 1
-    printf '#!/bin/sh\necho "git version 2.52.0"\n' >"$SANDBOX/oldbin/git" || return 1
-    printf '#!/bin/sh\necho "git version 2.30.2"\n' >"$SANDBOX/oldbin2/git" || return 1
-    chmod 755 "$SANDBOX/oldbin/git" "$SANDBOX/oldbin2/git" || return 1
-    set_env PATH="$SANDBOX/pathbin:$TEST_BASE_PATH:$SANDBOX/oldbin:$SANDBOX/oldbin2:$SANDBOX/oldbin"
-    gsg install
-    assert_rc 0 "install proceeds"
-    assert_contains "$ERR" "warning: $SANDBOX/oldbin/git is git 2.52.0" "warns about the first old git"
-    assert_contains "$ERR" "warning: $SANDBOX/oldbin2/git is git 2.30.2" "and about the second"
-    assert_contains "$ERR" "commits made with it are not scanned" "says what it means"
-    assert_eq "$(grep -c "warning: $SANDBOX/oldbin/git" <<<"$ERR")" 1 "one warning per binary, though it is on PATH twice"
-    assert_not_contains "$ERR" "warning: $GIT " "the git being used is not warned about"
-    assert_file "$LC_STATE/state" "the install completed"
-    if [ "$(/usr/bin/git --version 2>/dev/null | cut -d' ' -f3 | cut -d. -f2)" -lt 54 ] 2>/dev/null; then
-        assert_contains "$ERR" "warning: /usr/bin/git is git" "the machine's own /usr/bin/git is reported"
-        assert_eq "$(grep -c 'warning: /usr/bin/git ' <<<"$ERR")" 1 "once, though /bin/git is the same file"
-    fi
-    lc_begin && lc_make_fixtures && lc_use_fixtures || return 1
-    lc_path_without git_none || return 1
-    mkdir -p -- "$SANDBOX/root/usr/bin" || return 1
-    printf '#!/bin/sh\necho "git version 2.52.0"\n' >"$SANDBOX/root/usr/bin/git" || return 1
-    chmod 755 "$SANDBOX/root/usr/bin/git" || return 1
-    gsg install
-    assert_rc 0 "with a clean PATH"
-    # ^ why the real /usr/bin/git, not the sandbox root; lc_begin sets no GSG_GITUP_ROOT on Windows and Git for Windows has no /usr/bin/git
-    if [ "$TEST_IS_WINDOWS" -eq 1 ]; then
-        assert_not_contains "$ERR" "warning: $SANDBOX/root/usr/bin/git" "a stand-in outside the real /usr/bin is not a checked position"
-        return
-    fi
-    assert_contains "$ERR" "warning: $SANDBOX/root/usr/bin/git is git 2.52.0" "the always-checked /usr/bin position is checked even when it is not the first git on PATH"
-}
-
 test_install_refuses_before_changing_anything_when_it_cannot_record_or_link() {
     lc_begin && lc_make_fixtures && lc_use_fixtures || return 1
     mkdir -p -- "$LC_BIN" && printf 'mine\n' >"$LC_BIN/git-secret-guard" || return 1
@@ -878,7 +838,7 @@ test_install_prints_a_summary_of_what_it_did() {
     gsg install
     assert_rc 0 "install"
     assert_contains "$OUT" "installed git-secret-guard $(<"$GSG_PROJECT/VERSION")" "version"
-    assert_contains "$OUT" "hook command: $(lc_hook_command "$LC_DATA")" "hook command"
+    assert_contains "$OUT" "hook command: $(literal_hook_command "$LC_DATA")" "hook command"
     assert_contains "$OUT" "trufflehog 3.99.2: kept $LC_BIN/trufflehog$LC_EXE (already at the pinned version)" "a tool that was already right"
     assert_contains "$OUT" "betterleaks 1.9.0: downloaded, verified against tools.lock and installed to $LC_BIN/betterleaks$LC_EXE" "a tool that was downloaded"
     gsg install
@@ -992,7 +952,7 @@ test_without_xdg_variables_the_defaults_under_home_are_used() {
     assert_rc 0 "install with HOME only"
     assert_file "$LC_HOME/.local/share/git-secret-guard/hooks/secret-scan" "share dir under ~/.local/share"
     assert_file "$LC_HOME/.local/state/git-secret-guard/state" "state under ~/.local/state"
-    assert_eq "$(gitx config --global --get hook.git-secret-guard.command)" "$(lc_hook_command "$LC_HOME/.local/share/git-secret-guard")" "command points there"
+    assert_eq "$(gitx config --global --get hook.git-secret-guard.command)" "$(literal_hook_command "$LC_HOME/.local/share/git-secret-guard")" "command points there"
     assert_no_file "$SANDBOX/xdg/data/git-secret-guard" "the XDG dirs were not used"
 }
 

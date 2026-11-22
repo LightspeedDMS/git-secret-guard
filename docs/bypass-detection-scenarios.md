@@ -265,7 +265,7 @@ Scenarios added while the catalog was automated. There is no N06. N09 to N16 com
 | N16 | no test; documented only (install-time, the hook never runs the CLI wrapper) |
 | B01, B04 | `test_real_catalog_b*` |
 | C01 | `test_exemptions_real.sh`: `test_real_trufflehog_ignore_mutes_trufflehog_only`, `test_real_gitleaks_allow_mutes_betterleaks_only`, `test_real_both_markers_on_one_line_let_the_commit_succeed_in_either_order` |
-| C02 | `test_exemptions_real.sh`: `test_real_an_exemption_counts_only_from_the_commit_after_it_is_committed`, `test_real_a_staged_gitleaks_config_cannot_replace_the_one_at_head` |
+| C02 | `test_exemptions.sh`: `test_an_exemption_staged_in_the_same_commit_does_not_apply_but_the_next_commit_is_covered`, `test_head_gitleaks_files_are_applied_announced_and_the_staged_versions_never_are`; `test_exemptions_real.sh`: `test_real_a_staged_gitleaks_config_cannot_replace_the_one_at_head` |
 | C04, C05 (recorded) | `test_real_catalog_c*` |
 | D01–D05, D07–D09, D11–D16, D18–D20 | `test_real_catalog_d*` |
 | D06 | no test of its own: every test runs with `GIT_CONFIG_NOSYSTEM=1` and the hook in the global config, so each Block row above shows it is still blocked |

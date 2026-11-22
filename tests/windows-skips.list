@@ -21,10 +21,8 @@ test_extract::test_symlink_to_file_type_change_is_scanned | ln -s writes no syml
 test_hook::test_non_executable_tool_blocks | NTFS has no executable bit, chmod -x changes nothing
 test_hook::test_the_hook_blocks_when_setsid_or_timeout_is_not_a_usable_absolute_path | setsid is not used on Windows; taskkill takes its place
 test_hook::test_the_hook_takes_setsid_and_timeout_from_settings_never_from_PATH | setsid is not used on Windows; taskkill takes its place
-test_hook::test_a_scanner_that_ignores_term_is_killed_before_the_temp_dir_is_removed | uses pgrep and TERM grace; test_windows covers the interrupt with real processes
 test_hook::test_a_signal_before_the_runner_has_its_own_group_does_not_wait_for_the_scan | no process groups on Windows; test_windows covers the interrupt with real processes
 test_hook::test_int_signal_stops_the_scanners_and_removes_the_private_temp_dir | uses pgrep; test_windows covers the interrupt with real processes
-test_hook::test_term_signal_stops_the_scanners_and_removes_the_private_temp_dir | uses pgrep; test_windows covers the interrupt with real processes
 test_hookspath::test_a_dangling_include_does_not_hide_a_later_include_that_sets_core_hooks_path | ln -s writes no symlink native git can see
 test_hookspath::test_a_symlinked_global_gitconfig_stays_a_symlink_through_install_and_uninstall | ln -s writes no symlink native git can see
 test_hookspath::test_an_include_pointing_at_a_dangling_symlink_is_skipped_like_git_does | ln -s writes no symlink native git can see
@@ -35,7 +33,6 @@ test_install::test_replace_hooks_path_records_verbatim_backs_up_and_unsets | NTF
 test_install::test_install_refuses_a_read_only_global_config_before_changing_anything | NTFS ignores chmod, so nothing is read-only
 test_install::test_a_failed_copy_leaves_no_staging_dir_beside_the_share_dir | NTFS ignores chmod, so nothing is unreadable
 test_install::test_a_leftover_old_tree_that_cannot_be_removed_is_reported | NTFS ignores chmod, so nothing is undeletable
-test_install::test_install_refuses_when_jq_setsid_or_timeout_is_not_reachable | Linux prerequisite list; Windows downloads jq, covered by test_windows
 test_macos::test_doctor_accepts_the_macos_command_form_and_checks_the_recorded_bash | fakes a Mac; the fixtures of a Windows host do not fit
 test_macos::test_linux_install_never_calls_brew_and_writes_no_macos_settings | fakes Linux; the fixtures of a Windows host do not fit
 test_macos::test_load_settings_discards_inherited_bash_and_gnubin | fakes a Mac; the fixtures of a Windows host do not fit

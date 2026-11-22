@@ -495,7 +495,7 @@ PII detection together with its own config can put the same rules into that conf
   lower threshold (`git -c core.bigFileThreshold=1 commit`, or the same key in the repository config) makes git treat
   every file as binary and show no added lines, so a token would commit with no output. The command-line pin wins over
   the repository config, `GIT_CONFIG_PARAMETERS` and `GIT_CONFIG_COUNT`
-  (`test_real_core_big_file_threshold_cannot_make_a_token_commit_silently`). The pin is also the ceiling: a text file
+  (the three tests of `tests/scan/test_inherited_config.sh`). The pin is also the ceiling: a text file
   bigger than 100 GiB (4095 MiB on Windows, where Git for Windows keeps the value in 32 bits) is binary to git and is
   not scanned, whatever your own setting says. 27 other values of 25 settings (`diff.*`, `core.autocrlf`,
   `core.eol`, `core.safecrlf`, `color.*`, `core.quotePath`, encodings, ...) are swept in all three forms; none changes

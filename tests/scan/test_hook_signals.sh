@@ -293,15 +293,24 @@ test_the_scanners_do_not_inherit_the_worker_marker() {
 
 # ^ why 12000 ms, not the 3000 of the others; both scanner groups stop in one 5 s grace, one after the other 10 s would reach the supervisor's KILL
 SIG_STUBBORN_MS=12000
+# ^ why 4000 ms, not 0; scanners ignoring TERM end by the KILL after the 5 s grace, an earlier end means the grace was cut
+SIG_STUBBORN_MIN_MS=4000
 test_two_scanners_that_ignore_term_are_stopped_before_the_work_dir_is_removed() {
-    local keep_ms="$SIG_PROMPT_MS" rc
+    local keep_ms="$SIG_PROMPT_MS" rc run_rc
     sig_begin stubborn2 no-such-subcommand || return 1
     set_env STUB_TF_SLEEP="$SIGDUR" STUB_GL_SLEEP="$SIGDUR" STUB_TF_STUBBORN=1 STUB_GL_STUBBORN=1
     stage_file a.txt one || return 1
     SIG_START_COUNT=2
     SIG_PROMPT_MS="$SIG_STUBBORN_MS"
-    sig_run TERM && sig_check 143 "TERM with two scanners ignoring TERM"
-    rc=$?
+    sig_run TERM
+    run_rc=$?
+    if [ "$run_rc" -eq 0 ]; then
+        sig_check 143 "TERM with two scanners ignoring TERM"
+        rc=$?
+        [ "$SIG_MS" -ge "$SIG_STUBBORN_MIN_MS" ] || fail "the hook ended $SIG_MS ms after TERM; expected at least $SIG_STUBBORN_MIN_MS ms (the grace, then the KILL)"
+    else
+        rc="$run_rc"
+    fi
     SIG_START_COUNT=1
     SIG_PROMPT_MS="$keep_ms"
     return "$rc"

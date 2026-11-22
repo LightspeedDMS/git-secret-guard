@@ -201,6 +201,8 @@ test_status_not_installed_still_exits_1_with_a_problem_line_and_a_summary() {
     assert_contains "$OUT" "not installed" "says so"
     assert_contains "$OUT" "  PROBLEM  installed: not installed" "as a problem line"
     assert_summary "1 problem, 0 warnings"
+    assert_no_file "$LC_STATE" "and creates nothing"
+    assert_no_file "$LC_DATA" "not even the share dir"
 }
 
 test_status_in_terminal_mode_draws_icons_and_colours_only_the_icon() {

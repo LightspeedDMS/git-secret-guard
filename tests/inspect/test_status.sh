@@ -30,15 +30,6 @@ lc_which() {
     env -i HOME="$SANDBOX/home" PATH="$SANDBOX/pathbin:$TEST_BASE_PATH" bash -c 'type -P "$1"' _ "$1" </dev/null
 }
 
-test_status_reports_not_installed_with_exit_1() {
-    lc_begin || return 1
-    gsg status
-    assert_rc 1 "status before install"
-    assert_contains "$OUT" "not installed" "says so"
-    assert_no_file "$LC_STATE" "and creates nothing"
-    assert_no_file "$LC_DATA" "not even the share dir"
-}
-
 test_status_shows_the_installation() {
     fresh_install
     gsg status

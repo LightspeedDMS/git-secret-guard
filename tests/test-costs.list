@@ -41,7 +41,7 @@ test_doctor_record_refusals - 2
 test_doctor_repos - 37
 test_exempt - 1
 test_exemptions - 17
-test_exemptions_real - 102
+test_exemptions_real - 89
 test_extract - 2
 test_frameworks - 1
 test_gitup - 16
@@ -60,7 +60,7 @@ test_gitup_takeover - 60
 test_gitup_windows - 3
 test_gitup_windows_cmd - 0
 test_guidance - 1
-test_hook - 32
+test_hook - 20
 test_hook_libraries - 3
 test_hook_signals - 33
 test_hookspath 120 13

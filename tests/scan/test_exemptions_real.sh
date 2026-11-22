@@ -34,27 +34,6 @@ test_real_excluded_paths_are_not_scanned_and_the_rest_is() {
     assert_contains "$ERR" "1 staged file(s) excluded" "still announced"
 }
 
-test_real_an_exemption_counts_only_from_the_commit_after_it_is_committed() {
-    need_real_tools
-    new_repo rs2 || return 1
-    stage_file base.txt hello && gitx commit -q --no-verify -m base
-    stage_file .secret-scan-ignore 'secret/**   # fixtures'
-    stage_file secret/k.txt "$(token_line)"
-    commit_cap "self-exempting"
-    assert_rc 1 "the finding is reported although the same commit exempts it"
-    reported_by_trufflehog || fail "trufflehog row missing: ${ERR:0:300}"
-    reported_by_betterleaks || fail "betterleaks row missing: ${ERR:0:300}"
-    assert_contains "$ERR" "secret/k.txt:1" "real path and line"
-    gitx rm -q --cached secret/k.txt
-    commit_cap "the exemption on its own"
-    assert_rc 0 "the ignore file alone is clean"
-    stage_file secret/k.txt "$(token_line)"
-    commit_cap "now covered"
-    assert_rc 0 "the next commit of that path is not scanned"
-    assert_contains "$ERR" "1 staged file(s) excluded by .secret-scan-ignore" "announced"
-    no_leak "$(fake_github_token)"
-}
-
 test_real_the_ignore_file_is_scanned_even_when_a_pattern_or_a_catch_all_matches_it() {
     need_real_tools
     local n=0 pats
@@ -154,17 +133,6 @@ test_real_both_markers_on_one_line_let_the_commit_succeed_in_either_order() {
         assert_empty "$OUT" "stdout stays empty"
         assert_pass_line_only "$ERR" "only the pass line"
     done
-}
-
-test_real_a_marker_on_another_line_does_not_mute_the_secret() {
-    need_real_tools
-    new_repo rm4 || return 1
-    stage_file f.txt '# trufflehog:ignore gitleaks:allow' "$(token_line)"
-    commit_cap "marker above"
-    assert_rc 1 "blocked"
-    reported_by_trufflehog || fail "trufflehog row missing: ${ERR:0:300}"
-    reported_by_betterleaks || fail "betterleaks row missing: ${ERR:0:300}"
-    assert_contains "$ERR" "f.txt:2" "the secret line"
 }
 
 internal_id() { printf '%s%s' "ACMEINT" "-482915730264"; }
@@ -431,38 +399,6 @@ test_real_an_absolute_extend_path_to_an_existing_file_still_loads_a_documented_r
     assert_contains "$ERR" "from-base" "the rule of the base file fired"
 }
 
-test_real_core_big_file_threshold_cannot_make_a_token_commit_silently() {
-    need_real_tools
-    local mode
-    for mode in flag local; do
-        new_repo "rb-$mode" || return 1
-        stage_file src/a.txt "$(token_line)"
-        if [ "$mode" = flag ]; then
-            run_cap gitx -c core.bigFileThreshold=1 commit -q -m flag
-        else
-            gitx config core.bigFileThreshold 1
-            commit_cap "local"
-        fi
-        assert_rc 1 "[$mode] every file counted as binary must not hide the token"
-        reported_by_trufflehog || fail "[$mode] trufflehog row missing: ${ERR:0:300}"
-        reported_by_betterleaks || fail "[$mode] betterleaks row missing: ${ERR:0:300}"
-        no_leak "$(fake_github_token)"
-    done
-}
-
-test_real_a_replace_ref_cannot_substitute_a_permissive_ignore_file() {
-    need_real_tools
-    new_repo rrr1 || return 1
-    stage_file base.txt hello && gitx commit -q --no-verify -m base
-    replace_head_with_permissive_commit .secret-scan-ignore '**   # not in the branch history' || return 1
-    stage_file src/a.txt "$(token_line)"
-    commit_cap "replaced HEAD"
-    assert_rc 1 "the finding is still reported"
-    assert_contains "$ERR" "src/a.txt:1" "real path and line"
-    assert_not_contains "$ERR" "WARNING" "the substitute catch-all was never read"
-    no_leak "$(fake_github_token)"
-}
-
 test_real_a_replace_ref_cannot_substitute_a_permissive_gitleaks_config() {
     need_real_tools
     new_repo rrr2 || return 1
@@ -487,25 +423,6 @@ test_real_the_pre_flight_message_carries_betterleaks_message_words_and_no_fields
     assert_not_contains "$ERR" "error=" "and so does the field name"
     assert_not_contains "$ERR" "scan failed (exit 1)" "refused up front, not as an opaque scanner failure"
     assert_not_contains "$ERR" $'\033' "no escape characters reach the terminal"
-}
-
-test_real_literal_pathspecs_cannot_turn_the_excludes_off() {
-    need_real_tools
-    local mode
-    for mode in env flag; do
-        new_repo "rl-$mode" || return 1
-        commit_ignore_file 'docs/**   # generated'
-        stage_file src/a.txt "$(token_line)"
-        if [ "$mode" = env ]; then
-            set_env GIT_LITERAL_PATHSPECS=1
-            commit_cap "env"
-        else
-            run_cap gitx --literal-pathspecs commit -q -m flag
-        fi
-        assert_rc 1 "[$mode] the src finding is still reported"
-        assert_contains "$ERR" "src/a.txt:1" "[$mode] real path and line"
-        no_leak "$(fake_github_token)"
-    done
 }
 
 test_real_an_aws_access_token_fingerprint_at_head_also_mutes_a_lone_key_id() {

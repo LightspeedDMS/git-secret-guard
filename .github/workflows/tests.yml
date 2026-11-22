@@ -170,22 +170,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # The suite starts tens of thousands of processes; Defender's real-time scan of each one was about half the CPU of a file run (#61).
-      # This job only, on an ephemeral VM: the windows job below keeps the default scanner, as a real user has it.
-      - name: Antivirus real-time protection (state, and an exclusion for the suite)
+      # The suite starts tens of thousands of processes, and a real-time scan of each one can double a file's CPU time (#61).
+      # The windows-2025 image had real-time protection off when this was added, so the suite needs no exclusion; this line shows if that changes.
+      - name: Antivirus real-time protection state
         shell: pwsh
-        run: |
-          $fields = 'AMServiceEnabled', 'AntivirusEnabled', 'RealTimeProtectionEnabled', 'OnAccessProtectionEnabled', 'IoavProtectionEnabled', 'BehaviorMonitorEnabled'
-          Write-Output 'before:'
-          Get-MpComputerStatus | Format-List $fields
-          if (-not (Get-MpComputerStatus).RealTimeProtectionEnabled) { Write-Output 'real-time protection is off: no exclusion added'; exit 0 }
-          $git = Split-Path -Parent (Split-Path -Parent (Get-Command git.exe).Source)
-          $paths = @($env:GITHUB_WORKSPACE, $git, $env:RUNNER_TEMP, $env:TEMP, (Join-Path $HOME '.tmp'))
-          Add-MpPreference -ExclusionPath $paths
-          Write-Output 'excluded paths:'
-          (Get-MpPreference).ExclusionPath
-          Write-Output 'after:'
-          Get-MpComputerStatus | Format-List $fields
+        run: Write-Output "antivirus real-time protection enabled: $((Get-MpComputerStatus).RealTimeProtectionEnabled)"
 
       - name: Run the suite
         shell: cmd

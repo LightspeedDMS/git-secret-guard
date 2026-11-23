@@ -343,11 +343,12 @@ remove=0 removed" "the adapter plans, applies and removes through the real scrip
 }
 
 test_a_plain_install_on_windows_reaches_only_the_stand_in() {
+    local log="$SANDBOX/xdg/powershell.log"
     lc_begin && lc_make_fixtures && lc_use_fixtures || return 1
     gsg install
     assert_rc 0 "install"
-    assert_eq "$(wc -l <"$SANDBOX/powershell.log" | tr -d ' ')" 1 "the stand-in was called once"
-    assert_contains "$(<"$SANDBOX/powershell.log")" "gsg-path.ps1 plan " "and it was the plan"
+    assert_eq "$(wc -l <"$log" | tr -d ' ')" 1 "the stand-in was called once"
+    assert_contains "$(<"$log")" "gsg-path.ps1 plan " "and it was the plan"
     assert_contains "$OUT" "the PowerShell stand-in of the test suite changes nothing" "its reason is the hint's reason"
     assert_eq "$(state_value cli_path)" "" "nothing is recorded"
 }

@@ -128,7 +128,7 @@ lc_powershell_standin() {
     mkdir -p -- "${f%/*}" || return 1
     cat >"$f" <<'EOF' || return 1
 #!/bin/sh
-d="${0%/*}/../../../../.."
+d="${0%/*}/../../../../../xdg"
 printf '%s\n' "$*" >>"$d/powershell.log"
 echo "the PowerShell stand-in of the test suite changes nothing" >&2
 exit 2
@@ -482,7 +482,7 @@ lc_begin() {
     if [ "$TEST_IS_WINDOWS" -eq 1 ]; then LC_EXE=.exe; fi
     rm -rf -- "$LC_HOME" "$SANDBOX/xdg" "$SANDBOX/pathbin" "$LC_FIX" "$SANDBOX/systemctl.log" "$SANDBOX/systemctl.fail" \
         "$SANDBOX/schtasks.log" "$SANDBOX/schtasks.fail" "$SANDBOX/schtasks.tasks" \
-        "$SANDBOX/launchctl.log" "$SANDBOX/launchctl.fail" "$SANDBOX/launchctl.failonce" "$SANDBOX"/launchctl.loaded.* "$SANDBOX/brew.map" "$SANDBOX/dscl.log" "$SANDBOX/dscl.shell" "$SANDBOX/powershell.log" \
+        "$SANDBOX/launchctl.log" "$SANDBOX/launchctl.fail" "$SANDBOX/launchctl.failonce" "$SANDBOX"/launchctl.loaded.* "$SANDBOX/brew.map" "$SANDBOX/dscl.log" "$SANDBOX/dscl.shell" \
         "$SANDBOX"/gitup.log "$SANDBOX"/sudo.fail "$SANDBOX"/dnf.* "$SANDBOX"/make.* "$SANDBOX"/rpm.* "$SANDBOX"/sudo.failon "$SANDBOX"/sudo.skip "$SANDBOX"/newgit.broken "$SANDBOX"/df.avail "$SANDBOX"/df.avail.dirs "$SANDBOX"/ldd.out "$SANDBOX"/apt.* "$SANDBOX/root" "$SANDBOX/os-release" || return 1
     mkdir -p -- "$LC_HOME" "$SANDBOX/xdg/data" "$SANDBOX/xdg/state" "$SANDBOX/pathbin" || return 1
     lc_brew_reset || return 1

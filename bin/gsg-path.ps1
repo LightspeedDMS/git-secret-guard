@@ -1,10 +1,12 @@
-# ^ external powershell -NoProfile -ExecutionPolicy Bypass -File gsg-path.ps1 VERB ARGS puts the CLI folder on the Path of the Windows user (install) and takes it off (uninstall)
-# ^ invariant VERB plan FOLDER, apply MODE FOLDER, remove MODE FOLDER; MODE is sep (append ;FOLDER), bare (append FOLDER after a final ;) or create (the value did not exist)
+# ^ external powershell -NoProfile -ExecutionPolicy Bypass -File gsg-path.ps1 VERB ARGS puts the CLI folder on the user Path and takes it off again
+# ^ invariant VERB plan FOLDER, apply MODE FOLDER, remove MODE FOLDER; MODE is sep (append ;FOLDER), bare (FOLDER after a final ;) or create (no value yet)
 # ^ invariant only the value Path of HKCU\Environment, never the machine Path, no administrator rights, never setx (it cuts a value at 1024 characters)
-# ^ security no byte of the value is printed; stdout is one ASCII status word, a failure is a non-zero exit and one line on stderr, and bash reads nothing else
-# ^ invariant exit 0 done (status word printed); 1 unexpected error; 2 refused (arguments, registry type, length); 3 the value no longer fits the plan, nothing was changed
-# ^ invariant status words: plan present, absent-sep, absent-bare, absent-novalue; apply added, added-nobroadcast; remove removed, removed-nobroadcast, changed, absent
-# ^ invariant no module cmdlet is used, so the module path of a PowerShell 7 parent cannot matter; the registry is reached through .NET only
+
+# ^ security no byte of the value is printed; stdout is one ASCII status word, a failure is a non-zero exit and one line on stderr, bash reads nothing else
+# ^ invariant exit 0 done (status word printed); 1 unexpected error; 2 refused (arguments, registry type, length); 3 the value no longer fits the plan
+# ^ invariant status words are plan present, absent-sep, absent-bare, absent-novalue; apply added; remove removed, changed, absent; -nobroadcast after a write
+
+# ^ invariant no cmdlet is used, the module path of a PowerShell 7 parent cannot matter; the registry is reached through .NET only
 param([string]$Verb, [string]$First, [string]$Second)
 Set-StrictMode -Version 2
 $ErrorActionPreference = 'Stop'
@@ -30,8 +32,9 @@ function Set-UserPath([string]$Value, [string]$Kind) { $k = [Microsoft.Win32.Reg
 # ^ invariant deletes the value Path of the user; tests replace this one line
 function Remove-UserPath { $k = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $true); try { $k.DeleteValue('Path', $true) } finally { $k.Close() } }
 
-# ^ external a user variable set and deleted through .NET sends WM_SETTINGCHANGE to every window; the registry write alone tells no running program (Microsoft Learn, Environment.SetEnvironmentVariable)
-# ^ why a throwaway variable, not SendMessageTimeout through Add-Type; no compiler run, no native signature to get wrong, and it works under constrained language; tests replace this one line
+# ^ external a user variable set and deleted through .NET sends WM_SETTINGCHANGE to every window, the registry write alone tells no running program
+# ^ why a throwaway variable, not SendMessageTimeout through Add-Type; no compiler run, no native signature to get wrong, works under constrained language
+# ^ see Microsoft Learn Environment.SetEnvironmentVariable for the broadcast; tests replace this one line
 function Send-EnvironmentChange { [Environment]::SetEnvironmentVariable('GSG_ENV_CHANGED', '1', 'User'); [Environment]::SetEnvironmentVariable('GSG_ENV_CHANGED', $null, 'User') }
 
 # ^ invariant the word printed after a write; a failed broadcast never undoes or fails a written value, it only changes the word
@@ -40,7 +43,7 @@ function Send-AndSay([string]$Word) {
     Say $Word
 }
 
-# ^ invariant two entries are the same folder when they differ only by case, slash direction, trailing slashes or a %VARIABLE% (expanded here, for the comparison only)
+# ^ invariant two entries are the same folder when they differ only by case, slash direction, trailing slashes or a %VARIABLE%, expanded for the comparison only
 function Test-SameFolder([string]$Entry, [string]$Folder) {
     if ($Entry -eq '') { return $false }
     $a = [Environment]::ExpandEnvironmentVariables($Entry).Replace('/', '\').TrimEnd('\').ToUpperInvariant()
@@ -58,7 +61,8 @@ function Assert-Writable($Current, [string]$NewValue) {
     if ($NewValue.Length -ge $MaxChars) { Stop-Run 2 "the user Path would reach $($NewValue.Length) characters, more than Windows accepts for one variable" }
 }
 
-# ^ invariant the text install appends for MODE, or $null when the value no longer ends the way the plan saw it (sep needs no final ;, bare needs one or an empty value)
+# ^ invariant the value with the folder appended for MODE, or $null when the value no longer ends the way the plan saw it
+# ^ invariant sep needs a value without a final ; and bare needs a final ; or an empty value
 function Get-Appended([string]$Value, [string]$Mode, [string]$Folder) {
     if ($Mode -eq 'sep' -and $Value -ne '' -and -not $Value.EndsWith(';')) { return $Value + ';' + $Folder }
     if ($Mode -eq 'bare' -and ($Value -eq '' -or $Value.EndsWith(';'))) { return $Value + $Folder }
@@ -93,8 +97,8 @@ function Invoke-Apply([string]$Mode, [string]$Folder) {
     Send-AndSay 'added'
 }
 
-# ^ invariant the value install wrote ends with the recorded text, or has one element equal to the folder byte for byte; any other spelling of the folder is only named
-# ^ invariant what is cut is the text, or the element with exactly one adjacent separator; every other byte of the value stays and so does the registry type
+# ^ invariant the value install wrote ends with the recorded text, or has one element equal to the folder byte for byte; another spelling is only named
+# ^ invariant what is cut is the text, or the element with exactly one adjacent separator; every other byte of the value stays, and the registry type too
 function Get-Remainder([string]$Value, [string]$Mode, [string]$Folder) {
     $text = $Folder
     if ($Mode -eq 'sep') { $text = ';' + $Folder }

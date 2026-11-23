@@ -269,7 +269,7 @@ install_path_plan; echo "$INSTALL_PATH_ACTION|$INSTALL_PATH_RECORD|$INSTALL_PATH
     assert_eq "$OUT" "failed|denied" "winpath_apply failed: the action failed with the reason, never a failed install"
 }
 
-# ^ coupled a change written but not announced to running programs is a success that says what to do; the adapter sets WINPATH_NOBROADCAST
+# ^ coupled a change written and not announced to running programs is a success with advice on what to do; the adapter sets WINPATH_NOBROADCAST
 test_a_change_written_but_not_announced_says_to_sign_out_and_in() {
     ip_win 'winpath_apply() { WINPATH_NOBROADCAST=1; return 0; }; INSTALL_PATH_ACTION=add; install_path_apply; install_path_report'
     assert_contains "$OUT" "added /c/u/.local/bin to the user Path" "the change is reported as made"

@@ -33,7 +33,7 @@ test_plan_refuses_a_folder_the_user_path_cannot_hold_without_starting_powershell
             tab) dir=$'/c/a\tb' ;;
             relative) dir='relative/dir' ;;
         esac
-        # ^ external NTFS forbids a quote, a newline and a tab in a name, and the Windows command line cannot carry them to bash; only Linux can build these cases
+        # ^ external NTFS forbids a quote, a newline and a tab in a name and the Windows command line cannot carry them to bash; only Linux builds these
         if [ "$TEST_IS_WINDOWS" -eq 1 ] && [[ $name == quote || $name == newline || $name == tab ]]; then continue; fi
         wp_begin || return 1
         wp_say plan absent-sep || return 1
@@ -44,7 +44,7 @@ test_plan_refuses_a_folder_the_user_path_cannot_hold_without_starting_powershell
     done
 }
 
-# ^ invariant wp_unusable NAME EXPECTED-TEXT runs the plan after the stand-in was set up for NAME (the caller does that) and checks nothing is planned and the reason holds the text
+# ^ invariant wp_unusable NAME TEXT runs the plan on a stand-in the caller set up for NAME; nothing may be planned and the reason must hold TEXT
 wp_unusable() {
     wp 'winpath_plan "$GSG_BIN_DIR"; echo "$REPLY|[$WINPATH_RECORD]"; echo "$WINPATH_WHY"'
     assert_contains "$OUT" "unusable|[]" "[$1] nothing is planned"
@@ -68,7 +68,7 @@ test_plan_says_unusable_with_the_reason_when_powershell_cannot_answer() {
     assert_not_contains "$OUT" "$(printf '%0*d' "$WP_PAST_THE_CUT" 7)" "a long reason is cut"
 }
 
-# ^ coupled GSG_WINPATH_ROOT moves the System32 winpath looks in, as GSG_GITUP_ROOT moves it for the git upgrade; lifecycle tests on Windows point it at a stand-in
+# ^ coupled GSG_WINPATH_ROOT moves the System32 winpath looks in, as GSG_GITUP_ROOT does for the git upgrade; lifecycle tests on Windows point it at a stand-in
 test_the_powershell_comes_from_the_system32_the_git_upgrade_uses_and_a_root_override_moves_it() {
     local ps="WindowsPowerShell/v1.0/powershell.exe"
     wp_begin || return 1
@@ -95,13 +95,13 @@ test_the_script_is_plain_ascii_lf_and_never_reaches_the_machine_path_or_setx() {
     assert_contains "$(<"$f")" "DoNotExpandEnvironmentNames" "the value is read raw"
 }
 
-# ^ invariant two probes; apply reads the record from WINPATH_RECORD, remove takes it as its argument; $1 is the record and the answer is "rc=N [answer] nobc=0|1"
+# ^ invariant two probes; apply reads the record from WINPATH_RECORD, remove takes it as argument; $1 is the record, the answer is "rc=N [answer] nobc=0|1"
 # ^ invariant WP_WHY_CODE added to a probe also prints the reason
 WP_APPLY_CODE='WINPATH_RECORD="$1"; winpath_apply "$GSG_BIN_DIR"; echo "rc=$? nobc=$WINPATH_NOBROADCAST"'
 WP_REMOVE_CODE='winpath_remove "$1"; echo "rc=$? $REPLY nobc=$WINPATH_NOBROADCAST"'
 WP_WHY_CODE='; echo "$WINPATH_WHY"'
 
-# ^ invariant wp_forms apply|remove WORD runs winpath_apply or winpath_remove for each of the three record forms against a stand-in answering WORD; OUT is the answer of the last form
+# ^ invariant wp_forms apply|remove WORD runs winpath_apply or winpath_remove for each record form on a stand-in answering WORD; OUT is the last answer
 # ^ invariant for each form the script must have been started with exactly the verb, the form word and the folder, in this order
 wp_forms() {
     local verb="$1" word="$2" row mode rec log

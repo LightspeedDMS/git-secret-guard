@@ -129,4 +129,6 @@ test_update_log 288 48
 test_upgrade 218 12
 test_windows - 9
 test_windows_harness_safety 84 2
+test_windows_path 61 0
+test_winpath - 2
 test_wsl - 2

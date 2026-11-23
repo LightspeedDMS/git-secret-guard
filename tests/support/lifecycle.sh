@@ -121,7 +121,7 @@ EOF
     chmod 755 "$SANDBOX/pathbin/dscl"
 }
 
-# ^ security a Windows host runs the real PowerShell and the real registry, so lifecycle tests reach this stand-in through GSG_WINPATH_ROOT (set in lc_begin on Windows only)
+# ^ security a Windows host has the real PowerShell and registry; lifecycle tests reach this stand-in through GSG_WINPATH_ROOT, set in lc_begin on Windows only
 # ^ invariant it logs its arguments to powershell.log and answers every call with exit 2 and one reason line => the plan is a hint and nothing is ever written
 lc_powershell_standin() {
     local f="$SANDBOX/root/windows/System32/WindowsPowerShell/v1.0/powershell.exe"

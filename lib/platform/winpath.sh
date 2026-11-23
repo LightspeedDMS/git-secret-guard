@@ -1,12 +1,12 @@
 # shellcheck shell=bash disable=SC2034
 # ^ why a file-wide SC2034 off, not one per line; WINPATH_RECORD and WINPATH_WHY are read by install_path.sh
 
-# ^ coupled seam between the install flow (lib/install/install_path.sh) and the Windows user Path; the flow calls only winpath_plan, winpath_apply and winpath_remove
+# ^ coupled seam between lib/install/install_path.sh and the Windows user Path; the flow calls winpath_plan, winpath_apply and winpath_remove only
 # ^ coupled the work is done by bin/gsg-path.ps1 under the Windows PowerShell 5.1 of System32; docs/platforms.md has the maintainer notes
 # ^ security no value bytes cross the pipe from PowerShell to bash, only status words and exit codes => a Path entry never reaches a log or state this way
 WINPATH_RECORD="" WINPATH_WHY="" WINPATH_OUT="" WINPATH_W="" WINPATH_MODE="" WINPATH_FOLDER="" WINPATH_NOBROADCAST=0
 GSG_WINPATH_SCRIPT=gsg-path.ps1
-# ^ external Windows PowerShell 5.1 lives at this fixed place below System32 on every Windows that has it; PowerShell 7 is never used
+# ^ external Windows PowerShell 5.1 sits at this fixed place below System32 on every Windows, PowerShell 7 is never used
 GSG_WINPATH_POWERSHELL=WindowsPowerShell/v1.0/powershell.exe
 # ^ invariant one start of PowerShell is bounded; a cold start takes a few seconds, the registry work is milliseconds
 GSG_WINPATH_SECONDS=60
@@ -21,8 +21,8 @@ winpath_set_why() {
     WINPATH_WHY="${t:0:GSG_WINPATH_REASON_MAX}"
 }
 
-# ^ external the System32 directory is found as the git upgrade finds reg.exe (gitup_windows_sysdir: GSG_GITUP_ROOT for tests, else SYSTEMROOT), never through PATH
-# ^ coupled GSG_WINPATH_ROOT is a second, explicit override of the same kind; on Windows GSG_GITUP_ROOT would hide the real reg.exe and whoami.exe from the git upgrade
+# ^ external System32 is found as the git upgrade finds reg.exe (gitup_windows_sysdir), GSG_GITUP_ROOT moves it in tests, PATH is never searched
+# ^ coupled GSG_WINPATH_ROOT is a second explicit override; on Windows GSG_GITUP_ROOT would hide the real reg.exe and whoami.exe from the git upgrade
 # ^ invariant sets REPLY = the powershell.exe to run; rc 1 with WINPATH_WHY when the directory or the file is not there
 winpath_powershell() {
     local sys root="${GSG_WINPATH_ROOT:-}"
@@ -47,7 +47,7 @@ winpath_powershell() {
     REPLY="$sys/$GSG_WINPATH_POWERSHELL"
 }
 
-# ^ invariant winpath_run VERB ARGS... runs bin/gsg-path.ps1 and sets WINPATH_OUT = the last line it printed (one ASCII status word); rc 1 with WINPATH_WHY otherwise
+# ^ invariant winpath_run VERB ARGS... runs bin/gsg-path.ps1, sets WINPATH_OUT = its last line (one ASCII status word); rc 1 with WINPATH_WHY otherwise
 # ^ why both streams are read and only the last line is used, not stdout alone; a failure prints its one-line reason on stderr and noise before it is ignored
 # ^ security MSYS2_ARG_CONV_EXCL keeps the Windows path arguments as they are; stdin is /dev/null and the run is bounded by timeout
 winpath_run() {
@@ -127,7 +127,7 @@ winpath_plan() {
 
 # ^ invariant $1 = a record; sets WINPATH_MODE (sep, bare or create) and WINPATH_FOLDER; rc 1 with WINPATH_WHY when it is not one of ours
 # ^ invariant the forms are "windows-user-path ;FOLDER" (sep, appended after an entry), "windows-user-path FOLDER" (bare, after a final ;) and
-# ^ invariant "windows-user-path created FOLDER" (the value did not exist, uninstall deletes it again); FOLDER is a Windows path without ; % " or control characters
+# ^ invariant "windows-user-path created FOLDER" is a value install created, uninstall deletes it; FOLDER has no ; % " or control character
 winpath_record() {
     local rest="${1#windows-user-path }" re='^([A-Za-z]:\\|\\\\[^\\])[^;%"[:cntrl:]]*$'
     WINPATH_MODE="" WINPATH_FOLDER=""
@@ -144,7 +144,7 @@ winpath_record() {
 }
 
 # ^ invariant winpath_apply DIR appends the text of WINPATH_RECORD to the user Path value and keeps its registry type; every other entry stays byte for byte
-# ^ invariant rc 0 = appended (WINPATH_NOBROADCAST=1 when running programs could not be told), rc 1 = nothing changed (WINPATH_WHY says why); never a failed install
+# ^ invariant rc 0 = appended (WINPATH_NOBROADCAST=1 when running programs were not told), rc 1 = nothing changed (WINPATH_WHY); never a failed install
 winpath_apply() {
     WINPATH_NOBROADCAST=0
     winpath_record "$WINPATH_RECORD" || return 1

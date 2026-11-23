@@ -10,9 +10,9 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/../support/winpath.sh"
 
 if [ "$TEST_IS_WINDOWS" -ne 1 ]; then FILE_SKIP_REASON="runs bin/gsg-path.ps1 with Windows PowerShell 5.1; tests/install/test_winpath.sh covers the adapter everywhere"; fi
 
-# ^ security the sandbox copy of the script keeps no line that reaches the registry or the broadcast; the four functions are file-backed and wpw_begin counts the lines replaced
+# ^ security the sandbox copy keeps no line reaching the registry or the broadcast; four functions are file-backed and wpw_begin counts the lines replaced
 # ^ invariant the user Path of the test is two files in the sandbox (value.txt, kind.txt); events.log gets one word per write, delete and broadcast
-# ^ invariant the number of lines that differ from the product after the four replacements; each replaced line shows once as removed and once as added
+# ^ invariant the lines differing from the product after the four replacements; each replaced line shows once as removed and once as added
 WPW_SEAM_DIFF_LINES=8
 
 # ^ invariant the file-backed text of one seam function; @DIR@ is the sandbox directory as a Windows path
@@ -26,7 +26,7 @@ wpw_seam_text() {
     esac
 }
 
-# ^ invariant wpw_begin leaves WPW (the sandbox directory) with a copy of bin/gsg-path.ps1 whose four seam functions are the file-backed ones, and no user Path value
+# ^ invariant wpw_begin leaves WPW (the sandbox directory) with a copy of bin/gsg-path.ps1 whose four seam functions are file-backed, and no user Path value
 wpw_begin() {
     local dir name text
     WPW="$SANDBOX/wpw"
@@ -49,7 +49,7 @@ wpw_begin() {
     fi
 }
 
-# ^ invariant wpw_set VALUE KIND stores the test user Path; wpw_none removes it; wpw_value sets WPW_VALUE to the stored bytes exactly and WPW_KIND to the stored type
+# ^ invariant wpw_set VALUE KIND stores the test user Path; wpw_none removes it; wpw_value sets WPW_VALUE to the stored bytes and WPW_KIND to the type
 wpw_set() { printf '%s' "$1" >"$WPW/value.txt" && printf '%s' "$2" >"$WPW/kind.txt"; }
 wpw_none() { rm -f -- "$WPW/value.txt" "$WPW/kind.txt"; }
 wpw_value() {
@@ -58,7 +58,7 @@ wpw_value() {
     WPW_KIND="$(<"$WPW/kind.txt")"
 }
 
-# ^ invariant wpw_run VERB ARGS... runs the sandbox copy in Windows PowerShell 5.1; OUT is the status word without its carriage return, ERR the error line, RC the exit status
+# ^ invariant wpw_run VERB ARGS... runs the sandbox copy in Windows PowerShell 5.1; OUT is the status word without its CR, ERR the error line, RC the status
 wpw_run() {
     local script
     script="$(cygpath -w "$WPW/gsg-path.ps1")" || return 1
@@ -69,10 +69,10 @@ wpw_run() {
 }
 
 WPW_FOLDER='C:\gsgtest\Ana\.local\bin'
-# ^ invariant the exit statuses of bin/gsg-path.ps1 that a test expects: 2 = refused (arguments, registry type, length), 3 = the value no longer fits the plan
+# ^ invariant exit statuses of bin/gsg-path.ps1 a test expects; 2 = refused (arguments, registry type, length), 3 = the value no longer fits the plan
 WPW_RC_REFUSED=2 WPW_RC_STALE=3
 
-# ^ invariant wpw_install FOLDER does what the adapter does: plan, then apply with the form the plan named; WPW_MODE is that form, OUT and RC are those of the apply
+# ^ invariant wpw_install FOLDER does what the adapter does, a plan and an apply with the form the plan named; WPW_MODE is the form, OUT and RC are the apply's
 wpw_install() {
     wpw_run plan "$1" || return 1
     case "$OUT" in
@@ -105,7 +105,7 @@ test_every_spelling_of_the_folder_counts_as_present_and_nothing_else_does() {
     local entry
     wpw_begin || return 1
     set_env GSG_WPW_BASE='C:\gsgtest\Ana'
-    for entry in 'c:\GSGTEST\ana\.LOCAL\BIN' "$WPW_FOLDER\\" "$WPW_FOLDER\\\\" 'C:/gsgtest/Ana/.local/bin' 'C:/gsgtest/Ana/.local/bin/' '%GSG_WPW_BASE%\.local\bin' '%gsg_wpw_base%\.local\bin\'; do
+    for entry in 'c:\GSGTEST\ana\.LOCAL\BIN' "$WPW_FOLDER\\" "$WPW_FOLDER\\\\" 'C:/gsgtest/Ana/.local/bin' 'C:/gsgtest/Ana/.local/bin/' '%GSG_WPW_BASE%\.local\bin' "%gsg_wpw_base%\\.local\\bin\\"; do
         wpw_set "C:\\Windows;$entry;C:\\x" ExpandString || return 1
         wpw_run plan "$WPW_FOLDER"
         assert_eq "$OUT" present "[$entry] is the folder"
@@ -124,7 +124,7 @@ test_append_then_remove_restores_every_byte_and_the_registry_type() {
     local row kind value after
     wpw_begin || return 1
     set_env GSG_WPW_BASE='C:\gsgtest\Ana'
-    for row in 'ExpandString|%SystemRoot%\system32;C:\Program Files\Git\cmd' 'String|C:\Windows;C:\x y' 'ExpandString|C:\a;;C:\b;' 'String|C:\a;' 'ExpandString|' 'String|;' 'ExpandString|%GSG_WPW_BASE%\bin;%USERPROFILE%\x\'; do
+    for row in 'ExpandString|%SystemRoot%\system32;C:\Program Files\Git\cmd' 'String|C:\Windows;C:\x y' 'ExpandString|C:\a;;C:\b;' 'String|C:\a;' 'ExpandString|' 'String|;' "ExpandString|%GSG_WPW_BASE%\\bin;%USERPROFILE%\\x\\"; do
         IFS='|' read -r kind value <<<"$row"
         wpw_set "$value" "$kind" || return 1
         rm -f -- "$WPW/events.log"
@@ -146,7 +146,7 @@ test_append_then_remove_restores_every_byte_and_the_registry_type() {
 
 # ^ external Windows accepts a value below 32,767 characters (the limit counts the closing NUL); this is the longest value the script may write
 WPW_LONGEST_VALUE=32766
-# ^ invariant a value just past the 1024 characters that setx cuts at and past the 2048 that the Windows UI documents as comfortable
+# ^ invariant a value just past the 1024 characters setx cuts at and past the 2048 bytes Microsoft Learn recommends staying under for a user variable
 WPW_PAST_1024=1100 WPW_PAST_2048=2100
 
 # ^ invariant wpw_long N KIND stores a user Path of exactly N characters, entries separated by ; and not ending in one

@@ -460,8 +460,15 @@ that run a git 2.54 or newer, because the hook lives in the global git config.
   `doctor` report each SmartGit settings directory they find.
 
 - **Prerequisites.** Git for Windows with git 2.54 or newer (an older one is upgraded with `install --upgrade-git`, see below) on x86_64. `taskkill`,
-  `timeout`, `curl`, `sha256sum` and the System32 `tar.exe` come with Windows or Git for Windows. `~/.local/bin` should be
-  on `PATH` for the `git-secret-guard` command.
+  `timeout`, `curl`, `sha256sum` and the System32 `tar.exe` come with Windows or Git for Windows.
+- **The CLI folder on your user `Path`.** When `~/.local/bin` is not on `PATH`, `install` appends it to the `Path` of your Windows user (the value `Path`
+  of `HKCU\Environment`, never the machine `Path`, no administrator rights) and tells running programs; a cmd, PowerShell or Git Bash opened afterwards finds
+  `git-secret-guard` by name. Every other entry stays byte for byte and the registry type of the value (`REG_SZ` or `REG_EXPAND_SZ`) is kept; a user with
+  no `Path` value gets one of type `REG_EXPAND_SZ`, the type Windows gives it, and `uninstall` deletes it again. The folder counts as present when an entry
+  differs only by case, slash direction, trailing slashes or a `%VARIABLE%`; then nothing is changed. `uninstall` takes out exactly what `install` added
+  (the entry and one separator), leaves entries added since, and names and leaves our entry if you respelled it. `install --dont-change-path` leaves the
+  value alone and prints the step to do by hand, as does any case it cannot handle (a value of another registry type, a value that would pass 32,766
+  characters, a folder name with `;`, `%` or `"`, no Windows PowerShell). A failed change never fails `install`.
 - **jq is handled by `install`.** With no `jq` on `PATH`, `install` downloads the pinned `jq.exe` from the jqlang release,
   checks its SHA-256 against `tools.lock`, and places it in `~/.local/bin` beside the scanners. No package manager is
   needed (the Windows Server 2019 test host has no winget). It follows the scanner rules: all downloads are verified before anything
@@ -814,6 +821,25 @@ Result: not yet recorded.
 - **Windows: the work dir ignores a `TMPDIR` outside `HOME`** (NTFS ignores `chmod`, the profile ACL keeps staged lines private).
   Tests look at `TEST_WORK_BASE`, never `$SANDBOX/tmp`; an `includeIf` aimed at the wrong one silently sabotages nothing, and a
   fail-closed test goes green or red for the wrong reason.
+- **Windows: the user `Path` (`bin/gsg-path.ps1`, `lib/platform/winpath.sh`, #72).** (1) **Raw registry access.** `[Environment]::GetEnvironmentVariable(.., 'User')`
+  expands `%VARS%` and `SetEnvironmentVariable('Path', .., 'User')` rewrites the type, so the script opens `HKCU\Environment` and uses `GetValue('Path', $null,
+  DoNotExpandEnvironmentNames)`, `GetValueKind` and `SetValue(.., .., kind)`; a missing value reads as `$null` (`GetValueKind` throws then). Probed on Windows PowerShell
+  5.1.17763: the raw value kept its `%`, the expanded one was longer, the kind was `ExpandString`. No `setx` (it cuts at 1024), no machine hive, a kind other than
+  `String` and `ExpandString` is refused (exit 2). (2) **No value byte reaches bash**: stdout is one status word (`plan`: `present`, `absent-sep`, `absent-bare`,
+  `absent-novalue`; `apply`: `added`, `added-nobroadcast`; `remove`: `removed`, `removed-nobroadcast`, `changed`, `absent`), a failure is a non-zero exit and one line on
+  stderr (1 unexpected, 2 refused, 3 the value no longer fits the plan); the folder and the form (`sep`, `bare`, `create`) are arguments. (3) **The record** (state key
+  `cli_path`) is built in bash from the form the plan named: `windows-user-path ;FOLDER`, `windows-user-path FOLDER` (the value ended in `;` or was empty) and
+  `windows-user-path created FOLDER` (no value; uninstall deletes it). `apply` re-reads the value and writes only when it still ends the way the plan saw it, else
+  exit 3 and nothing changed; `remove` cuts the recorded text when the value ends with it, else the last element byte-equal to FOLDER with one adjacent separator,
+  else says `changed` when only another spelling is there and `absent` when nothing is. A new value of 32,767 characters or more is refused (the limit counts the
+  closing NUL). (4) **The broadcast** is a throwaway user variable set and removed through `[Environment]::SetEnvironmentVariable(.., 'User')`, which sends
+  `WM_SETTINGCHANGE` (Microsoft Learn, `Environment.SetEnvironmentVariable`: "other applications are notified of the set operation by a Windows `WM_SETTINGCHANGE`
+  message"); no `Add-Type` compile, works under constrained language. A failed broadcast after the write is the `-nobroadcast` word and the flow says to sign out and in.
+  (5) **Finding PowerShell**: `winpath_powershell` takes `WindowsPowerShell/v1.0/powershell.exe` below the System32 of `gitup_windows_sysdir` (so `GSG_GITUP_ROOT` moves it
+  in tests); `GSG_WINPATH_ROOT` moves only this lookup, because on a Windows host `GSG_GITUP_ROOT` would hide the real `reg.exe` and `whoami.exe` from the git upgrade, and
+  `lc_begin` points it at a stand-in that answers every call with exit 2, so no lifecycle test reaches the real registry. (6) **Tests**: `tests/install/test_winpath.sh`
+  (all platforms, recording stand-in), `tests/platform/test_windows_path.sh` (Windows only: the real script in 5.1 with `Get-UserPath`, `Set-UserPath`, `Remove-UserPath` and
+  `Send-EnvironmentChange` replaced by file-backed one-liners; `wpw_begin` fails unless exactly those four lines differ). The script uses no cmdlet, so it needs no `PSModulePath` reset.
 - **Windows: batch files.** `cmd` re-reads a batch file line by line, so a file deleted while it runs ends in `The batch file
   cannot be found`, also with `call`. The installed `.cmd` therefore deletes itself after bash returns, with
   `(goto) 2>nul & del "%~f0"`, once the share dir is gone (`GSG_CMD_ENTRY` tells uninstall to leave it). The checkout's `.cmd`

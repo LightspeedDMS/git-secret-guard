@@ -215,10 +215,36 @@ Behaviour: [Auto-update](install.md#auto-update---auto-update-and-update). Inter
   files, and `tests/autoupdate/test_autoupdate_schtasks.sh` drives install, status, doctor and uninstall through it; the task name is read from
   `lib/core/state.sh`, not typed in a test. Probed with the real scheduler: `/RU <user> /NP` asks for a password, and without `/F` an existing task is a Y/N question.
 - **Not run for real:** an SSH origin without an agent (the `fetch-failed` test uses an unreachable `file://` origin); more
-  than 1000 tags; the real Task Scheduler in run.sh (only the manual end-to-end run registers a task; the all-tasks `/Query` was verified only as
+  than 1000 tags; the real Task Scheduler in run.sh (only the manual end-to-end runs of the next note register a task; the all-tasks `/Query` was verified only as
   Administrator, a standard user is unverified). A real `launchctl` is not run by the update tests either: the
   lifecycle stand-in records calls (it keeps one loaded flag per label, so the tests assert the exact call logs); only `plutil -lint` on the update plist is
   Mac-only (`tests/macos-only.list`).
+- **The real Task Scheduler, run by hand (2026-11-23).** Two runs on a Windows Server 2019 test machine (build 17763, Git for Windows 2.56.0,
+  an account in Administrators, driven over ssh with a key), each from a clean profile: a clone over HTTPS with `main` at `v1.2.0`,
+  `install --auto-update`, `v1.3.0` the newest tag of the origin. The table is in
+  [platform-testing.md](platform-testing.md#auto-update-through-the-real-task-scheduler).
+  - **The task as install creates it:** principal `LogonType Interactive`, `RunLevel Limited` (schtasks prints `Logon Mode: Interactive only`), one
+    trigger that starts at the minute of the install and repeats every `PT1H`, `Last Result` 267011 (0x41303) until a first run.
+  - **Run 1, the user logged on at the console** (logon type Interactive): `schtasks /Run` moved the install from 1.2.0 to 1.3.0, 8 s from
+    `run started` to `updated` in `update.log`, record `role=owner`, `result=updated`, the checkout at `v1.3.0^{commit}` and not past it.
+    With the trigger replaced (once, then every 5 minutes) the scheduler started the task by itself and the run answered `current`.
+  - **Run 2, nobody logged on** (`query user` lists no session; an ssh key login is a network logon), logon type Interactive: `schtasks /Run`
+    prints `SUCCESS: Attempted to run the scheduled task` and exits 0, and nothing starts. `Last Run Time` and `Last Result` 267011 do not change,
+    no `update.log` and no record are written. The same at two times of a replaced trigger. Each time the Task Scheduler operational log (disabled on
+    that machine until the run enabled it) holds event 332, `Task Scheduler did not launch task ... because user ... was not logged on when the
+    launching conditions were met`. 13 minutes after install, both with exit 0: `status` `ok` without a `last check:` line, `doctor` `ok` with
+    `no update run is recorded yet`.
+  - **Logon type S4U, an observation and not a supported setup** (no product decision yet). In run 2 the same task with only its principal replaced
+    (`LogonType S4U`, `RunLevel Limited`, the same user, no stored password; `Set-ScheduledTask -Principal`) ran with nobody logged on: `/Run`
+    updated 1.2.0 to 1.3.0 in the same 8 s with result 0, and a replaced trigger started it twice (`current`); log lines, record and checkout equal
+    those of run 1. In the ssh session `USERDOMAIN` was `WORKGROUP`, and an account name built from it was refused (`No mapping between account
+    names and security IDs was done.`); the name built from `COMPUTERNAME` was accepted.
+  - **The wrapper was not rewritten** by the child install of either update (same text, same modification time), and the child install left the
+    S4U principal as it was. **`uninstall`** deleted the task in both runs, in run 2 with its principal and its trigger changed (event 141).
+  - **Not run:** S4U set by a standard user or without elevation, or through `schtasks.exe`; a stored-password logon type and the SYSTEM account;
+    `install --auto-update` again over a task switched to S4U (`/Create ... /F` may put the principal back); the hourly trigger as install writes
+    it firing at its own hour, and a reboot; the age findings of `status` and `doctor` for a task that never ran; an origin that needs
+    credentials under S4U; a machine on battery.
 - **macOS adapter** (`lib/platform/launchd.sh`). `launchd_job_set doctor|update` fills the `LJ_*` table (job word = last
   program argument, flag, message words, label, plist path, log path, marker, extra variable names); every plist function
   takes the job as an optional last argument, default `doctor`, so the doctor callers and texts are unchanged

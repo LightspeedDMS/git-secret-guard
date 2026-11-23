@@ -33,6 +33,8 @@ test_plan_refuses_a_folder_the_user_path_cannot_hold_without_starting_powershell
             tab) dir=$'/c/a\tb' ;;
             relative) dir='relative/dir' ;;
         esac
+        # ^ external NTFS forbids a quote, a newline and a tab in a name, and the Windows command line cannot carry them to bash; only Linux can build these cases
+        if [ "$TEST_IS_WINDOWS" -eq 1 ] && [[ $name == quote || $name == newline || $name == tab ]]; then continue; fi
         wp_begin || return 1
         wp_say plan absent-sep || return 1
         wp 'winpath_plan "$1"; echo "$REPLY|$WINPATH_RECORD|$WINPATH_WHY"' "$dir"

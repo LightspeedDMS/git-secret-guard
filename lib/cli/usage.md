@@ -68,7 +68,8 @@ commands:
         folder to the user Path; on Linux no file is changed and the line to add is printed. Nothing is changed when the
         folder is already on PATH, or when the file is a link, not yours, or the shell is not zsh or bash (the line to
         add is printed). --dont-change-path leaves PATH alone for that run and prints the line. The unattended install
-        of update never changes PATH. uninstall takes out exactly what install added and names what the user changed.
+        of update never changes PATH. A change that fails is reported with the step to do by hand and does not fail
+        install. uninstall takes out exactly what install added and names what the user changed.
   uninstall [--remove-tools] [--keep-system-git]
         Remove what install added and restore the recorded core.hooksPath (SmartGit and the Desktop link are
         undone first). Says "nothing to do" and exits 0 when nothing is installed.

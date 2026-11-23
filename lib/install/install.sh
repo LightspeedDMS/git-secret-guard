@@ -858,11 +858,11 @@ install_run() {
     install_link_cli || return 1
     install_set_config || return 1
     install_unset_hooks_path || return 1
-    # ^ invariant install_path_apply always returns 0 and install_path_report names a failure => a failed PATH change never changes install's exit status
-    install_path_apply
+    # ^ invariant install_path_apply returns 1 only for a state file it cannot rewrite after a failed change; a failed PATH change alone keeps install's status
+    local rc=0
+    install_path_apply || rc=1
     install_summary; install_path_report; install_wsl_notice
     # ^ invariant the four steps all run and any failure is install's status 1; a failed timer load never hides or skips the SmartGit and Desktop steps
-    local rc=0
     install_enable_timer || rc=1
     install_enable_update || rc=1
     smartgit_install_step "$smartgit" || rc=1

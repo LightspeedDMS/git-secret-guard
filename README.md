@@ -34,7 +34,7 @@ cd git-secret-guard
 bin/git-secret-guard install --auto-update   # Windows PowerShell or cmd: bin\git-secret-guard.cmd install --auto-update
 ```
 
-`install` places the pinned scanners and the `git-secret-guard` command in `~/.local/bin` (keep it on your `PATH`) and adds
+`install` places the pinned scanners and the `git-secret-guard` command in `~/.local/bin` (on Windows and macOS it also puts that folder on your `PATH`, `--dont-change-path` skips that; on Linux add it yourself if your distribution does not) and adds
 the hook to your global git config. It refuses to replace an existing global `core.hooksPath` unless you pass
 `--replace-hooks-path`. Every flag and step: [docs/install.md](docs/install.md).
 

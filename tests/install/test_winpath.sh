@@ -86,6 +86,18 @@ test_the_powershell_comes_from_the_system32_the_git_upgrade_uses_and_a_root_over
     assert_contains "$OUT" "GSG_WINPATH_ROOT" "and named"
 }
 
+# ^ invariant the seam is announced like every other test seam, once per run, with its value; a run without it prints nothing
+test_the_root_override_is_announced_once_and_a_plain_run_is_silent() {
+    wp_begin || return 1
+    wp_say plan present || return 1
+    wp 'winpath_plan "$GSG_BIN_DIR"; winpath_plan "$GSG_BIN_DIR"'
+    assert_not_contains "$ERR" "GSG_WINPATH_ROOT=" "no override set, nothing announced"
+    set_env GSG_WINPATH_ROOT="$WU_DIR/root"
+    wp 'winpath_plan "$GSG_BIN_DIR"; winpath_plan "$GSG_BIN_DIR"'
+    assert_contains "$ERR" "TEST OVERRIDE active (GSG_WINPATH_ROOT=[$WU_DIR/root]); Windows PowerShell is looked for below that folder" "announced with its value"
+    assert_eq "$(grep -c "GSG_WINPATH_ROOT=" <<<"$ERR")" 1 "once for two calls"
+}
+
 test_the_script_is_plain_ascii_lf_and_never_reaches_the_machine_path_or_setx() {
     local f="$GSG_PROJECT/bin/gsg-path.ps1"
     assert_file "$f" "the script ships in bin, which the share copies"
@@ -134,7 +146,7 @@ test_apply_that_changes_nothing_says_why_and_never_fails_the_install() {
     assert_contains "$OUT" "rc=1" "no record, nothing to apply"
     assert_contains "$OUT" "no record" "and says so"
     assert_eq "$(wp_log | wc -l | tr -d ' ')" 1 "PowerShell ran once, for the first call only"
-    wp 'GSG_NAME=git-secret-guard WINPATH_RECORD="windows-user-path ;$1" INSTALL_PATH_ACTION=add; install_path_apply; echo "install=$?"; install_path_report' "$WP_DIR" || return 1
+    wp 'install_write_state() { return 0; }; GSG_NAME=git-secret-guard WINPATH_RECORD="windows-user-path ;$1" INSTALL_PATH_ACTION=add; install_path_apply; echo "install=$?"; install_path_report' "$WP_DIR" || return 1
     assert_contains "$OUT" "install=0" "the install step itself succeeds"
     assert_contains "$OUT" "is not on PATH (the user Path changed while install ran; nothing was changed)" "install_path_report prints the hint with the reason"
     assert_contains "$OUT" "add $WP_DIR to the Path of your Windows user" "and the step to do by hand"

@@ -106,17 +106,51 @@ test_a_macos_install_adds_one_marked_block_and_says_so() {
     assert_not_contains "$OUT" "add this line" "no hint when it changed the file"
 }
 
-test_a_failed_change_is_reported_with_the_line_and_install_still_succeeds() {
-    lc_mac_begin || return 1
+# ^ invariant ip_readonly_zprofile leaves ~/.zprofile as one user line, read-only; the test is skipped for a user who writes read-only files
+ip_readonly_zprofile() {
     printf 'export A=1\n' >"$LC_HOME/.zprofile" || return 1
     chmod 444 "$LC_HOME/.zprofile" || return 1
     if [ -w "$LC_HOME/.zprofile" ]; then skip_test "this user writes a read-only file"; fi
+}
+
+test_a_failed_change_is_reported_with_the_line_and_install_still_succeeds() {
+    lc_mac_begin || return 1
+    ip_readonly_zprofile || return 1
     gsg install
     assert_rc 0 "a failed PATH change does not fail install"
     assert_contains "$OUT$ERR" "cannot write $LC_HOME/.zprofile" "says what failed"
     assert_contains "$OUT" "add this line to your shell startup file: $ADD_LINE" "still gives the line"
     assert_contains "$(gitx config --global --get-all hook.git-secret-guard.event)" "pre-commit" "the hook stays installed"
     assert_eq "$(<"$LC_HOME/.zprofile")" "export A=1" "the file is as it was"
+}
+
+# ^ invariant the record is written before the change and goes again when nothing was written; a stale one could cut a line the user adds later
+test_a_failed_change_leaves_no_record_of_ours() {
+    lc_mac_begin || return 1
+    ip_readonly_zprofile || return 1
+    gsg install
+    assert_rc 0 "a failed PATH change does not fail install"
+    assert_contains "$OUT$ERR" "cannot write $LC_HOME/.zprofile" "the failure is still printed"
+    assert_no_cli_record "the state keeps no record of a change that was not made"
+    chmod 644 "$LC_HOME/.zprofile" || return 1
+    printf '%s\n' "$ADD_LINE" >>"$LC_HOME/.zprofile" || return 1
+    gsg uninstall
+    assert_rc 0 "uninstall"
+    assert_contains "$(<"$LC_HOME/.zprofile")" "$ADD_LINE" "the line the user added afterwards stays"
+}
+
+test_a_failed_change_keeps_the_record_an_earlier_install_made() {
+    local rec
+    lc_mac_begin || return 1
+    gsg install
+    assert_rc 0 "first install"
+    rec="$(state_value cli_path)"
+    rm -f -- "$LC_HOME/.zprofile" || return 1
+    ip_readonly_zprofile || return 1
+    gsg install
+    assert_rc 0 "second install, the block gone and the file read-only"
+    assert_contains "$OUT$ERR" "cannot write $LC_HOME/.zprofile" "the failure is printed"
+    assert_eq "$(state_value cli_path)" "$rec" "the first install's record is as it was, not the failed run's"
 }
 
 test_a_reinstall_carries_the_record_over_and_never_adds_a_second_block() {
@@ -265,7 +299,7 @@ install_path_plan; echo "$INSTALL_PATH_ACTION|$INSTALL_PATH_RECORD|$INSTALL_PATH
     done
     ip_win 'winpath_apply() { return 0; }; INSTALL_PATH_ACTION=add; install_path_apply; echo "$INSTALL_PATH_ACTION|$INSTALL_PATH_DONE"'
     assert_eq "$OUT" "add|added /c/u/.local/bin to the user Path" "winpath_apply worked"
-    ip_win 'winpath_apply() { WINPATH_WHY=denied; return 1; }; INSTALL_PATH_ACTION=add; install_path_apply; echo "$INSTALL_PATH_ACTION|$INSTALL_PATH_WHY"'
+    ip_win 'install_write_state() { return 0; }; winpath_apply() { WINPATH_WHY=denied; return 1; }; INSTALL_PATH_ACTION=add; install_path_apply; echo "$INSTALL_PATH_ACTION|$INSTALL_PATH_WHY"'
     assert_eq "$OUT" "failed|denied" "winpath_apply failed: the action failed with the reason, never a failed install"
 }
 
@@ -297,6 +331,48 @@ ST_CLI_PATH="windows-user-path ;C:/u/bin"; uninstall_path_entry; echo "rc=$?"'
     done
     ip_win 'winpath_remove() { echo called; }; ST_CLI_PATH=""; uninstall_path_entry; echo "rc=$?"'
     assert_eq "$OUT" "rc=0" "no record, no call"
+}
+
+# ^ invariant ip_win_failed_apply PREAMBLE CODE runs install_path_apply on a fake Windows whose winpath_apply writes nothing (rc 1, "denied"); CODE follows
+ip_win_failed_apply() {
+    ip_win "$1"'
+INSTALL_PATH_RECORD="windows-user-path ;C:/u/bin" INSTALL_PATH_ACTION=add
+winpath_apply() { WINPATH_WHY=denied; return 1; }
+install_path_apply; echo "rc=$? $INSTALL_PATH_ACTION"'"$2"
+}
+
+# ^ coupled the condition of lc_git_wrapper ends in false => git never fails; its side effect swaps the state dir for a plain file after the hook command
+# ^ why a file in place of the dir, not a read-only dir; state_make_dir sets the dir to 0700 again on every write
+test_install_exits_1_when_the_state_cannot_be_rewritten_after_a_failed_change() {
+    lc_mac_begin || return 1
+    ip_readonly_zprofile || return 1
+    lc_git_wrapper '{ [ "$4" = hook.git-secret-guard.command ] && rm -rf -- "'"${LC_STATE:?}"'" && : >"'"$LC_STATE"'"; false; }' || return 1
+    gsg install
+    assert_rc 1 "the state could not be rewritten"
+    assert_contains "$ERR" "could not rewrite the state file $LC_STATE/state" "names the state file"
+    assert_contains "$(gitx config --global --get-all hook.git-secret-guard.event)" "pre-commit" "the hook is installed all the same"
+}
+
+# ^ coupled the Windows flow with the fake adapter => a failed apply writes the state again with the carried record, a written change never does
+test_the_windows_flow_clears_the_record_only_when_nothing_was_written() {
+    local write='install_write_state() { echo "write:$1 record=[$INSTALL_PATH_RECORD]"; }'
+    ip_win_failed_apply "$write"$'\nST_CLI_PATH="windows-user-path ;C:/old"' ""
+    assert_eq "$OUT" $'write:final record=[windows-user-path ;C:/old]\nrc=0 failed' "nothing written: the state goes again with the earlier record"
+    ip_win_failed_apply "$write"$'\nST_CLI_PATH=""' ""
+    assert_eq "$OUT" $'write:final record=[]\nrc=0 failed' "no earlier record: the state goes again with none"
+    ip_win "$write"'
+INSTALL_PATH_RECORD="windows-user-path ;C:/u/bin" INSTALL_PATH_ACTION=add
+winpath_apply() { return 0; }; install_path_apply; echo "rc=$?"
+winpath_apply() { WINPATH_NOBROADCAST=1; return 0; }; install_path_apply; echo "rc=$?"'
+    assert_eq "$OUT" $'rc=0\nrc=0' "a change written, announced or not, keeps its record and writes no state"
+}
+
+# ^ invariant a state file install cannot rewrite is named in one line and is install's status 1, like every state write failure
+test_a_state_that_cannot_be_rewritten_after_a_failed_change_is_named_and_fails_install() {
+    ip_win_failed_apply 'install_write_state() { return 1; }; GSG_STATE_FILE=/s/state; ST_CLI_PATH=""' ""
+    assert_contains "$OUT" "rc=1 failed" "the status says the rewrite failed, the action is still failed"
+    assert_contains "$ERR" "could not rewrite the state file /s/state" "names the state file"
+    assert_contains "$ERR" "cli_path record in it is stale" "says the record is stale"
 }
 
 run_file_tests

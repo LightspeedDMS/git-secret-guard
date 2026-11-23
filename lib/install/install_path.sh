@@ -74,7 +74,8 @@ install_path_plan_windows() {
     esac
 }
 
-# ^ invariant a failed change is the action failed with its reason and install still succeeds; the hook stays installed and status is as before
+# ^ invariant a failed change is the action failed with its reason and the PATH step never fails install; the hook stays installed and status is as before
+# ^ invariant rc 1 only when install_path_unrecord cannot rewrite the state after a failed change; a written change, announced or not, keeps its record
 # ^ order runs after the hook config is set; the record was written by install_write_state before this touches a file
 install_path_apply() {
     INSTALL_PATH_DONE=""
@@ -91,6 +92,18 @@ install_path_apply() {
     else
         INSTALL_PATH_ACTION=failed INSTALL_PATH_WHY="$MACPATH_WHY"
     fi
+    if [ "$INSTALL_PATH_ACTION" = failed ]; then install_path_unrecord; fi
+}
+
+# ^ invariant nothing was written => the state goes again without this run's record, an earlier install's stays; a stale record could cut a user's entry
+# ^ why rc 1 reaches install's status, not a warning alone; every failed install_write_state does, and the PATH change itself never does
+# ^ invariant rc 1 names the state file in one line on stderr and the record in it is stale
+install_path_unrecord() {
+    INSTALL_PATH_RECORD="${ST_CLI_PATH:-}"
+    if install_write_state final; then return 0; fi
+    printf '%s: PATH: could not rewrite the state file %s after the PATH change failed; the cli_path record in it is stale (nothing was written to PATH), so uninstall could remove an entry of the same text that you add by hand\n' \
+        "$GSG_NAME" "$GSG_STATE_FILE" >&2
+    return 1
 }
 
 # ^ invariant prints where the CLI is and what install did about PATH; an icon only in terminal mode, plain output is the words alone

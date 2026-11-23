@@ -21,6 +21,15 @@ winpath_set_why() {
     WINPATH_WHY="${t:0:GSG_WINPATH_REASON_MAX}"
 }
 
+# ^ invariant one stderr line per run, only when GSG_WINPATH_ROOT is set; it moves where PowerShell is looked for and skips no check, the seam is announced
+WINPATH_ANNOUNCED=0
+winpath_announce_override() {
+    if [ "$WINPATH_ANNOUNCED" -eq 1 ] || [ -z "${GSG_WINPATH_ROOT:-}" ]; then return 0; fi
+    WINPATH_ANNOUNCED=1
+    printf '%s: TEST OVERRIDE active (GSG_WINPATH_ROOT=[%s]); Windows PowerShell is looked for below that folder, not in the real System32\n' \
+        "$GSG_NAME" "$GSG_WINPATH_ROOT" >&2
+}
+
 # ^ external System32 is found as the git upgrade finds reg.exe (gitup_windows_sysdir), GSG_GITUP_ROOT moves it in tests, PATH is never searched
 # ^ coupled GSG_WINPATH_ROOT is a second explicit override; on Windows GSG_GITUP_ROOT would hide the real reg.exe and whoami.exe from the git upgrade
 # ^ invariant sets REPLY = the powershell.exe to run; rc 1 with WINPATH_WHY when the directory or the file is not there
@@ -32,6 +41,7 @@ winpath_powershell() {
             winpath_set_why "GSG_WINPATH_ROOT must be an absolute path without control characters or . and .. parts"
             return 1
         fi
+        winpath_announce_override
         sys="${root%/}/windows/System32"
     else
         if ! declare -F gitup_select >/dev/null || ! gitup_select || ! declare -F gitup_windows_sysdir >/dev/null || ! gitup_windows_sysdir; then

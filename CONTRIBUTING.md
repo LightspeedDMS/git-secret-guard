@@ -7,11 +7,13 @@ it, so changes are held to a high bar: every behaviour has a test, and every use
 
 - **Bugs and feature requests:** open a [GitHub issue](https://github.com/LightspeedDMS/git-secret-guard/issues). For a
   bug, include the platform (on Windows, whether you used Git Bash, PowerShell or cmd), `git --version`, `bash --version`, the output of `git-secret-guard status` and
-  `git-secret-guard doctor`, the steps to reproduce, and what you expected instead.
+  `git-secret-guard doctor`, the steps to reproduce, and what you expected instead. The issue forms ask for these.
 - **A way to get a secret past the hook, or any other security problem:** do **not** open a public issue. Use
   [private vulnerability reporting](https://github.com/LightspeedDMS/git-secret-guard/security/advisories/new)
   (Security tab, "Report a vulnerability").
 - **Never paste a real credential** into an issue, a pull request or a test, not even a revoked one.
+- **A problem with how someone behaves:** privately, as the [code of conduct](CODE_OF_CONDUCT.md#reporting-a-problem) says. It applies
+  to everyone who takes part.
 
 ## Setting up
 
@@ -265,7 +267,7 @@ than 1000 commits, `DCO_MAX_COMMITS`, is refused rather than cut short).
    `platforms.yml` (the container, VM and old-git runs) and `wsl.yml` (real WSL) run only when started by hand, never on a pull
    request: see [CI on real platforms](docs/platform-testing.md#ci-on-real-platforms) and
    [WSL test runs](docs/platform-testing.md#wsl-test-runs).
-5. Link the issue in the PR description.
+5. Link the issue in the PR description. The pull request template (`.github/pull_request_template.md`) holds this list as a checklist.
 
 ## Versions
 

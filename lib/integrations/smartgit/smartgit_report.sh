@@ -4,7 +4,7 @@
 # ^ invariant the git floor of every message is the one install uses, built here once
 smartgit_min_git() { printf '%s.%s' "$GSG_MIN_GIT_MAJOR" "$GSG_MIN_GIT_MINOR"; }
 
-smartgit_cmd_text() { printf '%s install --configure-smartgit' "$GSG_NAME"; }
+smartgit_cmd_text() { printf '%s install' "$GSG_NAME"; }
 
 # ^ invariant the by-hand step; install prints it after a refusal, status, doctor and the hint print it for a major the command would refuse
 smartgit_manual_text() {

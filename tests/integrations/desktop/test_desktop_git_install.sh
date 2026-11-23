@@ -10,23 +10,21 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/desktop_git.sh"
 # ^ external the Desktop feature is Linux only; the install flows run the real scanners and Desktop's real bundled git where it exists
 if [ "$TEST_IS_WINDOWS" -eq 1 ]; then FILE_SKIP_REASON="GitHub Desktop on Linux"; fi
 
-test_a_plain_install_with_desktop_present_prints_a_note_and_changes_nothing() {
+test_install_with_dont_link_desktop_git_prints_the_note_and_changes_nothing() {
     dg_install_begin || return 1
     dg_need_old_git
-    gsg install </dev/null
+    gsg install --dont-link-desktop-git </dev/null
     assert_rc 0 "install"
     assert_contains "$OUT" "GitHub Desktop" "the note names Desktop"
-    assert_contains "$OUT" "git-secret-guard install --link-desktop-git" "and the flag"
+    assert_contains "$OUT" "to scan them run: git-secret-guard install (without --dont-link-desktop-git)" "and plain install, not a flag"
     assert_contains "$ERR" "it is the git GitHub Desktop bundles" "the warning that its commits are not scanned stays without a link"
-    assert_no_file "$DG_HOOKS" "no hooks directory without the flag"
-    assert_no_file "$DG_LAUNCHER_USER" "no launcher without the flag"
+    assert_no_file "$DG_HOOKS" "no hooks directory with the off switch"
+    assert_no_file "$DG_LAUNCHER_USER" "no launcher with the off switch"
 }
 
 test_a_failing_self_check_still_shows_the_unscanned_warning() {
     local warn="it is the git GitHub Desktop bundles"
-    lc_begin && lc_make_fixtures && lc_use_fixtures && dg_fixture || return 1
-    dg_need_old_git
-    DG_HOOKS="$LC_DATA/desktop-hooks"
+    dg_failing_check_begin || return 1
     gsg install --link-desktop-git </dev/null
     assert_rc 1 "stand-in scanners cannot pass the check"
     assert_contains "$ERR" "GitHub Desktop was not linked" "the link was rolled back"
@@ -77,14 +75,20 @@ test_install_with_the_flag_links_desktop_and_a_desktop_commit_of_a_fake_token_is
 }
 
 test_a_failing_check_removes_everything_this_run_wrote_and_says_so() {
-    lc_begin && lc_make_fixtures && lc_use_fixtures && dg_fixture || return 1
-    DG_HOOKS="$LC_DATA/desktop-hooks"
+    DG_NO_DESKTOP_GIT_OK=1 dg_failing_check_begin || return 1
     gsg install --link-desktop-git </dev/null
     assert_rc 1 "stand-in scanners cannot pass the check"
     assert_contains "$ERR" "a commit of a fake token in a file failed, but not with the findings text of the hook" "the check names what failed"
     assert_contains "$ERR" "GitHub Desktop was not linked; 28 files of the link (written by this run or an earlier one) were removed again" "and that the run undid itself"
     assert_no_file "$DG_HOOKS" "no hooks directory is left"
     assert_no_file "$DG_LAUNCHER_USER" "no launcher is left"
+    if [ "$DG_OLD" -eq 1 ]; then
+        gsg install </dev/null
+        assert_rc 0 "a plain install: the same failed check is rolled back and is no failed install ($ERR)"
+        assert_contains "$ERR" "GitHub Desktop was not linked; 28 files of the link (written by this run or an earlier one) were removed again" "and says so"
+        assert_no_file "$DG_HOOKS" "again no hooks directory is left"
+        assert_no_file "$DG_LAUNCHER_USER" "again no launcher is left"
+    fi
 }
 
 test_a_rerun_changes_nothing_a_plain_install_keeps_the_link_and_a_missing_wrapper_is_restored() {
@@ -110,6 +114,10 @@ test_a_rerun_changes_nothing_a_plain_install_keeps_the_link_and_a_missing_wrappe
     gsg status
     assert_rc 0 "status after the plain install restored the wrapper"
     assert_contains "$OUT" "GitHub Desktop: linked" "the link a plain install restored reads as linked"
+    rm -f -- "$DG_HOOKS/post-merge" || return 1
+    gsg install --dont-link-desktop-git </dev/null
+    assert_rc 0 "install --dont-link-desktop-git ($ERR)"
+    assert_file "$DG_HOOKS/post-merge" "off only stops a new link; the existing one is refreshed as before"
 }
 
 test_every_refusal_happens_before_any_change() {
@@ -126,7 +134,7 @@ test_every_refusal_happens_before_any_change() {
     assert_rc 1 "a launcher entry of the user's own"
     assert_contains "$ERR" "$DG_LAUNCHER_USER exists and git-secret-guard did not write it" "names it"
     assert_eq "$(<"$DG_LAUNCHER_USER")" mine "and keeps it"
-    assert_contains "$ERR" "Move it away (or add the environment by hand) and run install --link-desktop-git again" "the launcher keeps its own advice"
+    assert_contains "$ERR" "Move it away (or add the environment by hand) and run git-secret-guard install again" "the launcher keeps its own advice"
     dg_nothing_changed
     rm -f -- "$DG_LAUNCHER_USER" || return 1
     mkdir -p -- "$DG_HOOKS" && printf 'mine\n' >"$DG_HOOKS/pre-push" || return 1
@@ -144,9 +152,83 @@ test_every_refusal_happens_before_any_change() {
     dg_nothing_changed
 }
 
-test_unlink_removes_only_our_files_and_a_repeat_is_harmless() {
+test_a_plain_install_links_desktop_with_no_flag_and_no_warning() {
+    local key
+    key="$(fake_aws_key)"
     dg_install_begin || return 1
     gsg install </dev/null
+    assert_rc 0 "plain install ($ERR)"
+    assert_contains "$OUT" "wrote the hooks directory" "the link lines are there"
+    assert_not_contains "$ERR" "it is the git GitHub Desktop bundles" "no warning: this run scans Desktop's commits"
+    assert_file "$DG_LAUNCHER_USER" "the launcher entry is written (last)"
+    dg_repo auto || return 1
+    printf 'k = "%s"\n' "$key" >a.txt || return 1
+    dgit "$DG_HOOKS" add a.txt || return 1
+    dgit "$DG_HOOKS" commit -q -m t
+    assert_rc 1 "a commit through Desktop's git is blocked"
+    no_leak "$key"
+    gsg status
+    assert_rc 0 "status"
+    assert_contains "$OUT" "GitHub Desktop: linked" "status reports Desktop's commits as scanned"
+}
+
+# ^ invariant da_refusal NAME TEXT = a plain install exited 0, printed TEXT (no flag named), wrote no shared file or wrapper, held the unscanned warning
+da_refusal() {
+    gsg install </dev/null
+    assert_rc 0 "$1: a refusal is a notice, not a failed install ($ERR)"
+    assert_contains "$ERR" "$2" "$1: says why"
+    assert_not_contains "$ERR" "--link-desktop-git" "$1: names no flag"
+    assert_contains "$ERR" "it is the git GitHub Desktop bundles" "$1: the warning that Desktop's commits are not scanned is shown"
+    assert_not_contains "$OUT" "wrote the hooks directory" "$1: nothing was linked"
+    assert_no_file "$DG_HOOKS/gsg-desktop-chain" "$1: no shared file"
+    assert_no_file "$DG_HOOKS/pre-commit" "$1: no wrapper"
+}
+
+# ^ invariant real files and links in the sandbox; each refusal is a file system state the product checks, mode 000 needs a user other than root
+test_every_refusal_of_the_automatic_link_is_a_notice_and_install_exits_0() {
+    DG_NO_DESKTOP_GIT_OK=1 dg_install_begin || return 1
+    dg_need_old_git
+    mkdir -p -- "${DG_LAUNCHER_USER%/*}" && printf 'mine\n' >"$DG_LAUNCHER_USER" || return 1
+    da_refusal "foreign launcher" "$DG_LAUNCHER_USER exists and git-secret-guard did not write it"
+    assert_eq "$(<"$DG_LAUNCHER_USER")" mine "foreign launcher: kept"
+    rm -f -- "$DG_LAUNCHER_USER" || return 1
+    mkdir -p -- "$DG_HOOKS" && printf 'mine\n' >"$DG_HOOKS/pre-push" || return 1
+    da_refusal "foreign hook" "$DG_HOOKS/pre-push exists and git-secret-guard did not write it"
+    assert_eq "$(<"$DG_HOOKS/pre-push")" mine "foreign hook: kept"
+    assert_no_file "$DG_LAUNCHER_USER" "foreign hook: no launcher"
+    rm -rf -- "${DG_HOOKS:?}" || return 1
+    mkdir -p -- "$SANDBOX/elsewhere" "$LC_DATA" && ln -s -- "$SANDBOX/elsewhere" "$DG_HOOKS" || return 1
+    da_refusal "hooks directory symlink" "is a symbolic link or not a directory"
+    assert_no_file "$DG_LAUNCHER_USER" "hooks directory symlink: no launcher"
+    rm -f -- "${DG_HOOKS:?}" || return 1
+    chmod 000 "$DG_LAUNCHER_SYS" || return 1
+    if [ -r "$DG_LAUNCHER_SYS" ]; then
+        chmod 644 "$DG_LAUNCHER_SYS" || return 1
+        skip_test "this user reads a file with mode 000 (root), so an unreadable system launcher cannot be made"
+    fi
+    da_refusal "unreadable system launcher" "cannot read the launcher entry $DG_LAUNCHER_SYS"
+    assert_no_file "$DG_LAUNCHER_USER" "unreadable system launcher: no launcher"
+    chmod 644 "$DG_LAUNCHER_SYS" || return 1
+}
+
+# ^ invariant a wrapper around the fixture git locks the hooks directory at the first commit; no real condition fails the removal on demand
+# ^ external root ignores mode 555 on a directory, the removal cannot fail for root, the test skips
+test_a_removal_that_fails_after_a_failed_self_check_makes_install_exit_1() {
+    if [ "$(id -u)" -eq 0 ]; then skip_test "root deletes from a directory with mode 555, so the removal cannot be made to fail"; fi
+    dg_failing_check_begin || return 1
+    mv -- "$DG_BUNDLE/bin/git" "$DG_BUNDLE/bin/git.real" || return 1
+    printf '#!/bin/sh\ncase " $* " in *" commit "*) chmod 555 "%s"; exit 1 ;; esac\nexec "%s" "$@"\n' "$DG_HOOKS" "$DG_BUNDLE/bin/git.real" >"$DG_BUNDLE/bin/git" || return 1
+    chmod 755 "$DG_BUNDLE/bin/git" || return 1
+    gsg install </dev/null
+    chmod 755 "$DG_HOOKS" || return 1
+    assert_rc 1 "the link could not be removed again: something of ours is left behind"
+    assert_contains "$ERR" "GitHub Desktop was not linked, but removing the files of the link failed" "says so"
+    assert_contains "$ERR" "unlink-desktop-git" "and names the command that finishes it"
+}
+
+test_unlink_removes_only_our_files_and_a_repeat_is_harmless() {
+    dg_install_begin || return 1
+    gsg install --dont-link-desktop-git </dev/null
     assert_rc 0 "install ($ERR)"
     dg_link_files
     gsg unlink-desktop-git
@@ -165,7 +247,7 @@ test_unlink_removes_only_our_files_and_a_repeat_is_harmless() {
 
 test_uninstall_removes_the_link_and_keeps_a_launcher_that_is_not_ours() {
     dg_install_begin || return 1
-    gsg install </dev/null
+    gsg install --dont-link-desktop-git </dev/null
     assert_rc 0 "install ($ERR)"
     dg_link_files
     gsg uninstall
@@ -182,8 +264,8 @@ test_uninstall_removes_the_link_and_keeps_a_launcher_that_is_not_ours() {
 test_uninstall_stops_and_keeps_a_file_of_the_users_in_the_hooks_directory() {
     local before
     DG_NO_DESKTOP_GIT_OK=1 dg_install_begin || return 1
-    gsg install </dev/null
-    assert_rc 0 "plain install, no link ($ERR)"
+    gsg install --dont-link-desktop-git </dev/null
+    assert_rc 0 "install without the link ($ERR)"
     mkdir -p -- "$DG_HOOKS" && printf 'mine\n' >"$DG_HOOKS/pre-commit" || return 1
     before="$(gitx config --global --list)"
     gsg uninstall
@@ -203,7 +285,7 @@ test_uninstall_stops_and_keeps_a_file_of_the_users_in_the_hooks_directory() {
 
 test_uninstall_and_unlink_name_and_keep_a_file_that_is_no_hook_name() {
     dg_install_begin || return 1
-    gsg install </dev/null
+    gsg install --dont-link-desktop-git </dev/null
     assert_rc 0 "install ($ERR)"
     dg_link_files
     printf 'mine\n' >"$DG_HOOKS/notes.txt" || return 1
@@ -242,7 +324,7 @@ test_a_system_entry_with_a_spaced_exec_key_still_gets_our_variable() {
 test_a_kept_file_name_is_printed_without_control_characters() {
     local name=$'x\e[31mA\ngit-secret-guard: FAKE'
     dg_install_begin || return 1
-    gsg install </dev/null
+    gsg install --dont-link-desktop-git </dev/null
     assert_rc 0 "install ($ERR)"
     dg_link_files
     : >"$DG_HOOKS/$name" || return 1
@@ -256,7 +338,7 @@ test_a_kept_file_name_is_printed_without_control_characters() {
 test_a_name_starting_with_two_dots_and_a_long_list_are_named() {
     local i
     dg_install_begin || return 1
-    gsg install </dev/null
+    gsg install --dont-link-desktop-git </dev/null
     assert_rc 0 "install ($ERR)"
     dg_link_files
     : >"$DG_HOOKS/..dotdot" || return 1
@@ -269,7 +351,7 @@ test_a_name_starting_with_two_dots_and_a_long_list_are_named() {
 
 test_a_half_written_link_is_completed_by_a_plain_install() {
     dg_install_begin || return 1
-    gsg install </dev/null
+    gsg install --dont-link-desktop-git </dev/null
     assert_rc 0 "install ($ERR)"
     dg_run 'paths_init && desktop_git_paths && desktop_git_hooks_write "$GSG_SHARE" "$DG_HOOKS"'
     assert_rc 0 "a run killed after the hooks directory (simulated): only the wrappers exist ($ERR)"
@@ -286,7 +368,7 @@ test_a_half_written_link_is_completed_by_a_plain_install() {
 
 test_a_failed_refresh_of_an_existing_link_counts_the_files_of_the_earlier_run() {
     dg_install_begin || return 1
-    gsg install </dev/null
+    gsg install --dont-link-desktop-git </dev/null
     assert_rc 0 "install ($ERR)"
     dg_link_files
     rm -f -- "$DG_LAUNCHER_USER" && chmod 555 -- "${DG_LAUNCHER_USER%/*}" || return 1
@@ -303,7 +385,7 @@ test_an_active_link_silences_the_old_git_warnings_of_install_and_doctor() {
     dg_install_begin || return 1
     [ "$DG_OLD" -eq 1 ] || skip_test "needs GitHub Desktop's own old git; a git of 2.54 or newer draws no warning"
     mkdir -p -- "$SANDBOX/roots" || return 1
-    gsg install </dev/null
+    gsg install --dont-link-desktop-git </dev/null
     assert_contains "$ERR" "$warn" "unlinked, install warns that Desktop's git is old"
     gsg doctor --roots "$SANDBOX/roots"
     assert_contains "$OUT" "$warn" "and doctor does too"
@@ -365,7 +447,7 @@ test_a_run_killed_during_the_check_leaves_wrappers_only_and_a_rerun_completes() 
     local pid i status
     local -r stall_poll_max=120 stall_poll_interval=0.5
     dg_install_begin || return 1
-    gsg install </dev/null
+    gsg install --dont-link-desktop-git </dev/null
     assert_rc 0 "install ($ERR)"
     : >"$SANDBOX/dg.stall" || return 1
     setsid env -i "${LC_ENV[@]}" "${EXTRA_ENV[@]}" "$GSG_PROJECT/bin/git-secret-guard" install --link-desktop-git </dev/null >"$SANDBOX/kill.out" 2>&1 &

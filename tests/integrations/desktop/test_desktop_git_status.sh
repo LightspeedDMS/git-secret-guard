@@ -12,20 +12,20 @@ if [ "$TEST_IS_WINDOWS" -eq 1 ]; then FILE_SKIP_REASON="GitHub Desktop on Linux"
 
 test_status_shows_a_desktop_that_is_not_linked_as_a_warning() {
     dg_install_begin || return 1
-    gsg install </dev/null
+    gsg install --dont-link-desktop-git </dev/null
     assert_rc 0 "install ($ERR)"
     gsg status
-    assert_rc 0 "status exits 0: linking is opt-in"
+    assert_rc 0 "status exits 0: an unlinked Desktop is a warning"
     [ "$DG_OLD" -eq 1 ] || skip_test "needs GitHub Desktop's own old git; a git of 2.54 or newer is reported as scanning by config"
     assert_contains "$OUT" "  WARNING  GitHub Desktop: git $DG_VER is not linked" "a WARNING line: it asks the user to act"
-    assert_contains "$OUT" "run: git-secret-guard install --link-desktop-git" "and the command"
+    assert_contains "$OUT" "run: git-secret-guard install" "and the command"
     assert_not_contains "$OUT" "MISMATCH" "it is no mismatch"
 }
 
 test_status_reports_missing_and_stale_parts_as_a_mismatch_with_the_command_to_run() {
-    local fix=install\ --link-desktop-git
+    local fix=install
     dg_install_begin || return 1
-    gsg install </dev/null
+    gsg install --dont-link-desktop-git </dev/null
     assert_rc 0 "install ($ERR)"
     dg_link_files
     gsg status
@@ -91,7 +91,7 @@ test_doctor_reports_the_desktop_link_as_info_ok_or_a_problem() {
     dg_install_begin || return 1
     [ "$DG_OLD" -eq 1 ] || skip_test "needs GitHub Desktop's own old git; a git of 2.54 or newer is reported as scanning by config"
     mkdir -p -- "$SANDBOX/roots" || return 1
-    gsg install </dev/null
+    gsg install --dont-link-desktop-git </dev/null
     assert_rc 0 "install ($ERR)"
     gsg doctor --roots "$SANDBOX/roots"
     assert_rc 0 "doctor with Desktop not linked: the link is opt-in"
@@ -103,21 +103,21 @@ test_doctor_reports_the_desktop_link_as_info_ok_or_a_problem() {
     printf 'Comment[de]=Zusammenarbeit\n' >>"$DG_LAUNCHER_SYS" || return 1
     gsg doctor --roots "$SANDBOX/roots"
     assert_rc 0 "doctor after a Desktop update changed the system entry: the old entry still sets the variable"
-    assert_contains "$OUT" "WARNING  GitHub Desktop: MISMATCH the launcher entry differs from the system entry it is made from; run: git-secret-guard install --link-desktop-git" "a warning, with the fix"
+    assert_contains "$OUT" "WARNING  GitHub Desktop: MISMATCH the launcher entry differs from the system entry it is made from; run: git-secret-guard install" "a warning, with the fix"
     gsg status
     assert_rc 1 "status still counts it as a mismatch"
     dg_repair
     rm -f -- "$DG_HOOKS/post-merge" || return 1
     gsg doctor --roots "$SANDBOX/roots"
     assert_rc 1 "doctor with a stale link"
-    assert_contains "$OUT" "PROBLEM  GitHub Desktop: MISMATCH the hooks directory is missing or has changed files (post-merge); run: git-secret-guard install --link-desktop-git" "a problem, with the fix"
+    assert_contains "$OUT" "PROBLEM  GitHub Desktop: MISMATCH the hooks directory is missing or has changed files (post-merge); run: git-secret-guard install" "a problem, with the fix"
 }
 
 test_doctor_calls_a_launcher_that_no_longer_sets_the_hooks_path_a_problem() {
     local line text=""
     dg_install_begin || return 1
     mkdir -p -- "$SANDBOX/roots" || return 1
-    gsg install </dev/null
+    gsg install --dont-link-desktop-git </dev/null
     assert_rc 0 "install ($ERR)"
     dg_link_files
     while IFS= read -r line || [ -n "$line" ]; do
@@ -128,7 +128,7 @@ test_doctor_calls_a_launcher_that_no_longer_sets_the_hooks_path_a_problem() {
     assert_contains "$(<"$DG_LAUNCHER_USER")" "written by install --link-desktop-git" "the marker is still there"
     gsg doctor --roots "$SANDBOX/roots"
     assert_rc 1 "doctor: Desktop would start unscanned"
-    assert_contains "$OUT" "PROBLEM  GitHub Desktop: MISMATCH the launcher entry no longer sets core.hooksPath for Desktop; run: git-secret-guard install --link-desktop-git" "a problem, with the fix"
+    assert_contains "$OUT" "PROBLEM  GitHub Desktop: MISMATCH the launcher entry no longer sets core.hooksPath for Desktop; run: git-secret-guard install" "a problem, with the fix"
     gsg status
     assert_rc 1 "status agrees"
     dg_repair

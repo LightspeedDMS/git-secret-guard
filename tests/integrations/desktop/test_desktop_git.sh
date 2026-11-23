@@ -155,8 +155,14 @@ test_the_hold_applies_to_desktops_own_git_in_a_linking_run_only() {
     assert_eq "$OUT" "0 1" "Desktop's git in a run that links it: held"
     dg_run 'paths_init && desktop_git_paths; DESKTOP_GIT_FLAG=1; DG_WARN_HELD=0; desktop_git_hold_warning /usr/bin/git; printf "%s %s" "$?" "$DG_WARN_HELD"'
     assert_eq "$OUT" "1 0" "another git is never held"
-    dg_run 'paths_init && desktop_git_paths; DESKTOP_GIT_FLAG=0; DG_WARN_HELD=0; desktop_git_hold_warning "$DG_GIT"; printf "%s %s" "$?" "$DG_WARN_HELD"'
-    assert_eq "$OUT" "1 0" "a plain install holds nothing"
+    dg_run 'paths_init && desktop_git_paths; DESKTOP_GIT_FLAG=0; DESKTOP_GIT_OFF_FLAG=1; DG_WARN_HELD=0; desktop_git_hold_warning "$DG_GIT"; printf "%s %s" "$?" "$DG_WARN_HELD"'
+    assert_eq "$OUT" "1 0" "--dont-link-desktop-git holds nothing: the warning is printed at once"
+    dg_run 'paths_init && desktop_git_paths; DESKTOP_GIT_FLAG=0; DESKTOP_GIT_OFF_FLAG=0; DG_WARN_HELD=0; desktop_git_hold_warning "$DG_GIT"; printf "%s %s" "$?" "$DG_WARN_HELD"'
+    if [ "$DG_OLD" -eq 1 ]; then
+        assert_eq "$OUT" "0 1" "a plain install holds it for the link step (an unlinked Desktop whose git is older than 2.54)"
+    else
+        assert_eq "$OUT" "1 0" "a plain install holds nothing for a git of 2.54 or newer: it is not linked, so nothing is to be contradicted"
+    fi
 }
 
 # ^ why counts, not time; wrapped checkouts take about 3.7x the plain ones by construction, and a 3x plus 5 s ceiling failed on macOS CI by 65 ms
@@ -464,7 +470,7 @@ test_the_launcher_is_written_once_from_the_system_entry_and_a_foreign_one_is_kep
     printf 'mine\n' >"$DG_LAUNCHER_USER" || return 1
     dg_run 'paths_init && desktop_git_paths && desktop_git_launcher_write'
     assert_rc 1 "a launcher that is not ours is not replaced"
-    assert_contains "$ERR" "$DG_LAUNCHER_USER is not a file install --link-desktop-git wrote" "and is named"
+    assert_contains "$ERR" "$DG_LAUNCHER_USER is not a file install wrote" "and is named"
     assert_eq "$(<"$DG_LAUNCHER_USER")" mine "its content is untouched"
 }
 

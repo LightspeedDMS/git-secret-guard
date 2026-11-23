@@ -60,11 +60,12 @@ desktop_git_covers() {
     [ "$DG_STATE" = active ]
 }
 
-# ^ invariant true for the git Desktop bundles when this run links it (--link-desktop-git); its warning moves to the link step and prints on failure only
+# ^ invariant true for Desktop's bundled git when this run tries to link it (the flag, or desktop_git_auto_wanted of desktop_git.sh)
 # ^ order install_report_other_gits runs before the link step => deciding there would print a warning the link lines contradict
-# ^ invariant sets DG_WARN_HELD=1 when it is true; the Desktop step clears it, and install_cleanup prints the held warning if it is still set
+# ^ invariant sets DG_WARN_HELD=1 when it is true; the Desktop step clears it after a good link, and install_cleanup prints the held warning if it is still set
 desktop_git_hold_warning() {
-    if ! install_git_is_bundled "$1" || [ "${DESKTOP_GIT_FLAG:-0}" -ne 1 ]; then return 1; fi
+    if ! install_git_is_bundled "$1"; then return 1; fi
+    if [ "${DESKTOP_GIT_FLAG:-0}" -ne 1 ]; then desktop_git_auto_wanted || return 1; fi
     DG_WARN_HELD=1
 }
 
@@ -94,7 +95,7 @@ desktop_git_status_lines() {
     esac
 }
 
-# ^ invariant doctor line for GitHub Desktop; a stale link is a PROBLEM (commits it promised to scan are not), an unlinked old git is information (opt-in)
+# ^ invariant doctor line for GitHub Desktop; a stale link is a PROBLEM (it promised to scan), an unlinked old git is information (a plain install links it)
 desktop_git_doctor_lines() {
     local rc=0
     desktop_git_linux_state desktop_git_other_doctor || rc=$?
@@ -148,7 +149,7 @@ desktop_git_launcher_sets_path() {
 # ^ invariant sets DG_STATE to none, unlinked (old Desktop git, nothing of ours), scans (Desktop git 2.54 or newer, nothing of ours), active or mismatch
 # ^ invariant DG_TEXT is the status text after the Desktop label (MISMATCH and the command for mismatch), DG_VER the git version; needs desktop_git_paths
 desktop_git_state() {
-    local stale want fix="run: $GSG_NAME install --link-desktop-git"
+    local stale want fix="run: $GSG_NAME install"
     DG_STATE=none DG_TEXT="" DG_VER="" DG_SOFT=0
     if desktop_git_found; then DG_VER="$(install_git_version "$DG_GIT")" || DG_VER="of unknown version"; fi
     if ! desktop_git_linked; then

@@ -517,15 +517,19 @@ smartgit_rollback() {
     else
         printf '%s: %s; %s\n' "$GSG_NAME" "$none" "$tail" >&2
     fi
+    [ "$failed" -eq 0 ]
 }
 
 # ^ order Git LFS first (package, and after it its filter), the settings last; a failure before the first edit leaves every preferences file untouched
 # ^ invariant any failure after the first edit rolls every directory of this run back; the Git LFS package and filter stay, and the message says so
+# ^ invariant rc 0 = applied, 1 = failed with every undo finished (or nothing changed), 2 = failed and an undo did not finish; the flag treats both as a failure
 smartgit_apply() {
-    local i fp=0 host=0 via step
+    local i fp=0 host=0 via step lrc=0
     local -a applied=()
     smartgit_lfs_install_pkg || return 1
-    smartgit_lfs_configure || return 1
+    smartgit_lfs_configure || lrc=$?
+    if [ "$lrc" -eq 2 ]; then return 2; fi
+    if [ "$lrc" -ne 0 ]; then return 1; fi
     for i in "$@"; do
         step=smartgit_apply_one
         if [ "${SG_SET_KIND[$i]}" = flatpak ]; then
@@ -535,13 +539,13 @@ smartgit_apply() {
             host=1
         fi
         "$step" "$i" || {
-            smartgit_apply_undo "$fp" "$i" "${applied[@]}"
+            smartgit_apply_undo "$fp" "$i" "${applied[@]}" || return 2
             return 1
         }
         applied+=("$i")
     done
     if { [ "$host" -eq 1 ] && ! smartgit_verify_run host; } || { [ "$fp" -eq 1 ] && ! smartgit_verify_run sandbox; }; then
-        smartgit_apply_undo "$fp" "${applied[@]}"
+        smartgit_apply_undo "$fp" "${applied[@]}" || return 2
         return 1
     fi
     for i in "${applied[@]}"; do
@@ -552,18 +556,21 @@ smartgit_apply() {
 }
 
 # ^ invariant FP ($1) = 1 when a Flatpak directory was in the run; the preferences are restored first, the Flatpak steps undone after them from their record
+# ^ invariant rc 1 = the restore or the Flatpak undo did not finish (said above, restore-smartgit finishes it)
 smartgit_apply_undo() {
-    local fp="$1"
+    local fp="$1" rb=0
     shift
-    smartgit_rollback "$fp" "$@"
-    if [ "$fp" -ne 1 ]; then return 0; fi
+    smartgit_rollback "$fp" "$@" || rb=1
+    if [ "$fp" -ne 1 ]; then return "$rb"; fi
     if ! smartgit_flatpak_undo; then
         printf '%s: the Flatpak steps were NOT fully undone (see above); run %s restore-smartgit\n' "$GSG_NAME" "$GSG_NAME" >&2
+        return 1
     elif [ -n "$SGF_UNDONE" ]; then
         printf '%s: undid the Flatpak changes of this run (%s); apart from them, %s\n' "$GSG_NAME" "$SGF_UNDONE" "$(brew_unchanged_text)" >&2
     else
         printf '%s: no Flatpak change was left to undo; %s\n' "$GSG_NAME" "$(brew_unchanged_text)" >&2
     fi
+    return "$rb"
 }
 
 # ^ invariant true when this tool left a manifest, a record or a temp file of an interrupted run under <state dir>/smartgit

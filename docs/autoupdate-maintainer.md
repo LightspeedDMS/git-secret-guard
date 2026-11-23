@@ -60,10 +60,14 @@ Behaviour: [Auto-update](install.md#auto-update---auto-update-and-update). Inter
   (`test_archive_filter_and_export_attributes_observation`); the trust section of the user docs states this, keep the two in
   step. `X` comes from `git show HEAD:VERSION`, never from the work tree file.
 - **The child install runs in the foreground, with no flags** (`autoupdate_child_install`):
-  `GSG_UPDATE_LOCK_PID=$$ env -u CLICOLOR_FORCE timeout -k 30 1800 <work dir>/tree/bin/git-secret-guard install </dev/null`, stdout and stderr into
+  `GSG_UPDATE_LOCK_PID=$$ env -u CLICOLOR_FORCE timeout -k 30 1800 <work dir>/tree/bin/git-secret-guard install "${GSG_UPDATE_INSTALL_ARGS[@]}" </dev/null`, stdout and stderr into
   files, `$?` taken, the files then copied to the run's own stdout and stderr (`CLICOLOR_FORCE` is dropped because a line of
   `install.err` goes into the record `status` shows, and escape codes must not). No flag means no `--upgrade-git`,
-  `--take-over-system-git` or `--replace-hooks-path`, and no terminal means no prompt. The tree has no `.git`, so that
+  `--take-over-system-git` or `--replace-hooks-path`, and no terminal means no prompt. It does mean the automatic SmartGit and
+  Desktop steps of a plain install (`preferences.yml`, the Desktop launcher and hooks directory; no package manager and no
+  Flatpak sandbox removal without a terminal). **The one switch** is the array `GSG_UPDATE_INSTALL_ARGS` in
+  `lib/autoupdate/autoupdate.sh`, empty: `--dont-configure-smartgit` and `--dont-link-desktop-git` there turn both steps off for
+  every update run, which then only reports. The tree has no `.git`, so that
   install keeps the recorded `source_checkout`, and as a plain install over `auto_update=yes` it refreshes the units and
   enables nothing. **Nothing is sourced after the child returns:** the installer has replaced the share tree the running
   shell's libraries came from. `updated` needs exit 0 **and** `$GSG_SHARE/VERSION` equal to `X`

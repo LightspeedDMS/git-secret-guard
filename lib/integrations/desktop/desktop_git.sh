@@ -178,7 +178,7 @@ desktop_git_paths_utf8_ok() {
             printf '%s: the path %q is not valid UTF-8, so GLib cannot load a launcher entry that names it\n' "$GSG_NAME" "$p" >&2
             return 1
         elif [ "$rc" -eq 127 ]; then
-            printf '%s: iconv is not installed; --link-desktop-git needs it to check that the launcher path is valid UTF-8\n' "$GSG_NAME" >&2
+            printf '%s: iconv is not installed; install needs it to check that the launcher path is valid UTF-8\n' "$GSG_NAME" >&2
             return 2
         elif [ "$rc" -ne 0 ]; then
             printf '%s: iconv failed (status %s) while checking the path of the launcher entry\n' "$GSG_NAME" "$rc" >&2
@@ -187,10 +187,33 @@ desktop_git_paths_utf8_ok() {
     done
 }
 
+# ^ invariant rc 0 = system launcher readable, paths UTF-8, hooks directory no link, no file of the user's in the way; writes nothing
+# ^ invariant LEAD ($1) starts a message, REFUSED ($2) the UTF-8 one, END ($3) closes each; the flag says nothing changed, auto says none written
+desktop_git_files_check() {
+    local lead="$1" refused="$2" end="$3" f
+    if [ ! -f "$DG_SYS_LAUNCHER" ] || [ ! -r "$DG_SYS_LAUNCHER" ]; then
+        printf '%s: %s cannot read the launcher entry %s the user entry is made from; %s.\n' "$GSG_NAME" "$lead" "$DG_SYS_LAUNCHER" "$end" >&2
+        return 1
+    fi
+    if ! desktop_git_paths_utf8_ok; then
+        printf '%s: %s Desktop would start unscanned; %s.\n' "$GSG_NAME" "$refused" "$end" >&2
+        return 1
+    fi
+    if [ -L "$DG_HOOKS" ] || { [ -e "$DG_HOOKS" ] && [ ! -d "$DG_HOOKS" ]; }; then
+        printf '%s: %s %s is a symbolic link or not a directory; install will not write through it; %s.\n' "$GSG_NAME" "$lead" "$DG_HOOKS" "$end" >&2
+        return 1
+    fi
+    if f="$(desktop_git_foreign)"; then
+        local advice='Move it out of the hooks directory (a hook of yours belongs in the repository or in a directory of your own)'
+        if [ "$f" = "$DG_USER_LAUNCHER" ]; then advice='Move it away (or add the environment by hand)'; fi
+        printf '%s: %s %s exists and git-secret-guard did not write it; it is kept, install will not replace it. %s and run %s install again; %s.\n' "$GSG_NAME" "$lead" "$f" "$advice" "$GSG_NAME" "$end" >&2
+        return 1
+    fi
+}
+
 # ^ invariant DESKTOP_GIT_FLAG is 1 for install --link-desktop-git; a global as lib/install/install.sh is at its size limit; a refusal here stops install
 # ^ order runs after paths_init and before the git offers and every other write => a refusal changes nothing, and says so
 desktop_git_precheck() {
-    local f
     if [ "${DESKTOP_GIT_FLAG:-0}" -ne 1 ]; then return 0; fi
     desktop_git_platform
     if [ "$REPLY" != linux ]; then
@@ -202,24 +225,7 @@ desktop_git_precheck() {
         printf '%s: --link-desktop-git: GitHub Desktop was not found (no executable %s; only the RPM and deb layout is looked for, not Flatpak, Snap or /opt); %s.\n' "$GSG_NAME" "$DG_GIT" "$(brew_unchanged_text)" >&2
         return 1
     fi
-    if [ ! -f "$DG_SYS_LAUNCHER" ] || [ ! -r "$DG_SYS_LAUNCHER" ]; then
-        printf '%s: --link-desktop-git: cannot read the launcher entry %s the user entry is made from; %s.\n' "$GSG_NAME" "$DG_SYS_LAUNCHER" "$(brew_unchanged_text)" >&2
-        return 1
-    fi
-    if ! desktop_git_paths_utf8_ok; then
-        printf '%s: --link-desktop-git refused, Desktop would start unscanned; %s.\n' "$GSG_NAME" "$(brew_unchanged_text)" >&2
-        return 1
-    fi
-    if [ -L "$DG_HOOKS" ] || { [ -e "$DG_HOOKS" ] && [ ! -d "$DG_HOOKS" ]; }; then
-        printf '%s: --link-desktop-git: %s is a symbolic link or not a directory; install will not write through it; %s.\n' "$GSG_NAME" "$DG_HOOKS" "$(brew_unchanged_text)" >&2
-        return 1
-    fi
-    if f="$(desktop_git_foreign)"; then
-        local advice='Move it out of the hooks directory (a hook of yours belongs in the repository or in a directory of your own)'
-        if [ "$f" = "$DG_USER_LAUNCHER" ]; then advice='Move it away (or add the environment by hand)'; fi
-        printf '%s: --link-desktop-git: %s exists and git-secret-guard did not write it; it is kept, install will not replace it. %s and run install --link-desktop-git again; %s.\n' "$GSG_NAME" "$f" "$advice" "$(brew_unchanged_text)" >&2
-        return 1
-    fi
+    desktop_git_files_check "--link-desktop-git:" "--link-desktop-git refused," "$(brew_unchanged_text)"
 }
 
 # ^ invariant desktop_git_hooks_write SHARE DIR makes DIR with the shared file and one wrapper per event; a file without the marker stops it before any write
@@ -232,11 +238,11 @@ desktop_git_hooks_write() {
         return 1
     fi
     if [ -L "$dir" ] || { [ -e "$dir" ] && [ ! -d "$dir" ]; }; then
-        printf '%s: %s is a symbolic link or not a directory; install --link-desktop-git will not write through it; nothing was changed\n' "$GSG_NAME" "$dir" >&2
+        printf '%s: %s is a symbolic link or not a directory; install will not write through it; nothing was changed\n' "$GSG_NAME" "$dir" >&2
         return 1
     fi
     if f="$(desktop_git_foreign_in "$dir")"; then
-        printf '%s: %s is not a file install --link-desktop-git wrote; nothing was changed\n' "$GSG_NAME" "$f" >&2
+        printf '%s: %s is not a file install wrote; nothing was changed\n' "$GSG_NAME" "$f" >&2
         return 1
     fi
     mkdir -p -- "$dir" || return 1
@@ -252,7 +258,7 @@ desktop_git_hooks_write() {
 desktop_git_launcher_write() {
     local text
     if { [ -e "$DG_USER_LAUNCHER" ] || [ -L "$DG_USER_LAUNCHER" ]; } && ! desktop_git_is_ours "$DG_USER_LAUNCHER"; then
-        printf '%s: %s is not a file install --link-desktop-git wrote; it is kept\n' "$GSG_NAME" "$DG_USER_LAUNCHER" >&2
+        printf '%s: %s is not a file install wrote; it is kept\n' "$GSG_NAME" "$DG_USER_LAUNCHER" >&2
         return 1
     fi
     desktop_git_paths_utf8_ok || return 1
@@ -262,10 +268,14 @@ desktop_git_launcher_write() {
 }
 
 # ^ invariant undoes a failed run by removing the files of the link, and says how many went or a removal failed
+# ^ invariant DG_ROLLBACK_FAILED is 1 after a failed removal, 0 otherwise; the automatic link exits 1 for it (a trace of ours is left)
+DG_ROLLBACK_FAILED=0
 desktop_git_rollback() {
+    DG_ROLLBACK_FAILED=0
     if desktop_git_unlink_files; then
         printf '%s: GitHub Desktop was not linked; %s files of the link (written by this run or an earlier one) were removed again\n' "$GSG_NAME" "$DG_REMOVED" >&2
     else
+        DG_ROLLBACK_FAILED=1
         printf '%s: GitHub Desktop was not linked, but removing the files of the link failed after %s files; run %s unlink-desktop-git\n' "$GSG_NAME" "$DG_REMOVED" "$GSG_NAME" >&2
     fi
 }
@@ -381,7 +391,7 @@ desktop_git_unlink_run() {
     desktop_git_unlink_files || return 1
     ui_prefix 1 ok
     if [ "$DG_REMOVED" -eq 0 ]; then
-        printf '%s%s: nothing to unlink, install --link-desktop-git has not changed anything here\n' "$REPLY" "$GSG_NAME"
+        printf '%s%s: nothing to unlink, install has not changed anything here\n' "$REPLY" "$GSG_NAME"
         return 0
     fi
     printf '%s%s: removed %s files of the GitHub Desktop link; restart GitHub Desktop so it stops using them\n' "$REPLY" "$GSG_NAME" "$DG_REMOVED"
@@ -408,8 +418,32 @@ desktop_git_carry_over() {
     cp -a -- "$GSG_SHARE/desktop-hooks" "$GSG_SHARE_NEW/"
 }
 
-# ^ invariant install's last step, after the share dir is in place; Linux links when asked (DESKTOP_GIT_FLAG=1) or refreshes a link, else prints one note
-# ^ invariant the other platforms get the update note of lib/integrations/desktop/desktop_git_report.sh; rc 1 = the link failed and was rolled back
+# ^ invariant rc 0 = a plain install links Desktop by itself; Linux, found, no DESKTOP_GIT_OFF_FLAG, unlinked, a git reporting a version older than 2.54
+# ^ coupled the one decision of desktop_git_install_step and of desktop_git_hold_warning (desktop_git_report.sh); the warning is held only when this is true
+desktop_git_auto_wanted() {
+    if [ "${DESKTOP_GIT_OFF_FLAG:-0}" -eq 1 ]; then return 1; fi
+    desktop_git_platform
+    if [ "$REPLY" != linux ]; then return 1; fi
+    desktop_git_paths || return 1
+    if ! desktop_git_found || desktop_git_linked; then return 1; fi
+    install_git_version "$DG_GIT" >/dev/null || return 1
+    ! install_git_is_new_enough "$DG_GIT"
+}
+
+# ^ invariant the automatic link of a plain install; the file checks of the flag run here instead of before install, and a refusal is a printed notice, rc 0
+# ^ invariant a failed link is rolled back (rc 0); rc 1 only when removing the files of the link failed; the held warning stays set until a link works
+desktop_git_auto_link() {
+    desktop_git_files_check "GitHub Desktop was not linked:" "GitHub Desktop was not linked," "nothing of the link was written" || return 0
+    DG_ROLLBACK_FAILED=0
+    if desktop_git_apply 1; then
+        DG_WARN_HELD=0
+        return 0
+    fi
+    return "$DG_ROLLBACK_FAILED"
+}
+
+# ^ invariant install's last step, after the share dir is in place; Linux links when asked (DESKTOP_GIT_FLAG=1), by itself, or refreshes a link
+# ^ invariant DESKTOP_GIT_OFF_FLAG 1 (--dont-link-desktop-git) = one note, no new link; macOS and Windows get desktop_git_other_note
 desktop_git_install_step() {
     local ver
     desktop_git_platform
@@ -431,6 +465,10 @@ desktop_git_install_step() {
         desktop_git_apply 0
         return
     fi
+    if desktop_git_auto_wanted; then
+        desktop_git_auto_link
+        return
+    fi
     ver="$(install_git_version "$DG_GIT")" || {
         ui_prefix 2 WARNING
         printf '%s%s: note: GitHub Desktop was found but %s did not report a git version; if it is older than 2.54 its commits are not scanned (install --link-desktop-git fixes that)\n' "$REPLY" "$GSG_NAME" "$DG_GIT" >&2
@@ -438,5 +476,5 @@ desktop_git_install_step() {
     }
     if install_git_is_new_enough "$DG_GIT"; then return 0; fi
     ui_prefix 1 WARNING
-    printf '%s%s: note: GitHub Desktop (git %s) runs its own git, which ignores the scan hook without any message, so commits made in Desktop are not scanned; to scan them run: %s install --link-desktop-git\n' "$REPLY" "$GSG_NAME" "$ver" "$GSG_NAME"
+    printf '%s%s: note: GitHub Desktop (git %s) runs its own git, which ignores the scan hook without any message, so commits made in Desktop are not scanned; to scan them run: %s install (without --dont-link-desktop-git)\n' "$REPLY" "$GSG_NAME" "$ver" "$GSG_NAME"
 }

@@ -104,3 +104,27 @@ sl_hand_wrapper() {
 # ^ invariant sl_flatpak_running lists an instance with a live pid (this shell); sl_flatpak_stale_only one whose pid is gone, as a finished flatpak run leaves
 sl_flatpak_running() { printf '%s\t%s\n' "$$" "$SL_APP_ID" >"$SANDBOX/flatpak.ps"; }
 sl_flatpak_stale_only() { printf '%s\t%s\n' "$(sh -c 'echo $$')" "$SL_APP_ID" >"$SANDBOX/flatpak.ps"; }
+
+# ^ invariant sl_lfs_missing_setup ID = a tarball SmartGit on a machine with os-release ID, the real scanners and no git-lfs SmartGit's git can find
+sl_lfs_missing_setup() {
+    sl_tarball_setup || return 1
+    gu_os_release "ID=$1" || return 1
+    sg_real_tools
+}
+
+# ^ invariant sl_flatpak_ready [FIXTURE] = the Flatpak SmartGit, a vmoptions file with one line of its own (copy in vmopts.orig), scanners, git-lfs
+sl_flatpak_ready() {
+    sl_flatpak_setup "$@" || return 1
+    printf -- '-Xmx1024m\n' >"$SL_VMOPTS" && chmod 640 "$SL_VMOPTS" && cp -p -- "$SL_VMOPTS" "$SANDBOX/vmopts.orig" || return 1
+    sg_real_tools || return 1
+    sg_lfs_present
+}
+
+# ^ invariant sl_flatpak_untouched MSG asserts the Flatpak and its settings are as sl_flatpak_ready left them; shared by the refusal tests
+sl_flatpak_untouched() {
+    assert_no_file "$SANDBOX/flatpak.override.user" "$1: no --user override"
+    assert_no_file "$SL_WRAPPER" "$1: no wrapper"
+    assert_eq "$(sg_hash "$SL_VMOPTS")" "$(sg_hash "$SANDBOX/vmopts.orig")" "$1: smartgit.vmoptions unchanged"
+    assert_eq "$(sg_hash "$SG_PREFS")" "$(sg_hash "$SANDBOX/prefs.orig")" "$1: preferences.yml unchanged"
+    assert_no_file "$SL_FLATPAK_RECORD" "$1: no record"
+}

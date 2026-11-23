@@ -1,0 +1,41 @@
+name: Feature request
+description: Something the hook, the CLI, install or doctor should do, or do differently
+title: "[STORY] "
+labels: ["story", "backlog"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For anything larger than a small fix, an issue comes before the pull request, so the approach can be agreed.
+
+        This issue is public: no real credential, and no detail of a machine or a person you do not want published.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: Who needs this, and what goes wrong or is missing today. A real case is worth more than a general one.
+    validations:
+      required: true
+  - type: textarea
+    id: wanted
+    attributes:
+      label: What you would like to happen
+      description: The behaviour a user would see (a command, its output, what a commit does).
+    validations:
+      required: true
+  - type: checkboxes
+    id: platforms
+    attributes:
+      label: Platforms concerned
+      options:
+        - label: Linux
+        - label: macOS
+        - label: Windows
+        - label: WSL
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives and workarounds
+      description: What you do today instead, and other ways you thought of.
+    validations:
+      required: false

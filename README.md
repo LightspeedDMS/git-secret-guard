@@ -107,6 +107,7 @@ The full list: [docs/scan.md#limits](docs/scan.md#limits).
 | [docs/bypass-detection-scenarios.md](docs/bypass-detection-scenarios.md) | the bypass and detection scenario catalog and what the hook answers |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | development setup, running the tests, rules for changes, signing off commits ([DCO.txt](DCO.txt)) |
 | [SECURITY.md](SECURITY.md) | how to report a vulnerability privately |
+| [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | how people working on the project treat each other, and how to report a problem privately |
 | [THIRD_PARTY_LICENSES](THIRD_PARTY_LICENSES) | the third-party components `install` downloads |
 
 ## License and maintainers

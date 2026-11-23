@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a vulnerability (private)
+    url: https://github.com/LightspeedDMS/git-secret-guard/security/advisories/new
+    about: A way to get a secret past the hook, or any other security problem. Never in a public issue.
+  - name: Report a conduct problem (private)
+    url: https://github.com/LightspeedDMS/git-secret-guard/blob/main/CODE_OF_CONDUCT.md#reporting-a-problem
+    about: The code of conduct says how to reach a maintainer privately. Never in a public issue.

@@ -1,0 +1,89 @@
+name: Bug report
+description: The hook, the CLI, install or doctor did something wrong
+title: "[BUG] "
+labels: ["bug", "backlog"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Two things first:
+
+        - **A way to get a secret past the hook, or any other security problem, does not go here.** Report it privately: [Report a vulnerability](https://github.com/LightspeedDMS/git-secret-guard/security/advisories/new).
+        - **Never paste a real credential**, not even a revoked one. A fake value that triggers the same behaviour is enough.
+
+        This issue is public. The `status` and `doctor` output names paths on your machine: replace anything you do not want published.
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Linux
+        - macOS
+        - Windows (Git Bash)
+        - Windows (PowerShell)
+        - Windows (cmd)
+        - WSL
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system and version
+      placeholder: Ubuntu 24.04, macOS 26, Windows 11, Rocky Linux 9 ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: git-secret-guard version
+      description: The output of `git-secret-guard version`, or the commit you tested.
+    validations:
+      required: true
+  - type: input
+    id: git
+    attributes:
+      label: git --version
+    validations:
+      required: true
+  - type: input
+    id: bash
+    attributes:
+      label: bash --version (first line)
+    validations:
+      required: true
+  - type: textarea
+    id: status
+    attributes:
+      label: Output of git-secret-guard status
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of git-secret-guard doctor
+      render: text
+    validations:
+      required: false
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: A small script or a list of commands, and what each printed.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you submit
+      options:
+        - label: This is not a security problem (those are reported privately, see above).
+          required: true
+        - label: Nothing above is a real credential, and I removed the details I do not want published.
+          required: true

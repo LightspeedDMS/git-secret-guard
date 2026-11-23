@@ -718,7 +718,7 @@ install_write_state() {
     done
     if [ "$INSTALL_TIMER" -eq 1 ]; then timer=yes; fi
     placed="$(install_unique_words "$placed")"
-    state_write "$(<"$GSG_ROOT/VERSION")" "$prev_set" "$prev" "$tools" "$backup" "$replaced" "$placed" "$timer" "$INSTALL_AUTO_UPDATE" "$INSTALL_SOURCE_CHECKOUT"
+    state_write "$(<"$GSG_ROOT/VERSION")" "$prev_set" "$prev" "$tools" "$backup" "$replaced" "$placed" "$timer" "$INSTALL_AUTO_UPDATE" "$INSTALL_SOURCE_CHECKOUT" "$INSTALL_PATH_RECORD"
 }
 
 # ^ why --replace-all, not a plain set; a plain set exits 5 when the key already has several values, and --add would duplicate the event
@@ -815,6 +815,7 @@ install_run() {
     if [ "$timer" -eq 1 ]; then GSG_INSTALL_FLAGS+=" --with-timer"; fi
     if [ "${AUTO_UPDATE_FLAG:-0}" -eq 1 ]; then GSG_INSTALL_FLAGS+=" --auto-update"; fi
     if [ "$takeover" -eq 1 ]; then GSG_INSTALL_FLAGS+=" --take-over-system-git"; fi
+    if [ "${INSTALL_PATH_FLAG:-0}" -eq 1 ]; then GSG_INSTALL_FLAGS+=" --dont-change-path"; fi
     # ^ security umask only tightens (022 or stricter) => settings, share tree, CLI link and state are never group or other writable; WSL 1 starts at 0000
     umask "$(printf '%03o' "$((8#$(umask) | 8#022))")"
     paths_init || return 1
@@ -844,6 +845,7 @@ install_run() {
     if [ "$early" -eq 0 ]; then install_run_state_checks || return 1; fi
     install_prepare_timer "$timer" || return 1
     install_prepare_update || return 1
+    install_path_plan || return 1
     tools_announce_overrides
     install_tools_ready || return 1
     install_record_rule_hash || return 1
@@ -856,7 +858,9 @@ install_run() {
     install_link_cli || return 1
     install_set_config || return 1
     install_unset_hooks_path || return 1
-    install_summary; install_wsl_notice
+    # ^ invariant install_path_apply always returns 0 and install_path_report names a failure => a failed PATH change never changes install's exit status
+    install_path_apply
+    install_summary; install_path_report; install_wsl_notice
     # ^ invariant the four steps all run and any failure is install's status 1; a failed timer load never hides or skips the SmartGit and Desktop steps
     local rc=0
     install_enable_timer || rc=1

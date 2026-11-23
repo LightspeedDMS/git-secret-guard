@@ -122,6 +122,7 @@ doctor_check_state() {
         return 0
     fi
     doctor_machine_line ok "installed: version $ST_VERSION (state $GSG_STATE_FILE)"
+    if ! install_path_has_dir "$GSG_BIN_DIR"; then doctor_machine_line info "CLI folder: $(install_path_missing_text)"; fi
     doctor_check_state_records
 }
 

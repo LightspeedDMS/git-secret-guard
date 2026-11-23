@@ -73,6 +73,7 @@ test_install_adopt 112 6
 test_install_network - 22
 test_install_old_git - 2
 test_install_other_gits - 0
+test_install_path - 12
 test_install_written_files - 2
 test_jq_wrapper - 4
 test_launchd - 17
@@ -83,6 +84,7 @@ test_mac_runner - 0
 test_macos 315 21
 test_macos_ci - 0
 test_macos_intel - 5
+test_macos_path - 7
 test_message 104 14
 test_message_real 245 79
 test_message_third_block - 0

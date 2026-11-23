@@ -42,6 +42,8 @@ GSG_UPDATE_EXIT_TERM=143
 GSG_UPDATE_LOG_MAX=1048576
 
 AU_LOCK_HELD=0
+# ^ invariant AU_LET_IN=1 only after autoupdate_lock_take let this process in as update's child; install_path_is_update_child reads it, not GSG_UPDATE_LOCK_PID
+AU_LET_IN=0
 AU_ROLE="" AU_RESULT="" AU_REASON="" AU_DETAIL="" AU_FROM="" AU_TO="" AU_WORK=""
 # ^ invariant AU_TIMED_OUT = "" or the text naming the first call of this run its limit ended; autoupdate_finish records such a run as failed
 AU_TIMED_OUT=""
@@ -69,10 +71,13 @@ autoupdate_is_ancestor() {
 # ^ order state_make_dir before the lock => a first install can take it, the lock lives in the state dir
 autoupdate_lock_take() {
     local holder
-    AU_LOCK_HELD=0
+    AU_LOCK_HELD=0 AU_LET_IN=0
     if [ -n "${GSG_UPDATE_LOCK_PID:-}" ]; then
         holder="$(readlink -- "$GSG_UPDATE_LOCK" 2>/dev/null)" || holder=""
-        if [ -n "$holder" ] && [ "$holder" = "$GSG_UPDATE_LOCK_PID" ] && autoupdate_is_ancestor "$holder"; then return 0; fi
+        if [ -n "$holder" ] && [ "$holder" = "$GSG_UPDATE_LOCK_PID" ] && autoupdate_is_ancestor "$holder"; then
+            AU_LET_IN=1
+            return 0
+        fi
     fi
     state_make_dir || return 2
     if doctor_rec_lock "$GSG_UPDATE_LOCK" 1 "$GSG_UPDATE_LOCK_MAX_AGE_MIN" "update, install or uninstall"; then

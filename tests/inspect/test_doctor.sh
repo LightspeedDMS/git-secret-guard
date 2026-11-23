@@ -26,6 +26,20 @@ test_a_healthy_machine_exits_0_and_shows_the_machine_section() {
     assert_eq "$ERR" "git-secret-guard: note: GIT_CONFIG_GLOBAL is set; the global git config used is $SANDBOX/gitconfig" "stderr is only the one-line note"
 }
 
+# ^ coupled issue #72 dr_begin keeps the CLI folder off PATH; doctor reports it as information only, never as a PROBLEM or a WARNING
+test_doctor_says_when_the_cli_folder_is_not_on_path_as_information_only() {
+    dr_begin || return 1
+    doctor
+    assert_rc 0 "doctor with the CLI folder off PATH"
+    assert_contains "$OUT" "  info     CLI folder: $LC_BIN is not on the PATH this shell runs with" "the information line"
+    assert_not_contains "$OUT" "warnings:" "no warning is counted"
+    assert_not_contains "$OUT" "PROBLEM" "and no problem"
+    set_env PATH="$LC_BIN/:$SANDBOX/pathbin:$TEST_BASE_PATH"
+    doctor
+    assert_rc 0 "doctor with the CLI folder on PATH"
+    assert_not_contains "$OUT" "CLI folder" "nothing is said"
+}
+
 test_a_doctor_that_cannot_run_exits_2_and_says_why() {
     dr_begin || return 1
     gsg doctor --roots "$SANDBOX/no-such-dir"

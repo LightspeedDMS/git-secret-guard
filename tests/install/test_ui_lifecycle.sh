@@ -18,7 +18,8 @@ test_install_puts_the_ok_icon_on_its_outcome_line_in_terminal_mode_only() {
     gsg install
     assert_rc 0 "install"
     assert_eq "$(head -n 1 <<<"$OUT")" "$OK_ICON git-secret-guard: installed git-secret-guard $want" "icon, one space, the unchanged line"
-    assert_eq "$(grep -c "$ESC" <<<"$OUT")" 1 "no other line of install carries an escape sequence"
+    assert_eq "$(grep -c "$ESC" <<<"$OUT")" 2 "no other line of install carries an escape sequence than the outcome line and the PATH line"
+    assert_contains "$OUT" "${ESC}[2m•${ESC}[0m git-secret-guard: PATH: " "the PATH line carries the info icon (the sandbox PATH never holds the CLI folder)"
 }
 
 test_install_in_plain_mode_prints_no_escape_sequence_and_no_extra_line() {

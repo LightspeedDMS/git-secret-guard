@@ -109,7 +109,7 @@ JQ_ADOPT_ENV='GSG_OS=MINGW64_NT-10.0-26200 GSG_ARCH=x86_64 GSG_NAME=git-secret-g
 jq_adopt_chain() {
     local bin="$1" lock="$2" jqbin="$3"
     win "$JQ_ADOPT_ENV"' GSG_TOOLS_LOCK="$2" GSG_BIN_DIR="$1" INSTALL_JQ_BIN="$3" ST_PLACED="" GSG_STATE_DIR="$1/st" GSG_STATE_FILE="$1/st/state"
-GSG_TOOL_NEWSHA=("" "" "") ST_BACKUP="" ST_PREV_SET=no GSG_PREV_SET=no INSTALL_TIMER=0 INSTALL_AUTO_UPDATE=no INSTALL_SOURCE_CHECKOUT=""
+GSG_TOOL_NEWSHA=("" "" "") ST_BACKUP="" ST_PREV_SET=no GSG_PREV_SET=no INSTALL_TIMER=0 INSTALL_AUTO_UPDATE=no INSTALL_SOURCE_CHECKOUT="" INSTALL_PATH_RECORD=""
 install_manage_jq; install_plan_lock && install_plan_tools; echo "names=[${GSG_TOOL_NAMES[*]}] need=${GSG_TOOL_NEED[2]} aside=[${GSG_TOOL_ASIDE[2]}] wrapper=[$INSTALL_JQ_WRAPPER]"
 state_make_dir && install_write_state final && state_read && echo "tools=[$ST_TOOLS] placed=[$ST_PLACED]"
 UN_HANDLED=" "; uninstall_read_placed && uninstall_tools' "$bin" "$lock" "$jqbin"

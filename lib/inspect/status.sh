@@ -418,6 +418,7 @@ status_install_lines() {
         asides+="${asides:+ }${entry%:*}"
     done
     status_line info "originals moved aside" "${asides:-none}"
+    if ! install_path_has_dir "$GSG_BIN_DIR"; then status_line info "CLI folder" "$(install_path_missing_text)"; fi
 }
 
 # ^ invariant arg = 0 when the git in use passed its check, only a passed check asks git about the hook; rc 1 = reading the git config failed

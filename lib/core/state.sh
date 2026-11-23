@@ -3,7 +3,7 @@
 GSG_STATE_MAX_LINES=100
 # ^ why a cap per line, not only per file; the tools_* values go through read -a <<<, and Git for Windows bash hangs at 64 KiB + 1 to 128 bytes
 GSG_STATE_LINE_MAX=8192
-GSG_STATE_VALUES=10
+GSG_STATE_VALUES=11
 GSG_LAUNCHD_LABEL=com.lightspeeddms.git-secret-guard.doctor
 # ^ coupled the Windows updater's Task Scheduler task (lib/platform/schtasks.sh); one per user, like the units of Linux
 GSG_UPDATE_TASK_NAME=git-secret-guard-update
@@ -12,11 +12,12 @@ GSG_ASIDE_RE='^[a-z][a-z0-9-]*\.gsg-replaced-[0-9]{8}T[0-9]{6}Z$'
 
 # ^ invariant sets ST_* for every key (ST_PREV_SET, ST_TIMER and ST_AUTO_UPDATE are yes|no); the keys after backup_path are optional
 # ^ invariant ST_SOURCE_CHECKOUT is an absolute path or "" (no checkout recorded); an older state file reads as auto_update=no and no checkout
+# ^ invariant ST_CLI_PATH is "", "macos-block <created 0|1> <no final newline 0|1> <file>" or "windows-user-path <text>"; an older file reads ""
 state_read() {
     local line key val missing="" seen=" "
     local -a lines=()
     ST_EXISTS=0 ST_VERSION="" ST_PREV_SET=no ST_PREV="" ST_TOOLS="" ST_BACKUP="" ST_REPLACED="" ST_PLACED="" ST_TIMER=no
-    ST_AUTO_UPDATE=no ST_SOURCE_CHECKOUT=""
+    ST_AUTO_UPDATE=no ST_SOURCE_CHECKOUT="" ST_CLI_PATH=""
     if [ ! -e "$GSG_STATE_FILE" ]; then return 0; fi
     mapfile -t -n "$((GSG_STATE_MAX_LINES + 1))" lines <"$GSG_STATE_FILE" || return 1
     if [ "${#lines[@]}" -gt "$GSG_STATE_MAX_LINES" ]; then
@@ -41,6 +42,7 @@ state_read() {
             timer_installed) ST_TIMER="$val" ;;
             auto_update) ST_AUTO_UPDATE="$val" ;;
             source_checkout) ST_SOURCE_CHECKOUT="$val" ;;
+            cli_path) ST_CLI_PATH="$val" ;;
             *) key="" ;;
         esac
         if [[ $line != *=* ]] || [ -z "$key" ] || [[ $seen == *" $key "* ]]; then
@@ -60,6 +62,13 @@ state_read() {
         printf '%s: the state file %s has a bad auto_update or source_checkout; fix or remove it\n' "$GSG_NAME" "$GSG_STATE_FILE" >&2
         return 1
     fi
+    case "$ST_CLI_PATH" in
+        "" | "macos-block "[01]" "[01]" /"* | "windows-user-path "?*) ;;
+        *)
+            printf '%s: the state file %s has a bad cli_path; fix or remove it\n' "$GSG_NAME" "$GSG_STATE_FILE" >&2
+            return 1
+            ;;
+    esac
     ST_EXISTS=1
 }
 
@@ -74,16 +83,16 @@ state_make_dir() {
     chmod 700 -- "$GSG_STATE_DIR" || return 1
 }
 
-# ^ invariant every caller passes all GSG_STATE_VALUES values; one written before auto_update and source_checkout existed is refused, never defaulted
-# ^ why refuse a short call, not default the two new values; a default would silently turn a recorded auto_update=yes into no
+# ^ invariant every caller passes all GSG_STATE_VALUES values; one written before auto_update, source_checkout and cli_path existed is refused, never defaulted
+# ^ why refuse a short call, not default the new values; a default would silently turn a recorded auto_update=yes into no, or drop a recorded PATH entry
 state_write() {
-    local version prev_set prev tools backup replaced placed timer auto checkout tmp all
+    local version prev_set prev tools backup replaced placed timer auto checkout clipath tmp all
     if [ "$#" -ne "$GSG_STATE_VALUES" ]; then
         printf '%s: state_write needs %s values, got %s; refusing to write the state file\n' "$GSG_NAME" "$GSG_STATE_VALUES" "$#" >&2
         return 1
     fi
-    version="$1" prev_set="$2" prev="$3" tools="$4" backup="$5" replaced="$6" placed="$7" timer="$8" auto="$9" checkout="${10}"
-    all="$version$prev_set$prev$tools$backup$replaced$placed$timer$auto$checkout"
+    version="$1" prev_set="$2" prev="$3" tools="$4" backup="$5" replaced="$6" placed="$7" timer="$8" auto="$9" checkout="${10}" clipath="${11}"
+    all="$version$prev_set$prev$tools$backup$replaced$placed$timer$auto$checkout$clipath"
     if [[ $all == *$'\n'* ]]; then
         printf '%s: a value to record contains a newline; refusing to write the state file\n' "$GSG_NAME" >&2
         return 1
@@ -101,6 +110,7 @@ state_write() {
         printf 'timer_installed=%s\n' "$timer"
         printf 'auto_update=%s\n' "$auto"
         printf 'source_checkout=%s\n' "$checkout"
+        printf 'cli_path=%s\n' "$clipath"
     } >"$tmp" || { rm -f -- "$tmp"; return 1; }
     mv -f -- "$tmp" "$GSG_STATE_FILE"
 }

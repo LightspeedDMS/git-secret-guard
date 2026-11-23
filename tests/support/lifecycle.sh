@@ -102,6 +102,40 @@ EOF
     chmod 755 "$SANDBOX/pathbin/launchctl"
 }
 
+# ^ security the stand-in records its arguments and reads one file beside it => no lifecycle test can reach the real directory service
+# ^ invariant dscl . -read /Users/NAME UserShell prints one UserShell line from dscl.shell and fails as for an unknown record when dscl.shell is absent
+# ^ invariant any other call of the stand-in fails loudly
+lc_dscl_standin() {
+    cat >"$SANDBOX/pathbin/dscl" <<'EOF' || return 1
+#!/bin/sh
+d="${0%/*}/.."
+printf '%s\n' "$*" >>"$d/dscl.log"
+if [ "$1" = . ] && [ "$2" = -read ] && [ "$4" = UserShell ]; then
+    if [ -f "$d/dscl.shell" ]; then printf 'UserShell: %s\n' "$(cat "$d/dscl.shell")"; exit 0; fi
+    echo "<dscl_cmd> DS Error: -14136 (eDSRecordNotFound)" >&2
+    exit 56
+fi
+echo "Error: the dscl stand-in does not know the call [$*]" >&2
+exit 1
+EOF
+    chmod 755 "$SANDBOX/pathbin/dscl"
+}
+
+# ^ security a Windows host runs the real PowerShell and the real registry, so lifecycle tests reach this stand-in through GSG_WINPATH_ROOT (set in lc_begin on Windows only)
+# ^ invariant it logs its arguments to powershell.log and answers every call with exit 2 and one reason line => the plan is a hint and nothing is ever written
+lc_powershell_standin() {
+    local f="$SANDBOX/root/windows/System32/WindowsPowerShell/v1.0/powershell.exe"
+    mkdir -p -- "${f%/*}" || return 1
+    cat >"$f" <<'EOF' || return 1
+#!/bin/sh
+d="${0%/*}/../../../../.."
+printf '%s\n' "$*" >>"$d/powershell.log"
+echo "the PowerShell stand-in of the test suite changes nothing" >&2
+exit 2
+EOF
+    chmod 755 "$f"
+}
+
 # ^ security these stand-ins log their arguments to $SANDBOX/gitup.log and touch only sandbox files => no lifecycle test runs a real sudo, dnf or restorecon
 # ^ invariant sudo runs the given command as the test user; dnf answers from files beside it (dnf.candidate, dnf.repos) and fails loudly on an unmodeled call
 lc_gitup_standins() {
@@ -432,6 +466,12 @@ as_macos() {
     if [ "$TEST_OS" = Darwin ]; then lc_real_uname; else lc_fake_uname Darwin arm64; fi
 }
 
+# ^ invariant lc_mac_begin [SHELL] = a scratch macOS with fixtures whose dscl names SHELL (default /bin/zsh) as the login shell; PATH tests start here
+lc_mac_begin() {
+    lc_begin && as_macos && lc_make_fixtures && lc_use_fixtures || return 1
+    printf '%s\n' "${1:-/bin/zsh}" >"$SANDBOX/dscl.shell"
+}
+
 lc_begin() {
     LC_HOME="$SANDBOX/home"
     LC_BIN="$LC_HOME/.local/bin"
@@ -442,13 +482,15 @@ lc_begin() {
     if [ "$TEST_IS_WINDOWS" -eq 1 ]; then LC_EXE=.exe; fi
     rm -rf -- "$LC_HOME" "$SANDBOX/xdg" "$SANDBOX/pathbin" "$LC_FIX" "$SANDBOX/systemctl.log" "$SANDBOX/systemctl.fail" \
         "$SANDBOX/schtasks.log" "$SANDBOX/schtasks.fail" "$SANDBOX/schtasks.tasks" \
-        "$SANDBOX/launchctl.log" "$SANDBOX/launchctl.fail" "$SANDBOX/launchctl.failonce" "$SANDBOX"/launchctl.loaded.* "$SANDBOX/brew.map" \
+        "$SANDBOX/launchctl.log" "$SANDBOX/launchctl.fail" "$SANDBOX/launchctl.failonce" "$SANDBOX"/launchctl.loaded.* "$SANDBOX/brew.map" "$SANDBOX/dscl.log" "$SANDBOX/dscl.shell" "$SANDBOX/powershell.log" \
         "$SANDBOX"/gitup.log "$SANDBOX"/sudo.fail "$SANDBOX"/dnf.* "$SANDBOX"/make.* "$SANDBOX"/rpm.* "$SANDBOX"/sudo.failon "$SANDBOX"/sudo.skip "$SANDBOX"/newgit.broken "$SANDBOX"/df.avail "$SANDBOX"/df.avail.dirs "$SANDBOX"/ldd.out "$SANDBOX"/apt.* "$SANDBOX/root" "$SANDBOX/os-release" || return 1
     mkdir -p -- "$LC_HOME" "$SANDBOX/xdg/data" "$SANDBOX/xdg/state" "$SANDBOX/pathbin" || return 1
     lc_brew_reset || return 1
     lc_systemctl_standin || return 1
     lc_schtasks_standin || return 1
     lc_launchctl_standin || return 1
+    lc_dscl_standin || return 1
+    if [ "$TEST_IS_WINDOWS" -eq 1 ]; then lc_powershell_standin || return 1; fi
     lc_brew_standin || return 1
     lc_gitup_standins || return 1
     # ^ why a neutral distribution by default, not the host's; on Rocky the real os-release would route every old-git test into the RPM upgrade offer
@@ -463,7 +505,7 @@ lc_begin() {
     # ^ why the two Linux overrides off Windows only, not everywhere; the windows module announces any override it finds and neither changes anything there
     # ^ why GSG_GITUP_ROOT in the sandbox by default, not the host's /usr; a host with Desktop adds a WARNING to status, and set_env wins later
     # ^ coupled the root stays off on Windows too; gitup_windows_sysdir reads GSG_GITUP_ROOT there and would lose reg.exe and whoami
-    if [ "$TEST_IS_WINDOWS" -ne 1 ]; then LC_ENV+=(GSG_OS_RELEASE="$SANDBOX/os-release" GSG_GITUP_BUILD_PATH="$SANDBOX/pathbin" GSG_GITUP_ROOT="$SANDBOX/root"); fi
+    if [ "$TEST_IS_WINDOWS" -ne 1 ]; then LC_ENV+=(GSG_OS_RELEASE="$SANDBOX/os-release" GSG_GITUP_BUILD_PATH="$SANDBOX/pathbin" GSG_GITUP_ROOT="$SANDBOX/root"); else LC_ENV+=(GSG_WINPATH_ROOT="$SANDBOX/root"); fi
     gitx config --global user.name "Test User" || return 1
     gitx config --global user.email "test@example.invalid" || return 1
     gitx config --global commit.gpgsign false || return 1
@@ -572,7 +614,7 @@ lc_path_without() {
         if compgen -G "$d/*" >/dev/null; then ln -sfn "$d"/* "$dir/" || return 1; fi
     done
     rm -f -- "$dir/$1" || return 1
-    for name in systemctl schtasks launchctl brew uname git sudo dnf restorecon make df ldd rpm apt-get apt-cache add-apt-repository gpg; do
+    for name in systemctl schtasks launchctl dscl brew uname git sudo dnf restorecon make df ldd rpm apt-get apt-cache add-apt-repository gpg; do
         if [ "$1" = "$name" ] || [ ! -e "$SANDBOX/pathbin/$name" ]; then continue; fi
         ln -sfn -- "$SANDBOX/pathbin/$name" "$dir/$name" || return 1
     done

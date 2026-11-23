@@ -26,6 +26,25 @@ test_status_shows_the_installation() {
     assert_eq "$ERR" "git-secret-guard: note: GIT_CONFIG_GLOBAL is set; the global git config used is $SANDBOX/gitconfig" "stderr is only the one-line note"
 }
 
+# ^ coupled issue #72 lc_begin keeps the CLI folder off PATH; status reports it as information only, never as a PROBLEM or a WARNING
+test_status_says_when_the_cli_folder_is_not_on_path_as_information_only() {
+    fresh_install
+    gsg status
+    assert_rc 0 "status after install"
+    assert_contains "$OUT" "  info     CLI folder: $LC_BIN is not on the PATH this shell runs with" "the information line"
+    # shellcheck disable=SC2016
+    if [ "$TEST_IS_WINDOWS" -ne 1 ]; then assert_contains "$OUT" 'add this line to your shell startup file: export PATH="$HOME/.local/bin:$PATH"' "with the line to add"; fi
+    assert_contains "$OUT" "summary: 0 problems, 0 warnings" "no problem and no warning is counted"
+}
+
+test_status_is_silent_about_the_cli_folder_when_it_is_on_path() {
+    fresh_install
+    set_env PATH="$LC_BIN/:$SANDBOX/pathbin:$TEST_BASE_PATH"
+    gsg status
+    assert_rc 0 "status after install"
+    assert_not_contains "$OUT" "CLI folder" "the folder is on PATH, spelled with a trailing slash"
+}
+
 test_status_shows_the_recorded_hooks_path_and_backup() {
     lc_begin && lc_make_fixtures && lc_use_fixtures || return 1
     mkdir -p -- "$LC_HOME/.config/git/hooks" && printf 'x\n' >"$LC_HOME/.config/git/hooks/pre-commit" || return 1

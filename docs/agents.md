@@ -80,7 +80,8 @@ releases and finishing. Where [CONTRIBUTING.md](../CONTRIBUTING.md) already says
   create, kill only what you started, and check `ps` before a long run (when a full suite already runs there, run one file at a time).
 - **Watch every remote run:** an agent that starts a run on another machine polls it (a bounded loop or a monitor) until it ends. A run
   nobody watches stalls silently.
-- **Never run `wsl.exe`, `wsl` or `ubuntu.exe` on a Windows machine used for this repository** (development or test); real WSL runs are
+- **Never run `wsl.exe`, `wsl` or `ubuntu.exe` on Windows Server 2019** (build 17763): WSL is known not to work there, WSL 1 blue-screened
+  the host twice. On a current Windows with WSL 2, running the suite in WSL is fine. The project's real WSL runs are
   [platforms.md#wsl-windows-subsystem-for-linux](platforms.md#wsl-windows-subsystem-for-linux).
 
 ## A destructive step on a shared test machine

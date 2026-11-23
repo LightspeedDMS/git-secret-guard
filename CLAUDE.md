@@ -53,8 +53,10 @@ This file is an index: each topic states what must not break and links the doc h
   in `tests/herestring-bounded.list` (a new one fails `test_quality.sh`): [platforms.md#maintainer-notes](docs/platforms.md#maintainer-notes).
 - **git >= 2.54**, older git ignores config hooks silently. Tests use `GSG_TEST_GIT` (Linux default `/usr/local/bin/git`; set it where that
   path does not exist). Config hooks run before the hookdir hook, both run, either failing blocks, whatever `core.hooksPath` says.
-- **Never run `wsl.exe`, `wsl` or `ubuntu.exe` on the Windows development host** (it blue-screened twice); real WSL runs are
-  `.github/workflows/wsl.yml`: [platforms.md#wsl-windows-subsystem-for-linux](docs/platforms.md#wsl-windows-subsystem-for-linux).
+- **WSL is known not to work on Windows Server 2019** (build 17763: WSL 1 blue-screened the host twice, cause not established): never run
+  `wsl.exe`, `wsl` or `ubuntu.exe` on such a machine. On a current Windows with WSL 2, running the suite in WSL is fine. The project's
+  real WSL runs are `.github/workflows/wsl.yml`:
+  [platforms.md#wsl-windows-subsystem-for-linux](docs/platforms.md#wsl-windows-subsystem-for-linux).
 - **Commits:** DCO sign-off ([CONTRIBUTING.md#sign-your-commits-dco](CONTRIBUTING.md#sign-your-commits-dco)); feature and fix PRs never
   touch `VERSION`, a separate release PR (only `VERSION`, its description lists the merged PRs and the bump) raises it after the merges;
   tag that PR's merge commit, never move a tag; docs write the version `<x.y.z>` ([CONTRIBUTING.md#versions](CONTRIBUTING.md#versions));

@@ -62,6 +62,7 @@ test_gitup_takeover - 60
 test_gitup_windows 281 3
 test_gitup_windows_cmd - 0
 test_guidance - 1
+test_harness_assertions - 0
 test_hook 119 20
 test_hook_libraries - 3
 test_hook_signals - 33

@@ -317,13 +317,27 @@ systemd units, and the rest is the same: the cycle above, the update record, the
 ```bash
 bin/git-secret-guard install --auto-update           # from the checkout; Git Bash
 git-secret-guard update                              # one cycle by hand (cmd and PowerShell: git-secret-guard.cmd update)
-schtasks /Run /TN git-secret-guard-update            # one cycle through the task
+schtasks /Run /TN git-secret-guard-update            # one cycle through the task (only while you are logged on, see below)
 type %USERPROFILE%\.local\state\git-secret-guard\update.log   # the output of the runs, each line stamped with its UTC time (cmd)
 ```
 
 - **The task** is `git-secret-guard-update`, created with `schtasks /Create /TN git-secret-guard-update /SC HOURLY /TR "<wrapper>" /F`.
   `/F` is always given (without it schtasks asks a question). The task has no password and no elevation: it runs as you, **only while you
   are logged on**, the Windows counterpart of [Linger](#linger). Task Scheduler's defaults also apply (no start on battery power).
+- **What install prints.** On Windows the `auto-update timer enabled` line is replaced by two:
+  `auto-update task registered (git-secret-guard-update, every hour); its output goes to <state dir>/update.log` and
+  `the task runs only while you are logged on`.
+- **The first scheduled run is one hour after install.** The task's trigger starts at the minute of the install and repeats every hour;
+  `schtasks /Query /TN git-secret-guard-update /V /FO LIST` shows the `Next Run Time`.
+- **With nobody logged on nothing runs, and for the first hours nothing says so** (measured on Windows Server 2019 with the real Task Scheduler,
+  [platform-testing.md](platform-testing.md#auto-update-through-the-real-task-scheduler)). `schtasks /Run /TN git-secret-guard-update` still answers
+  `SUCCESS: Attempted to run the scheduled task "git-secret-guard-update".` and exits 0, but the task is not started: its `Last Run Time` and
+  `Last Result` do not change and no `update.log` is written. A trigger time is skipped the same way (seen with a replaced trigger). 13 minutes
+  after such an install `status` still showed `ok` and no `last check:` line, and `doctor` `ok` with `no update run is recorded yet`, both with
+  exit 0. Doctor's age rule (no run recorded and the wrapper older than 3 × the interval + 1h, [doctor.md](doctor.md#machine-checks)) is there to
+  report such a task as `timer inactive`; these runs did not last long enough to see it. A run that happened is known by its lines in
+  `update.log` and by the `last check: <UTC time> <result>` line of `status`; while both are missing, no run has happened. A login over ssh with
+  a key is not a logon in this sense, so the task of a machine reached only that way never runs.
 - **The action is a wrapper**, `update-task.cmd` in the state dir, because a task runs no shell. It sets `HOME` (the logon profile's may differ, and the child install writes the CLI link under it), the XDG variables and
   `GIT_CONFIG_GLOBAL` this install ran with, runs `"<Git for Windows>\bin\bash.exe" "<share>/bin/git-secret-guard" update` and
   appends both streams to `update.log` beside it. After the run a line of `cmd` moves a log over 1 MiB to `update.log.1` (one earlier file is kept,

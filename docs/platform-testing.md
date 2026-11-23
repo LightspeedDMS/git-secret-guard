@@ -440,3 +440,31 @@ The `windows` job runs on `windows-2025` (Windows Server 2025, build 26100, elev
   PowerShell 5.1) and now resets `PSModulePath` for its own process (`bin/gsg-gitup.ps1`); `bin/gsg-bash.cmd` names a half-installed Git for Windows; the runner stops with the new exit 19 when programs of the install directory run, before the hand-off is used up.
 - **Not done:** a real UAC decline (needs a person) and the typed yes above.
 
+#### Auto-update through the real Task Scheduler
+
+Run by hand on 2026-11-23, not by a workflow: a Windows Server 2019 test machine (build 17763), Git for Windows 2.56.0, Git Bash driven over ssh
+with a key. Two runs, each from a clean profile (no install, no task, no hook configuration, no `~/.local`, no `~/.gitconfig`): a clone over HTTPS
+with `main` at `v1.2.0`, `bin/git-secret-guard install --auto-update`, and `v1.3.0` as the newest tag of the origin. In run 1 the user was logged on
+at the console while the task ran; in run 2 nobody was logged on from start to end (`query user` listed no session).
+
+| Case | Result |
+|---|---|
+| `install --auto-update` from the 1.2.0 checkout, both runs (nobody logged on at that moment) | exit 0; the task is registered: `Logon Mode: Interactive only`, hourly, first run one hour after the minute of the install; `status` exit 0, `0 problems, 0 warnings`; `doctor` exit 0, every line `ok`, `no update run is recorded yet` |
+| Commit checks on 1.2.0, both runs | a commit adding a fake key: exit 1, `1 potential secret(s) in lines this commit adds`, no commit made, the value not in the output; a commit adding none: exit 0, `scanned 1 file, 1 added line (trufflehog 3.99.2, betterleaks 1.9.0): no findings` |
+| `schtasks /Run`, user logged on, logon type Interactive | `update: updated 1.2.0 -> 1.3.0`, 8 s; record `role=owner`, `result=updated`, `from=1.2.0`, `to=1.3.0`; task result 0 |
+| Own trigger (once, then every 5 minutes), user logged on, Interactive | started by the scheduler; `update: current, 1.3.0 is installed` |
+| `schtasks /Run`, nobody logged on, Interactive | `SUCCESS: Attempted to run the scheduled task "git-secret-guard-update".`, exit 0, and **nothing ran**: `Last Result` stays 267011, no `update.log`, no record, still 1.2.0; operational log event 332 (`did not launch task ... because user ... was not logged on`) |
+| Own trigger, nobody logged on, Interactive (two trigger times) | nothing ran; event 332 each time |
+| `status` and `doctor` after those three attempts, 13 minutes after install | `status` exit 0, `0 problems, 0 warnings`, no `last check:` line; `doctor` exit 0, `ok` with `no update run is recorded yet`: nothing says the task did not start (doctor's age rule for a task that never ran needs more than 4 hours and was not waited for) |
+| `schtasks /Run`, nobody logged on, the principal replaced by logon type S4U | `update: updated 1.2.0 -> 1.3.0`, 8 s, task result 0; same log lines, record and checkout as with the user logged on |
+| Own trigger, nobody logged on, S4U (two trigger times) | started by the scheduler both times; `update: current, 1.3.0 is installed` |
+| After the update, both runs | `git-secret-guard 1.3.0`; the checkout at `v1.3.0^{commit}`, not at `origin/main`; `status` and `doctor` exit 0, both with the `rule file:` line, `status` with `last check: <UTC time> current` and `doctor` with `last check <UTC time> current`; `update-task.cmd` not rewritten |
+| Commit checks on 1.3.0, both runs | the fake key blocked, the clean commit passed, as on 1.2.0 |
+| `uninstall`, both runs (in run 2 the task had another principal and another trigger) | exit 0; the task deleted, the wrapper, the share dir, the state dir, the CLI link and the `hook.git-secret-guard` section gone; a commit afterwards runs no hook |
+| The profile after `uninstall` against the profile before install | the three downloaded tools stay in `~/.local/bin` (no `--remove-tools`); also left, and not there before: the empty directories `~/.local/share` and `~/.local/state` and a `~/.gitconfig` of 0 bytes (the [Uninstall](install.md#uninstall) section does not list these three) |
+
+The S4U rows are an observation, not a supported setup; what they mean and what was not run is in the
+[maintainer notes](autoupdate-maintainer.md). The suite is unchanged by these runs: `tests/run.sh` registers no task on any machine, and
+`tests/autoupdate/test_autoupdate_schtasks.sh` still drives install, status, doctor and uninstall through the recording stand-in
+`lc_schtasks_standin`.
+

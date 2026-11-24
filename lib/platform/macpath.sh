@@ -55,13 +55,15 @@ macpath_has_marker() {
     [[ $c == *$'\n'"$GSG_MACPATH_BEGIN"$'\n'* ]]
 }
 
-# ^ invariant rc 0 = $1 is "macos-block <created 0|1> <no final newline 0|1> <absolute file>"; sets MACPATH_RCREATED, MACPATH_RNONL and MACPATH_RFILE
+# ^ invariant rc 0 = $1 is "macos-block <created 0|1> <no final newline 0|1> <file>", the file $HOME/.zprofile or $HOME/.bash_profile; sets MACPATH_R* globals
+# ^ security rc 1 with MACPATH_RFILE set = a record naming another file => a hand-edited record never makes uninstall rewrite or delete it
 macpath_record_file() {
     local rest
     MACPATH_RCREATED="" MACPATH_RNONL="" MACPATH_RFILE=""
     if [[ $1 != "macos-block "[01]" "[01]" /"* ]]; then return 1; fi
     rest="${1#macos-block }"
     MACPATH_RCREATED="${rest:0:1}" MACPATH_RNONL="${rest:2:1}" MACPATH_RFILE="${rest:4}"
+    if [ "$MACPATH_RFILE" != "$HOME/.zprofile" ] && [ "$MACPATH_RFILE" != "$HOME/.bash_profile" ]; then return 1; fi
 }
 
 # ^ invariant rc 0 = file $1 may get the block; rc 1 with MACPATH_WHY otherwise, nothing is written either way
@@ -103,7 +105,7 @@ macpath_plan() {
         INSTALL_PATH_ACTION=hint INSTALL_PATH_WHY="$MACPATH_WHY; install left it alone"
         return 0
     fi
-    INSTALL_PATH_ACTION=add INSTALL_PATH_WHY="" INSTALL_PATH_RECORD="macos-block $MACPATH_CREATED $MACPATH_NONL $file"
+    INSTALL_PATH_ACTION=add INSTALL_PATH_WHY="" INSTALL_PATH_NEWREC="macos-block $MACPATH_CREATED $MACPATH_NONL $file"
 }
 
 # ^ invariant appends the block to the recorded file, after the newline it lacked when the record says so; rc 1 with MACPATH_WHY when it cannot write
@@ -116,19 +118,26 @@ macpath_apply() {
     } 2>/dev/null >>"$MACPATH_RFILE" || { MACPATH_WHY="cannot write $MACPATH_RFILE"; return 1; }
 }
 
-# ^ invariant $1 = the record; sets MACPATH_RESULT to removed, none (gone) or left (MACPATH_WHY says why); rc 1 when a write fails or the record is not ours
+# ^ invariant $1 = the record; sets MACPATH_RESULT to removed, none (gone) or left (MACPATH_WHY says why); rc 1 when a write fails or the record has no shape
 # ^ invariant only the first exact block starting at a line start is cut; the final newline install added is taken back only when nothing follows the block
 # ^ why a cp -p copy renamed over the file, not a write in place; a failure half way never leaves a cut login file, and mode and owner stay
 macpath_remove() {
     local LC_ALL=C file block before after tmp
     MACPATH_RESULT=none MACPATH_WHY=""
-    macpath_record_file "$1" || { MACPATH_WHY="the record names no startup file"; return 1; }
+    if ! macpath_record_file "$1"; then
+        if [ -z "$MACPATH_RFILE" ]; then
+            MACPATH_WHY="the record names no startup file"
+            return 1
+        fi
+        MACPATH_RESULT=left MACPATH_WHY="the record names $MACPATH_RFILE, which is not ~/.zprofile or ~/.bash_profile"
+        return 0
+    fi
     file="$MACPATH_RFILE"
     if [ ! -e "$file" ] && [ ! -L "$file" ]; then return 0; fi
     if [ -L "$file" ]; then MACPATH_RESULT=left MACPATH_WHY="$file is a symbolic link now"; return 0; fi
     if [ ! -f "$file" ] || [ ! -O "$file" ]; then MACPATH_RESULT=left MACPATH_WHY="$file is no longer a regular file of yours"; return 0; fi
     if ! macpath_read "$file"; then MACPATH_RESULT=left; return 0; fi
-    if ! macpath_has_marker; then return 0; fi
+    if [[ $MACPATH_CONTENT != *"$GSG_MACPATH_BEGIN"* ]]; then return 0; fi
     block="$(macpath_block_text; printf x)"
     block="${block%x}"
     before="${MACPATH_CONTENT%%"$block"*}"

@@ -63,13 +63,19 @@ state_read() {
         return 1
     fi
     case "$ST_CLI_PATH" in
-        "" | "macos-block "[01]" "[01]" /"* | "windows-user-path "?*) ;;
-        *)
-            printf '%s: the state file %s has a bad cli_path; fix or remove it\n' "$GSG_NAME" "$GSG_STATE_FILE" >&2
-            return 1
+        "" | "macos-block "[01]" "[01]" /"*)
+            ST_EXISTS=1
+            return 0
+            ;;
+        "windows-user-path "?*)
+            if common_winrec_split "$ST_CLI_PATH"; then
+                ST_EXISTS=1
+                return 0
+            fi
             ;;
     esac
-    ST_EXISTS=1
+    printf '%s: the state file %s has a bad cli_path; fix or remove it\n' "$GSG_NAME" "$GSG_STATE_FILE" >&2
+    return 1
 }
 
 # ^ security umask 077 and a 700 dir => the recorded hooksPath and backup tarballs are readable by this user only

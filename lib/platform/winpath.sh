@@ -15,10 +15,11 @@ GSG_WINPATH_TIMEOUT_RC=124
 # ^ invariant a reason from PowerShell is shown up to this many characters; it is one line of a script of ours, never a value
 GSG_WINPATH_REASON_MAX=200
 
-# ^ invariant sets WINPATH_WHY = text $1 with control characters as spaces, cut at GSG_WINPATH_REASON_MAX; the one place a reason is made
+# ^ invariant sets WINPATH_WHY = text $1 with control characters as ?, cut at GSG_WINPATH_REASON_MAX (trunc_text); the one place a reason is made
 winpath_set_why() {
-    local t="${1//[[:cntrl:]]/ }"
-    WINPATH_WHY="${t:0:GSG_WINPATH_REASON_MAX}"
+    local REPLY
+    trunc_text "${1//[[:cntrl:]]/?}" "$GSG_WINPATH_REASON_MAX"
+    WINPATH_WHY="$REPLY"
 }
 
 # ^ invariant one stderr line per run, only when GSG_WINPATH_ROOT is set; it moves where PowerShell is looked for and skips no check, the seam is announced
@@ -102,12 +103,8 @@ winpath_folder() {
         winpath_set_why "the folder name cannot be written as a Windows path"
         return 1
     fi
-    if [[ $w == *[\;%\"[:cntrl:]]* ]]; then
-        winpath_set_why "the folder name holds a character the user Path cannot carry (a semicolon, a percent sign, a quote or a control character)"
-        return 1
-    fi
-    if [[ ! $w =~ ^([A-Za-z]:\\|\\\\[^\\]) ]]; then
-        winpath_set_why "the folder name is not an absolute Windows path"
+    if [[ ! $w =~ $GSG_WINDIR_RE ]]; then
+        winpath_set_why "the folder name is not an absolute Windows path, or holds a character the user Path cannot carry (a semicolon, a percent sign, a quote or a control character)"
         return 1
     fi
     WINPATH_W="$w"
@@ -139,25 +136,20 @@ winpath_plan() {
 # ^ invariant the forms are "windows-user-path ;FOLDER" (sep, appended after an entry), "windows-user-path FOLDER" (bare, after a final ;) and
 # ^ invariant "windows-user-path created FOLDER" is a value install created, uninstall deletes it; FOLDER has no ; % " or control character
 winpath_record() {
-    local rest="${1#windows-user-path }" re='^([A-Za-z]:\\|\\\\[^\\])[^;%"[:cntrl:]]*$'
     WINPATH_MODE="" WINPATH_FOLDER=""
-    case "$rest" in
-        ";"*) WINPATH_MODE=sep WINPATH_FOLDER="${rest#;}" ;;
-        "created "*) WINPATH_MODE=create WINPATH_FOLDER="${rest#created }" ;;
-        *) WINPATH_MODE=bare WINPATH_FOLDER="$rest" ;;
-    esac
-    if [ "$rest" = "$1" ] || [[ ! $WINPATH_FOLDER =~ $re ]]; then
-        WINPATH_MODE="" WINPATH_FOLDER=""
+    if ! common_winrec_split "$1"; then
         winpath_set_why "there is no record of a user Path entry of ours to work from"
         return 1
     fi
+    WINPATH_MODE="$WINREC_MODE" WINPATH_FOLDER="$WINREC_FOLDER"
 }
 
-# ^ invariant winpath_apply DIR appends the text of WINPATH_RECORD to the user Path value and keeps its registry type; every other entry stays byte for byte
+# ^ invariant winpath_apply DIR appends INSTALL_PATH_RECORD to the user Path value and keeps its registry type; every other entry stays byte for byte
+# ^ coupled INSTALL_PATH_RECORD is the record install put in the state right before this call, the one source macpath_apply reads too
 # ^ invariant rc 0 = appended (WINPATH_NOBROADCAST=1 when running programs were not told), rc 1 = nothing changed (WINPATH_WHY); never a failed install
 winpath_apply() {
     WINPATH_NOBROADCAST=0
-    winpath_record "$WINPATH_RECORD" || return 1
+    winpath_record "$INSTALL_PATH_RECORD" || return 1
     winpath_run apply "$WINPATH_MODE" "$WINPATH_FOLDER" || return 1
     case "$WINPATH_OUT" in
         added) ;;

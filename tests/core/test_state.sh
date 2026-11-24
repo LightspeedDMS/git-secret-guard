@@ -123,7 +123,7 @@ test_state_write_refuses_a_newline_and_paths_init_refuses_relative_dirs() {
 
 # ^ coupled issue #72 makes cli_path the optional key for what install added to PATH; an older file reads as nothing of ours
 test_state_records_the_cli_path_entry() {
-    local f="$SANDBOX/st-state/git-secret-guard/state" rec='macos-block 1 0 /a b/.zprofile'
+    local f="$SANDBOX/st-state/git-secret-guard/state" rec='macos-block 1 0 /a b/.zprofile' bad
     state_dir_env || return 1
     st eval "state_write 0.1.0 no '' '' '' '' '' no no '' '$rec' && state_read && printf '[%s]' \"\$ST_CLI_PATH\""
     assert_rc 0 "write then read a macOS record"
@@ -142,6 +142,12 @@ test_state_records_the_cli_path_entry() {
     st state_read
     assert_rc 1 "a record of an unknown shape"
     assert_contains "$ERR" "bad cli_path" "says why"
+    for bad in 'windows-user-path relative\dir' 'windows-user-path ;C:\a;b' 'windows-user-path created ' 'windows-user-path C:\a%b' 'windows-user-path ;C:\a"b' 'windows-user-path ;\\;srv\share'; do
+        grep -v '^cli_path=' "$f" >"$f.old" && mv -f -- "$f.old" "$f" && printf 'cli_path=%s\n' "$bad" >>"$f" || return 1
+        st state_read
+        assert_rc 1 "[$bad] is not a record uninstall could work from"
+        assert_contains "$ERR" "bad cli_path" "[$bad] is refused at read, like every other bad value"
+    done
     st state_write 0.1.0 no '' '' '' '' '' no no '' $'macos-block 1 0 /a\n/b'
     assert_rc 1 "a newline in the record"
     assert_contains "$ERR" "contains a newline" "says why"

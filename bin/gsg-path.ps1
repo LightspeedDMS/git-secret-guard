@@ -14,7 +14,7 @@ $ErrorActionPreference = 'Stop'
 $MaxChars = 32767
 $Kinds = 'String', 'ExpandString'
 $CreateKind = 'ExpandString'
-$FolderPattern = '^([A-Za-z]:\\|\\\\[^\\])[^;%"\x00-\x1f]*$'
+$FolderPattern = '^([A-Za-z]:\\|\\\\[^\\;%"\x00-\x1f])[^;%"\x00-\x1f]*$'
 
 function Stop-Run([int]$Code, [string]$Text) {
     [Console]::Error.WriteLine($Text)
@@ -48,7 +48,7 @@ function Test-SameFolder([string]$Entry, [string]$Folder) {
     if ($Entry -eq '') { return $false }
     $a = [Environment]::ExpandEnvironmentVariables($Entry).Replace('/', '\').TrimEnd('\').ToUpperInvariant()
     $b = [Environment]::ExpandEnvironmentVariables($Folder).Replace('/', '\').TrimEnd('\').ToUpperInvariant()
-    return ($a -ceq $b)
+    return [string]::Equals($a, $b, [StringComparison]::Ordinal)
 }
 
 function Test-Holds([string]$Value, [string]$Folder) {
@@ -64,8 +64,8 @@ function Assert-Writable($Current, [string]$NewValue) {
 # ^ invariant the value with the folder appended for MODE, or $null when the value no longer ends the way the plan saw it
 # ^ invariant sep needs a value without a final ; and bare needs a final ; or an empty value
 function Get-Appended([string]$Value, [string]$Mode, [string]$Folder) {
-    if ($Mode -eq 'sep' -and $Value -ne '' -and -not $Value.EndsWith(';')) { return $Value + ';' + $Folder }
-    if ($Mode -eq 'bare' -and ($Value -eq '' -or $Value.EndsWith(';'))) { return $Value + $Folder }
+    if ($Mode -eq 'sep' -and $Value -ne '' -and -not $Value.EndsWith(';', [StringComparison]::Ordinal)) { return $Value + ';' + $Folder }
+    if ($Mode -eq 'bare' -and ($Value -eq '' -or $Value.EndsWith(';', [StringComparison]::Ordinal))) { return $Value + $Folder }
     return $null
 }
 
@@ -74,7 +74,7 @@ function Invoke-Plan([string]$Folder) {
     if ($null -eq $cur) { Assert-Writable @{ Kind = $CreateKind } $Folder; Say 'absent-novalue'; return }
     if (Test-Holds $cur.Value $Folder) { Say 'present'; return }
     $mode = 'sep'
-    if ($cur.Value -eq '' -or $cur.Value.EndsWith(';')) { $mode = 'bare' }
+    if ($cur.Value -eq '' -or $cur.Value.EndsWith(';', [StringComparison]::Ordinal)) { $mode = 'bare' }
     Assert-Writable $cur (Get-Appended $cur.Value $mode $Folder)
     Say "absent-$mode"
 }
@@ -108,7 +108,7 @@ function Get-Remainder([string]$Value, [string]$Mode, [string]$Folder) {
     }
     $parts = $Value.Split(';')
     for ($i = $parts.Length - 1; $i -ge 0; $i--) {
-        if ($parts[$i] -ceq $Folder) {
+        if ([string]::Equals($parts[$i], $Folder, [StringComparison]::Ordinal)) {
             $keep = [System.Collections.Generic.List[string]]::new()
             for ($j = 0; $j -lt $parts.Length; $j++) { if ($j -ne $i) { $keep.Add($parts[$j]) } }
             return [string]::Join(';', $keep.ToArray())

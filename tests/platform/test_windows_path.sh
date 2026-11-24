@@ -238,6 +238,29 @@ test_a_respelled_entry_is_named_and_left_and_a_gone_one_is_absent() {
     assert_no_file "$WPW/events.log" "nothing was written"
 }
 
+# ^ why ordinal, not culture-sensitive; a culture-sensitive comparison ignores zero-width and soft-hyphen characters and would call such an entry ours
+# ^ invariant the characters are built from UTF-8 bytes here, never written as a literal; the file stays plain ASCII
+test_an_entry_that_differs_only_by_an_ignorable_character_is_not_ours() {
+    local name bytes entry
+    wpw_begin || return 1
+    for name in zero-width-space soft-hyphen; do
+        case "$name" in
+            zero-width-space) bytes='\xe2\x80\x8b' ;;
+            *) bytes='\xc2\xad' ;;
+        esac
+        entry="C:\\gsgtest$(printf '%b' "$bytes")\\Ana\\.local\\bin"
+        wpw_set "C:\\a;$entry" String || return 1
+        rm -f -- "$WPW/events.log"
+        wpw_run plan "$WPW_FOLDER"
+        assert_eq "$OUT|$RC" "absent-sep|0" "[$name] the entry is not the folder"
+        wpw_run remove sep "$WPW_FOLDER"
+        assert_eq "$OUT|$RC" "absent|0" "[$name] the entry is not ours at remove either"
+        wpw_value || return 1
+        assert_eq "$WPW_VALUE" "C:\\a;$entry" "[$name] the value is untouched"
+        assert_no_file "$WPW/events.log" "[$name] nothing was written"
+    done
+}
+
 test_an_apply_whose_value_changed_since_the_plan_writes_nothing() {
     local row mode value
     wpw_begin || return 1
@@ -287,7 +310,7 @@ test_a_value_of_another_registry_type_and_a_bad_argument_are_refused_with_nothin
         assert_eq "$WPW_VALUE|$WPW_KIND" "C:\\a;$WPW_FOLDER|$kind" "[$kind] the value is as it was"
     done
     wpw_set 'C:\a' String || return 1
-    for row in 'plan|C:\a;b' 'plan|C:\a%b' 'plan|rel\dir' 'plan' 'frob|C:\x' 'apply|wrong|C:\x' 'remove|sep|rel'; do
+    for row in 'plan|C:\a;b' 'plan|C:\a%b' 'plan|\\;srv\share' 'plan|rel\dir' 'plan' 'frob|C:\x' 'apply|wrong|C:\x' 'remove|sep|rel'; do
         IFS='|' read -ra words <<<"$row"
         wpw_run "${words[@]}"
         assert_eq "$RC" "$WPW_RC_REFUSED" "[$row] is refused"
@@ -332,7 +355,7 @@ test_the_adapter_and_the_script_agree_from_plan_to_removal() {
     printf '#!/bin/sh\nexec "%s/WindowsPowerShell/v1.0/powershell.exe" "$@"\n' "$TEST_SYSTEM32" >"$sys/powershell.exe" && chmod 755 "$sys/powershell.exe" || return 1
     set_env GSG_WINPATH_ROOT="$WPW/sys"
     wpw_set 'C:\a' String || return 1
-    wp 'GSG_ROOT="$1"; winpath_plan "$GSG_BIN_DIR"; echo "plan=$REPLY|$WINPATH_RECORD"; winpath_apply "$GSG_BIN_DIR"; echo "apply=$? nobc=$WINPATH_NOBROADCAST"
+    wp 'GSG_ROOT="$1"; winpath_plan "$GSG_BIN_DIR"; echo "plan=$REPLY|$WINPATH_RECORD"; INSTALL_PATH_RECORD="$WINPATH_RECORD"; winpath_apply "$GSG_BIN_DIR"; echo "apply=$? nobc=$WINPATH_NOBROADCAST"
 winpath_remove "$WINPATH_RECORD"; echo "remove=$? $REPLY"' "$WPW/root" || return 1
     assert_eq "$OUT" "plan=absent|windows-user-path ;$WP_DIR
 apply=0 nobc=0
@@ -340,6 +363,17 @@ remove=0 removed" "the adapter plans, applies and removes through the real scrip
     wpw_value || return 1
     assert_eq "$WPW_VALUE|$WPW_KIND" 'C:\a|String' "and the value is as it was"
     assert_eq "$(<"$WPW/events.log")" $'write\nbroadcast\nwrite\nbroadcast' "each change was announced once"
+}
+
+# ^ external the real cygpath -m -l -p turns the whole PATH into ;-separated Windows paths in one start; the fake of the other tests only mimics it
+test_the_path_comparison_matches_through_the_real_cygpath_list_form() {
+    local row spelling
+    wp_begin || return 1
+    for row in "/c/Users/me/.local/bin|yes" "/c/Users/me/.local/bin/|yes" "/c/USERS/ME/.LOCAL/BIN|yes" "/c/Users/me/.local|no" "/c/Users/me/.local/bin/sub|no"; do
+        spelling="${row%|*}"
+        wp 'PATH="/c/Windows:$1:$PATH"; if install_path_has_dir "$GSG_BIN_DIR"; then echo yes; else echo no; fi' "$spelling"
+        assert_eq "$OUT" "${row##*|}" "a PATH holding [$spelling]"
+    done
 }
 
 test_a_plain_install_on_windows_reaches_only_the_stand_in() {

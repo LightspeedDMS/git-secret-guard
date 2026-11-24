@@ -5,7 +5,8 @@
 # shellcheck disable=SC2016
 GSG_PATH_LINE='export PATH="$HOME/.local/bin:$PATH"'
 # ^ coupled install_path_plan sets these; install_write_state records INSTALL_PATH_RECORD and install_path_report prints the rest
-INSTALL_PATH_ACTION="" INSTALL_PATH_WHY="" INSTALL_PATH_RECORD=""
+# ^ invariant INSTALL_PATH_RECORD is what the state holds (an earlier install's record or none) until install_path_apply moves INSTALL_PATH_NEWREC into it
+INSTALL_PATH_ACTION="" INSTALL_PATH_WHY="" INSTALL_PATH_RECORD="" INSTALL_PATH_NEWREC=""
 
 # ^ invariant sets REPLY = folder $1 as the comparison sees it, trailing slashes cut ("/" stays "/"); on Windows through cygpath -m -l and in lower case
 # ^ invariant rc 1 (REPLY empty) for an empty folder or when cygpath cannot name it => no match, never a guess; cygpath's own message stays visible
@@ -17,21 +18,34 @@ install_path_norm() {
         v="$(cygpath -m -l -- "$v")" || return 1
         v="${v,,}"
     fi
-    REPLY="${v%"${v##*[!/]}"}"
+    install_path_trim "$v"
+}
+
+# ^ invariant sets REPLY = $1 with its trailing slashes cut, "/" for a value of slashes only
+install_path_trim() {
+    REPLY="${1%"${1##*[!/]}"}"
     if [ -z "$REPLY" ]; then REPLY=/; fi
 }
 
 # ^ invariant rc 0 = folder $1 is an entry of the PATH install runs with; one comparison for every platform, an empty entry never matches
-# ^ invariant the loop ends as rest loses its first entry at every turn
+# ^ external on Windows one cygpath -m -l -p call turns the whole PATH into ;-separated Windows paths; a failure is no match, never a guess
+# ^ invariant the loop ends as rest loses its first entry at every turn; the list is walked by expansion, never fed through a here-string
 install_path_has_dir() {
-    local want entry rest="$PATH:"
+    local want entry rest sep=:
     install_path_norm "$1" || return 1
     want="$REPLY"
+    rest="$PATH"
+    if tools_is_windows; then
+        rest="$(cygpath -m -l -p -- "$PATH")" || return 1
+        rest="${rest,,}" sep=";"
+    fi
+    rest+="$sep"
     while [ -n "$rest" ]; do
-        entry="${rest%%:*}"
-        rest="${rest#*:}"
+        entry="${rest%%"$sep"*}"
+        rest="${rest#*"$sep"}"
         if [ -z "$entry" ]; then continue; fi
-        if install_path_norm "$entry" && [ "$REPLY" = "$want" ]; then return 0; fi
+        install_path_trim "$entry"
+        if [ "$REPLY" = "$want" ]; then return 0; fi
     done
     return 1
 }
@@ -44,7 +58,7 @@ install_path_is_update_child() { [ "${AU_LET_IN:-0}" -eq 1 ]; }
 # ^ invariant a record of ours from an earlier install is carried over unchanged, never dropped and never duplicated
 # ^ why the default reason is generic, not per platform; Linux never edits a file, and the macOS and Windows branches set their own
 install_path_plan() {
-    INSTALL_PATH_ACTION=hint INSTALL_PATH_WHY="install changes no file on this platform" INSTALL_PATH_RECORD="${ST_CLI_PATH:-}"
+    INSTALL_PATH_ACTION=hint INSTALL_PATH_WHY="install changes no file on this platform" INSTALL_PATH_RECORD="${ST_CLI_PATH:-}" INSTALL_PATH_NEWREC=""
     if install_path_has_dir "$GSG_BIN_DIR"; then
         INSTALL_PATH_ACTION=onpath INSTALL_PATH_WHY=""
         return 0
@@ -68,18 +82,24 @@ install_path_plan() {
 install_path_plan_windows() {
     winpath_plan "$GSG_BIN_DIR"
     case "$REPLY" in
-        absent) INSTALL_PATH_ACTION=add INSTALL_PATH_WHY="" INSTALL_PATH_RECORD="$WINPATH_RECORD" ;;
+        absent) INSTALL_PATH_ACTION=add INSTALL_PATH_WHY="" INSTALL_PATH_NEWREC="$WINPATH_RECORD" ;;
         present) INSTALL_PATH_ACTION=present INSTALL_PATH_WHY="the user Path already holds $GSG_BIN_DIR" ;;
         *) INSTALL_PATH_ACTION=hint INSTALL_PATH_WHY="$WINPATH_WHY" ;;
     esac
 }
 
 # ^ invariant a failed change is the action failed with its reason and the PATH step never fails install; the hook stays installed and status is as before
-# ^ invariant rc 1 only when install_path_unrecord cannot rewrite the state after a failed change; a written change, announced or not, keeps its record
-# ^ order runs after the hook config is set; the record was written by install_write_state before this touches a file
+# ^ invariant rc 1 only when a state write fails, before the change (nothing is written) or in install_path_unrecord; a written change keeps its record
+# ^ order runs after the hook config is set; the record goes into the state right before the change => recorded before made, nothing written = no record
 install_path_apply() {
     INSTALL_PATH_DONE=""
     if [ "$INSTALL_PATH_ACTION" != add ]; then return 0; fi
+    INSTALL_PATH_RECORD="$INSTALL_PATH_NEWREC"
+    if ! install_write_state final; then
+        INSTALL_PATH_RECORD="${ST_CLI_PATH:-}" INSTALL_PATH_ACTION=failed INSTALL_PATH_WHY="the state file could not record the change first"
+        printf '%s: PATH: could not write the state file %s before the PATH change; nothing was written to PATH\n' "$GSG_NAME" "$GSG_STATE_FILE" >&2
+        return 1
+    fi
     if tools_is_windows; then
         if winpath_apply "$GSG_BIN_DIR"; then
             INSTALL_PATH_DONE="added $GSG_BIN_DIR to the user Path"
@@ -106,6 +126,9 @@ install_path_unrecord() {
     return 1
 }
 
+# ^ invariant the one wording of the advice when a shell was open before the entry was added, by this install or an earlier one
+install_path_new_shell_line() { printf '%s: PATH: a shell opened before this install does not see the change; open a new one\n' "$GSG_NAME"; }
+
 # ^ invariant prints where the CLI is and what install did about PATH; an icon only in terminal mode, plain output is the words alone
 install_path_report() {
     printf '%s: CLI: %s/%s\n' "$GSG_NAME" "$GSG_BIN_DIR" "$GSG_NAME"
@@ -116,11 +139,12 @@ install_path_report() {
             ;;
         present)
             printf '%s: PATH: %s; nothing was changed\n' "$GSG_NAME" "$INSTALL_PATH_WHY"
+            install_path_new_shell_line
             return 0
             ;;
         add)
             printf '%s: PATH: %s\n' "$GSG_NAME" "$INSTALL_PATH_DONE"
-            printf '%s: PATH: a shell opened before this install does not see the change; open a new one\n' "$GSG_NAME"
+            install_path_new_shell_line
             return 0
             ;;
     esac

@@ -63,7 +63,7 @@ test_plan_says_unusable_with_the_reason_when_powershell_cannot_answer() {
     wp_begin || return 1
     long="$(printf 'boom\001%0*d' "$WP_LONG_REASON_LENGTH" 7)"
     wp_say plan "" 1 "$long" || return 1
-    wp_unusable noisy-reason "boom "
+    wp_unusable noisy-reason "boom?"
     assert_not_contains "$OUT" $'\001' "control characters never reach the output"
     assert_not_contains "$OUT" "$(printf '%0*d' "$WP_PAST_THE_CUT" 7)" "a long reason is cut"
 }
@@ -107,9 +107,9 @@ test_the_script_is_plain_ascii_lf_and_never_reaches_the_machine_path_or_setx() {
     assert_contains "$(<"$f")" "DoNotExpandEnvironmentNames" "the value is read raw"
 }
 
-# ^ invariant two probes; apply reads the record from WINPATH_RECORD, remove takes it as argument; $1 is the record, the answer is "rc=N [answer] nobc=0|1"
+# ^ invariant two probes; apply reads INSTALL_PATH_RECORD, remove takes the record as argument; $1 is the record, the answer is "rc=N [answer] nobc=0|1"
 # ^ invariant WP_WHY_CODE added to a probe also prints the reason
-WP_APPLY_CODE='WINPATH_RECORD="$1"; winpath_apply "$GSG_BIN_DIR"; echo "rc=$? nobc=$WINPATH_NOBROADCAST"'
+WP_APPLY_CODE='INSTALL_PATH_RECORD="$1"; winpath_apply "$GSG_BIN_DIR"; echo "rc=$? nobc=$WINPATH_NOBROADCAST"'
 WP_REMOVE_CODE='winpath_remove "$1"; echo "rc=$? $REPLY nobc=$WINPATH_NOBROADCAST"'
 WP_WHY_CODE='; echo "$WINPATH_WHY"'
 
@@ -146,7 +146,7 @@ test_apply_that_changes_nothing_says_why_and_never_fails_the_install() {
     assert_contains "$OUT" "rc=1" "no record, nothing to apply"
     assert_contains "$OUT" "no record" "and says so"
     assert_eq "$(wp_log | wc -l | tr -d ' ')" 1 "PowerShell ran once, for the first call only"
-    wp 'install_write_state() { return 0; }; GSG_NAME=git-secret-guard WINPATH_RECORD="windows-user-path ;$1" INSTALL_PATH_ACTION=add; install_path_apply; echo "install=$?"; install_path_report' "$WP_DIR" || return 1
+    wp 'install_write_state() { return 0; }; GSG_NAME=git-secret-guard INSTALL_PATH_NEWREC="windows-user-path ;$1" INSTALL_PATH_ACTION=add; install_path_apply; echo "install=$?"; install_path_report' "$WP_DIR" || return 1
     assert_contains "$OUT" "install=0" "the install step itself succeeds"
     assert_contains "$OUT" "is not on PATH (the user Path changed while install ran; nothing was changed)" "install_path_report prints the hint with the reason"
     assert_contains "$OUT" "add $WP_DIR to the Path of your Windows user" "and the step to do by hand"

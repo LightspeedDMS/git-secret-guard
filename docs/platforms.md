@@ -842,7 +842,7 @@ Result: not yet recorded.
   Tests look at `TEST_WORK_BASE`, never `$SANDBOX/tmp`; an `includeIf` aimed at the wrong one silently sabotages nothing, and a
   fail-closed test goes green or red for the wrong reason.
 - **Windows: the user `Path` (`bin/gsg-path.ps1`, `lib/platform/winpath.sh`, #72).** (1) **Raw registry access.** `[Environment]::GetEnvironmentVariable(.., 'User')`
-  expands `%VARS%` and `SetEnvironmentVariable('Path', .., 'User')` rewrites the type, so the script opens `HKCU\Environment` and uses `GetValue('Path', $null,
+  expands `%VARS%` and `SetEnvironmentVariable('Path', .., 'User')` rewrites the type, so the script opens `HKCU\Environment` and uses `GetValue('Path', '',
   DoNotExpandEnvironmentNames)`, `GetValueKind` and `SetValue(.., .., kind)`; a missing value reads as `$null` (`GetValueKind` throws then). Probed on Windows PowerShell
   5.1.17763: the raw value kept its `%`, the expanded one was longer, the kind was `ExpandString`. No `setx` (it cuts at 1024), no machine hive, a kind other than
   `String` and `ExpandString` is refused (exit 2). (2) **No value byte reaches bash**: stdout is one status word (`plan`: `present`, `absent-sep`, `absent-bare`,
@@ -852,15 +852,18 @@ Result: not yet recorded.
   `windows-user-path created FOLDER` (no value; uninstall deletes it). `apply` re-reads the value and writes only when it still ends the way the plan saw it, else
   exit 3 and nothing changed; `remove` cuts the recorded text when the value ends with it, else the last element byte-equal to FOLDER with one adjacent separator,
   else says `changed` when only another spelling is there and `absent` when nothing is. A new value of 32,767 characters or more is refused (the limit counts the
-  closing NUL). (4) **The broadcast** is a throwaway user variable set and removed through `[Environment]::SetEnvironmentVariable(.., 'User')`, which sends
+  closing NUL). The form of a record and the rule for its folder (absolute drive or UNC path, no `;`, `%`, `"` or control character, from the first character on) are written once for
+  bash, `common_winrec_split` and `GSG_WINDIR_RE` in `lib/core/common.sh`, read by `winpath_folder`, `winpath_record` and `state_read` (a malformed record is refused when the state is
+  read); `$FolderPattern` of the script is the same rule for PowerShell. Every comparison of the script on the value is ordinal (`[string]::Equals(.., Ordinal)`, `EndsWith(.., Ordinal)`),
+  so an entry that differs from the folder by a zero-width or soft-hyphen character is another folder. (4) **The broadcast** is a throwaway user variable set and removed through `[Environment]::SetEnvironmentVariable(.., 'User')`, which sends
   `WM_SETTINGCHANGE` (Microsoft Learn, `Environment.SetEnvironmentVariable`: "other applications are notified of the set operation by a Windows `WM_SETTINGCHANGE`
   message"); no `Add-Type` compile, works under constrained language. A failed broadcast after the write is the `-nobroadcast` word and the flow says to sign out and in.
   (5) **Finding PowerShell**: `winpath_powershell` takes `WindowsPowerShell/v1.0/powershell.exe` below the System32 of `gitup_windows_sysdir` (so `GSG_GITUP_ROOT` moves it
   in tests); `GSG_WINPATH_ROOT` moves only this lookup, because on a Windows host `GSG_GITUP_ROOT` would hide the real `reg.exe` and `whoami.exe` from the git upgrade, and
   `lc_begin` points it at a stand-in that answers every call with exit 2, so no lifecycle test reaches the real registry. Like the other test seams it is announced on stderr,
   once per run (`TEST OVERRIDE active (GSG_WINPATH_ROOT=[<dir>]); Windows PowerShell is looked for below that folder, not in the real System32`), and skips no check.
-  (6) **A failed apply** (`winpath_apply` rc 1: exit 1, 2 or 3 of the script, a timeout, an answer that is no status word) is "nothing was written" to the flow: `install_path_unrecord`
-  writes the state again without this run's record. Only `added-nobroadcast` is a written change and keeps it. (7) **Tests**: `tests/install/test_winpath.sh`
+  (6) **A failed apply** (`winpath_apply` rc 1: exit 1, 2 or 3 of the script, a timeout, an answer that is no status word) is "nothing was written" to the flow: the state was written with this run's record right before the call (`winpath_apply` reads it from `INSTALL_PATH_RECORD`, as `macpath_apply` does) and
+  `install_path_unrecord` writes it again without that record. Only `added-nobroadcast` is a written change and keeps it. (7) **Tests**: `tests/install/test_winpath.sh`
   (all platforms, recording stand-in), `tests/platform/test_windows_path.sh` (Windows only: the real script in 5.1 with `Get-UserPath`, `Set-UserPath`, `Remove-UserPath` and
   `Send-EnvironmentChange` replaced by file-backed one-liners; `wpw_begin` fails unless exactly those four lines differ). The script uses no cmdlet, so it needs no `PSModulePath` reset.
 - **Windows: batch files.** `cmd` re-reads a batch file line by line, so a file deleted while it runs ends in `The batch file

@@ -1,17 +1,22 @@
 #!/usr/bin/env bash
-# shellcheck disable=SC2016,SC2034,SC2153
+# shellcheck disable=SC2016,SC2034,SC2153 # stand-in texts are single-quoted, WP_* globals are read by the test files, WU_DIR is set by gitup_windows.sh
 # ^ order sourced after tests/support/lib.sh and tests/support/gitup_windows.sh => the helpers here build on wu, wu_begin, set_env and the sandbox
 # ^ coupled lib/platform/winpath.sh runs bin/gsg-path.ps1 under the Windows PowerShell of System32; here powershell.exe is a recording stand-in
 # ^ security the stand-in lives in the sandbox System32 named by GSG_GITUP_ROOT => no helper here reaches the real registry or the real PowerShell
 
 # ^ external Linux has no cygpath; this stand-in maps /c/x to C:\x and any other absolute path below C:\fake, a relative one stays as it is
 WP_FAKE_CYGPATH='cygpath() {
-    local p="${*: -1}" rest
-    case "$p" in
-        /[a-z]/*) rest="${p:2}"; printf "%s:%s\n" "${p:1:1}" "${rest//\//\\}" | sed "s/^./\U&/" ;;
-        /*) printf "C:\\\\fake%s\n" "${p//\//\\}" ;;
-        *) printf "%s\n" "$p" ;;
-    esac
+    local p="${*: -1}" e rest out="" sep=""
+    local -a items=("$p")
+    if [[ " $* " == *" -p "* ]]; then IFS=: read -ra items <<<"$p"; sep=";"; fi
+    for e in "${items[@]}"; do
+        case "$e" in
+            /[a-z]/*) rest="${e:2}"; e="${e:1:1}"; e="${e^}:${rest//\//\\}" ;;
+            /*) e="C:\\fake${e//\//\\}" ;;
+        esac
+        out+="${out:+$sep}$e"
+    done
+    printf "%s\n" "$out"
 }'
 # ^ invariant the status of a shell whose libraries did not load; the prelude exits with it
 WP_LOAD_FAILED_RC=9

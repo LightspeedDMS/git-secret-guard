@@ -71,26 +71,36 @@ test_a_startup_file_install_must_not_edit_is_left_alone_and_the_line_is_printed(
     done
 }
 
+# ^ invariant install and uninstall in turn give the file back byte for byte, mode kept; a file install created (missing-file) is removed again
 test_existing_content_stays_byte_for_byte_and_the_record_says_what_to_restore() {
-    local LC_ALL=C row name content nonl p n
-    for row in "no-final-newline|1" "utf8|0" "crlf|0" "trailing-blank-lines|0"; do
-        IFS='|' read -r name nonl <<<"$row"
+    local LC_ALL=C row name content created nonl p n
+    for row in "with-newline|0|0" "no-final-newline|0|1" "empty-file|0|0" "missing-file|1|0" "utf8|0|0" "crlf|0|0" "trailing-blank-lines|0|0" "user-added-the-same-line|0|0"; do
+        IFS='|' read -r name created nonl <<<"$row"
         case "$name" in
+            with-newline) content=$'export A=1\n' ;;
             no-final-newline) content=$'export A=1' ;;
             utf8) content=$'# caf\xc3\xa9 \xe2\x82\xac\nexport B=2\n' ;;
             crlf) content=$'export A=1\r\nexport B=2\r\n' ;;
-            *) content=$'export A=1\n\n\n' ;;
+            trailing-blank-lines) content=$'export A=1\n\n\n' ;;
+            user-added-the-same-line) content='export PATH="$HOME/.local/bin:$PATH"'$'\n' ;;
+            *) content="" ;;
         esac
         lc_mac_begin || return 1
         p="$LC_HOME/.zprofile"
-        printf '%s' "$content" >"$p" && chmod 600 "$p" || return 1
+        if [ "$created" -eq 0 ]; then printf '%s' "$content" >"$p" && chmod 600 "$p" || return 1; fi
         n="${#content}"
         gsg install
         assert_rc 0 "install over [$name]"
-        assert_eq "$(state_value cli_path)" "macos-block 0 $nonl $p" "[$name] the record says what to restore"
+        assert_eq "$(state_value cli_path)" "macos-block $created $nonl $p" "[$name] the record says what to restore"
         cmp -s -n "$n" -- "$p" <(printf '%s' "$content") || fail "[$name] the first $n bytes changed"
+        assert_contains "$(<"$p")" "$MARK" "[$name] the block is there"
         gsg uninstall
         assert_rc 0 "uninstall over [$name]"
+        assert_contains "$OUT" "removed the marked PATH block from $p" "[$name] says what it removed"
+        if [ "$created" -eq 1 ]; then
+            assert_no_file "$p" "[$name] a file install created is removed again"
+            continue
+        fi
         cmp -s -- "$p" <(printf '%s' "$content") || fail "[$name] the file is not byte for byte what it was"
         assert_eq "$(stat -c %a "$p")" 600 "[$name] the mode is kept"
     done

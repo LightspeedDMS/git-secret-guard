@@ -42,17 +42,37 @@ test_the_path_comparison_ignores_trailing_slashes_and_never_matches_a_prefix_or_
     assert_eq "$OUT" yes "the root is the root however many slashes it has"
 }
 
-# ^ external on Windows the folder and each entry go through cygpath -m -l and compare in lower case; a fake cygpath keeps this on every host
-test_the_windows_path_comparison_goes_through_cygpath_and_ignores_case() {
-    local fake='tools_is_windows() { return 0; }
-cygpath() { local p="$4"; if [ "$p" = /bad ]; then return 1; fi; p="${p//\\//}"; case "$p" in /[A-Za-z]/*) p="${p:1:1}:${p:2}" ;; esac; printf "%s\n" "$p"; }
+# ^ external on Windows the folder and PATH go through cygpath -m -l (-p for the list), compared in lower case; a fake cygpath keeps this on every host
+# ^ invariant two cygpath starts per answer, one for the folder and one for the list, whatever the length of PATH; the fake logs its arguments to @LOG@
+test_the_windows_path_comparison_goes_through_one_cygpath_list_call_and_ignores_case() {
+    local log="$SANDBOX/cygpath.log" fake
+    fake='tools_is_windows() { return 0; }
+cygpath() {
+    local last="${*: -1}" e out=""
+    local -a items=("$last")
+    echo "$*" >>@LOG@
+    if [[ " $* " == *" -p "* ]]; then IFS=: read -ra items <<<"$last"; fi
+    for e in "${items[@]}"; do
+        if [ "$e" = /bad ]; then return 1; fi
+        e="${e//\\//}"
+        case "$e" in /[A-Za-z]/*) e="${e:1:1}:${e:2}" ;; esac
+        out+="$e;"
+    done
+    printf "%s\n" "${out%;}"
+}
 '
-    ip_on_path "$fake" "/c/Windows:/C/USERS/Ana/.local/BIN/:/bad" "/c/Users/ana/.local/bin"
-    assert_eq "$OUT" yes "another case and another drive-letter spelling are the same folder"
+    fake="${fake//@LOG@/$log}"
+    : >"$log" || return 1
+    ip_on_path "$fake" "/c/Windows:/C/USERS/Ana/.local/BIN/:/d/x" "/c/Users/ana/.local/bin"
+    assert_eq "$OUT" yes "another case, another drive-letter spelling and a trailing slash are the same folder"
+    assert_eq "$(wc -l <"$log" | tr -d ' ')" 2 "one cygpath start for the folder and one for the whole PATH"
+    assert_contains "$(<"$log")" "-m -l -p -- /c/Windows:/C/USERS/Ana/.local/BIN/:/d/x" "the PATH goes in as one list"
     ip_on_path "$fake" "/c/Windows:/c/Users/ana/.local" "/c/Users/ana/.local/bin"
     assert_eq "$OUT" no "a parent folder is not the folder"
     ip_on_path "$fake" "/bad:/c/Users/ana/.local/bin" "/bad"
     assert_eq "$OUT" no "a folder cygpath cannot name is never matched on a guess"
+    ip_on_path "$fake" "/c/Windows:/c/Users/ana/.local/bin:/bad" "/c/Users/ana/.local/bin"
+    assert_eq "$OUT" no "a PATH cygpath cannot convert matches nothing, not even an entry before the bad one"
 }
 
 test_install_on_linux_says_where_the_cli_is_and_prints_the_line_to_add_without_changing_a_file() {
@@ -113,7 +133,8 @@ ip_readonly_zprofile() {
     if [ -w "$LC_HOME/.zprofile" ]; then skip_test "this user writes a read-only file"; fi
 }
 
-test_a_failed_change_is_reported_with_the_line_and_install_still_succeeds() {
+# ^ invariant the record goes into the state right before the change and is taken back when nothing was written; a stale one could cut a later user line
+test_a_failed_change_is_reported_with_the_line_leaves_no_record_and_install_still_succeeds() {
     lc_mac_begin || return 1
     ip_readonly_zprofile || return 1
     gsg install
@@ -122,15 +143,6 @@ test_a_failed_change_is_reported_with_the_line_and_install_still_succeeds() {
     assert_contains "$OUT" "add this line to your shell startup file: $ADD_LINE" "still gives the line"
     assert_contains "$(gitx config --global --get-all hook.git-secret-guard.event)" "pre-commit" "the hook stays installed"
     assert_eq "$(<"$LC_HOME/.zprofile")" "export A=1" "the file is as it was"
-}
-
-# ^ invariant the record is written before the change and goes again when nothing was written; a stale one could cut a line the user adds later
-test_a_failed_change_leaves_no_record_of_ours() {
-    lc_mac_begin || return 1
-    ip_readonly_zprofile || return 1
-    gsg install
-    assert_rc 0 "a failed PATH change does not fail install"
-    assert_contains "$OUT$ERR" "cannot write $LC_HOME/.zprofile" "the failure is still printed"
     assert_no_cli_record "the state keeps no record of a change that was not made"
     chmod 644 "$LC_HOME/.zprofile" || return 1
     printf '%s\n' "$ADD_LINE" >>"$LC_HOME/.zprofile" || return 1
@@ -211,32 +223,6 @@ test_the_child_install_carries_an_earlier_record_over() {
     ip_drop_update_lock
 }
 
-# ^ invariant uninstall restores the file byte for byte, also a file with no final newline, an empty one, or none at all
-test_uninstall_restores_the_startup_file_byte_for_byte() {
-    local name content
-    for name in with-newline no-final-newline empty-file missing-file user-added-the-same-line; do
-        case "$name" in
-            with-newline) content=$'export A=1\n' ;;
-            no-final-newline) content='export A=1' ;;
-            user-added-the-same-line) content="$ADD_LINE"$'\n' ;;
-            *) content="" ;;
-        esac
-        lc_mac_begin || return 1
-        if [ "$name" != missing-file ]; then printf '%s' "$content" >"$LC_HOME/.zprofile" || return 1; fi
-        gsg install
-        assert_rc 0 "install over [$name]"
-        assert_contains "$(<"$LC_HOME/.zprofile")" "$BEGIN_MARK" "[$name] the block is there"
-        gsg uninstall
-        assert_rc 0 "uninstall of [$name]"
-        assert_contains "$OUT" "removed the marked PATH block from $LC_HOME/.zprofile" "[$name] says what it removed"
-        if [ "$name" = missing-file ]; then
-            assert_no_zprofile "[$name] a file install created is removed again"
-        else
-            cmp -s -- "$LC_HOME/.zprofile" <(printf '%s' "$content") || fail "[$name] the file is not byte for byte what it was"
-        fi
-    done
-}
-
 test_uninstall_keeps_what_the_user_wrote_around_the_block() {
     lc_mac_begin || return 1
     printf 'export A=1\n' >"$LC_HOME/.zprofile" || return 1
@@ -264,6 +250,48 @@ test_uninstall_names_and_leaves_a_block_the_user_changed() {
     assert_eq "$(<"$LC_HOME/.zprofile")" "$before" "the file is untouched"
 }
 
+# ^ invariant ip_mac CODE ARGS... runs CODE with macpath.sh loaded and uninstall_say printing "say:TEXT"; $1 is the home directory of the probe, set as HOME
+ip_mac() {
+    local code="$1"
+    shift
+    ip_call 'source "$GSG_ROOT/lib/platform/macpath.sh" || exit 9
+GSG_NAME=git-secret-guard HOME="$1"
+uninstall_say() { echo "say:$1"; }
+'"$code" "$@"
+}
+
+test_uninstall_names_and_leaves_a_block_whose_marker_line_is_not_the_one_install_wrote() {
+    local variant h="$SANDBOX/iphome" before
+    for variant in crlf trailing-space; do
+        rm -rf -- "${h:?}" && mkdir -p -- "$h" || return 1
+        case "$variant" in
+            crlf) printf '%s\r\n%s\r\n%s\r\n' "$BEGIN_MARK" "$ADD_LINE" "$END_MARK" >"$h/.zprofile" ;;
+            *) printf '%s \n%s\n%s\n' "$BEGIN_MARK" "$ADD_LINE" "$END_MARK" >"$h/.zprofile" ;;
+        esac || return 1
+        before="$(cksum <"$h/.zprofile")"
+        ip_mac 'ST_CLI_PATH="macos-block 0 0 $HOME/.zprofile"; uninstall_path_entry; echo "rc=$?"' "$h"
+        assert_contains "$OUT" "rc=0" "[$variant] uninstall goes on"
+        assert_contains "$OUT" "$h/.zprofile has the PATH marker but not the block install wrote; left as it is" "[$variant] names the file and says why"
+        assert_eq "$(cksum <"$h/.zprofile")" "$before" "[$variant] the file is untouched"
+    done
+}
+
+# ^ invariant a record names ~/.zprofile or ~/.bash_profile of this account only; a hand-edited one never reaches another file and a rerun is not blocked
+test_uninstall_touches_only_the_two_startup_files_a_record_may_name() {
+    local h="$SANDBOX/iphome" other before
+    other="$h/other-file"
+    rm -rf -- "${h:?}" && mkdir -p -- "$h" || return 1
+    ip_block_text >"$other" || return 1
+    before="$(cksum <"$other")"
+    ip_mac 'ST_CLI_PATH="macos-block 1 0 $2"; uninstall_path_entry; echo "rc=$?"' "$h" "$other"
+    assert_contains "$OUT" "rc=0" "uninstall goes on"
+    assert_contains "$OUT" "the record names $other, which is not ~/.zprofile or ~/.bash_profile; left as it is" "another file is named and refused"
+    assert_eq "$(cksum <"$other")" "$before" "the file is untouched, though the record says install created it"
+    ip_block_text >"$h/.bash_profile" || return 1
+    ip_mac 'ST_CLI_PATH="macos-block 1 0 $HOME/.bash_profile"; uninstall_path_entry; echo "rc=$?"' "$h"
+    assert_contains "$OUT" "say:removed the marked PATH block from $h/.bash_profile and the file itself, which install created" "the .bash_profile of the account is accepted"
+}
+
 test_uninstall_without_a_record_touches_nothing_even_if_a_marked_block_is_there() {
     lc_begin && lc_make_fixtures && lc_use_fixtures || return 1
     gsg install
@@ -289,29 +317,34 @@ test_the_windows_flow_follows_what_winpath_plan_answers() {
     local answer expect
     for answer in absent present unusable; do
         ip_win 'winpath_plan() { REPLY='"$answer"'; WINPATH_RECORD="windows-user-path ;C:/u/bin"; WINPATH_WHY="the adapter says no"; }
-install_path_plan; echo "$INSTALL_PATH_ACTION|$INSTALL_PATH_RECORD|$INSTALL_PATH_WHY"'
+install_path_plan; echo "$INSTALL_PATH_ACTION|$INSTALL_PATH_NEWREC|$INSTALL_PATH_RECORD|$INSTALL_PATH_WHY"'
         case "$answer" in
-            absent) expect='add|windows-user-path ;C:/u/bin|' ;;
-            present) expect='present||the user Path already holds /c/u/.local/bin' ;;
-            *) expect='hint||the adapter says no' ;;
+            absent) expect='add|windows-user-path ;C:/u/bin||' ;;
+            present) expect='present|||the user Path already holds /c/u/.local/bin' ;;
+            *) expect='hint|||the adapter says no' ;;
         esac
         assert_eq "$OUT" "$expect" "winpath_plan answers $answer"
     done
-    ip_win 'winpath_apply() { return 0; }; INSTALL_PATH_ACTION=add; install_path_apply; echo "$INSTALL_PATH_ACTION|$INSTALL_PATH_DONE"'
+    ip_win 'install_write_state() { return 0; }; winpath_apply() { return 0; }; INSTALL_PATH_ACTION=add; install_path_apply; echo "$INSTALL_PATH_ACTION|$INSTALL_PATH_DONE"'
     assert_eq "$OUT" "add|added /c/u/.local/bin to the user Path" "winpath_apply worked"
-    ip_win 'install_write_state() { return 0; }; winpath_apply() { WINPATH_WHY=denied; return 1; }; INSTALL_PATH_ACTION=add; install_path_apply; echo "$INSTALL_PATH_ACTION|$INSTALL_PATH_WHY"'
-    assert_eq "$OUT" "failed|denied" "winpath_apply failed: the action failed with the reason, never a failed install"
 }
 
 # ^ coupled a change written and not announced to running programs is a success with advice on what to do; the adapter sets WINPATH_NOBROADCAST
 test_a_change_written_but_not_announced_says_to_sign_out_and_in() {
-    ip_win 'winpath_apply() { WINPATH_NOBROADCAST=1; return 0; }; INSTALL_PATH_ACTION=add; install_path_apply; install_path_report'
+    ip_win 'install_write_state() { return 0; }; winpath_apply() { WINPATH_NOBROADCAST=1; return 0; }; INSTALL_PATH_ACTION=add; install_path_apply; install_path_report'
     assert_contains "$OUT" "added /c/u/.local/bin to the user Path" "the change is reported as made"
     assert_contains "$OUT" "could not tell running programs; sign out and in, or start a new session" "with what to do"
     ip_win 'uninstall_say() { echo "say:$1"; }
 winpath_remove() { REPLY=removed; WINPATH_NOBROADCAST=1; }
 ST_CLI_PATH="windows-user-path ;C:/u/bin"; uninstall_path_entry; echo "rc=$?"'
     assert_contains "$OUT" "say:removed /c/u/.local/bin from the user Path; running programs could not be told, so sign out and in" "uninstall says the same"
+}
+
+# ^ coupled the user Path holds the folder, this shell lacks it => a shell open before the entry was added needs the same advice as after a change
+test_the_windows_flow_tells_a_shell_opened_before_about_a_folder_the_user_path_already_holds() {
+    ip_win 'winpath_plan() { REPLY=present; }; install_path_plan; install_path_report'
+    assert_contains "$OUT" "PATH: the user Path already holds /c/u/.local/bin; nothing was changed" "says nothing was changed"
+    assert_contains "$OUT" "PATH: a shell opened before this install does not see the change; open a new one" "and that a shell opened before does not see it"
 }
 
 test_the_windows_hint_and_uninstall_follow_the_adapter() {
@@ -336,43 +369,80 @@ ST_CLI_PATH="windows-user-path ;C:/u/bin"; uninstall_path_entry; echo "rc=$?"'
 # ^ invariant ip_win_failed_apply PREAMBLE CODE runs install_path_apply on a fake Windows whose winpath_apply writes nothing (rc 1, "denied"); CODE follows
 ip_win_failed_apply() {
     ip_win "$1"'
-INSTALL_PATH_RECORD="windows-user-path ;C:/u/bin" INSTALL_PATH_ACTION=add
+INSTALL_PATH_NEWREC="windows-user-path ;C:/u/bin" INSTALL_PATH_ACTION=add
 winpath_apply() { WINPATH_WHY=denied; return 1; }
 install_path_apply; echo "rc=$? $INSTALL_PATH_ACTION"'"$2"
 }
 
 # ^ coupled the condition of lc_git_wrapper ends in false => git never fails; its side effect swaps the state dir for a plain file after the hook command
 # ^ why a file in place of the dir, not a read-only dir; state_make_dir sets the dir to 0700 again on every write
-test_install_exits_1_when_the_state_cannot_be_rewritten_after_a_failed_change() {
+test_install_exits_1_and_changes_nothing_when_the_state_cannot_be_written_before_the_path_change() {
+    local want
     lc_mac_begin || return 1
-    ip_readonly_zprofile || return 1
+    want="PATH: could not write the state file $LC_STATE/state before the PATH change; nothing was written to PATH"
     lc_git_wrapper '{ [ "$4" = hook.git-secret-guard.command ] && rm -rf -- "'"${LC_STATE:?}"'" && : >"'"$LC_STATE"'"; false; }' || return 1
     gsg install
-    assert_rc 1 "the state could not be rewritten"
-    assert_contains "$ERR" "could not rewrite the state file $LC_STATE/state" "names the state file"
+    assert_rc 1 "the state could not be written"
+    assert_contains "$ERR" "$want" "names the state file"
+    assert_eq "$(grep -c -F -- "$want" <<<"$ERR")" 1 "in one line, said once"
+    assert_no_zprofile "the startup file was not written"
+    assert_contains "$OUT" "add this line to your shell startup file: $ADD_LINE" "the line to add by hand is printed"
     assert_contains "$(gitx config --global --get-all hook.git-secret-guard.event)" "pre-commit" "the hook is installed all the same"
 }
 
-# ^ coupled the Windows flow with the fake adapter => a failed apply writes the state again with the carried record, a written change never does
-test_the_windows_flow_clears_the_record_only_when_nothing_was_written() {
-    local write='install_write_state() { echo "write:$1 record=[$INSTALL_PATH_RECORD]"; }'
-    ip_win_failed_apply "$write"$'\nST_CLI_PATH="windows-user-path ;C:/old"' ""
-    assert_eq "$OUT" $'write:final record=[windows-user-path ;C:/old]\nrc=0 failed' "nothing written: the state goes again with the earlier record"
-    ip_win_failed_apply "$write"$'\nST_CLI_PATH=""' ""
-    assert_eq "$OUT" $'write:final record=[]\nrc=0 failed' "no earlier record: the state goes again with none"
-    ip_win "$write"'
-INSTALL_PATH_RECORD="windows-user-path ;C:/u/bin" INSTALL_PATH_ACTION=add
-winpath_apply() { return 0; }; install_path_apply; echo "rc=$?"
-winpath_apply() { WINPATH_NOBROADCAST=1; return 0; }; install_path_apply; echo "rc=$?"'
-    assert_eq "$OUT" $'rc=0\nrc=0' "a change written, announced or not, keeps its record and writes no state"
+# ^ coupled a stand-in mktemp lets the first state write after the hook command through and fails the second, the rewrite of a failed change
+# ^ why the marker files sit in pathbin, not in the sandbox; lc_begin clears pathbin and the listing of the sandbox outside the template items stays as it was
+ip_fail_the_second_state_write() {
+    local real armed="$SANDBOX/pathbin/state.armed" seen="$SANDBOX/pathbin/state.seen"
+    real="$(type -P mktemp)" || return 1
+    printf '#!/bin/sh\ncase "$1" in */state.*) if [ -f "%s" ]; then if [ -f "%s" ]; then echo "mktemp: injected failure" >&2; exit 1; fi; : >"%s"; fi ;; esac\nexec %s "$@"\n' \
+        "$armed" "$seen" "$seen" "$real" >"$SANDBOX/pathbin/mktemp" && chmod 755 "$SANDBOX/pathbin/mktemp" || return 1
+    lc_git_wrapper '{ [ "$4" = hook.git-secret-guard.command ] && : >"'"$armed"'"; false; }'
 }
 
-# ^ invariant a state file install cannot rewrite is named in one line and is install's status 1, like every state write failure
-test_a_state_that_cannot_be_rewritten_after_a_failed_change_is_named_and_fails_install() {
-    ip_win_failed_apply 'install_write_state() { return 1; }; GSG_STATE_FILE=/s/state; ST_CLI_PATH=""' ""
-    assert_contains "$OUT" "rc=1 failed" "the status says the rewrite failed, the action is still failed"
-    assert_contains "$ERR" "could not rewrite the state file /s/state" "names the state file"
+test_install_exits_1_and_says_the_record_is_stale_when_the_state_cannot_be_rewritten_after_a_failed_change() {
+    lc_mac_begin || return 1
+    ip_readonly_zprofile || return 1
+    ip_fail_the_second_state_write || return 1
+    gsg install
+    assert_rc 1 "the state could not be rewritten"
+    assert_contains "$ERR" "could not rewrite the state file $LC_STATE/state" "names the state file"
     assert_contains "$ERR" "cli_path record in it is stale" "says the record is stale"
+    assert_eq "$(<"$LC_HOME/.zprofile")" "export A=1" "the file is as it was"
+    assert_contains "$(gitx config --global --get-all hook.git-secret-guard.event)" "pre-commit" "the hook is installed all the same"
+}
+
+# ^ invariant recorded before made, nothing written = no record; a step before the PATH step stopping install leaves neither a record nor a file
+test_an_install_that_stops_before_the_path_step_leaves_no_record_and_no_file() {
+    lc_mac_begin || return 1
+    lc_git_wrapper '[ "$4" = hook.git-secret-guard.command ]' || return 1
+    gsg install
+    assert_rc 1 "install stops when the hook command cannot be set"
+    assert_no_cli_record "the state records no change that was never made"
+    assert_no_zprofile "and the startup file was not written"
+}
+
+# ^ coupled the Windows flow with a fake adapter => the state gets the new record before the change; a failed apply writes it again with the carried one
+test_the_windows_flow_writes_the_state_with_the_new_record_before_the_change_and_takes_it_back_when_nothing_was_written() {
+    local new='windows-user-path ;C:/u/bin' old='windows-user-path ;C:/old' write='install_write_state() { echo "write:$1 record=[$INSTALL_PATH_RECORD]"; }'
+    ip_win "$write"'
+winpath_apply() { echo "apply record=[$INSTALL_PATH_RECORD]"; return 0; }
+ST_CLI_PATH="'"$old"'" INSTALL_PATH_RECORD="'"$old"'" INSTALL_PATH_NEWREC="'"$new"'" INSTALL_PATH_ACTION=add
+install_path_apply; echo "rc=$?"'
+    assert_eq "$OUT" "write:final record=[$new]"$'\n'"apply record=[$new]"$'\nrc=0' "the state holds the record when the Path is written"
+    ip_win_failed_apply "$write"$'\nST_CLI_PATH="'"$old"'"' ""
+    assert_eq "$OUT" "write:final record=[$new]"$'\n'"write:final record=[$old]"$'\nrc=0 failed' "nothing written: the state goes again with the earlier record"
+    ip_win_failed_apply "$write"$'\nST_CLI_PATH=""' ""
+    assert_eq "$OUT" "write:final record=[$new]"$'\nwrite:final record=[]\nrc=0 failed' "no earlier record: the state goes again with none"
+    ip_win "$write"'
+INSTALL_PATH_NEWREC="'"$new"'" INSTALL_PATH_ACTION=add
+winpath_apply() { WINPATH_NOBROADCAST=1; return 0; }; install_path_apply; echo "rc=$?"'
+    assert_eq "$OUT" "write:final record=[$new]"$'\nrc=0' "a change written but not announced keeps its record and writes the state once"
+    ip_win 'install_write_state() { return 1; }; winpath_apply() { echo called; }
+GSG_STATE_FILE=/s/state ST_CLI_PATH="'"$old"'" INSTALL_PATH_RECORD="'"$old"'" INSTALL_PATH_NEWREC="'"$new"'" INSTALL_PATH_ACTION=add
+install_path_apply; echo "rc=$? $INSTALL_PATH_ACTION [$INSTALL_PATH_RECORD]"'
+    assert_eq "$OUT" "rc=1 failed [$old]" "the state cannot be written first: the Path is not touched, install's status is 1"
+    assert_contains "$ERR" "PATH: could not write the state file /s/state before the PATH change; nothing was written to PATH" "and the state file is named"
 }
 
 run_file_tests

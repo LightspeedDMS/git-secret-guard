@@ -12,7 +12,7 @@ if [ -z "$event" ] || [ "$event" = gsg-desktop-chain ]; then
     exit 1
 fi
 if [ "${#scan[@]}" -eq 0 ]; then
-    printf 'git-secret-guard: the Desktop hook wrapper has no scan command (install did not write one); run: git-secret-guard install --link-desktop-git\n' >&2
+    printf 'git-secret-guard: the Desktop hook wrapper has no scan command (install did not write one); run: git-secret-guard install\n' >&2
     exit 1
 fi
 # ^ invariant rc 0 = the git running this hook is 2.54 or newer and hook.git-secret-guard.* in the global config already scans; a second scan would repeat it

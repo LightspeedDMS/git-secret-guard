@@ -19,17 +19,17 @@ GU_PTY_BSD=1
 
 test_status_reads_the_flatpak_version_with_underscores_and_the_bundled_git_through_flatpak_run() {
     sl_flatpak_setup || return 1
-    gsg install </dev/null
+    gsg install --dont-configure-smartgit </dev/null
     gsg status
     assert_rc 1 "status with a Flatpak SmartGit on its bundled git 2.53.0"
     assert_contains "$OUT" "flatpak com.syntevo.SmartGit (SmartGit 26.1.057)" "26_1_057 is read as 26.1.057, so the install matches settings 26.1"
     assert_contains "$OUT" "SmartGit settings: $SG_SETTINGS (26.1): bundled git, git 2.53.0" "the bundled git is read through flatpak run"
-    assert_contains "$OUT" "commits are NOT scanned MISMATCH: run: git-secret-guard install --configure-smartgit" "and names the fix"
+    assert_contains "$OUT" "commits are NOT scanned MISMATCH: run: git-secret-guard install" "and names the fix"
 }
 
 test_doctor_reports_a_flatpak_on_its_old_bundled_git_as_a_problem() {
     sl_flatpak_setup || return 1
-    gsg install </dev/null
+    gsg install --dont-configure-smartgit </dev/null
     mkdir -p -- "$SANDBOX/roots" || return 1
     gsg doctor --roots "$SANDBOX/roots"
     assert_rc 1 "doctor with a Flatpak SmartGit on git 2.53.0"
@@ -39,7 +39,7 @@ test_doctor_reports_a_flatpak_on_its_old_bundled_git_as_a_problem() {
 test_a_home_relative_executable_is_read_as_the_wrapper_and_judged_inside_the_sandbox() {
     sl_flatpak_setup linux-flatpak-26.1-byhand || return 1
     sl_hand_wrapper || return 1
-    gsg install </dev/null
+    gsg install --dont-configure-smartgit </dev/null
     gsg status
     assert_contains "$OUT" "SmartGit settings: $SG_SETTINGS (26.1): $SL_WRAPPER, git 2.56.0; commits are scanned" "a home-relative path is the wrapper, run inside the sandbox"
     assert_not_contains "$OUT" "unknown form" "never an executable of unknown form"
@@ -47,12 +47,12 @@ test_a_home_relative_executable_is_read_as_the_wrapper_and_judged_inside_the_san
 
 test_doctor_reports_a_tarball_on_its_old_bundled_git_as_a_problem() {
     sl_tarball_setup || return 1
-    gsg install </dev/null
+    gsg install --dont-configure-smartgit </dev/null
     mkdir -p -- "$SANDBOX/roots" || return 1
     gsg doctor --roots "$SANDBOX/roots"
     assert_rc 1 "doctor with a tarball SmartGit on git 2.53.0"
     assert_contains "$OUT" "PROBLEM  SmartGit 26.1 ($SG_SETTINGS): Git Executable is the bundled git 2.53.0" "the bundle's git is read on the host"
-    assert_contains "$OUT" "run: git-secret-guard install --configure-smartgit" "with the fix command"
+    assert_contains "$OUT" "run: git-secret-guard install" "with the fix command"
 }
 
 # ^ invariant sl_tarball_configure = a tarball SmartGit on its bundled git, the real scanners, a working git-lfs, and install --configure-smartgit after them
@@ -120,13 +120,6 @@ test_a_running_tarball_smartgit_is_refused_before_any_change() {
     sl_tarball_refused "SmartGit (or another Syntevo app) of this user is running"
 }
 
-# ^ invariant sl_lfs_missing_setup ID = a tarball SmartGit on a machine with os-release ID, the real scanners and no git-lfs SmartGit's git can find
-sl_lfs_missing_setup() {
-    sl_tarball_setup || return 1
-    gu_os_release "ID=$1" || return 1
-    sg_real_tools
-}
-
 test_git_lfs_missing_on_fedora_is_installed_with_dnf_as_root_after_the_repoquery() {
     sl_lfs_missing_setup fedora || return 1
     printf '3.7.1\n' >"$SANDBOX/dnf.candidate" || return 1
@@ -187,27 +180,10 @@ test_a_pre_release_apt_candidate_for_git_lfs_is_refused_with_its_own_wording() {
     assert_not_contains "$(gu_log)" "install -y" "no package install ran"
 }
 
-# ^ invariant sl_flatpak_ready [FIXTURE] = the Flatpak SmartGit, a vmoptions file with one line of its own (copy in vmopts.orig), scanners, git-lfs
-sl_flatpak_ready() {
-    sl_flatpak_setup "$@" || return 1
-    printf -- '-Xmx1024m\n' >"$SL_VMOPTS" && chmod 640 "$SL_VMOPTS" && cp -p -- "$SL_VMOPTS" "$SANDBOX/vmopts.orig" || return 1
-    sg_real_tools || return 1
-    sg_lfs_present
-}
-
 # ^ invariant sl_flatpak_configure [FIXTURE] = sl_flatpak_ready and install --configure-smartgit with the sandbox consent flag, without a terminal
 sl_flatpak_configure() {
     sl_flatpak_ready "$@" || return 1
     gsg install --configure-smartgit --allow-smartgit-sandbox-removal </dev/null
-}
-
-# ^ invariant sl_flatpak_untouched MSG asserts the Flatpak and its settings are as sl_flatpak_ready left them; shared by the refusal tests
-sl_flatpak_untouched() {
-    assert_no_file "$SANDBOX/flatpak.override.user" "$1: no --user override"
-    assert_no_file "$SL_WRAPPER" "$1: no wrapper"
-    assert_eq "$(sg_hash "$SL_VMOPTS")" "$(sg_hash "$SANDBOX/vmopts.orig")" "$1: smartgit.vmoptions unchanged"
-    assert_eq "$(sg_hash "$SG_PREFS")" "$(sg_hash "$SANDBOX/prefs.orig")" "$1: preferences.yml unchanged"
-    assert_no_file "$SL_FLATPAK_RECORD" "$1: no record"
 }
 
 test_a_flatpak_run_without_a_terminal_and_without_the_flag_is_refused_with_the_manual_steps() {
@@ -482,13 +458,6 @@ test_a_failure_after_real_flatpak_changes_lists_exactly_what_was_undone() {
     rm -f -- "${SL_TMPDIR%/*}"
 }
 
-test_the_sandbox_flag_without_configure_smartgit_is_a_usage_error() {
-    sl_flatpak_ready || return 1
-    gsg install --allow-smartgit-sandbox-removal </dev/null
-    assert_rc 2 "usage error"
-    assert_contains "$ERR" "--allow-smartgit-sandbox-removal needs --configure-smartgit" "says why"
-}
-
 # ^ invariant sl_interrupt_then_restore PATTERN SKIP stops the Flatpak setup with TERM at the move (or flatpak override) matching PATTERN after SKIP
 # ^ invariant such moves; restore-smartgit must leave the Flatpak as sl_flatpak_ready made it, with no temp file of ours behind
 sl_interrupt_then_restore() {
@@ -532,7 +501,7 @@ test_a_left_over_older_major_is_an_info_line_in_status_and_never_a_problem() {
     sl_leftover_setup || return 1
     gsg install </dev/null
     assert_rc 0 "install"
-    assert_not_contains "$OUT$ERR" "run: git-secret-guard install --configure-smartgit" "no hint to configure a directory nobody uses"
+    assert_not_contains "$OUT$ERR" "run: git-secret-guard install" "no hint to configure a directory nobody uses"
     gsg status
     assert_rc 0 "status: the leftover does not count"
     assert_contains "$OUT" "SmartGit settings: $SL_OLD (25.1): $(sl_leftover_tail 25.1 26.1)" "one info line names the leftover"
@@ -569,20 +538,20 @@ test_a_live_directory_of_an_unrecorded_major_gets_the_by_hand_step_in_status_doc
     sl_tarball_setup || return 1
     rm -rf -- "$SG_SETTINGS" || return 1
     sl_extra_major "$LC_HOME/.config/smartgit" 27.1 linux-tarball-26.1 "$SL_INSTALL" || return 1
-    gsg install </dev/null
+    gsg install --dont-configure-smartgit </dev/null
     assert_rc 0 "install only prints the hint"
     assert_contains "$OUT" "SmartGit: found $LC_HOME/.config/smartgit/27.1" "the hint names the directory"
     assert_contains "$OUT" "so its commits are not scanned; $by_hand" "the hint gives the by-hand step"
-    assert_not_contains "$OUT$ERR" "run: git-secret-guard install --configure-smartgit" "never the command that refuses 27.1"
+    assert_not_contains "$OUT$ERR" "run: git-secret-guard install" "never the command that refuses 27.1"
     gsg status
     assert_rc 1 "a live directory still counts"
     assert_contains "$OUT" "(27.1): bundled git, git 2.53.0; commits are NOT scanned MISMATCH: $by_hand" "status gives the by-hand step"
-    assert_not_contains "$OUT" "run: git-secret-guard install --configure-smartgit" "status never names the command"
+    assert_not_contains "$OUT" "run: git-secret-guard install" "status never names the command"
     mkdir -p -- "$SANDBOX/roots" || return 1
     gsg doctor --roots "$SANDBOX/roots"
     assert_rc 1 "doctor: a PROBLEM"
     assert_contains "$OUT" "PROBLEM  SmartGit 27.1 ($LC_HOME/.config/smartgit/27.1): Git Executable is the bundled git 2.53.0, so its commits are not scanned; $by_hand" "doctor gives the by-hand step"
-    assert_not_contains "$OUT" "run: git-secret-guard install --configure-smartgit" "doctor never names the command"
+    assert_not_contains "$OUT" "run: git-secret-guard install" "doctor never names the command"
 }
 
 test_an_older_flatpak_directory_is_left_over_until_the_installed_flatpak_has_that_major() {
@@ -601,7 +570,7 @@ test_an_older_flatpak_directory_is_left_over_until_the_installed_flatpak_has_tha
     gsg status
     assert_rc 1 "the installed Flatpak is 25.1.100: its directory is live and on the old bundled git"
     assert_contains "$OUT" "SmartGit settings: $old (25.1): bundled git, git 2.53.0; commits are NOT scanned MISMATCH: by hand:" "the by-hand step"
-    assert_not_contains "$OUT" "run: git-secret-guard install --configure-smartgit" "status never names the refused command"
+    assert_not_contains "$OUT" "run: git-secret-guard install" "status never names the refused command"
     assert_not_contains "$OUT" "left over" "nothing is left over now"
 }
 
@@ -618,7 +587,7 @@ test_a_newer_directory_smartgit_never_set_up_does_not_demote_the_live_one() {
     sl_tarball_setup || return 1
     newer="$LC_HOME/.config/smartgit/26.2"
     mkdir -p -- "$newer" || return 1
-    gsg install </dev/null
+    gsg install --dont-configure-smartgit </dev/null
     sl_still_live "an empty 26.2"
     mkdir -p -- "$SANDBOX/roots" || return 1
     gsg doctor --roots "$SANDBOX/roots"

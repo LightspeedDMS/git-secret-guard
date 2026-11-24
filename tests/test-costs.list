@@ -106,6 +106,7 @@ test_rule_file_hash_status - 6
 test_runner - 3
 test_share_permissions - 0
 test_smartgit - 241
+test_smartgit_auto - 63
 test_smartgit_linux - 219
 test_smartgit_record_refusals - 4
 test_smartgit_windows 584 2

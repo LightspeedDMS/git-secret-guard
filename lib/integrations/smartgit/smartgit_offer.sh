@@ -222,9 +222,9 @@ smartgit_nothing_to_change() {
     return 1
 }
 
-# ^ invariant the one entry of install; rc 0 = nothing to do, the hint, a decline without the flag, or success; rc 1 = a refused or failed explicit flag
-# ^ invariant a failed apply returns 1 with or without the flag, as the user said yes to it; the backup was restored and the failure says so
-# ^ order every refusal and the whole plan come before the one question, and nothing is written before its yes
+# ^ invariant the one entry of install; FLAG 1 = --configure-smartgit (a refusal or failure is rc 1), 0 = automatic (a refusal is a notice, rc 0)
+# ^ invariant SMARTGIT_OFF_FLAG 1 (--dont-configure-smartgit) prints the hint and writes nothing; automatic rc 1 only after an undo left a trace
+# ^ order every refusal and the whole plan come before the first write; no question is asked, the one consent left is the Flatpak sandbox removal
 smartgit_install_step() {
     local flag="$1" i
     local -a todo=()
@@ -251,7 +251,7 @@ smartgit_install_step() {
         smartgit_nothing_to_change "$flag"
         return
     fi
-    if [ "$flag" -eq 0 ] && { [ ! -t 0 ] || [ ! -t 2 ]; }; then
+    if [ "$flag" -eq 0 ] && [ "${SMARTGIT_OFF_FLAG:-0}" -eq 1 ]; then
         for i in "${todo[@]}"; do
             if smartgit_needs_change "$i"; then smartgit_hint "$i"; fi
         done
@@ -260,10 +260,10 @@ smartgit_install_step() {
     smartgit_offer "$flag" "${todo[@]}"
 }
 
-# ^ invariant the answer is no only without the flag (the flag is the yes); a decline returns 0; every refusal before the plan returns the flag value
-# ^ security a Flatpak directory also needs the sandbox yes (smartgit_flatpak_keep) after the general one; a No there leaves the Flatpak untouched
+# ^ invariant no question is asked; every refusal before the write returns the flag value (1 for the flag, 0 automatic)
+# ^ security a Flatpak directory still needs its own sandbox yes (the flag or a terminal question in smartgit_flatpak_keep); a No leaves the Flatpak untouched
 smartgit_offer() {
-    local flag="$1" i rc=0
+    local flag="$1" i rc=0 arc=0
     local -a elig=()
     shift
     SMARTGIT_WIN_TARGET="" SMARTGIT_WIN_GIT=""
@@ -287,6 +287,7 @@ smartgit_offer() {
         if [ "${SG_SET_KIND[$i]}" = flatpak ]; then fp_run=1; else host_run=1; fi
     done
     smartgit_lfs_plan "$fp_run" || return "$flag"
+    if [ "$flag" -eq 0 ]; then smartgit_lfs_auto_ok || return 0; fi
     if [ "$host_run" -eq 1 ]; then
         printf '  then: git --version and git lfs version through %s, a fake-token commit in a scratch repository must be blocked and a clean commit must print the summary line; any failure restores the backup\n' "${SMARTGIT_WIN_TARGET:-$GSG_GIT}"
     fi
@@ -294,12 +295,11 @@ smartgit_offer() {
         printf '  then (Flatpak): the same checks run through the wrapper %s inside the SmartGit sandbox (flatpak run, in your own session; the scratch repository under %s); any failure also undoes the Flatpak steps\n' "$SGF_WRAPPER" "$SGF_TMPDIR"
     fi
     gitup_need_elevation || return "$flag"
-    if ! gitup_consent "$flag" "Point SmartGit at ${SMARTGIT_WIN_TARGET:-$GSG_GIT}?"; then
-        printf '%s: SmartGit was not changed\n' "$GSG_NAME"
-        return 0
-    fi
     smartgit_flatpak_keep "${elig[@]}"
     if [ "${#SGF_KEEP[@]}" -eq 0 ]; then return 0; fi
-    smartgit_apply "${SGF_KEEP[@]}" || return 1
+    smartgit_apply "${SGF_KEEP[@]}" || arc=$?
+    # ^ invariant rc 1 = the failure was said and the backup restored, rc 2 = an undo left a trace; only rc 2 fails an automatic run
+    if [ "$arc" -eq 2 ] || { [ "$arc" -ne 0 ] && [ "$flag" -eq 1 ]; }; then return 1; fi
+    if [ "$arc" -ne 0 ]; then return 0; fi
     return "$((flag * rc))"
 }

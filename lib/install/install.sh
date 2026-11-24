@@ -815,6 +815,9 @@ install_run() {
     if [ "$timer" -eq 1 ]; then GSG_INSTALL_FLAGS+=" --with-timer"; fi
     if [ "${AUTO_UPDATE_FLAG:-0}" -eq 1 ]; then GSG_INSTALL_FLAGS+=" --auto-update"; fi
     if [ "$takeover" -eq 1 ]; then GSG_INSTALL_FLAGS+=" --take-over-system-git"; fi
+    # ^ why the off switches only, not the positive flags; a plain install does what those say, the rerun must not do what the user turned off
+    if [ "${SMARTGIT_OFF_FLAG:-0}" -eq 1 ]; then GSG_INSTALL_FLAGS+=" --dont-configure-smartgit"; fi
+    if [ "${DESKTOP_GIT_OFF_FLAG:-0}" -eq 1 ]; then GSG_INSTALL_FLAGS+=" --dont-link-desktop-git"; fi
     # ^ security umask only tightens (022 or stricter) => settings, share tree, CLI link and state are never group or other writable; WSL 1 starts at 0000
     umask "$(printf '%03o' "$((8#$(umask) | 8#022))")"
     paths_init || return 1

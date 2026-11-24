@@ -451,12 +451,16 @@ autoupdate_export() {
 # ^ invariant rc 0 = exit status $1 is one GNU timeout gives when its limit ended the command
 autoupdate_rc_timed_out() { [ "$1" -eq "$GSG_UPDATE_RC_TIMEOUT" ] || [ "$1" -eq "$GSG_UPDATE_RC_KILLED" ]; }
 
+# ^ invariant the one switch of what the unattended install may change; empty = it does what a plain install does (SmartGit and Desktop set up by themselves)
+# ^ invariant --dont-configure-smartgit and --dont-link-desktop-git in this array turn the automatic setup off for update; the hourly run only reports
+GSG_UPDATE_INSTALL_ARGS=()
+
 # ^ invariant updated only when the child exits 0 AND the installed VERSION is $1; anything else is failed, install-failed
 # ^ invariant an install its limit ended is recorded as timed out, whatever it printed before
 autoupdate_child_install() {
     local x="$1" rc=0
     # ^ coupled autoupdate_first_line copies a line of install.err into the record status shows => CLICOLOR_FORCE would put escape codes in it
-    GSG_UPDATE_LOCK_PID="$$" env -u CLICOLOR_FORCE "$TIMEOUT_BIN" -k "$GSG_UPDATE_INSTALL_KILL_SECONDS" "$GSG_UPDATE_INSTALL_SECONDS" "$AU_WORK/tree/bin/$GSG_NAME" install \
+    GSG_UPDATE_LOCK_PID="$$" env -u CLICOLOR_FORCE "$TIMEOUT_BIN" -k "$GSG_UPDATE_INSTALL_KILL_SECONDS" "$GSG_UPDATE_INSTALL_SECONDS" "$AU_WORK/tree/bin/$GSG_NAME" install "${GSG_UPDATE_INSTALL_ARGS[@]}" \
         >"$AU_WORK/install.out" 2>"$AU_WORK/install.err" </dev/null || rc=$?
     cat -- "$AU_WORK/install.out" || true
     cat -- "$AU_WORK/install.err" >&2 || true

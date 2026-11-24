@@ -222,6 +222,22 @@ smartgit_lfs_plan() {
     fi
 }
 
+# ^ invariant automatic mode only; rc 0 = nothing to install, or brew at a terminal as the user; rc 1 = a notice naming the command, nothing was run
+# ^ why a notice, not a question; no question is asked, and root, sudo or an unwatched run (the child of update) must never start a package manager by itself
+smartgit_lfs_auto_ok() {
+    case "$SG_LFS_ROUTE" in
+        none) return 0 ;;
+        brew)
+            if [ -t 0 ] && [ -t 2 ]; then return 0; fi
+            printf '%s: SmartGit: git lfs version fails through %s and there is no terminal to install Git LFS from; run as your user: brew install git-lfs, then run install again; SmartGit was not changed\n' "$GSG_NAME" "$GSG_GIT" >&2
+            ;;
+        *)
+            printf '%s: SmartGit: git lfs version fails through %s and installing Git LFS needs root; run as root: %s, then run install again; SmartGit was not changed\n' "$GSG_NAME" "$GSG_GIT" "${SG_LFS_CMD[*]}" >&2
+            ;;
+    esac
+    return 1
+}
+
 # ^ invariant runs the command the plan chose; brew is named in BREW_INSTALLED and the root routes in GITUP_CHANGED; a later refusal says what changed
 # ^ invariant success means git lfs version works through the target afterwards; anything else is a failure and leaves the package as the manager left it
 smartgit_lfs_install_pkg() {
@@ -313,11 +329,12 @@ smartgit_lfs_take_back() {
 }
 
 # ^ order pending is written before git lfs install runs, yes after its settings are seen; a stop in between leaves pending, and a rerun only drops it
+# ^ invariant rc 0 = done, 1 = failed with nothing left behind, 2 = failed and a record or filter section of ours is left (the apply passes rc 2 on)
 smartgit_lfs_configure() {
     local irc=0
     if smartgit_lfs_filter_set; then
         if smartgit_lfs_is_pending; then
-            smartgit_lfs_take_back || return 1
+            smartgit_lfs_take_back || return 2
             printf '%s: the filter.lfs.* settings in your global git config are kept, as this tool cannot prove it added them; if you did not add them yourself, remove them with: git config --global --remove-section filter.lfs\n' "$GSG_NAME"
         fi
         return 0
@@ -328,17 +345,17 @@ smartgit_lfs_configure() {
     if smartgit_lfs_filter_set; then
         smartgit_lfs_record_write yes || {
             printf '%s: the filter.lfs.* settings stay in your global git config; remove them by hand to undo\n' "$GSG_NAME" >&2
-            return 1
+            return 2
         }
     fi
     if [ "$irc" -ne 0 ]; then
         printf '%s: git lfs install failed (exit %s); taking back what it wrote\n' "$GSG_NAME" "$irc" >&2
-        smartgit_lfs_take_back
+        smartgit_lfs_take_back || return 2
         return 1
     fi
     if ! smartgit_lfs_filter_set; then
         printf '%s: git lfs install exited 0 but no filter.lfs.* setting is visible; taking back its record\n' "$GSG_NAME" >&2
-        smartgit_lfs_take_back
+        smartgit_lfs_take_back || return 2
         return 1
     fi
 }

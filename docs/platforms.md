@@ -860,7 +860,10 @@ Result: not yet recorded.
   message"); no `Add-Type` compile, works under constrained language. A failed broadcast after the write is the `-nobroadcast` word and the flow says to sign out and in.
   (5) **Finding PowerShell**: `winpath_powershell` takes `WindowsPowerShell/v1.0/powershell.exe` below the System32 of `gitup_windows_sysdir` (so `GSG_GITUP_ROOT` moves it
   in tests); `GSG_WINPATH_ROOT` moves only this lookup, because on a Windows host `GSG_GITUP_ROOT` would hide the real `reg.exe` and `whoami.exe` from the git upgrade, and
-  `lc_begin` points it at a stand-in that answers every call with exit 2, so no lifecycle test reaches the real registry. Like the other test seams it is announced on stderr,
+  every Windows sandbox carries it in the base `GSG_ENV` (`sandbox_winpath_seam` of `tests/support/lib.sh`, so `LC_ENV` and any environment built from `GSG_ENV` have it; `lc_begin`
+  only builds the stand-in again), and it points at a stand-in that answers every call with exit 2, so no test reaches the real registry; `wu_env` sets it empty (an empty value is
+  unset), because the adapter tests there choose their stand-in through `GSG_GITUP_ROOT`. The gates: `tests/project/test_windows_harness_safety.sh` (seam and wiring, every host) and
+  `test_every_route_that_starts_an_install_reaches_only_the_stand_in` in `tests/platform/test_windows_path.sh` (Windows). Like the other test seams it is announced on stderr,
   once per run (`TEST OVERRIDE active (GSG_WINPATH_ROOT=[<dir>]); Windows PowerShell is looked for below that folder, not in the real System32`), and skips no check.
   (6) **A failed apply** (`winpath_apply` rc 1: exit 1, 2 or 3 of the script, a timeout, an answer that is no status word) is "nothing was written" to the flow: the state was written with this run's record right before the call (`winpath_apply` reads it from `INSTALL_PATH_RECORD`, as `macpath_apply` does) and
   `install_path_unrecord` writes it again without that record. Only `added-nobroadcast` is a written change and keeps it. (7) **Tests**: `tests/install/test_winpath.sh`

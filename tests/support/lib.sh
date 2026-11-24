@@ -106,6 +106,30 @@ RC=0
 OUT=""
 ERR=""
 
+# ^ security a Windows host has the real PowerShell and registry; the CLI reaches this stand-in through GSG_WINPATH_ROOT of GSG_ENV (#72)
+# ^ invariant it logs its arguments to $SANDBOX/xdg/powershell.log and exits 2 with one reason line => the plan is a hint, nothing is written
+# ^ coupled lc_begin clears the sandbox and builds it again; the log sits in xdg, a template item of the lifecycle
+winpath_standin_create() {
+    local f="$SANDBOX/root/windows/System32/WindowsPowerShell/v1.0/powershell.exe"
+    mkdir -p -- "${f%/*}" || return 1
+    cat >"$f" <<'EOF' || return 1
+#!/bin/sh
+d="${0%/*}/../../../../../xdg"
+mkdir -p "$d"
+printf '%s\n' "$*" >>"$d/powershell.log"
+echo "the PowerShell stand-in of the test suite changes nothing" >&2
+exit 2
+EOF
+    chmod 755 "$f"
+}
+
+# ^ invariant adds GSG_WINPATH_ROOT to GSG_ENV and builds the stand-in; sandbox_create calls it on Windows only (the product announces the override)
+# ^ why in the base environment, not in lc_begin; a CLI run built from GSG_ENV alone (a rebuilt LC_ENV, a bare env -i) never reaches the real PowerShell
+sandbox_winpath_seam() {
+    winpath_standin_create || return 1
+    GSG_ENV+=(GSG_WINPATH_ROOT="$SANDBOX/root")
+}
+
 sandbox_create() {
     mkdir -p -- "$REAL_HOME/.tmp" || exit 2
     SANDBOX="$(mktemp -d -- "$REAL_HOME/.tmp/git-secret-guard-tests.XXXXXX")" || exit 2
@@ -144,6 +168,7 @@ sandbox_create() {
     if [ "$TEST_IS_WINDOWS" -eq 1 ]; then
         TEST_SANDBOX_MIXED="$(cygpath -m "$SANDBOX")" || exit 2
         GSG_ENV+=(SYSTEMROOT="$SYSTEMROOT")
+        sandbox_winpath_seam || exit 2
         TEST_JQ="$SANDBOX/jq-binary-mode"
         printf '#!%s\nexec %q -b "$@"\n' "$TEST_RECORDED_BASH" "$TEST_JQ_EXE" >"$TEST_JQ" || exit 2
         chmod 755 "$TEST_JQ" || exit 2

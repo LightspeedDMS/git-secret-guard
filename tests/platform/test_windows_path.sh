@@ -400,4 +400,32 @@ test_a_plain_install_on_windows_reaches_only_the_stand_in() {
     assert_eq "$(state_value cli_path)" "" "nothing is recorded"
 }
 
+# ^ security the gate of #72; each way the suite builds a CLI environment is started here => only the stand-in is reached, and only for a plan
+# ^ invariant the routes are the checkout CLI (the test above), LC_ENV rebuilt from GSG_ENV alone (test_install.sh does for HOME-only runs), the installed copy
+# ^ see test:test_a_plain_install_on_windows_reaches_only_the_stand_in
+test_every_route_that_starts_an_install_reaches_only_the_stand_in() {
+    local route log="$SANDBOX/xdg/powershell.log" line
+    assert_eq "$(printf '%s\n' "${GSG_ENV[@]}" | grep -c "^GSG_WINPATH_ROOT=$SANDBOX/root\$")" 1 "the base environment names the stand-in root"
+    for route in base-environment installed-copy; do
+        lc_begin && lc_make_fixtures && lc_use_fixtures || return 1
+        case "$route" in
+            base-environment)
+                LC_ENV=("${GSG_ENV[@]}" PATH="$SANDBOX/pathbin:$TEST_BASE_PATH")
+                gsg install
+                ;;
+            installed-copy)
+                gsg install
+                assert_rc 0 "[$route] the first install"
+                rm -f -- "$log" || return 1
+                run_cap env -i "${LC_ENV[@]}" "${EXTRA_ENV[@]}" "$LC_DATA/bin/git-secret-guard" install
+                ;;
+        esac
+        assert_rc 0 "[$route] install"
+        [ -s "$log" ] || { fail "[$route] the stand-in was never called, so the plan did not run"; return 1; }
+        while IFS= read -r line; do
+            assert_contains "$line" "gsg-path.ps1 plan " "[$route] every call is a plan"
+        done <"$log"
+    done
+}
+
 run_file_tests

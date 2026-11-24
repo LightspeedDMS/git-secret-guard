@@ -121,21 +121,6 @@ EOF
     chmod 755 "$SANDBOX/pathbin/dscl"
 }
 
-# ^ security a Windows host has the real PowerShell and registry; lifecycle tests reach this stand-in through GSG_WINPATH_ROOT, set in lc_begin on Windows only
-# ^ invariant it logs its arguments to powershell.log and answers every call with exit 2 and one reason line => the plan is a hint and nothing is ever written
-lc_powershell_standin() {
-    local f="$SANDBOX/root/windows/System32/WindowsPowerShell/v1.0/powershell.exe"
-    mkdir -p -- "${f%/*}" || return 1
-    cat >"$f" <<'EOF' || return 1
-#!/bin/sh
-d="${0%/*}/../../../../../xdg"
-printf '%s\n' "$*" >>"$d/powershell.log"
-echo "the PowerShell stand-in of the test suite changes nothing" >&2
-exit 2
-EOF
-    chmod 755 "$f"
-}
-
 # ^ security these stand-ins log their arguments to $SANDBOX/gitup.log and touch only sandbox files => no lifecycle test runs a real sudo, dnf or restorecon
 # ^ invariant sudo runs the given command as the test user; dnf answers from files beside it (dnf.candidate, dnf.repos) and fails loudly on an unmodeled call
 lc_gitup_standins() {
@@ -490,7 +475,7 @@ lc_begin() {
     lc_schtasks_standin || return 1
     lc_launchctl_standin || return 1
     lc_dscl_standin || return 1
-    if [ "$TEST_IS_WINDOWS" -eq 1 ]; then lc_powershell_standin || return 1; fi
+    if [ "$TEST_IS_WINDOWS" -eq 1 ]; then winpath_standin_create || return 1; fi
     lc_brew_standin || return 1
     lc_gitup_standins || return 1
     # ^ why a neutral distribution by default, not the host's; on Rocky the real os-release would route every old-git test into the RPM upgrade offer
@@ -504,8 +489,8 @@ lc_begin() {
         XDG_DATA_HOME="$SANDBOX/xdg/data" XDG_STATE_HOME="$SANDBOX/xdg/state")
     # ^ why the two Linux overrides off Windows only, not everywhere; the windows module announces any override it finds and neither changes anything there
     # ^ why GSG_GITUP_ROOT in the sandbox by default, not the host's /usr; a host with Desktop adds a WARNING to status, and set_env wins later
-    # ^ coupled the root stays off on Windows too; gitup_windows_sysdir reads GSG_GITUP_ROOT there and would lose reg.exe and whoami
-    if [ "$TEST_IS_WINDOWS" -ne 1 ]; then LC_ENV+=(GSG_OS_RELEASE="$SANDBOX/os-release" GSG_GITUP_BUILD_PATH="$SANDBOX/pathbin" GSG_GITUP_ROOT="$SANDBOX/root"); else LC_ENV+=(GSG_WINPATH_ROOT="$SANDBOX/root"); fi
+    # ^ coupled the root stays off on Windows too; gitup_windows_sysdir reads GSG_GITUP_ROOT there; GSG_WINPATH_ROOT comes with GSG_ENV (sandbox_winpath_seam)
+    if [ "$TEST_IS_WINDOWS" -ne 1 ]; then LC_ENV+=(GSG_OS_RELEASE="$SANDBOX/os-release" GSG_GITUP_BUILD_PATH="$SANDBOX/pathbin" GSG_GITUP_ROOT="$SANDBOX/root"); fi
     gitx config --global user.name "Test User" || return 1
     gitx config --global user.email "test@example.invalid" || return 1
     gitx config --global commit.gpgsign false || return 1

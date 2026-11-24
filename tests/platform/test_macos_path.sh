@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# shellcheck source=tests/support/lib.sh disable=SC2016
+# shellcheck source=tests/support/lib.sh disable=SC2016 # test code is single-quoted on purpose, a child shell expands it
 source "$(dirname -- "${BASH_SOURCE[0]}")/../support/lib.sh"
 # shellcheck source=tests/support/lifecycle.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/../support/lifecycle.sh"

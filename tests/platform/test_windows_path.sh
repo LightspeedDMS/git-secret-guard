@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# shellcheck source=tests/support/lib.sh disable=SC2016
+# shellcheck source=tests/support/lib.sh disable=SC2016 # PowerShell stand-in texts and test code are single-quoted on purpose
 source "$(dirname -- "${BASH_SOURCE[0]}")/../support/lib.sh"
 # shellcheck source=tests/support/lifecycle.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/../support/lifecycle.sh"

@@ -32,7 +32,7 @@ test_status_says_when_the_cli_folder_is_not_on_path_as_information_only() {
     gsg status
     assert_rc 0 "status after install"
     assert_contains "$OUT" "  info     CLI folder: $LC_BIN is not on the PATH this shell runs with" "the information line"
-    # shellcheck disable=SC2016
+    # shellcheck disable=SC2016 # the line to add is expected literally, $HOME and $PATH stay unexpanded
     if [ "$TEST_IS_WINDOWS" -ne 1 ]; then assert_contains "$OUT" 'add this line to your shell startup file: export PATH="$HOME/.local/bin:$PATH"' "with the line to add"; fi
     assert_contains "$OUT" "summary: 0 problems, 0 warnings" "no problem and no warning is counted"
 }

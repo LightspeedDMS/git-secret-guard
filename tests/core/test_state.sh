@@ -131,10 +131,9 @@ test_state_records_the_cli_path_entry() {
     assert_contains "$(<"$f")" $'source_checkout=\ncli_path='"$rec" "written after source_checkout"
     st eval "state_write 0.1.0 no '' '' '' '' '' no no '' 'windows-user-path ;C:\\Users\\a b\\.local\\bin' && state_read && printf '[%s]' \"\$ST_CLI_PATH\""
     assert_rc 0 "a Windows record is a valid shape too"
-    # shellcheck disable=SC2016
     assert_eq "$OUT" '[windows-user-path ;C:\Users\a b\.local\bin]' "and comes back exactly"
     grep -v '^cli_path=' "$f" >"$f.old" && mv -f -- "$f.old" "$f" || return 1
-    # shellcheck disable=SC2016
+    # shellcheck disable=SC2016 # the code is single-quoted on purpose, the child shell expands it
     st eval 'state_read && printf "[%s][%s]" "$ST_EXISTS" "$ST_CLI_PATH"'
     assert_rc 0 "a file written before cli_path existed"
     assert_eq "$OUT" "[1][]" "reads as nothing of ours"

@@ -146,6 +146,14 @@ dg_install_begin() {
     DG_HOOKS="$LC_DATA/desktop-hooks"
 }
 
+# ^ invariant dg_failing_check_begin = Desktop's fixture with stand-in scanners (the self-check cannot pass); DG_HOOKS is the hooks directory in the share dir
+# ^ invariant a real scanner cannot fail the check on demand; DG_NO_DESKTOP_GIT_OK=1 skips the old-git requirement, as for dg_install_begin
+dg_failing_check_begin() {
+    lc_begin && lc_make_fixtures && lc_use_fixtures && dg_fixture || return 1
+    if [ "${DG_NO_DESKTOP_GIT_OK:-}" != 1 ]; then dg_need_old_git; fi
+    DG_HOOKS="$LC_DATA/desktop-hooks"
+}
+
 # ^ invariant dg_snapshot prints path, size and modification time (nanoseconds) of every file of the Desktop link, sorted; equal output = nothing was rewritten
 dg_snapshot() {
     { find "$DG_HOOKS" -type f -printf '%p %s %T@\n' 2>/dev/null; find "$DG_LAUNCHER_USER" -type f -printf '%p %s %T@\n' 2>/dev/null; } | LC_ALL=C sort

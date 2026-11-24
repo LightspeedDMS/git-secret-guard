@@ -74,7 +74,7 @@ test_unlink_and_restore_smartgit_nothing_to_do_lines_get_the_ok_icon() {
     ui_force_terminal
     gsg unlink-desktop-git
     assert_rc 0 "unlink"
-    assert_eq "$OUT" "$OK_ICON git-secret-guard: nothing to unlink, install --link-desktop-git has not changed anything here" "unlink"
+    assert_eq "$OUT" "$OK_ICON git-secret-guard: nothing to unlink, install has not changed anything here" "unlink"
     gsg restore-smartgit
     assert_rc 0 "restore-smartgit"
     assert_eq "$OUT" "$OK_ICON git-secret-guard: nothing to restore: git-secret-guard has not changed SmartGit" "restore-smartgit"

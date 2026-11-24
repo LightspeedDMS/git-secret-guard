@@ -447,7 +447,7 @@ uninstall_steps() {
         printf '%s: uninstall stopped before removing anything else; fix what is said above and run %s uninstall again\n' "$GSG_NAME" "$GSG_NAME" >&2
         return 1
     }
-    if [ "$had_records" -eq 1 ]; then uninstall_say "SmartGit was restored from the records of install --configure-smartgit (details above)"; fi
+    if [ "$had_records" -eq 1 ]; then uninstall_say "SmartGit was restored from the records of install (details above)"; fi
     # ^ order the Desktop link goes before the hooks path and the share dir => Desktop is not left pointing at a directory about to vanish
     desktop_git_uninstall_step || return 1
     # ^ order uninstall_restore_hooks_path before uninstall_hook_section => a failed restore leaves the hook config scanning, never a machine with neither

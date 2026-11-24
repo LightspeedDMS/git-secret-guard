@@ -215,7 +215,7 @@ test_status_reports_the_bundled_git_of_a_windows_smartgit_as_a_problem_with_the_
     assert_rc 1 "status with a SmartGit that commits with git 2.53.0"
     assert_contains "$OUT" "SmartGit install: $SW_APP (version unknown)" "the install is listed, its version is not read on Windows"
     assert_contains "$OUT" "SmartGit settings: $SG_SETTINGS (26.1): bundled git, git 2.53.0" "the bundled git is read through executable.absolute and run"
-    assert_contains "$OUT" "commits are NOT scanned MISMATCH: run: git-secret-guard install --configure-smartgit" "names the fix command"
+    assert_contains "$OUT" "commits are NOT scanned MISMATCH: run: git-secret-guard install" "names the fix command"
 }
 
 test_doctor_reports_that_bundled_git_of_a_windows_smartgit_as_a_problem() {
@@ -224,7 +224,7 @@ test_doctor_reports_that_bundled_git_of_a_windows_smartgit_as_a_problem() {
     gsg doctor --roots "$SANDBOX/roots"
     assert_rc 1 "doctor with a SmartGit on git 2.53.0"
     assert_contains "$OUT" "PROBLEM  SmartGit 26.1 ($SG_SETTINGS): Git Executable is the bundled git 2.53.0" "a PROBLEM for the old bundled git"
-    assert_contains "$OUT" "run: git-secret-guard install --configure-smartgit" "with the fix command"
+    assert_contains "$OUT" "run: git-secret-guard install" "with the fix command"
 }
 
 test_status_reads_the_form_smartgit_writes_itself_and_calls_a_git_of_2_56_scanned() {

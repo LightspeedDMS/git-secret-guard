@@ -78,7 +78,9 @@ Details: [docs/exemptions.md](docs/exemptions.md).
 ## Limits
 
 - Commits made by a git older than 2.54 are not scanned: check the git your IDE or GUI client bundles
-  ([SmartGit](docs/smartgit.md), [GitHub Desktop on Linux](docs/install.md#github-desktop-on-linux---link-desktop-git-and-unlink-desktop-git)).
+  ([SmartGit](docs/smartgit.md), [GitHub Desktop on Linux](docs/install.md#github-desktop-on-linux---dont-link-desktop-git-and-unlink-desktop-git)).
+  `install` points SmartGit at a git 2.54 or newer and links GitHub Desktop on Linux by itself; `--dont-configure-smartgit`
+  and `--dont-link-desktop-git` leave them as they are for one run.
 - Git runs no `pre-commit` hook for automatic merges, cherry-picks, rebases and `git am`, so their lines are not scanned, and no
   `commit-msg` hook for reverts, cherry-picks, `git am`, `rebase -i` squash and fixup, tags and notes, so their messages are not.
 - Binary files, including UTF-16 text, are not scanned.

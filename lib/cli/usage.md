@@ -5,8 +5,8 @@ through a git config hook (git >= 2.54, events pre-commit and commit-msg).
 
 commands:
   install [--replace-hooks-path] [--with-timer] [--auto-update] [--upgrade-git] [--take-over-system-git]
-          [--configure-smartgit [--allow-smartgit-sandbox-removal]] [--link-desktop-git]
-          [--dont-change-path]
+          [--dont-configure-smartgit] [--allow-smartgit-sandbox-removal] [--dont-link-desktop-git]
+          [--configure-smartgit] [--link-desktop-git] [--dont-change-path]
         Install, or upgrade when already installed. Needs git >= 2.54 first on PATH, jq, setsid, timeout and (Linux) awk
         (on Windows taskkill replaces setsid and a missing jq is downloaded; on macOS missing Homebrew tools are
         installed with brew after the other checks), and curl when something has to be downloaded. Puts the pinned
@@ -42,27 +42,35 @@ commands:
         /usr/local build, keeps the originals, and makes dnf skip the git packages; undo with restore-system-git.
         On macOS it only reports that /usr/bin/git cannot be replaced (SIP), changes nothing, and install goes on;
         on any other system it is refused.
-        --configure-smartgit points SmartGit's Git Executable at the git in use (>= 2.54) and installs Git LFS
-        for it when missing (not on Windows, which refuses with repair advice; SmartGit 26.1: macOS, Linux
-        tarball or package, Linux Flatpak, Windows). Offered at a terminal
-        when SmartGit is found, otherwise a hint is printed. Prints the plan, asks once (default No), backs up
-        preferences.yml with a manifest, edits only the executable lines, then checks a fake-token commit is
-        blocked; any failure restores the backup. For the Flatpak it also adds a --user flatpak override, a
-        wrapper running the host git and a smartgit.vmoptions line, each recorded first and undone exactly.
-        That override removes the SmartGit sandbox, so it needs its own yes: a second question at a terminal,
-        or --allow-smartgit-sandbox-removal (only together with --configure-smartgit, else exit 2). Refuses
-        while SmartGit runs and for any version not recorded; the manual steps are printed instead. A Snap is
-        only listed.
-        --link-desktop-git (Linux) makes commits made in GitHub Desktop scanned: its bundled git is older than
-        2.54 and ignores the hook. It writes ${XDG_DATA_HOME:-~/.local/share}/git-secret-guard/desktop-hooks
+        SmartGit is set up by a plain install, with no flag and no question: when a SmartGit settings directory
+        commits with a git older than 2.54, install points its Git Executable at the git in use (>= 2.54) and installs
+        Git LFS for it when missing (not on Windows, which refuses with repair advice; SmartGit 26.1: macOS, Linux
+        tarball or package, Linux Flatpak, Windows). It prints the plan, backs up preferences.yml with a manifest,
+        edits only the executable lines, then checks a fake-token commit is blocked; any failure restores the backup.
+        For the Flatpak it also adds a --user flatpak override, a wrapper running the host git and a
+        smartgit.vmoptions line, each recorded first and undone exactly. That override removes the SmartGit sandbox,
+        so it keeps its own yes: a question at a terminal, or --allow-smartgit-sandbox-removal; without either the
+        Flatpak is refused. Git LFS is installed without a question only where it runs as your user at a terminal
+        (brew on macOS); where it needs root (dnf, apt-get) or there is no terminal (also the unattended update),
+        install names the command to run and leaves SmartGit as it is. A refusal (SmartGit running, a wizard not
+        finished, a version not recorded, a file that is not of the recorded shape) is a printed notice with the
+        manual steps, not a failed install; status and doctor keep reporting it. A Snap is only listed.
+        --dont-configure-smartgit changes nothing of SmartGit and prints the hint. --configure-smartgit is still
+        accepted and differs from a plain install in two ways: a refusal or a failure is exit status 1, and a
+        missing Git LFS is installed as before (dnf or apt-get as root, brew also without a terminal).
+        GitHub Desktop on Linux is linked by a plain install too (no flag, no question): its bundled git is older than
+        2.54 and ignores the hook. install writes ${XDG_DATA_HOME:-~/.local/share}/git-secret-guard/desktop-hooks
         (a wrapper for every git hook but reference-transaction, whose repository hook does not run; the
         wrappers run the scan for pre-commit and commit-msg, then the repository's own hook) and a user launcher
         entry applications/github-desktop.desktop that starts Desktop with core.hooksPath set for it alone. It
-        checks the result with Desktop's own git first; any failure removes the files of the link. Refuses
-        before any change when Desktop is not found or a launcher file is not ours. Restart Desktop from the
-        menu afterwards; Desktop started any other way is not covered. A plain install prints a note naming the
-        flag, and refreshes a link that exists. On macOS and Windows the flag is refused; install, status and
-        doctor only recommend updating Desktop when it is found.
+        checks the result with Desktop's own git first; any failure removes the files of the link. A launcher
+        file or hooks directory file that is not ours, an unreadable system launcher entry or a path that is not
+        UTF-8 is a printed notice (the file is named and kept, nothing of the link is written), not a failed
+        install. Restart Desktop from the menu afterwards; Desktop started any other way is not covered. On macOS
+        and Windows nothing is linked; install, status and doctor only recommend updating Desktop when it is found.
+        --dont-link-desktop-git writes no link (an existing link is still refreshed) and prints the note.
+        --link-desktop-git is still accepted and differs from a plain install in three ways: a refusal is exit
+        status 1 before any change, a failed self-check is exit status 1, and on macOS and Windows it is refused.
         Install says where the CLI is and whether its folder is on PATH. On macOS it adds one marked block to
         ~/.zprofile (zsh) or ~/.bash_profile (bash), the startup file of the account's login shell, and on Windows the
         folder to the user Path; on Linux no file is changed and the line to add is printed. Nothing is changed when the
@@ -80,12 +88,12 @@ commands:
         Undo a system git takeover: puts the saved RPM files back (hash checked), removes the dnf excludepkgs entry
         and the backup directory. Needs no network. Says "nothing to restore" and exits 0 when there is no takeover.
   restore-smartgit
-        Undo what install --configure-smartgit did: the Git Executable lines from the backup (only while they are
+        Undo what install did to SmartGit: the Git Executable lines from the backup (only while they are
         still the ones this tool wrote), the filter.lfs.* settings that git lfs install added and, for the
         Flatpak, the recorded override, wrapper and smartgit.vmoptions line. Git LFS packages are kept.
         Says "nothing to restore" when SmartGit was never changed.
   unlink-desktop-git
-        Undo install --link-desktop-git: removes the launcher entry, the wrappers and the hooks directory, only files carrying
+        Undo the GitHub Desktop link install wrote: removes the launcher entry, the wrappers and the hooks directory, only files carrying
         the marker line (anything else is named and kept). Never touches Desktop's own files or /usr. Says "nothing to unlink"
         when there is nothing of ours. uninstall does the same.
   status

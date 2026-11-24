@@ -529,6 +529,15 @@ test_the_git_bash_next_step_keeps_the_flags_of_the_install_that_stopped() {
     assert_contains "$OUT" 'git-secret-guard.cmd" install --replace-hooks-path' "the flag is in the command to run after the upgrade"
 }
 
+# ^ why a stubbed install_check_prerequisites, not a full install; install_run builds the flags text first and stops at the first refusal
+test_the_rerun_text_names_the_off_switches_and_leaves_the_positive_flags_out() {
+    wu_begin machine 2.52.0.1 || return 1
+    wu 'SMARTGIT_OFF_FLAG=1; DESKTOP_GIT_OFF_FLAG=1; install_check_prerequisites() { return 1; }; install_run 1 0 0 0 0; printf "[%s]" "$GSG_INSTALL_FLAGS"'
+    assert_eq "$OUT" "[ --replace-hooks-path --dont-configure-smartgit --dont-link-desktop-git]" "the rerun does not do what the user turned off"
+    wu 'SMARTGIT_OFF_FLAG=0; DESKTOP_GIT_OFF_FLAG=0; SMARTGIT_SANDBOX_FLAG=1; DESKTOP_GIT_FLAG=1; install_check_prerequisites() { return 1; }; install_run 0 0 0 0 1; printf "[%s]" "$GSG_INSTALL_FLAGS"'
+    assert_eq "$OUT" "[]" "the positive flags and the sandbox consent stay out, as before"
+}
+
 test_uninstall_removes_the_hand_off_files_in_both_places_and_nothing_else() {
     wu_begin machine 2.52.0.1 || return 1
     mkdir -p -- "$WU_HANDOFF_DIR" "$WU_FRONT_DIR/git-upgrade" || return 1

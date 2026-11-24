@@ -103,6 +103,26 @@ EOF
     assert_no_file "$LC_BIN" "no bin dir was created"
 }
 
+# ^ invariant a flag given with its negative twin, or the sandbox consent given with the SmartGit off switch, is a usage error naming both flags
+test_a_flag_with_its_negative_twin_or_the_sandbox_flag_with_the_off_switch_is_a_usage_error_naming_both() {
+    lc_begin || return 1
+    local row want
+    while IFS='|' read -r row want; do
+        # shellcheck disable=SC2086
+        gsg install $row
+        assert_rc 2 "[$row]"
+        assert_contains "${ERR%%$'\n'*}" "$want" "[$row] names what contradicts"
+        assert_not_contains "${ERR%%$'\n'*}" "unknown option" "[$row] is not an unknown option"
+    done <<'EOF'
+--configure-smartgit --dont-configure-smartgit|--configure-smartgit and --dont-configure-smartgit
+--dont-configure-smartgit --configure-smartgit|--configure-smartgit and --dont-configure-smartgit
+--link-desktop-git --dont-link-desktop-git|--link-desktop-git and --dont-link-desktop-git
+--dont-link-desktop-git --link-desktop-git|--link-desktop-git and --dont-link-desktop-git
+--dont-configure-smartgit --allow-smartgit-sandbox-removal|--allow-smartgit-sandbox-removal and --dont-configure-smartgit
+EOF
+    assert_no_file "$LC_STATE" "no state was created"
+}
+
 test_version_refuses_a_version_file_that_is_not_x_y_z() {
     lc_begin || return 1
     local copy="$SANDBOX/cli-copy"

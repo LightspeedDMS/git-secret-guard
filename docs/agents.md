@@ -80,7 +80,8 @@ releases and finishing. Where [CONTRIBUTING.md](../CONTRIBUTING.md) already says
   create, kill only what you started, and check `ps` before a long run (when a full suite already runs there, run one file at a time).
 - **Watch every remote run:** an agent that starts a run on another machine polls it (a bounded loop or a monitor) until it ends. A run
   nobody watches stalls silently.
-- **Never run `wsl.exe`, `wsl` or `ubuntu.exe` on a Windows machine used for this repository** (development or test); real WSL runs are
+- **Never run `wsl.exe`, `wsl` or `ubuntu.exe` on Windows Server 2019** (build 17763): WSL is known not to work there, WSL 1 blue-screened
+  the host twice. On a current Windows with WSL 2, running the suite in WSL is fine. The project's real WSL runs are
   [platforms.md#wsl-windows-subsystem-for-linux](platforms.md#wsl-windows-subsystem-for-linux).
 
 ## A destructive step on a shared test machine
@@ -95,10 +96,12 @@ other run there uses as `GSG_TEST_GIT`) is coordinated:
 
 ## Flags that act without a terminal
 
-An install flag is the consent: without a terminal it does not stop at the plan, it applies. `install --configure-smartgit` edits
-SmartGit's `preferences.yml` (with a backup), and on a machine without Git LFS first installs it (`brew install git-lfs`, which on a Mac
-without bottles builds from source for a long time, or `dnf`/`apt-get` as root; nothing on Windows). Before a real run of such a flag on any machine, read its consent rule in [install.md](install.md) and
-[smartgit.md](smartgit.md); never use one as a dry run. To check the behaviour, run the test suite (it uses stand-ins), or ask first.
+An install flag is the consent: without a terminal it does not stop at the plan, it applies. **A plain `install` acts without any
+flag too:** on a machine with SmartGit on a git older than 2.54 it edits SmartGit's `preferences.yml` (with a backup), at a terminal on
+a Mac first installs a missing Git LFS (`brew install git-lfs`, which on a Mac without bottles builds from source for a long time), and on
+Linux with GitHub Desktop it writes the Desktop hooks directory and launcher entry. Anyone running `install` on a real machine to try
+something passes `--dont-configure-smartgit --dont-link-desktop-git`, or uses the test suite (it uses stand-ins). Before a real run
+of any flag, read its consent rule in [install.md](install.md) and [smartgit.md](smartgit.md); never use one as a dry run, or ask first.
 
 ## No private details, in files or on GitHub
 

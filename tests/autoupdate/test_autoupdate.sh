@@ -374,6 +374,21 @@ test_a_failed_child_install_keeps_the_old_copy_and_the_next_run_retries() {
     assert_file "$SANDBOX/au-child.args" "the installer was started again"
 }
 
+# ^ invariant update runs the installed share code; the test edits the constant in the sandbox copy of autoupdate.sh, no environment knob exists
+test_the_one_switch_for_unattended_runs_puts_the_off_flags_on_the_child_install() {
+    local f text
+    local -r empty=$'\nGSG_UPDATE_INSTALL_ARGS=()\n'
+    au_setup || return 1
+    f="$LC_DATA/lib/autoupdate/autoupdate.sh"
+    text="$(<"$f")" || return 1
+    [[ $text == *"$empty"* ]] || fail "the installed autoupdate.sh has no switch line GSG_UPDATE_INSTALL_ARGS=()"
+    printf '%s\n' "${text/"$empty"/$'\nGSG_UPDATE_INSTALL_ARGS=(--dont-configure-smartgit --dont-link-desktop-git)\n'}" >"$f" || return 1
+    au_broken_installer 'exit 1' && au_release 1.1.0 && au_publish || return 1
+    upd
+    assert_rc 1 "the stand-in installer fails; only its arguments matter here"
+    assert_eq "$(<"$SANDBOX/au-child.args")" "install --dont-configure-smartgit --dont-link-desktop-git" "the switch puts both off flags on the unattended install"
+}
+
 test_an_installer_that_exits_0_without_installing_is_a_failure_and_a_sound_release_recovers() {
     au_setup || return 1
     au_broken_installer 'exit 0' && au_release 1.1.0 && au_publish || return 1

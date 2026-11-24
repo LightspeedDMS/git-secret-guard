@@ -15,11 +15,11 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/../../support/smartgit.sh"
 if [ "$TEST_IS_WINDOWS" -eq 1 ]; then FILE_SKIP_REASON="the SmartGit macOS flow"; fi
 GU_PTY_BSD=1
 
-# ^ invariant sg_installed = sg_setup followed by a plain install (fixture scanners); the preferences file is untouched by it
+# ^ invariant sg_installed = sg_setup followed by install --dont-configure-smartgit (fixture scanners); the preferences file is untouched by it
 sg_installed() {
     sg_setup "$@" || return 1
-    gsg install </dev/null
-    assert_rc 0 "plain install on the SmartGit machine"
+    gsg install --dont-configure-smartgit </dev/null
+    assert_rc 0 "install with the SmartGit step off, on the SmartGit machine"
 }
 
 # ^ invariant sg_untouched HASH LABEL = the preferences file has the hash it had and no backup directory exists
@@ -45,7 +45,7 @@ test_status_reports_a_smartgit_on_its_bundled_git_older_than_2_54_as_a_problem_w
     assert_contains "$OUT" "SmartGit install: " "the install is listed"
     assert_contains "$OUT" "$SG_APP (SmartGit 26.1.056)" "with its path and version"
     assert_contains "$OUT" "SmartGit settings: $SG_SETTINGS (26.1): bundled git, git 2.53.0" "the settings directory and the bundled git version read from the bundle"
-    assert_contains "$OUT" "commits are NOT scanned MISMATCH: run: git-secret-guard install --configure-smartgit" "names the fix command"
+    assert_contains "$OUT" "commits are NOT scanned MISMATCH: run: git-secret-guard install" "names the fix command"
 }
 
 test_doctor_reports_that_smartgit_bundled_git_as_a_problem_naming_the_fix_command() {
@@ -53,7 +53,7 @@ test_doctor_reports_that_smartgit_bundled_git_as_a_problem_naming_the_fix_comman
     sg_doctor
     assert_rc 1 "doctor with a SmartGit on git 2.53.0"
     assert_contains "$OUT" "PROBLEM  SmartGit 26.1 ($SG_SETTINGS): Git Executable is the bundled git 2.53.0" "a PROBLEM for the old bundled git"
-    assert_contains "$OUT" "run: git-secret-guard install --configure-smartgit" "with the fix command"
+    assert_contains "$OUT" "run: git-secret-guard install" "with the fix command"
 }
 
 test_a_smartgit_settings_dir_without_any_installation_is_a_warning_not_a_problem() {
@@ -82,27 +82,16 @@ test_a_new_major_version_directory_is_reported_as_not_configured_with_the_comman
     assert_not_contains "$OUT" "PROBLEM  SmartGit 27.0" "a directory without preferences is nothing to configure yet"
 }
 
-test_install_without_the_flag_and_without_a_terminal_prints_the_hint_and_changes_nothing() {
+test_install_with_dont_configure_smartgit_prints_the_hint_and_changes_nothing() {
     local h
     sg_setup || return 1
     h="$(sg_hash "$SG_PREFS")"
-    gsg install </dev/null
+    gsg install --dont-configure-smartgit </dev/null
     assert_rc 0 "install is not refused because of SmartGit"
     assert_contains "$OUT" "SmartGit: found $SG_APP (SmartGit 26.1.056); it commits with its bundled git 2.53.0, so its commits are not scanned" "the hint names the bundled git"
-    assert_contains "$OUT" "run: git-secret-guard install --configure-smartgit" "and the command"
-    assert_not_contains "$OUT$ERR" "[y/N]" "no prompt without a terminal"
+    assert_contains "$OUT" "run: git-secret-guard install" "and the command"
+    assert_not_contains "$OUT$ERR" "[y/N]" "no prompt"
     sg_untouched "$h" "hint only"
-}
-
-test_install_asks_at_a_terminal_and_a_no_changes_nothing() {
-    local h
-    sg_setup || return 1
-    h="$(sg_hash "$SG_PREFS")"
-    gsg_pty $'n\n' install
-    assert_rc 0 "install with a no at the SmartGit question"
-    assert_contains "$OUT" "SmartGit plan" "the plan is printed before the question"
-    assert_contains "$OUT" "[y/N]" "the question was asked"
-    sg_untouched "$h" "answer no"
 }
 
 test_a_failed_timer_load_does_not_skip_the_smartgit_step_and_install_still_exits_1() {
@@ -113,8 +102,8 @@ test_a_failed_timer_load_does_not_skip_the_smartgit_step_and_install_still_exits
     gsg install --with-timer </dev/null
     assert_rc 1 "the failed timer load is install's status"
     assert_contains "$ERR" "could not load" "the timer failure is reported"
-    assert_contains "$OUT" "run: git-secret-guard install --configure-smartgit" "the SmartGit step still ran"
-    sg_untouched "$h" "hint only"
+    assert_contains "$OUT" "SmartGit plan" "the SmartGit step still ran"
+    assert_eq "$(sg_hash "$SG_PREFS")" "$h" "the fixture scanners fail the check, so the preferences are the original again"
 }
 
 test_a_running_smartgit_refuses_before_any_change() {
@@ -437,7 +426,7 @@ test_on_a_mac_an_older_major_is_left_over_unless_its_own_app_is_installed() {
     gsg status
     assert_rc 1 "a SmartGit 25.1 app is installed: its directory is live and on the old bundled git"
     assert_contains "$OUT" "SmartGit settings: $old (25.1): bundled git, git 2.53.0; commits are NOT scanned MISMATCH: by hand:" "the by-hand step"
-    assert_not_contains "$OUT" "run: git-secret-guard install --configure-smartgit" "status never names the refused command"
+    assert_not_contains "$OUT" "run: git-secret-guard install" "status never names the refused command"
     rm -rf -- "$SG_APPS/SmartGit25.app" || return 1
 }
 

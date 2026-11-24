@@ -53,8 +53,10 @@ This file is an index: each topic states what must not break and links the doc h
   in `tests/herestring-bounded.list` (a new one fails `test_quality.sh`): [platforms.md#maintainer-notes](docs/platforms.md#maintainer-notes).
 - **git >= 2.54**, older git ignores config hooks silently. Tests use `GSG_TEST_GIT` (Linux default `/usr/local/bin/git`; set it where that
   path does not exist). Config hooks run before the hookdir hook, both run, either failing blocks, whatever `core.hooksPath` says.
-- **Never run `wsl.exe`, `wsl` or `ubuntu.exe` on the Windows development host** (it blue-screened twice); real WSL runs are
-  `.github/workflows/wsl.yml`: [platforms.md#wsl-windows-subsystem-for-linux](docs/platforms.md#wsl-windows-subsystem-for-linux).
+- **WSL is known not to work on Windows Server 2019** (build 17763: WSL 1 blue-screened the host twice, cause not established): never run
+  `wsl.exe`, `wsl` or `ubuntu.exe` on such a machine. On a current Windows with WSL 2, running the suite in WSL is fine. The project's
+  real WSL runs are `.github/workflows/wsl.yml`:
+  [platforms.md#wsl-windows-subsystem-for-linux](docs/platforms.md#wsl-windows-subsystem-for-linux).
 - **Commits:** DCO sign-off ([CONTRIBUTING.md#sign-your-commits-dco](CONTRIBUTING.md#sign-your-commits-dco)); feature and fix PRs never
   touch `VERSION`, a separate release PR (only `VERSION`, its description lists the merged PRs and the bump) raises it after the merges;
   tag that PR's merge commit, never move a tag; docs write the version `<x.y.z>` ([CONTRIBUTING.md#versions](CONTRIBUTING.md#versions));
@@ -122,7 +124,8 @@ This file is an index: each topic states what must not break and links the doc h
 - **Auto-update** (Linux, macOS and Windows; `lib/autoupdate/autoupdate.sh`, units
   `lib/autoupdate/install_timer.sh`, LaunchAgent `lib/platform/launchd.sh`):
   only the checkout's owner fetches (tags never forced) and fast-forwards, to the peeled commit of the newest valid tag, never past it; every user
-  installs from a `git archive` export of the tag by a foreground child `install` without flags, nothing is sourced after it; a doubtful case is a
+  installs from a `git archive` export of the tag by a foreground child `install` without flags (`GSG_UPDATE_INSTALL_ARGS`, empty: it sets up
+  SmartGit and Desktop too), nothing is sourced after it; a doubtful case is a
   recorded skip (exit 0); "needs install" = newer than the state's version or the share's `VERSION`; the lock lets in only its holder's child;
   `update` stamps its output only when stdout and stderr are both `update.log` (macOS, Windows): the logged child is a fresh bash under a pipe plus
   `PIPESTATUS`, never a subshell (the lock names `$$`), and Windows rotates the log in the `.cmd` wrapper, macOS in `autoupdate_log_rotate`:
@@ -158,13 +161,16 @@ This file is an index: each topic states what must not break and links the doc h
   the installer: [install.md#maintainer-notes-git-upgrade](docs/install.md#maintainer-notes-git-upgrade).
 - **SmartGit:** only the `executable:` lines of a recorded `preferences.yml`, never re-serialised YAML; the Flatpak's four steps are one unit,
   each recorded before it acts. Per settings root only the newest set-up major is live; an older one is left over (info, no exit status, never
-  edited) unless an install has exactly that major: [smartgit.md](docs/smartgit.md).
+  edited) unless an install has exactly that major. A plain install applies it, no question (`--dont-configure-smartgit` off for one run); the
+  Flatpak sandbox removal keeps its own consent; an automatic refusal is a notice, never a failed install (exit 1 only for an unfinished undo):
+  [smartgit.md](docs/smartgit.md#the-automatic-way-a-plain-install).
 - **GitHub Desktop link** (`lib/integrations/desktop/desktop_git*.sh`,
   body `lib/integrations/desktop/desktop-chain.sh`): Desktop's renderer resets `LOCAL_GIT_DIRECTORY`, so only `core.hooksPath` in
   `GIT_CONFIG_PARAMETERS` (never `GIT_CONFIG_COUNT`: Desktop's default branch sets its own, the preview branch appends) reaches its git 2.45. Order: wrappers,
   check of both branches with Desktop's git, launcher last; wrappers are links to one shared file (one bash, one git call, no `reference-transaction` one);
-  only files of ours are rewritten or removed; the chain skips the scan on git 2.54+; no `environment.d`:
-  [install.md](docs/install.md#github-desktop-on-linux---link-desktop-git-and-unlink-desktop-git), [platforms.md](docs/platforms.md#github-desktop-on-linux).
+  only files of ours are rewritten or removed; the chain skips the scan on git 2.54+; no `environment.d`. A plain install links (`--dont-link-desktop-git`
+  off for one run); an automatic refusal is a notice, never a failed install:
+  [install.md](docs/install.md#github-desktop-on-linux---dont-link-desktop-git-and-unlink-desktop-git), [platforms.md](docs/platforms.md#github-desktop-on-linux).
 - **CI on real platforms** (`platforms.yml`): `workflow_dispatch` only, never merge a `push:` trigger; read the artifacts, not the logs;
   `ubuntu.sh` never mentions `--skip-isolation`: [platform-testing.md#ci-on-real-platforms](docs/platform-testing.md#ci-on-real-platforms).
 

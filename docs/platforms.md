@@ -853,8 +853,8 @@ Result: not yet recorded.
   exit 3 and nothing changed; `remove` cuts the recorded text when the value ends with it, else the last element byte-equal to FOLDER with one adjacent separator,
   else says `changed` when only another spelling is there and `absent` when nothing is. A new value of 32,767 characters or more is refused (the limit counts the
   closing NUL). The form of a record and the rule for its folder (absolute drive or UNC path, no `;`, `%`, `"` or control character, from the first character on) are written once for
-  bash, `common_winrec_split` and `GSG_WINDIR_RE` in `lib/core/common.sh`, read by `winpath_folder`, `winpath_record` and `state_read` (a malformed record is refused when the state is
-  read); `$FolderPattern` of the script is the same rule for PowerShell. Every comparison of the script on the value is ordinal (`[string]::Equals(.., Ordinal)`, `EndsWith(.., Ordinal)`),
+  bash, `state_winrec_split` and `GSG_WINDIR_RE` in `lib/core/state.sh` (the hook never loads it), read by `winpath_folder`, `winpath_record` and `state_read` (a malformed record is refused when the state is
+  read); `$FolderPattern` of the script is the same rule for PowerShell (control characters are `\x00-\x1f` and `\x7f`, as `[:cntrl:]` of bash; `\z`, not `$`, ends it, since `$` lets a final newline in). Every comparison of the script on the value is ordinal (`[string]::Equals(.., Ordinal)`, `EndsWith(.., Ordinal)`, emptiness by `.Length`, never `-eq ''`, which ignores zero-width characters),
   so an entry that differs from the folder by a zero-width or soft-hyphen character is another folder. (4) **The broadcast** is a throwaway user variable set and removed through `[Environment]::SetEnvironmentVariable(.., 'User')`, which sends
   `WM_SETTINGCHANGE` (Microsoft Learn, `Environment.SetEnvironmentVariable`: "other applications are notified of the set operation by a Windows `WM_SETTINGCHANGE`
   message"); no `Add-Type` compile, works under constrained language. A failed broadcast after the write is the `-nobroadcast` word and the flow says to sign out and in.

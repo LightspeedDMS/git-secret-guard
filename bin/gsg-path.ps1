@@ -14,7 +14,7 @@ $ErrorActionPreference = 'Stop'
 $MaxChars = 32767
 $Kinds = 'String', 'ExpandString'
 $CreateKind = 'ExpandString'
-$FolderPattern = '^([A-Za-z]:\\|\\\\[^\\;%"\x00-\x1f])[^;%"\x00-\x1f]*$'
+$FolderPattern = '^([A-Za-z]:\\|\\\\[^\\;%"\x00-\x1f\x7f])[^;%"\x00-\x1f\x7f]*\z'
 
 function Stop-Run([int]$Code, [string]$Text) {
     [Console]::Error.WriteLine($Text)
@@ -45,7 +45,7 @@ function Send-AndSay([string]$Word) {
 
 # ^ invariant two entries are the same folder when they differ only by case, slash direction, trailing slashes or a %VARIABLE%, expanded for the comparison only
 function Test-SameFolder([string]$Entry, [string]$Folder) {
-    if ($Entry -eq '') { return $false }
+    if ($Entry.Length -eq 0) { return $false }
     $a = [Environment]::ExpandEnvironmentVariables($Entry).Replace('/', '\').TrimEnd('\').ToUpperInvariant()
     $b = [Environment]::ExpandEnvironmentVariables($Folder).Replace('/', '\').TrimEnd('\').ToUpperInvariant()
     return [string]::Equals($a, $b, [StringComparison]::Ordinal)
@@ -64,8 +64,8 @@ function Assert-Writable($Current, [string]$NewValue) {
 # ^ invariant the value with the folder appended for MODE, or $null when the value no longer ends the way the plan saw it
 # ^ invariant sep needs a value without a final ; and bare needs a final ; or an empty value
 function Get-Appended([string]$Value, [string]$Mode, [string]$Folder) {
-    if ($Mode -eq 'sep' -and $Value -ne '' -and -not $Value.EndsWith(';', [StringComparison]::Ordinal)) { return $Value + ';' + $Folder }
-    if ($Mode -eq 'bare' -and ($Value -eq '' -or $Value.EndsWith(';', [StringComparison]::Ordinal))) { return $Value + $Folder }
+    if ($Mode -eq 'sep' -and $Value.Length -gt 0 -and -not $Value.EndsWith(';', [StringComparison]::Ordinal)) { return $Value + ';' + $Folder }
+    if ($Mode -eq 'bare' -and ($Value.Length -eq 0 -or $Value.EndsWith(';', [StringComparison]::Ordinal))) { return $Value + $Folder }
     return $null
 }
 
@@ -74,7 +74,7 @@ function Invoke-Plan([string]$Folder) {
     if ($null -eq $cur) { Assert-Writable @{ Kind = $CreateKind } $Folder; Say 'absent-novalue'; return }
     if (Test-Holds $cur.Value $Folder) { Say 'present'; return }
     $mode = 'sep'
-    if ($cur.Value -eq '' -or $cur.Value.EndsWith(';', [StringComparison]::Ordinal)) { $mode = 'bare' }
+    if ($cur.Value.Length -eq 0 -or $cur.Value.EndsWith(';', [StringComparison]::Ordinal)) { $mode = 'bare' }
     Assert-Writable $cur (Get-Appended $cur.Value $mode $Folder)
     Say "absent-$mode"
 }
@@ -104,7 +104,7 @@ function Get-Remainder([string]$Value, [string]$Mode, [string]$Folder) {
     if ($Mode -eq 'sep') { $text = ';' + $Folder }
     if ($Value.EndsWith($text, [StringComparison]::Ordinal)) {
         $head = $Value.Substring(0, $Value.Length - $text.Length)
-        if ($Mode -eq 'sep' -or ($Mode -eq 'bare' -and ($head -eq '' -or $head.EndsWith(';'))) -or ($Mode -eq 'create' -and $head -eq '')) { return $head }
+        if ($Mode -eq 'sep' -or ($Mode -eq 'bare' -and ($head.Length -eq 0 -or $head.EndsWith(';', [StringComparison]::Ordinal))) -or ($Mode -eq 'create' -and $head.Length -eq 0)) { return $head }
     }
     $parts = $Value.Split(';')
     for ($i = $parts.Length - 1; $i -ge 0; $i--) {
@@ -126,7 +126,7 @@ function Invoke-Remove([string]$Mode, [string]$Folder) {
         return
     }
     if ($Kinds -notcontains $cur.Kind) { Stop-Run 2 "the user Path has the registry type $($cur.Kind), which this tool does not change" }
-    if ($rest -eq '' -and $Mode -eq 'create') { Remove-UserPath } else { Set-UserPath $rest $cur.Kind }
+    if ($rest.Length -eq 0 -and $Mode -eq 'create') { Remove-UserPath } else { Set-UserPath $rest $cur.Kind }
     Send-AndSay 'removed'
 }
 

@@ -5,18 +5,14 @@
 # ^ security the stand-in lives in the sandbox System32 named by GSG_GITUP_ROOT => no helper here reaches the real registry or the real PowerShell
 
 # ^ external Linux has no cygpath; this stand-in maps /c/x to C:\x and any other absolute path below C:\fake, a relative one stays as it is
+# ^ why a second fake, not WU_FAKE_CYGPATH; it reads the path as $2 (these calls end in -l -- PATH) and puts a relative path under C:\fake
 WP_FAKE_CYGPATH='cygpath() {
-    local p="${*: -1}" e rest out="" sep=""
-    local -a items=("$p")
-    if [[ " $* " == *" -p "* ]]; then IFS=: read -ra items <<<"$p"; sep=";"; fi
-    for e in "${items[@]}"; do
-        case "$e" in
-            /[a-z]/*) rest="${e:2}"; e="${e:1:1}"; e="${e^}:${rest//\//\\}" ;;
-            /*) e="C:\\fake${e//\//\\}" ;;
-        esac
-        out+="${out:+$sep}$e"
-    done
-    printf "%s\n" "$out"
+    local p="${*: -1}" rest
+    case "$p" in
+        /[a-z]/*) rest="${p:2}"; p="${p:1:1}"; p="${p^}:${rest//\//\\}" ;;
+        /*) p="C:\\fake${p//\//\\}" ;;
+    esac
+    printf "%s\n" "$p"
 }'
 # ^ invariant the status of a shell whose libraries did not load; the prelude exits with it
 WP_LOAD_FAILED_RC=9

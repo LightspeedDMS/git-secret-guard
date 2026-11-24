@@ -858,7 +858,7 @@ install_run() {
     install_link_cli || return 1
     install_set_config || return 1
     install_unset_hooks_path || return 1
-    # ^ invariant install_path_apply returns 1 only for a state file it cannot rewrite after a failed change; a failed PATH change alone keeps install's status
+    # ^ invariant install_path_apply returns 1 only when the state cannot be written before the change or rewritten after a failed one
     local rc=0
     install_path_apply || rc=1
     install_summary; install_path_report; install_wsl_notice

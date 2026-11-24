@@ -259,6 +259,14 @@ test_an_entry_that_differs_only_by_an_ignorable_character_is_not_ours() {
         assert_eq "$WPW_VALUE" "C:\\a;$entry" "[$name] the value is untouched"
         assert_no_file "$WPW/events.log" "[$name] nothing was written"
     done
+    entry="$(printf '%b' '\xe2\x80\x8b')$WPW_FOLDER"
+    wpw_set "C:\\a;$entry" String || return 1
+    rm -f -- "$WPW/events.log"
+    wpw_run remove bare "$WPW_FOLDER"
+    assert_eq "$OUT|$RC" "absent|0" "[bare] a zero-width space before the folder text is another entry"
+    wpw_value || return 1
+    assert_eq "$WPW_VALUE" "C:\\a;$entry" "[bare] the value is untouched"
+    assert_no_file "$WPW/events.log" "[bare] nothing was written"
 }
 
 test_an_apply_whose_value_changed_since_the_plan_writes_nothing() {
@@ -310,7 +318,7 @@ test_a_value_of_another_registry_type_and_a_bad_argument_are_refused_with_nothin
         assert_eq "$WPW_VALUE|$WPW_KIND" "C:\\a;$WPW_FOLDER|$kind" "[$kind] the value is as it was"
     done
     wpw_set 'C:\a' String || return 1
-    for row in 'plan|C:\a;b' 'plan|C:\a%b' 'plan|\\;srv\share' 'plan|rel\dir' 'plan' 'frob|C:\x' 'apply|wrong|C:\x' 'remove|sep|rel'; do
+    for row in 'plan|C:\a;b' 'plan|C:\a%b' 'plan|\\;srv\share' 'plan|rel\dir' $'plan|C:\\a\x7fb' 'plan' 'frob|C:\x' 'apply|wrong|C:\x' 'remove|sep|rel'; do
         IFS='|' read -ra words <<<"$row"
         wpw_run "${words[@]}"
         assert_eq "$RC" "$WPW_RC_REFUSED" "[$row] is refused"
@@ -373,6 +381,11 @@ test_the_path_comparison_matches_through_the_real_cygpath_list_form() {
         spelling="${row%|*}"
         wp 'PATH="/c/Windows:$1:$PATH"; if install_path_has_dir "$GSG_BIN_DIR"; then echo yes; else echo no; fi' "$spelling"
         assert_eq "$OUT" "${row##*|}" "a PATH holding [$spelling]"
+    done
+    for row in ":/c/Windows::/c/Users/me/.local/bin:|yes" "::/c/Users/me/.local/bin::|yes" ":/c/Users/me/.local::|no" ":::|no" "|no"; do
+        spelling="${row%|*}"
+        wp 'real="$(type -P cygpath)"; cygpath() { "$real" "$@"; }; PATH="$1"; if install_path_has_dir "$GSG_BIN_DIR"; then echo yes; else echo no; fi' "$spelling"
+        assert_eq "$OUT" "${row##*|}" "a PATH of [$spelling], empty entries included"
     done
 }
 

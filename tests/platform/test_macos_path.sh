@@ -31,7 +31,7 @@ test_the_account_login_shell_picks_the_startup_file_and_other_answers_leave_file
 
 test_a_startup_file_install_must_not_edit_is_left_alone_and_the_line_is_printed() {
     local name why before="" watched limit=1048576 p
-    for name in symlink directory marker-without-record nul-byte over-the-limit; do
+    for name in symlink directory marker-without-record marker-crlf marker-trailing-space nul-byte over-the-limit; do
         lc_mac_begin || return 1
         p="$LC_HOME/.zprofile"
         watched="$p"
@@ -46,9 +46,11 @@ test_a_startup_file_install_must_not_edit_is_left_alone_and_the_line_is_printed(
                 watched=""
                 mkdir -p -- "$p" || return 1
                 ;;
-            marker-without-record)
+            marker-without-record | marker-crlf | marker-trailing-space)
                 why="has a PATH marker of ours that no record of ours names"
                 printf 'export A=1\n%s\nexport X=1\n' "$MARK" >"$p" || return 1
+                if [ "$name" = marker-crlf ]; then printf '%s\r\n%s\r\n%s\r\n' "$MARK" 'export PATH="$HOME/.local/bin:$PATH"' '# end git-secret-guard PATH' >"$p" || return 1; fi
+                if [ "$name" = marker-trailing-space ]; then printf '%s \nexport A=1\n' "$MARK" >"$p" || return 1; fi
                 ;;
             nul-byte)
                 why="holds a NUL byte"

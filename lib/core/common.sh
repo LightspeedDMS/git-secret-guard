@@ -173,30 +173,6 @@ trunc_text() {
     fi
 }
 
-# ^ invariant the one rule for a folder the Windows user Path may carry; absolute (drive or UNC), no ; % " or control character anywhere
-# ^ coupled bin/gsg-path.ps1 holds the same rule as $FolderPattern; lib/platform/winpath.sh and state_read read this one
-# shellcheck disable=SC2034
-GSG_WINDIR_RE='^([A-Za-z]:\\|\\\\[^\\;%"[:cntrl:]])[^;%"[:cntrl:]]*$'
-# shellcheck disable=SC2034
-WINREC_MODE="" WINREC_FOLDER=""
-
-# ^ invariant $1 = a "windows-user-path ..." record; sets WINREC_MODE (sep, bare or create) and WINREC_FOLDER, rc 1 and both empty for any other shape
-# ^ invariant the forms are ";FOLDER" (sep), "FOLDER" (bare) and "created FOLDER" (create); FOLDER must match GSG_WINDIR_RE
-common_winrec_split() {
-    local rest="${1#windows-user-path }"
-    WINREC_MODE="" WINREC_FOLDER=""
-    if [ "$rest" = "$1" ]; then return 1; fi
-    case "$rest" in
-        ";"*) WINREC_MODE=sep WINREC_FOLDER="${rest#;}" ;;
-        "created "*) WINREC_MODE=create WINREC_FOLDER="${rest#created }" ;;
-        *) WINREC_MODE=bare WINREC_FOLDER="$rest" ;;
-    esac
-    if [[ ! $WINREC_FOLDER =~ $GSG_WINDIR_RE ]]; then
-        WINREC_MODE="" WINREC_FOLDER=""
-        return 1
-    fi
-}
-
 # ^ external git puts detail on tab-indented lines after its "fatal:" line (extension names); first_message keeps at most 5 of them
 # ^ invariant sets REPLY = first line of $1 without the hook prefix plus the indented lines after it, one space apart; control characters "?", cut at 200
 first_message() {

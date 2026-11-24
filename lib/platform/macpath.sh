@@ -55,6 +55,9 @@ macpath_has_marker() {
     [[ $c == *$'\n'"$GSG_MACPATH_BEGIN"$'\n'* ]]
 }
 
+# ^ invariant rc 0 = MACPATH_CONTENT has the begin marker text anywhere, in any form (CRLF, a trailing space); install and uninstall use this one test
+macpath_mentions_marker() { [[ $MACPATH_CONTENT == *"$GSG_MACPATH_BEGIN"* ]]; }
+
 # ^ invariant rc 0 = $1 is "macos-block <created 0|1> <no final newline 0|1> <file>", the file $HOME/.zprofile or $HOME/.bash_profile; sets MACPATH_R* globals
 # ^ security rc 1 with MACPATH_RFILE set = a record naming another file => a hand-edited record never makes uninstall rewrite or delete it
 macpath_record_file() {
@@ -75,7 +78,7 @@ macpath_check_file() {
     if [ ! -f "$1" ]; then MACPATH_WHY="$1 is not a regular file"; return 1; fi
     if [ ! -O "$1" ]; then MACPATH_WHY="$1 is not owned by you"; return 1; fi
     macpath_read "$1" || return 1
-    if macpath_has_marker; then MACPATH_WHY="$1 has a PATH marker of ours that no record of ours names"; return 1; fi
+    if macpath_mentions_marker; then MACPATH_WHY="$1 has a PATH marker of ours that no record of ours names"; return 1; fi
     MACPATH_CREATED=0
     if [ -n "$MACPATH_CONTENT" ] && [ "${MACPATH_CONTENT%$'\n'}" = "$MACPATH_CONTENT" ]; then MACPATH_NONL=1; fi
 }
@@ -85,9 +88,20 @@ macpath_check_file() {
 # ^ external the login shell is the account's (dscl); ~/.zprofile for zsh, ~/.bash_profile for bash
 macpath_plan() {
     local file=""
-    if macpath_record_file "${ST_CLI_PATH:-}" && [ -f "$MACPATH_RFILE" ] && macpath_read "$MACPATH_RFILE" && macpath_has_marker; then
-        INSTALL_PATH_ACTION=present INSTALL_PATH_WHY="$MACPATH_RFILE already has the marked block an earlier install added"
-        return 0
+    if macpath_record_file "${ST_CLI_PATH:-}" && [ -f "$MACPATH_RFILE" ]; then
+        file="$MACPATH_RFILE"
+        if ! macpath_read "$file"; then
+            INSTALL_PATH_ACTION=hint INSTALL_PATH_WHY="$MACPATH_WHY; the state records a block of ours in $file; install left it alone and kept the record"
+            return 0
+        fi
+        if macpath_has_marker; then
+            INSTALL_PATH_ACTION=present INSTALL_PATH_WHY="$file already has the marked block an earlier install added"
+            return 0
+        fi
+        if macpath_mentions_marker; then
+            INSTALL_PATH_ACTION=hint INSTALL_PATH_WHY="$file has the PATH marker of ours in a form install did not write; the state records a block of ours in $file; install left it alone and kept the record"
+            return 0
+        fi
     fi
     if ! macpath_login_shell; then
         INSTALL_PATH_ACTION=hint INSTALL_PATH_WHY="the login shell of this account cannot be determined (dscl)"
@@ -137,7 +151,7 @@ macpath_remove() {
     if [ -L "$file" ]; then MACPATH_RESULT=left MACPATH_WHY="$file is a symbolic link now"; return 0; fi
     if [ ! -f "$file" ] || [ ! -O "$file" ]; then MACPATH_RESULT=left MACPATH_WHY="$file is no longer a regular file of yours"; return 0; fi
     if ! macpath_read "$file"; then MACPATH_RESULT=left; return 0; fi
-    if [[ $MACPATH_CONTENT != *"$GSG_MACPATH_BEGIN"* ]]; then return 0; fi
+    if ! macpath_mentions_marker; then return 0; fi
     block="$(macpath_block_text; printf x)"
     block="${block%x}"
     before="${MACPATH_CONTENT%%"$block"*}"

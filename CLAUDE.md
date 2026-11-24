@@ -136,7 +136,7 @@ This file is an index: each topic states what must not break and links the doc h
   state right before the change, never earlier (`INSTALL_PATH_NEWREC` moves into `INSTALL_PATH_RECORD` in `install_path_apply`,
   which writes the state first; a failed write skips the change), and is written again without it when nothing was written
   (an earlier install's stays; a state that cannot be written is install's status 1); a macOS record names only `$HOME/.zprofile`
-  or `$HOME/.bash_profile`, a Windows folder follows `GSG_WINDIR_RE` of `lib/core/common.sh`, which `state_read` checks too; uninstall
+  or `$HOME/.bash_profile`, a Windows folder follows `GSG_WINDIR_RE` of `lib/core/state.sh` (not `common.sh`), which `state_read` checks; uninstall
   removes only what the record names and only while unchanged, a user's entry or line is never cut; the update child never changes `PATH`
   (`install_path_is_update_child` = `AU_LET_IN`, never the bare `GSG_UPDATE_LOCK_PID`); Windows: the user `Path` through the registry with its type kept, never
   `setx`, no value byte through the pipe (status words), the suite never reaches the real registry (`GSG_WINPATH_ROOT` stand-in set in `lc_begin`, announced like

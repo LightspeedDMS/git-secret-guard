@@ -2,6 +2,8 @@
 # ^ why a file-wide SC2034 off, not one per line; WINPATH_RECORD and WINPATH_WHY are read by install_path.sh
 
 # ^ coupled seam between lib/install/install_path.sh and the Windows user Path; the flow calls winpath_plan, winpath_apply and winpath_remove only
+# ^ coupled needs lib/core/state.sh (state_winrec_split, GSG_WINDIR_RE); bin/git-secret-guard loads core/state before this file
+
 # ^ coupled the work is done by bin/gsg-path.ps1 under the Windows PowerShell 5.1 of System32; docs/platforms.md has the maintainer notes
 # ^ security no value bytes cross the pipe from PowerShell to bash, only status words and exit codes => a Path entry never reaches a log or state this way
 WINPATH_RECORD="" WINPATH_WHY="" WINPATH_OUT="" WINPATH_W="" WINPATH_MODE="" WINPATH_FOLDER="" WINPATH_NOBROADCAST=0
@@ -137,11 +139,11 @@ winpath_plan() {
 # ^ invariant "windows-user-path created FOLDER" is a value install created, uninstall deletes it; FOLDER has no ; % " or control character
 winpath_record() {
     WINPATH_MODE="" WINPATH_FOLDER=""
-    if ! common_winrec_split "$1"; then
+    if ! state_winrec_split "$1"; then
         winpath_set_why "there is no record of a user Path entry of ours to work from"
         return 1
     fi
-    WINPATH_MODE="$WINREC_MODE" WINPATH_FOLDER="$WINREC_FOLDER"
+    WINPATH_MODE="$ST_WINREC_MODE" WINPATH_FOLDER="$ST_WINREC_FOLDER"
 }
 
 # ^ invariant winpath_apply DIR appends INSTALL_PATH_RECORD to the user Path value and keeps its registry type; every other entry stays byte for byte

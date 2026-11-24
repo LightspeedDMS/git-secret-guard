@@ -881,9 +881,14 @@ repository, so only an absolute value gives a reliable answer.
   nothing (any environment can hold it): `test_the_child_install_of_update_never_changes_path_but_a_bare_variable_does_not_make_a_child`. (3) **The comparison.**
   `install_path_has_dir` walks `PATH` entry by entry and compares the folder in one form for every platform, trailing slashes cut; on Windows the folder goes through one
   `cygpath -m -l` and the whole `PATH` through one `cygpath -m -l -p` (a `;`-separated list, split by a bounded loop, never a here-string), both in lower case: two `cygpath`
-  starts however long `PATH` is. An empty entry, a name `cygpath` cannot read, or a `PATH` it cannot convert, never matches (no guessing). `status`, `doctor` and the plan use it. (4) **Records carried.** A record of an
+  starts however long `PATH` is. Empty entries are cut from the list before `cygpath` sees it (it may turn one into `.` or drop it; an empty entry never matches), a `PATH` of separators only matches nothing; a name `cygpath` cannot read, or a `PATH` it cannot convert, never matches (no guessing). `status`, `doctor` and the plan use it. (4) **Records carried.** A record of an
   earlier install stays in every run that writes none (folder on `PATH`, `--dont-change-path`, the update child, a hint); on macOS the plan is `present` while the recorded
-  file still holds the marker, whatever the login shell says now. Tests: `tests/install/test_install_path.sh`, `tests/install/test_winpath.sh`, `tests/platform/test_macos_path.sh`,
+  file still holds the marker line, whatever the login shell says now. There is one record slot, so a record is never replaced while its block or entry may still be there:
+  on macOS a recorded file that `macpath_read` cannot read (over the limit, a NUL byte, unreadable) or that holds the marker text in any other form (a CRLF conversion, a trailing space)
+  makes the plan a hint (`<why>; the state records a block of ours in <file>; install left it alone and kept the record`), also when the login shell is another one now; on Windows a record
+  for another folder than the one install would add (the home or profile moved; compared without case) makes it a hint (`the state records an entry for another folder, <folder>, which
+  git-secret-guard uninstall removes; install left the user Path alone`), and `uninstall` removes that entry. `macpath_check_file` (install) and `macpath_remove` (uninstall)
+  detect the marker with the same test, `macpath_mentions_marker`. Tests: `tests/install/test_install_path.sh`, `tests/install/test_winpath.sh`, `tests/platform/test_macos_path.sh`,
   `tests/platform/test_windows_path.sh`; the per-platform notes are in [platforms.md](platforms.md#maintainer-notes).
 
 ## Maintainer notes: git upgrade

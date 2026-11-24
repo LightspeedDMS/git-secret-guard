@@ -10,6 +10,28 @@ GSG_UPDATE_TASK_NAME=git-secret-guard-update
 GSG_LAUNCHD_UPDATE_LABEL=com.lightspeeddms.git-secret-guard.update
 GSG_ASIDE_RE='^[a-z][a-z0-9-]*\.gsg-replaced-[0-9]{8}T[0-9]{6}Z$'
 
+# ^ invariant the one rule for a folder the Windows user Path may carry; absolute (drive or UNC), no ; % " or control character anywhere
+# ^ coupled bin/gsg-path.ps1 holds the same rule as $FolderPattern, DEL (0x7f) included; lib/platform/winpath.sh and state_read read this one
+GSG_WINDIR_RE='^([A-Za-z]:\\|\\\\[^\\;%"[:cntrl:]])[^;%"[:cntrl:]]*$'
+ST_WINREC_MODE="" ST_WINREC_FOLDER=""
+
+# ^ invariant $1 = a "windows-user-path ..." record; sets ST_WINREC_MODE (sep, bare or create) and ST_WINREC_FOLDER, rc 1 and both empty for any other shape
+# ^ invariant the forms are ";FOLDER" (sep), "FOLDER" (bare) and "created FOLDER" (create); FOLDER must match GSG_WINDIR_RE
+state_winrec_split() {
+    local rest="${1#windows-user-path }"
+    ST_WINREC_MODE="" ST_WINREC_FOLDER=""
+    if [ "$rest" = "$1" ]; then return 1; fi
+    case "$rest" in
+        ";"*) ST_WINREC_MODE=sep ST_WINREC_FOLDER="${rest#;}" ;;
+        "created "*) ST_WINREC_MODE=create ST_WINREC_FOLDER="${rest#created }" ;;
+        *) ST_WINREC_MODE=bare ST_WINREC_FOLDER="$rest" ;;
+    esac
+    if [[ ! $ST_WINREC_FOLDER =~ $GSG_WINDIR_RE ]]; then
+        ST_WINREC_MODE="" ST_WINREC_FOLDER=""
+        return 1
+    fi
+}
+
 # ^ invariant sets ST_* for every key (ST_PREV_SET, ST_TIMER and ST_AUTO_UPDATE are yes|no); the keys after backup_path are optional
 # ^ invariant ST_SOURCE_CHECKOUT is an absolute path or "" (no checkout recorded); an older state file reads as auto_update=no and no checkout
 # ^ invariant ST_CLI_PATH is "", "macos-block <created 0|1> <no final newline 0|1> <file>" or "windows-user-path <text>"; an older file reads ""
@@ -68,7 +90,7 @@ state_read() {
             return 0
             ;;
         "windows-user-path "?*)
-            if common_winrec_split "$ST_CLI_PATH"; then
+            if state_winrec_split "$ST_CLI_PATH"; then
                 ST_EXISTS=1
                 return 0
             fi

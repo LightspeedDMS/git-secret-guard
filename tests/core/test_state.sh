@@ -153,4 +153,21 @@ test_state_records_the_cli_path_entry() {
     assert_contains "$ERR" "contains a newline" "says why"
 }
 
+# ^ coupled the split lives in lib/core/state.sh, never in the hook; GSG_WINDIR_RE is the folder rule of bin/gsg-path.ps1, DEL included
+test_the_windows_record_splits_into_form_and_folder_and_refuses_what_the_user_path_cannot_carry() {
+    local row rec mode folder
+    for row in 'windows-user-path ;C:\a b\bin|sep|C:\a b\bin' 'windows-user-path C:\bin|bare|C:\bin' 'windows-user-path created \\srv\share|create|\\srv\share' \
+        'windows-user-path created C:\x|create|C:\x' 'macos-block 1 0 /h/.zprofile||' 'windows-user-path relative\dir||' 'windows-user-path ;C:\a;b||' \
+        'windows-user-path C:\a%b||' 'windows-user-path ;C:\a"b||' 'windows-user-path created ||' $'windows-user-path ;C:\\a\x7fb||' $'windows-user-path ;C:\\a\tb||'; do
+        IFS='|' read -r rec mode folder <<<"$row"
+        # shellcheck disable=SC2016 # the code is single-quoted on purpose, the child shell expands it
+        st eval 'if state_winrec_split '"${rec@Q}"'; then printf "rc0|%s|%s" "$ST_WINREC_MODE" "$ST_WINREC_FOLDER"; else printf "rc1|%s|%s" "$ST_WINREC_MODE" "$ST_WINREC_FOLDER"; fi'
+        if [ -n "$mode" ]; then
+            assert_eq "$OUT" "rc0|$mode|$folder" "[$rec] splits"
+        else
+            assert_eq "$OUT" "rc1||" "[$rec] is refused and leaves both empty"
+        fi
+    done
+}
+
 run_file_tests

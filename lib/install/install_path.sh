@@ -36,7 +36,12 @@ install_path_has_dir() {
     want="$REPLY"
     rest="$PATH"
     if tools_is_windows; then
-        rest="$(cygpath -m -l -p -- "$PATH")" || return 1
+        # ^ why the empty entries are cut before cygpath, not after; it may turn one into "." or drop it, and an empty one never matches anyway
+        # ^ invariant each pass shortens the list, the loop ends
+        while [[ $rest == *::* ]]; do rest="${rest//::/:}"; done
+        rest="${rest#:}" rest="${rest%:}"
+        if [ -z "$rest" ]; then return 1; fi
+        rest="$(cygpath -m -l -p -- "$rest")" || return 1
         rest="${rest,,}" sep=";"
     fi
     rest+="$sep"
@@ -80,9 +85,20 @@ install_path_plan() {
 
 # ^ invariant maps the answer of winpath_plan to the plan; absent = add with the adapter's record, present = nothing to do, else a hint
 install_path_plan_windows() {
+    local old=""
     winpath_plan "$GSG_BIN_DIR"
     case "$REPLY" in
-        absent) INSTALL_PATH_ACTION=add INSTALL_PATH_WHY="" INSTALL_PATH_NEWREC="$WINPATH_RECORD" ;;
+        absent)
+            INSTALL_PATH_ACTION=add INSTALL_PATH_WHY="" INSTALL_PATH_NEWREC="$WINPATH_RECORD"
+            # ^ invariant one record slot; a record for another folder stays (uninstall removes it), the folders are compared without case
+            if state_winrec_split "${ST_CLI_PATH:-}"; then
+                old="$ST_WINREC_FOLDER"
+                if state_winrec_split "$WINPATH_RECORD" && [ "${old,,}" != "${ST_WINREC_FOLDER,,}" ]; then
+                    INSTALL_PATH_ACTION=hint INSTALL_PATH_NEWREC=""
+                    INSTALL_PATH_WHY="the state records an entry for another folder, $old, which $GSG_NAME uninstall removes; install left the user Path alone"
+                fi
+            fi
+            ;;
         present) INSTALL_PATH_ACTION=present INSTALL_PATH_WHY="the user Path already holds $GSG_BIN_DIR" ;;
         *) INSTALL_PATH_ACTION=hint INSTALL_PATH_WHY="$WINPATH_WHY" ;;
     esac

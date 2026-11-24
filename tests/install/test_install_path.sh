@@ -17,12 +17,12 @@ assert_no_zprofile() { assert_no_file "$LC_HOME/.zprofile" "${1:-no startup file
 # ^ invariant the PATH install runs with, the CLI folder spelled as $1 first, as "$LC_BIN" or with one or two trailing slashes
 ip_path_with() { set_env PATH="$1:$SANDBOX/pathbin:$TEST_BASE_PATH"; }
 
-# ^ invariant ip_call CODE ARGS... runs CODE in a clean shell with only common.sh, tools.sh and install_path.sh loaded; OUT and RC are the answer
+# ^ invariant ip_call CODE ARGS... runs CODE in a clean shell with only common.sh, state.sh, tools.sh and install_path.sh loaded; OUT and RC are the answer
 ip_call() {
     local code="$1"
     shift
     run_cap env -i "${GSG_ENV[@]}" "${EXTRA_ENV[@]}" bash -c 'set -u; GSG_ROOT="$1"; shift
-for lib in core/common install/tools install/install_path; do source "$GSG_ROOT/lib/$lib.sh" || exit 9; done
+for lib in core/common core/state install/tools install/install_path; do source "$GSG_ROOT/lib/$lib.sh" || exit 9; done
 '"$code" _ "$GSG_PROJECT" "$@"
 }
 
@@ -73,6 +73,14 @@ cygpath() {
     assert_eq "$OUT" no "a folder cygpath cannot name is never matched on a guess"
     ip_on_path "$fake" "/c/Windows:/c/Users/ana/.local/bin:/bad" "/c/Users/ana/.local/bin"
     assert_eq "$OUT" no "a PATH cygpath cannot convert matches nothing, not even an entry before the bad one"
+    : >"$log" || return 1
+    ip_on_path "$fake" "::/c/Windows::/C/USERS/Ana/.local/BIN/:" "/c/Users/ana/.local/bin"
+    assert_eq "$OUT" yes "empty entries (leading, middle, trailing) lose no other entry"
+    assert_eq "$(sed -n 2p "$log")" "-m -l -p -- /c/Windows:/C/USERS/Ana/.local/BIN/" "cygpath is never given an empty entry, whatever it would make of one"
+    : >"$log" || return 1
+    ip_on_path "$fake" ":::" "/c/Users/ana/.local/bin"
+    assert_eq "$OUT" no "a PATH of separators only matches nothing"
+    assert_eq "$(wc -l <"$log" | tr -d ' ')" 1 "and starts no list call"
 }
 
 test_install_on_linux_says_where_the_cli_is_and_prints_the_line_to_add_without_changing_a_file() {
@@ -184,6 +192,34 @@ test_a_reinstall_carries_the_record_over_and_never_adds_a_second_block() {
     assert_zprofile_is_the_block "and the file is untouched"
     gsg install --dont-change-path
     assert_eq "$(state_value cli_path)" "$rec" "carried over by the opt-out run too"
+}
+
+# ^ invariant one record slot; an earlier record stays until its block is gone or can be checked, whatever the login shell is
+test_an_earlier_record_is_kept_and_nothing_is_added_while_its_block_may_still_be_there() {
+    local variant rec why before p limit=1048576 other="has the PATH marker of ours in a form install did not write"
+    for variant in nul-byte over-the-limit crlf-marker trailing-space-marker; do
+        lc_mac_begin || return 1
+        gsg install
+        assert_rc 0 "[$variant] first install, the login shell is zsh"
+        rec="$(state_value cli_path)"
+        p="$LC_HOME/.zprofile"
+        case "$variant" in
+            nul-byte) why="holds a NUL byte" && printf 'a\0b\n' >"$p" ;;
+            over-the-limit) why="is larger than $limit bytes" && head -c "$((limit + 1))" /dev/zero | tr '\0' a >"$p" ;;
+            crlf-marker) why="$other" && printf '%s\r\n%s\r\n%s\r\n' "$BEGIN_MARK" "$ADD_LINE" "$END_MARK" >"$p" ;;
+            *) why="$other" && printf '%s \n%s\n%s\n' "$BEGIN_MARK" "$ADD_LINE" "$END_MARK" >"$p" ;;
+        esac || return 1
+        before="$(cksum <"$p")"
+        printf '/bin/bash\n' >"$SANDBOX/dscl.shell" || return 1
+        gsg install
+        assert_rc 0 "[$variant] second install, the login shell is bash now"
+        assert_contains "$OUT" "$why" "[$variant] says why"
+        assert_contains "$OUT" "the state records a block of ours in $p; install left it alone and kept the record" "[$variant] says the earlier block is the reason"
+        assert_contains "$OUT" "add this line to your shell startup file: $ADD_LINE" "[$variant] prints the line to add"
+        assert_no_file "$LC_HOME/.bash_profile" "[$variant] nothing was written for bash"
+        assert_eq "$(state_value cli_path)" "$rec" "[$variant] the earlier record is kept"
+        assert_eq "$(cksum <"$p")" "$before" "[$variant] the recorded file is untouched"
+    done
 }
 
 # ^ coupled lib/autoupdate/autoupdate.sh takes the lock for the update run (this test shell plays it) and the child install inherits its pid
@@ -329,6 +365,22 @@ install_path_plan; echo "$INSTALL_PATH_ACTION|$INSTALL_PATH_NEWREC|$INSTALL_PATH
     assert_eq "$OUT" "add|added /c/u/.local/bin to the user Path" "winpath_apply worked"
 }
 
+# ^ invariant one record slot; a record for another folder stays and the plan is a hint, the same folder in any case or form is added again
+test_the_windows_flow_keeps_an_earlier_record_for_another_folder_and_adds_nothing() {
+    local row old expect rec why
+    for row in 'windows-user-path ;C:\old\bin|hint|windows-user-path ;C:\old\bin|the state records an entry for another folder, C:\old\bin, which git-secret-guard uninstall removes' \
+        'windows-user-path C:\NEW\BIN|add||' 'windows-user-path created C:\new\bin|add||' '|add||'; do
+        IFS='|' read -r old expect rec why <<<"$row"
+        ip_win 'winpath_plan() { REPLY=absent; WINPATH_RECORD='"'windows-user-path ;C:\\new\\bin'"'; }
+ST_CLI_PATH='"${old@Q}"'; install_path_plan; echo "$INSTALL_PATH_ACTION|$INSTALL_PATH_RECORD|$INSTALL_PATH_WHY"'
+        if [ "$expect" = hint ]; then
+            assert_eq "$OUT" "hint|$rec|$why; install left the user Path alone" "[$old] a hint, the earlier record stays"
+        else
+            assert_eq "$OUT" "add|$old|" "[$old] the same folder is added again"
+        fi
+    done
+}
+
 # ^ coupled a change written and not announced to running programs is a success with advice on what to do; the adapter sets WINPATH_NOBROADCAST
 test_a_change_written_but_not_announced_says_to_sign_out_and_in() {
     ip_win 'install_write_state() { return 0; }; winpath_apply() { WINPATH_NOBROADCAST=1; return 0; }; INSTALL_PATH_ACTION=add; install_path_apply; install_path_report'
@@ -393,10 +445,15 @@ test_install_exits_1_and_changes_nothing_when_the_state_cannot_be_written_before
 # ^ coupled a stand-in mktemp lets the first state write after the hook command through and fails the second, the rewrite of a failed change
 # ^ why the marker files sit in pathbin, not in the sandbox; lc_begin clears pathbin and the listing of the sandbox outside the template items stays as it was
 ip_fail_the_second_state_write() {
-    local real armed="$SANDBOX/pathbin/state.armed" seen="$SANDBOX/pathbin/state.seen"
+    local real armed="$SANDBOX/pathbin/state.armed" seen="$SANDBOX/pathbin/state.seen" gnubin="$SANDBOX/brewprefix/opt/coreutils/libexec/gnubin"
     real="$(type -P mktemp)" || return 1
     printf '#!/bin/sh\ncase "$1" in */state.*) if [ -f "%s" ]; then if [ -f "%s" ]; then echo "mktemp: injected failure" >&2; exit 1; fi; : >"%s"; fi ;; esac\nexec %s "$@"\n' \
         "$armed" "$seen" "$seen" "$real" >"$SANDBOX/pathbin/mktemp" && chmod 755 "$SANDBOX/pathbin/mktemp" || return 1
+    # ^ external on a Mac the CLI has the gnubin of the brew prefix first on PATH => the stand-in goes there too, once the prefix is filled
+    if [ -n "$TEST_GNUBIN" ]; then
+        lc_brew_have bash coreutils util-linux jq || return 1
+        rm -f -- "$gnubin/mktemp" && cp -- "$SANDBOX/pathbin/mktemp" "$gnubin/mktemp" || return 1
+    fi
     lc_git_wrapper '{ [ "$4" = hook.git-secret-guard.command ] && : >"'"$armed"'"; false; }'
 }
 

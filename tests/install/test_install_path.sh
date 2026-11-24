@@ -371,12 +371,32 @@ test_the_windows_flow_keeps_an_earlier_record_for_another_folder_and_adds_nothin
     for row in 'windows-user-path ;C:\old\bin|hint|windows-user-path ;C:\old\bin|the state records an entry for another folder, C:\old\bin, which git-secret-guard uninstall removes' \
         'windows-user-path C:\NEW\BIN|add||' 'windows-user-path created C:\new\bin|add||' '|add||'; do
         IFS='|' read -r old expect rec why <<<"$row"
-        ip_win 'winpath_plan() { REPLY=absent; WINPATH_RECORD='"'windows-user-path ;C:\\new\\bin'"'; }
+        ip_win 'winpath_plan() { REPLY=absent; WINPATH_RECORD='"'windows-user-path ;C:\\new\\bin'"'; if [ "$1" = '"'C:\\old\\bin'"' ]; then REPLY=present; fi; }
 ST_CLI_PATH='"${old@Q}"'; install_path_plan; echo "$INSTALL_PATH_ACTION|$INSTALL_PATH_RECORD|$INSTALL_PATH_WHY"'
         if [ "$expect" = hint ]; then
             assert_eq "$OUT" "hint|$rec|$why; install left the user Path alone" "[$old] a hint, the earlier record stays"
         else
             assert_eq "$OUT" "add|$old|" "[$old] the same folder is added again"
+        fi
+    done
+}
+
+# ^ invariant the hint for a record of another folder lasts as long as the entry may be there; the plan asks the adapter about the recorded folder
+# ^ invariant absent = the user took the old entry out by hand and the plan adds the current folder; present or unusable keep hint and record
+test_the_windows_hint_goes_when_the_recorded_entry_is_gone_but_stays_when_present_or_unusable() {
+    local answer
+    for answer in absent present unusable; do
+        ip_win 'winpath_plan() {
+    if [ "$1" = /c/u/.local/bin ]; then REPLY=absent WINPATH_RECORD="windows-user-path ;C:\new\bin" WINPATH_WHY="for the new folder"
+    elif [ "$1" = "C:\old\bin" ]; then REPLY='"$answer"' WINPATH_RECORD="windows-user-path ;C:\stale\bin" WINPATH_WHY="the adapter cannot read it"
+    else REPLY=unusable; fi
+}
+ST_CLI_PATH="windows-user-path ;C:\old\bin"; install_path_plan; echo "$INSTALL_PATH_ACTION|$INSTALL_PATH_NEWREC|$INSTALL_PATH_RECORD|$INSTALL_PATH_WHY"'
+        if [ "$answer" = absent ]; then
+            assert_eq "$OUT" 'add|windows-user-path ;C:\new\bin|windows-user-path ;C:\old\bin|' "[$answer] the stale record is replaced by the new folder's"
+        else
+            assert_contains "$OUT" 'hint||windows-user-path ;C:\old\bin|' "[$answer] the hint and the record stay"
+            assert_contains "$OUT" 'C:\old\bin,' "[$answer] the hint names the recorded folder"
         fi
     done
 }
@@ -388,8 +408,8 @@ test_a_change_written_but_not_announced_says_to_sign_out_and_in() {
     assert_contains "$OUT" "could not tell running programs; sign out and in, or start a new session" "with what to do"
     ip_win 'uninstall_say() { echo "say:$1"; }
 winpath_remove() { REPLY=removed; WINPATH_NOBROADCAST=1; }
-ST_CLI_PATH="windows-user-path ;C:/u/bin"; uninstall_path_entry; echo "rc=$?"'
-    assert_contains "$OUT" "say:removed /c/u/.local/bin from the user Path; running programs could not be told, so sign out and in" "uninstall says the same"
+ST_CLI_PATH="windows-user-path ;C:\u\bin"; uninstall_path_entry; echo "rc=$?"'
+    assert_contains "$OUT" 'say:removed C:\u\bin from the user Path; running programs could not be told, so sign out and in' "uninstall says the same, naming the recorded folder"
 }
 
 # ^ coupled the user Path holds the folder, this shell lacks it => a shell open before the entry was added needs the same advice as after a change
@@ -407,10 +427,10 @@ test_the_windows_hint_and_uninstall_follow_the_adapter() {
     for answer in removed changed absent; do
         ip_win 'uninstall_say() { echo "say:$1"; }
 winpath_remove() { REPLY='"$answer"'; WINPATH_WHY=""; }
-ST_CLI_PATH="windows-user-path ;C:/u/bin"; uninstall_path_entry; echo "rc=$?"'
+ST_CLI_PATH="windows-user-path ;C:\Users\old\.local\bin"; uninstall_path_entry; echo "rc=$?"'
         case "$answer" in
-            removed) assert_contains "$OUT" "say:removed /c/u/.local/bin from the user Path" "removed is said" ;;
-            changed) assert_contains "$OUT" "the user Path holds /c/u/.local/bin in another spelling than install wrote; left as it is" "a respelled entry is named and left" ;;
+            removed) assert_contains "$OUT" 'say:removed C:\Users\old\.local\bin from the user Path' "removed names the folder of the record, not the current install folder" ;;
+            changed) assert_contains "$OUT" 'the user Path holds C:\Users\old\.local\bin in another spelling than install wrote; left as it is' "a respelled entry is named by the recorded folder and left" ;;
             *) assert_eq "$OUT" "rc=0" "nothing to remove is silent" ;;
         esac
     done

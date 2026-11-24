@@ -91,11 +91,15 @@ install_path_plan_windows() {
         absent)
             INSTALL_PATH_ACTION=add INSTALL_PATH_WHY="" INSTALL_PATH_NEWREC="$WINPATH_RECORD"
             # ^ invariant one record slot; a record for another folder stays (uninstall removes it), the folders are compared without case
+            # ^ invariant the recorded folder is asked about too; absent = the entry is gone, the add goes on; a failed question never drops a record
             if state_winrec_split "${ST_CLI_PATH:-}"; then
                 old="$ST_WINREC_FOLDER"
                 if state_winrec_split "$WINPATH_RECORD" && [ "${old,,}" != "${ST_WINREC_FOLDER,,}" ]; then
-                    INSTALL_PATH_ACTION=hint INSTALL_PATH_NEWREC=""
-                    INSTALL_PATH_WHY="the state records an entry for another folder, $old, which $GSG_NAME uninstall removes; install left the user Path alone"
+                    winpath_plan "$old"
+                    if [ "$REPLY" != absent ]; then
+                        INSTALL_PATH_ACTION=hint INSTALL_PATH_NEWREC=""
+                        INSTALL_PATH_WHY="the state records an entry for another folder, $old, which $GSG_NAME uninstall removes; install left the user Path alone"
+                    fi
                 fi
             fi
             ;;
@@ -217,7 +221,11 @@ uninstall_path_entry() {
 }
 
 # ^ invariant the Windows arm of uninstall_path_entry; winpath_remove deletes what apply appended, only if the value is unchanged
+# ^ invariant every line names the folder of the record (Windows form), never GSG_BIN_DIR; the record may be for another folder than this install's
+# ^ invariant an invalid record fails in winpath_remove (same split) before any line; folder is never empty where it is printed
 uninstall_path_entry_windows() {
+    local folder=""
+    if state_winrec_split "$ST_CLI_PATH"; then folder="$ST_WINREC_FOLDER"; fi
     if ! winpath_remove "$ST_CLI_PATH"; then
         printf '%s: cannot take the folder out of the user Path: %s; fix that and run %s uninstall again\n' "$GSG_NAME" "$WINPATH_WHY" "$GSG_NAME" >&2
         return 1
@@ -225,14 +233,14 @@ uninstall_path_entry_windows() {
     case "$REPLY" in
         removed)
             if [ "${WINPATH_NOBROADCAST:-0}" -eq 1 ]; then
-                uninstall_say "removed $GSG_BIN_DIR from the user Path; running programs could not be told, so sign out and in"
+                uninstall_say "removed $folder from the user Path; running programs could not be told, so sign out and in"
             else
-                uninstall_say "removed $GSG_BIN_DIR from the user Path"
+                uninstall_say "removed $folder from the user Path"
             fi
             ;;
         changed)
             ui_prefix 1 WARNING
-            printf '%s%s: the user Path holds %s in another spelling than install wrote; left as it is\n' "$REPLY" "$GSG_NAME" "$GSG_BIN_DIR"
+            printf '%s%s: the user Path holds %s in another spelling than install wrote; left as it is\n' "$REPLY" "$GSG_NAME" "$folder"
             ;;
     esac
 }

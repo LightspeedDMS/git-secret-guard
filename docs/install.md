@@ -555,7 +555,7 @@ As for `jq`, the test is the hash alone, so a byte-identical copy you put there 
   nothing. A record that names any file but `~/.zprofile` or `~/.bash_profile` of the account (a hand-edited state) touches nothing and is named:
   `the record names <file>, which is not ~/.zprofile or ~/.bash_profile; left as it is`. On Windows the recorded text, or the one entry equal to the folder byte for byte with one adjacent separator, is cut from the user `Path` (entries added after
   install stay): `removed <folder> from the user Path`, with `; running programs could not be told, so sign out and in` when the broadcast failed. An entry you respelled
-  is named and left: `the user Path holds <folder> in another spelling than install wrote; left as it is`. A write that fails stops uninstall (`cannot take the PATH block
+  is named and left: `the user Path holds <folder> in another spelling than install wrote; left as it is`. `<folder>` is the folder of the record in its Windows form (`C:\Users\...`), not the folder of the install that runs uninstall. A write that fails stops uninstall (`cannot take the PATH block
   out: <reason>; fix that and run git-secret-guard uninstall again`, on Windows `cannot take the folder out of the user Path: <reason>; fix that and run git-secret-guard uninstall again`): the state stays and a rerun
   finishes the job. On Windows uninstall stops there and removes nothing after that step (the share dir, the state file and the rest stay) while PowerShell cannot answer. When
   Windows PowerShell can never run on the machine, delete the `cli_path=` line from the state file (`${XDG_STATE_HOME:-~/.local/state}/git-secret-guard/state`, the State row
@@ -887,7 +887,8 @@ repository, so only an absolute value gives a reliable answer.
   on macOS a recorded file that `macpath_read` cannot read (over the limit, a NUL byte, unreadable) or that holds the marker text in any other form (a CRLF conversion, a trailing space)
   makes the plan a hint (`<why>; the state records a block of ours in <file>; install left it alone and kept the record`), also when the login shell is another one now; on Windows a record
   for another folder than the one install would add (the home or profile moved; compared without case) makes it a hint (`the state records an entry for another folder, <folder>, which
-  git-secret-guard uninstall removes; install left the user Path alone`), and `uninstall` removes that entry. `macpath_check_file` (install) and `macpath_remove` (uninstall)
+  git-secret-guard uninstall removes; install left the user Path alone`), and `uninstall` removes that entry. The plan asks `winpath_plan` about the recorded folder too (read-only): `absent`
+  (you took that entry out by hand) means the record protects nothing and install adds the current folder and records it; `present` keeps the hint and the record, and so does `unusable` (a record is never dropped on a failed question). `macpath_check_file` (install) and `macpath_remove` (uninstall)
   detect the marker with the same test, `macpath_mentions_marker`. Tests: `tests/install/test_install_path.sh`, `tests/install/test_winpath.sh`, `tests/platform/test_macos_path.sh`,
   `tests/platform/test_windows_path.sh`; the per-platform notes are in [platforms.md](platforms.md#maintainer-notes).
 

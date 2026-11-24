@@ -182,7 +182,7 @@ jobs:
         run: ./tests/platform/wsl-phase.ps1 -Phase mntc -PhaseArg metadata
 
       # The logs so far are written down before the test files, the rename probe and the installed-CLI install run: the probe renames a directory holding a running script, which is
-      # the operation that coincided with the first blue screen of the maintainer's WSL 1 host, so it goes last and nothing earlier depends on it surviving.
+      # the operation that coincided with the first blue screen of a WSL 1 host on Windows Server 2019, so it goes last and nothing earlier depends on it surviving.
       - name: Results so far in the job summary
         if: ${{ !cancelled() }}
         shell: pwsh

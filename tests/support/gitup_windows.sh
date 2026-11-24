@@ -78,6 +78,9 @@ assert_not_exists_any() {
 # ^ invariant the env of every module test; sandbox HOME and state dir, the sandbox as System32, stand-ins first on PATH
 wu_env() {
     set_env HOME="$WU_DIR/home" XDG_STATE_HOME="$WU_DIR/xdg/state" GSG_GITUP_ROOT="$WU_DIR/root" PATH="$WU_DIR/pathbin:$TEST_BASE_PATH" LOCALAPPDATA="$(wu_w "$WU_DIR/home/AppData/Local")"
+    # ^ why empty, not the sandbox root of GSG_ENV; here PowerShell is found through GSG_GITUP_ROOT (a stand-in below WU_DIR) and no override may be announced
+    # ^ coupled an empty GSG_WINPATH_ROOT counts as unset in winpath_powershell; a root set later by a test wins (later in EXTRA_ENV)
+    set_env GSG_WINPATH_ROOT=
 }
 
 # ^ invariant wu_begin SCOPE VERSION leaves a Git for Windows VERSION set up for SCOPE (machine or user) in the registry stand-in

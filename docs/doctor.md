@@ -163,6 +163,10 @@ warnings: 1 (listed above, they do not change the exit status)
 directories follow under `not searched:` (see discovery). Only repositories with a finding follow it. A repository counts as
 **covered** when it has no PROBLEM (warnings and info do not change that). `warnings:` appears only when there are some.
 
+When the CLI folder is not on the `PATH` doctor runs with, one more line follows the `installed:` line, information only (no warning, no exit status):
+`  info     CLI folder: <folder> is not on the PATH this shell runs with, so git-secret-guard is found by its full path only; <hint>`. The hint is the one `install` prints
+([install.md](install.md#what-install-does): the line to add on Linux and macOS, the user `Path` step on Windows).
+
 | Exit status | Meaning |
 |---|---|
 | exit status 0 | no PROBLEM anywhere (WARNING and info lines can still be printed) |

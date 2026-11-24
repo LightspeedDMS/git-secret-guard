@@ -718,7 +718,7 @@ install_write_state() {
     done
     if [ "$INSTALL_TIMER" -eq 1 ]; then timer=yes; fi
     placed="$(install_unique_words "$placed")"
-    state_write "$(<"$GSG_ROOT/VERSION")" "$prev_set" "$prev" "$tools" "$backup" "$replaced" "$placed" "$timer" "$INSTALL_AUTO_UPDATE" "$INSTALL_SOURCE_CHECKOUT"
+    state_write "$(<"$GSG_ROOT/VERSION")" "$prev_set" "$prev" "$tools" "$backup" "$replaced" "$placed" "$timer" "$INSTALL_AUTO_UPDATE" "$INSTALL_SOURCE_CHECKOUT" "$INSTALL_PATH_RECORD"
 }
 
 # ^ why --replace-all, not a plain set; a plain set exits 5 when the key already has several values, and --add would duplicate the event
@@ -815,6 +815,7 @@ install_run() {
     if [ "$timer" -eq 1 ]; then GSG_INSTALL_FLAGS+=" --with-timer"; fi
     if [ "${AUTO_UPDATE_FLAG:-0}" -eq 1 ]; then GSG_INSTALL_FLAGS+=" --auto-update"; fi
     if [ "$takeover" -eq 1 ]; then GSG_INSTALL_FLAGS+=" --take-over-system-git"; fi
+    if [ "${INSTALL_PATH_FLAG:-0}" -eq 1 ]; then GSG_INSTALL_FLAGS+=" --dont-change-path"; fi
     # ^ why the off switches only, not the positive flags; a plain install does what those say, the rerun must not do what the user turned off
     if [ "${SMARTGIT_OFF_FLAG:-0}" -eq 1 ]; then GSG_INSTALL_FLAGS+=" --dont-configure-smartgit"; fi
     if [ "${DESKTOP_GIT_OFF_FLAG:-0}" -eq 1 ]; then GSG_INSTALL_FLAGS+=" --dont-link-desktop-git"; fi
@@ -847,6 +848,7 @@ install_run() {
     if [ "$early" -eq 0 ]; then install_run_state_checks || return 1; fi
     install_prepare_timer "$timer" || return 1
     install_prepare_update || return 1
+    install_path_plan || return 1
     tools_announce_overrides
     install_tools_ready || return 1
     install_record_rule_hash || return 1
@@ -859,9 +861,11 @@ install_run() {
     install_link_cli || return 1
     install_set_config || return 1
     install_unset_hooks_path || return 1
-    install_summary; install_wsl_notice
-    # ^ invariant the four steps all run and any failure is install's status 1; a failed timer load never hides or skips the SmartGit and Desktop steps
+    # ^ invariant install_path_apply returns 1 only when the state cannot be written before the change or rewritten after a failed one
     local rc=0
+    install_path_apply || rc=1
+    install_summary; install_path_report; install_wsl_notice
+    # ^ invariant the four steps all run and any failure is install's status 1; a failed timer load never hides or skips the SmartGit and Desktop steps
     install_enable_timer || rc=1
     install_enable_update || rc=1
     smartgit_install_step "$smartgit" || rc=1

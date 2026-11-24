@@ -455,6 +455,7 @@ uninstall_steps() {
     uninstall_hook_section || return 1
     if brew_is_macos; then uninstall_agents || return 1; else uninstall_timer || return 1; fi
     uninstall_cli_link || return 1
+    uninstall_path_entry || return 1
     uninstall_share_dir || return 1
     uninstall_read_placed || return 1
     uninstall_restore_replaced || return 1

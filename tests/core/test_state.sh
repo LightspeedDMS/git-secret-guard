@@ -21,7 +21,7 @@ test_state_round_trips_verbatim_values() {
     rep="betterleaks.gsg-replaced-20261031T101500Z:$sha"
     placed="betterleaks:$sha trufflehog:$sha"
     state_dir_env || return 1
-    st eval "$(declare -f show_state); state_write 0.1.0 yes '~/.config/git/hooks \$x \"q\" = tail' 'trufflehog betterleaks' '/a b/backup.tar.gz' '$rep' '$placed' yes yes '/a b/check=out' && state_read && show_state"
+    st eval "$(declare -f show_state); state_write 0.1.0 yes '~/.config/git/hooks \$x \"q\" = tail' 'trufflehog betterleaks' '/a b/backup.tar.gz' '$rep' '$placed' yes yes '/a b/check=out' '' && state_read && show_state"
     assert_rc 0 "write then read"
     # shellcheck disable=SC2016
     assert_eq "$OUT" "[1][0.1.0][yes][~/.config/git/hooks \$x \"q\" = tail][trufflehog betterleaks][/a b/backup.tar.gz][$rep][$placed][yes][yes][/a b/check=out]" "values come back exactly, including = and quotes"
@@ -29,8 +29,8 @@ test_state_round_trips_verbatim_values() {
     assert_eq "$(stat -c %a "$SANDBOX/st-state/git-secret-guard/state")" 600 "file mode"
     st eval "$(declare -f show_state); rm -f \"\$GSG_STATE_FILE\"; state_read && show_state"
     assert_eq "$OUT" '[0][][no][][][][][][no][no][]' "an absent file means not installed, with empty values, no timer and no auto-update"
-    st eval "$(declare -f show_state); state_write 0.1.0 no '' '' '' '' '' no no '' && state_read && show_state"
-    assert_rc 0 "ten-argument write then read"
+    st eval "$(declare -f show_state); state_write 0.1.0 no '' '' '' '' '' no no '' '' && state_read && show_state"
+    assert_rc 0 "eleven-argument write then read"
     assert_eq "$OUT" '[1][0.1.0][no][][][][][][no][no][]' "auto_update=no and an empty source_checkout round trip"
     assert_contains "$(<"$SANDBOX/st-state/git-secret-guard/state")" $'timer_installed=no\nauto_update=no\nsource_checkout=' "both keys are written, after timer_installed"
 }
@@ -104,21 +104,69 @@ test_state_read_refuses_a_line_longer_than_8192_characters() {
 
 test_state_write_refuses_a_newline_and_paths_init_refuses_relative_dirs() {
     state_dir_env || return 1
-    st state_write 0.1.0 yes $'a\nb' '' '' '' '' no no ''
+    st state_write 0.1.0 yes $'a\nb' '' '' '' '' no no '' ''
     assert_rc 1 "a newline in a value"
     assert_contains "$ERR" "contains a newline" "says why"
     assert_no_file "$SANDBOX/st-state/git-secret-guard/state" "and writes nothing"
-    st state_write 0.1.0 yes '' '' '' '' '' no yes $'/a\n/b'
+    st state_write 0.1.0 yes '' '' '' '' '' no yes $'/a\n/b' ''
     assert_rc 1 "a newline in source_checkout"
     assert_contains "$ERR" "contains a newline" "says why"
     st state_write 0.1.0 yes '' '' '' '' '' no
     assert_rc 1 "a caller that does not pass auto_update and source_checkout"
-    assert_contains "$ERR" "state_write needs 10 values, got 8" "says why"
+    assert_contains "$ERR" "state_write needs 11 values, got 8" "says why"
     assert_no_file "$SANDBOX/st-state/git-secret-guard/state" "and writes nothing either"
     set_env HOME=relative
     st true
     assert_rc 1 "relative HOME"
     assert_contains "$ERR" "HOME must be an absolute path" "says why"
+}
+
+# ^ coupled issue #72 makes cli_path the optional key for what install added to PATH; an older file reads as nothing of ours
+test_state_records_the_cli_path_entry() {
+    local f="$SANDBOX/st-state/git-secret-guard/state" rec='macos-block 1 0 /a b/.zprofile' bad
+    state_dir_env || return 1
+    st eval "state_write 0.1.0 no '' '' '' '' '' no no '' '$rec' && state_read && printf '[%s]' \"\$ST_CLI_PATH\""
+    assert_rc 0 "write then read a macOS record"
+    assert_eq "$OUT" "[$rec]" "the record comes back exactly, spaces in the path included"
+    assert_contains "$(<"$f")" $'source_checkout=\ncli_path='"$rec" "written after source_checkout"
+    st eval "state_write 0.1.0 no '' '' '' '' '' no no '' 'windows-user-path ;C:\\Users\\a b\\.local\\bin' && state_read && printf '[%s]' \"\$ST_CLI_PATH\""
+    assert_rc 0 "a Windows record is a valid shape too"
+    assert_eq "$OUT" '[windows-user-path ;C:\Users\a b\.local\bin]' "and comes back exactly"
+    grep -v '^cli_path=' "$f" >"$f.old" && mv -f -- "$f.old" "$f" || return 1
+    # shellcheck disable=SC2016 # the code is single-quoted on purpose, the child shell expands it
+    st eval 'state_read && printf "[%s][%s]" "$ST_EXISTS" "$ST_CLI_PATH"'
+    assert_rc 0 "a file written before cli_path existed"
+    assert_eq "$OUT" "[1][]" "reads as nothing of ours"
+    printf 'cli_path=somewhere else\n' >>"$f" || return 1
+    st state_read
+    assert_rc 1 "a record of an unknown shape"
+    assert_contains "$ERR" "bad cli_path" "says why"
+    for bad in 'windows-user-path relative\dir' 'windows-user-path ;C:\a;b' 'windows-user-path created ' 'windows-user-path C:\a%b' 'windows-user-path ;C:\a"b' 'windows-user-path ;\\;srv\share'; do
+        grep -v '^cli_path=' "$f" >"$f.old" && mv -f -- "$f.old" "$f" && printf 'cli_path=%s\n' "$bad" >>"$f" || return 1
+        st state_read
+        assert_rc 1 "[$bad] is not a record uninstall could work from"
+        assert_contains "$ERR" "bad cli_path" "[$bad] is refused at read, like every other bad value"
+    done
+    st state_write 0.1.0 no '' '' '' '' '' no no '' $'macos-block 1 0 /a\n/b'
+    assert_rc 1 "a newline in the record"
+    assert_contains "$ERR" "contains a newline" "says why"
+}
+
+# ^ coupled the split lives in lib/core/state.sh, never in the hook; GSG_WINDIR_RE is the folder rule of bin/gsg-path.ps1, DEL included
+test_the_windows_record_splits_into_form_and_folder_and_refuses_what_the_user_path_cannot_carry() {
+    local row rec mode folder
+    for row in 'windows-user-path ;C:\a b\bin|sep|C:\a b\bin' 'windows-user-path C:\bin|bare|C:\bin' 'windows-user-path created \\srv\share|create|\\srv\share' \
+        'windows-user-path created C:\x|create|C:\x' 'macos-block 1 0 /h/.zprofile||' 'windows-user-path relative\dir||' 'windows-user-path ;C:\a;b||' \
+        'windows-user-path C:\a%b||' 'windows-user-path ;C:\a"b||' 'windows-user-path created ||' $'windows-user-path ;C:\\a\x7fb||' $'windows-user-path ;C:\\a\tb||'; do
+        IFS='|' read -r rec mode folder <<<"$row"
+        # shellcheck disable=SC2016 # the code is single-quoted on purpose, the child shell expands it
+        st eval 'if state_winrec_split '"${rec@Q}"'; then printf "rc0|%s|%s" "$ST_WINREC_MODE" "$ST_WINREC_FOLDER"; else printf "rc1|%s|%s" "$ST_WINREC_MODE" "$ST_WINREC_FOLDER"; fi'
+        if [ -n "$mode" ]; then
+            assert_eq "$OUT" "rc0|$mode|$folder" "[$rec] splits"
+        else
+            assert_eq "$OUT" "rc1||" "[$rec] is refused and leaves both empty"
+        fi
+    done
 }
 
 run_file_tests

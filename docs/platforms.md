@@ -384,6 +384,13 @@ bin/git-secret-guard install        # lists what is missing, installs it with br
   as on Linux with the BSD tools.
 - **awk.** macOS `/usr/bin/awk` (one-true-awk 20200816) gives the expected results for `lib/scan/extract.awk`, every malformed diff and the
   inline programs: `tests/scan/test_awk_portability.sh` runs them under it (named `bwk`) next to the gawk and mawk cases.
+- **The CLI folder on `PATH`.** macOS does not put `~/.local/bin` on `PATH`. When it is not there, `install` appends one marked block to the startup file of the account's
+  login shell, `~/.zprofile` for zsh or `~/.bash_profile` for bash: `# begin git-secret-guard PATH`, `export PATH="$HOME/.local/bin:$PATH"`, `# end git-secret-guard PATH`.
+  The login shell comes from `dscl . -read /Users/<name> UserShell`, not from `$SHELL`, which names the shell that started the process. Left alone, with the reason and the line
+  to add printed: a file that is a symbolic link, not a regular file of yours, over 1 MiB, holding a NUL byte or already holding our marker with no record of ours; a login
+  shell other than zsh or bash; a `dscl` that fails. What the file held stays byte for byte; one without a final newline gets a newline before the block, which `uninstall` takes
+  back. `uninstall` cuts exactly the block it wrote, only from the file the state names, and removes a file install created once nothing else is in it. A new login shell reads
+  the file, one that was open does not. `install --dont-change-path` and the unattended install of auto-update never write it.
 - **Running the suite on a Mac.** `tests/run.sh` puts the Homebrew bash and the GNU directory first on `PATH` itself. The real-scanner
   suites use the pinned binaries: `tests/fetch-test-tools.sh` downloads them (SHA-256 checked against `tools.lock`) into
   `~/.cache/git-secret-guard-test-tools`, never into `~/.local/bin`. The brew steps are tested with a recording `brew` stand-in and a
@@ -460,8 +467,20 @@ that run a git 2.54 or newer, because the hook lives in the global git config.
   `doctor` report each SmartGit settings directory they find.
 
 - **Prerequisites.** Git for Windows with git 2.54 or newer (an older one is upgraded with `install --upgrade-git`, see below) on x86_64. `taskkill`,
-  `timeout`, `curl`, `sha256sum` and the System32 `tar.exe` come with Windows or Git for Windows. `~/.local/bin` should be
-  on `PATH` for the `git-secret-guard` command.
+  `timeout`, `curl`, `sha256sum` and the System32 `tar.exe` come with Windows or Git for Windows.
+- **The CLI folder on your user `Path`.** When `~/.local/bin` is not on `PATH`, `install` appends it to the `Path` of your Windows user (the value `Path`
+  of `HKCU\Environment`, never the machine `Path`, no administrator rights) and tells running programs; a cmd, PowerShell or Git Bash opened afterwards finds
+  `git-secret-guard` by name. Every other entry stays byte for byte and the registry type of the value (`REG_SZ` or `REG_EXPAND_SZ`) is kept; a user with
+  no `Path` value gets one of type `REG_EXPAND_SZ`, the type Windows gives it, and `uninstall` deletes it again. The folder counts as present when an entry
+  differs only by case, slash direction, trailing slashes or a `%VARIABLE%`; then nothing is changed. `uninstall` takes out exactly what `install` added
+  (the entry and one separator), leaves entries added since, and names and leaves our entry if you respelled it. `install --dont-change-path` leaves the
+  value alone and prints the step to do by hand, as does any case it cannot handle (a value of another registry type, a value that would pass 32,766
+  characters, a folder name with `;`, `%` or `"`, no Windows PowerShell). The check runs on the `PATH` of the Git Bash that runs `install` first (`PATH: <folder> is
+  already on PATH; nothing was changed`; a folder on the machine `Path` counts), then on the user `Path` value (`PATH: the user Path already holds <folder>; nothing was
+  changed`). Not matched, so the folder is added: a quoted entry of the user `Path`, a link or another path to the same folder. When running programs could not be told
+  after the write, the line reads `PATH: added <folder> to the user Path; could not tell running programs; sign out and in, or start a new session`. A failed change
+  never fails `install`: the reason and the step by hand are printed and the record in the state is taken back (an earlier install's stays). The unattended install of
+  auto-update never changes the `Path`.
 - **jq is handled by `install`.** With no `jq` on `PATH`, `install` downloads the pinned `jq.exe` from the jqlang release,
   checks its SHA-256 against `tools.lock`, and places it in `~/.local/bin` beside the scanners. No package manager is
   needed (the Windows Server 2019 test host has no winget). It follows the scanner rules: all downloads are verified before anything
@@ -744,6 +763,14 @@ Result: not yet recorded.
   `install`, `version` and `help` without a GNU directory
   (`test_a_command_that_needs_the_gnu_tools_refuses_when_their_directory_is_missing`); a settings file `load_settings` refuses
   prints `cannot read <file>: <reason>`, the reason sanitised and cut (`test_a_refused_settings_file_names_the_reason_on_macos`).
+- **macOS `PATH` block** (`lib/platform/macpath.sh`, #72). The block is `macpath_block_text` (three lines, the middle one `GSG_PATH_LINE` with `$HOME` literal). The record is
+  `macos-block <created 0|1> <no final newline 0|1> <file>`, built by `macpath_plan` from the file as it was (`macpath_check_file`) and written to the state before
+  `macpath_apply` appends; `2>/dev/null` stands before the `>>`, so a failed open is reported once, as `cannot write <file>`, and the state then goes again without the record.
+  The marker test is a whole line equal to the begin marker, in a file read through `macpath_read` (at most 1 MiB, no NUL; a `printf x` guard keeps the final newlines).
+  `macpath_remove` reads the recorded file only, cuts the first exact block that starts at a line start (an edited block, or the marker without the block, is `left` and named)
+  and writes a `cp -p` copy renamed over the file, so mode and owner stay and a failure never leaves a half-cut login file. The login shell is read by `dscl` (found by
+  `install_find_bin`) for the name `id -un` gives; tests use `lc_dscl_standin`, which answers from `dscl.shell`, so no test reads the real directory service.
+  Tests: `tests/install/test_install_path.sh` (the flow, runnable on Linux under the fake `uname`) and `tests/platform/test_macos_path.sh`.
 - **macOS git upgrade** (`lib/gitup/gitup_macos.sh`; routes `path-fix`, `brew-upgrade`, `brew-install`, state read from the file `$(brew --prefix)/bin/git`).
   *Ordering (decided):* git runs through the core's offer alone, not inside the single `brew install` of the other formulae. The offer must come first
   (the `core.hooksPath` checks, the re-verification and the PATH line need the new git) and the single install is the last step after every refusable
@@ -814,6 +841,34 @@ Result: not yet recorded.
 - **Windows: the work dir ignores a `TMPDIR` outside `HOME`** (NTFS ignores `chmod`, the profile ACL keeps staged lines private).
   Tests look at `TEST_WORK_BASE`, never `$SANDBOX/tmp`; an `includeIf` aimed at the wrong one silently sabotages nothing, and a
   fail-closed test goes green or red for the wrong reason.
+- **Windows: the user `Path` (`bin/gsg-path.ps1`, `lib/platform/winpath.sh`, #72).** (1) **Raw registry access.** `[Environment]::GetEnvironmentVariable(.., 'User')`
+  expands `%VARS%` and `SetEnvironmentVariable('Path', .., 'User')` rewrites the type, so the script opens `HKCU\Environment` and uses `GetValue('Path', '',
+  DoNotExpandEnvironmentNames)`, `GetValueKind` and `SetValue(.., .., kind)`; a missing value reads as `$null` (`GetValueKind` throws then). Probed on Windows PowerShell
+  5.1.17763: the raw value kept its `%`, the expanded one was longer, the kind was `ExpandString`. No `setx` (it cuts at 1024), no machine hive, a kind other than
+  `String` and `ExpandString` is refused (exit 2). (2) **No value byte reaches bash**: stdout is one status word (`plan`: `present`, `absent-sep`, `absent-bare`,
+  `absent-novalue`; `apply`: `added`, `added-nobroadcast`; `remove`: `removed`, `removed-nobroadcast`, `changed`, `absent`), a failure is a non-zero exit and one line on
+  stderr (1 unexpected, 2 refused, 3 the value no longer fits the plan); the folder and the form (`sep`, `bare`, `create`) are arguments. (3) **The record** (state key
+  `cli_path`) is built in bash from the form the plan named: `windows-user-path ;FOLDER`, `windows-user-path FOLDER` (the value ended in `;` or was empty) and
+  `windows-user-path created FOLDER` (no value; uninstall deletes it). `apply` re-reads the value and writes only when it still ends the way the plan saw it, else
+  exit 3 and nothing changed; `remove` cuts the recorded text when the value ends with it, else the last element byte-equal to FOLDER with one adjacent separator,
+  else says `changed` when only another spelling is there and `absent` when nothing is. A new value of 32,767 characters or more is refused (the limit counts the
+  closing NUL). The form of a record and the rule for its folder (absolute drive or UNC path, no `;`, `%`, `"` or control character, from the first character on) are written once for
+  bash, `state_winrec_split` and `GSG_WINDIR_RE` in `lib/core/state.sh` (the hook never loads it), read by `winpath_folder` (the pattern), `winpath_record`, `state_read`, `install_path_plan_windows` and `uninstall_path_entry_windows` (the split) (a malformed record is refused when the state is
+  read); `$FolderPattern` of the script is the same rule for PowerShell (control characters are `\x00-\x1f` and `\x7f`, as `[:cntrl:]` of bash; `\z`, not `$`, ends it, since `$` lets a final newline in). Every comparison of the script on the value is ordinal (`[string]::Equals(.., Ordinal)`, `EndsWith(.., Ordinal)`, emptiness by `.Length`, never `-eq ''`, which ignores zero-width characters),
+  so an entry that differs from the folder by a zero-width or soft-hyphen character is another folder. (4) **The broadcast** is a throwaway user variable set and removed through `[Environment]::SetEnvironmentVariable(.., 'User')`, which sends
+  `WM_SETTINGCHANGE` (Microsoft Learn, `Environment.SetEnvironmentVariable`: "other applications are notified of the set operation by a Windows `WM_SETTINGCHANGE`
+  message"); no `Add-Type` compile, works under constrained language. A failed broadcast after the write is the `-nobroadcast` word and the flow says to sign out and in.
+  (5) **Finding PowerShell**: `winpath_powershell` takes `WindowsPowerShell/v1.0/powershell.exe` below the System32 of `gitup_windows_sysdir` (so `GSG_GITUP_ROOT` moves it
+  in tests); `GSG_WINPATH_ROOT` moves only this lookup, because on a Windows host `GSG_GITUP_ROOT` would hide the real `reg.exe` and `whoami.exe` from the git upgrade, and
+  every Windows sandbox carries it in the base `GSG_ENV` (`sandbox_winpath_seam` of `tests/support/lib.sh`, so `LC_ENV` and any environment built from `GSG_ENV` have it; `lc_begin`
+  only builds the stand-in again), and it points at a stand-in that answers every call with exit 2, so no test reaches the real registry; `wu_env` sets it empty (an empty value is
+  unset), because the adapter tests there choose their stand-in through `GSG_GITUP_ROOT`. The gates: `tests/project/test_windows_harness_safety.sh` (seam and wiring, every host) and
+  `test_every_route_that_starts_an_install_reaches_only_the_stand_in` in `tests/platform/test_windows_path.sh` (Windows). Like the other test seams it is announced on stderr,
+  once per run (`TEST OVERRIDE active (GSG_WINPATH_ROOT=[<dir>]); Windows PowerShell is looked for below that folder, not in the real System32`), and skips no check.
+  (6) **A failed apply** (`winpath_apply` rc 1: exit 1, 2 or 3 of the script, a timeout, an answer that is no status word) is "nothing was written" to the flow: the state was written with this run's record right before the call (`winpath_apply` reads it from `INSTALL_PATH_RECORD`, as `macpath_apply` does) and
+  `install_path_unrecord` writes it again without that record. Only `added-nobroadcast` is a written change and keeps it. (7) **Tests**: `tests/install/test_winpath.sh`
+  (all platforms, recording stand-in), `tests/platform/test_windows_path.sh` (Windows only: the real script in 5.1 with `Get-UserPath`, `Set-UserPath`, `Remove-UserPath` and
+  `Send-EnvironmentChange` replaced by file-backed one-liners; `wpw_begin` fails unless exactly those four lines differ). The script uses no cmdlet, so it needs no `PSModulePath` reset.
 - **Windows: batch files.** `cmd` re-reads a batch file line by line, so a file deleted while it runs ends in `The batch file
   cannot be found`, also with `call`. The installed `.cmd` therefore deletes itself after bash returns, with
   `(goto) 2>nul & del "%~f0"`, once the share dir is gone (`GSG_CMD_ENTRY` tells uninstall to leave it). The checkout's `.cmd`

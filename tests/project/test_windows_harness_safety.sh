@@ -231,6 +231,30 @@ test_the_stray_file_check_sees_a_new_entry_in_a_directory() {
     [ "$(wu_names "$d")" != "$before" ] || fail "a new entry went unseen"
 }
 
+# ^ security the Windows user Path is never written by a test; every CLI run of the suite gets the stand-in PowerShell from the base environment (#72)
+# ^ invariant runs on every host, the seam and the stand-in are plain bash and sh; only the TEST_IS_WINDOWS branch calling them is Windows-only
+test_the_windows_seam_adds_the_stand_in_root_to_the_base_environment_and_builds_the_stand_in() {
+    local ps="$SANDBOX/root/windows/System32/WindowsPowerShell/v1.0/powershell.exe" before after
+    before="${#GSG_ENV[@]}"
+    sandbox_winpath_seam || return 1
+    after="${#GSG_ENV[@]}"
+    assert_eq "$((after - before))" 1 "one entry joins the base environment"
+    assert_eq "${GSG_ENV[$((after - 1))]}" "GSG_WINPATH_ROOT=$SANDBOX/root" "and it is the stand-in root of this sandbox"
+    [ -x "$ps" ] || { fail "no executable stand-in at $ps"; return 1; }
+    run_cap "$ps" -NoProfile -ExecutionPolicy Bypass -File "C:\\x\\gsg-path.ps1" plan 'C:\a'
+    assert_rc 2 "the stand-in refuses every call"
+    assert_contains "$ERR" "the PowerShell stand-in of the test suite changes nothing" "and says why"
+    assert_eq "$(<"$SANDBOX/xdg/powershell.log")" '-NoProfile -ExecutionPolicy Bypass -File C:\x\gsg-path.ps1 plan C:\a' "and logs the arguments it was given"
+}
+
+test_the_sandbox_and_the_lifecycle_start_take_the_stand_in_from_the_one_place() {
+    local create begin
+    create="$(declare -f sandbox_create)" begin="$(declare -f lc_begin)"
+    assert_contains "$create" "sandbox_winpath_seam" "sandbox_create builds the seam for every sandbox on Windows"
+    assert_contains "$begin" "winpath_standin_create" "lc_begin builds the stand-in again after it clears the sandbox"
+    assert_not_contains "$begin" "GSG_WINPATH_ROOT" "and LC_ENV takes the variable from the base environment, not from a line of its own"
+}
+
 test_zz_nothing_was_created_at_the_root_of_the_file_system() {
     assert_eq "$(wu_names /)" "$WU_ROOT_NAMES" "no test of this file created an entry at the root (on Git Bash the Git for Windows install)"
 }

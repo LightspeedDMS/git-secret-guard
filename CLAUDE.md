@@ -135,6 +135,17 @@ This file is an index: each topic states what must not break and links the doc h
   pins the share dir); the role is git's ownership probe (`[ -O ]` is true for any owner under MSYS); the fetch has no `setsid`,
   `GCM_INTERACTIVE=never` is exported and `MSYS_NO_PATHCONV` unset; the lock reads `/proc/<pid>/ppid` (MSYS `ps` has no `-o`);
   status and doctor run no `schtasks`; run.sh uses the recording `lc_schtasks_standin`, never a real task.
+- **CLI on PATH** (`lib/install/install_path.sh`, `lib/platform/{macpath,winpath}.sh`, `bin/gsg-path.ps1`): the record (`cli_path`) goes into the
+  state right before the change, never earlier (`INSTALL_PATH_NEWREC` moves into `INSTALL_PATH_RECORD` in `install_path_apply`,
+  which writes the state first; a failed write skips the change), and is written again without it when nothing was written
+  (an earlier install's stays; a state that cannot be written is install's status 1); a macOS record names only `$HOME/.zprofile`
+  or `$HOME/.bash_profile`, a Windows folder follows `GSG_WINDIR_RE` of `lib/core/state.sh` (not `common.sh`), which `state_read` checks; uninstall
+  removes only what the record names and only while unchanged, a user's entry or line is never cut; the update child never changes `PATH`
+  (`install_path_is_update_child` = `AU_LET_IN`, never the bare `GSG_UPDATE_LOCK_PID`); Windows: the user `Path` through the registry with its type kept, never
+  `setx`, no value byte through the pipe (status words), the suite never reaches the real registry (`GSG_WINPATH_ROOT` stand-in in the base `GSG_ENV` of every
+  Windows sandbox, `sandbox_winpath_seam` of `tests/support/lib.sh`, `wu_env` empties it; a test never builds a CLI environment without it);
+  macOS: one marked block in the file of the login shell `dscl` names, never `$SHELL`; `status` and `doctor` print information only:
+  [install.md#maintainer-notes](docs/install.md#maintainer-notes), [platforms.md#maintainer-notes](docs/platforms.md#maintainer-notes).
 - **Severity icons:** the plain output of `status` (new format), `doctor`, the hook and the lifecycle commands is byte-stable; icons and escape
   sequences exist only in terminal mode and only in the `ui_*` helpers of `lib/core/common.sh`; `status_line` counts PROBLEM and WARNING lines (the hook-listing
   subshell returns its count); the hook starts `doctor --recheck` without `CLICOLOR_FORCE`:

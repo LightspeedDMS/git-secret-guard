@@ -6,7 +6,7 @@ through a git config hook (git >= 2.54, events pre-commit and commit-msg).
 commands:
   install [--replace-hooks-path] [--with-timer] [--auto-update] [--upgrade-git] [--take-over-system-git]
           [--dont-configure-smartgit] [--allow-smartgit-sandbox-removal] [--dont-link-desktop-git]
-          [--configure-smartgit] [--link-desktop-git]
+          [--configure-smartgit] [--link-desktop-git] [--dont-change-path]
         Install, or upgrade when already installed. Needs git >= 2.54 first on PATH, jq, setsid, timeout and (Linux) awk
         (on Windows taskkill replaces setsid and a missing jq is downloaded; on macOS missing Homebrew tools are
         installed with brew after the other checks), and curl when something has to be downloaded. Puts the pinned
@@ -71,6 +71,13 @@ commands:
         --dont-link-desktop-git writes no link (an existing link is still refreshed) and prints the note.
         --link-desktop-git is still accepted and differs from a plain install in three ways: a refusal is exit
         status 1 before any change, a failed self-check is exit status 1, and on macOS and Windows it is refused.
+        Install says where the CLI is and whether its folder is on PATH. On macOS it adds one marked block to
+        ~/.zprofile (zsh) or ~/.bash_profile (bash), the startup file of the account's login shell, and on Windows the
+        folder to the user Path; on Linux no file is changed and the line to add is printed. Nothing is changed when the
+        folder is already on PATH, or when the file is a link, not yours, or the shell is not zsh or bash (the line to
+        add is printed). --dont-change-path leaves PATH alone for that run and prints the line. The unattended install
+        of update never changes PATH. A change that fails is reported with the step to do by hand and does not fail
+        install. uninstall takes out exactly what install added and names what the user changed.
   uninstall [--remove-tools] [--keep-system-git]
         Remove what install added and restore the recorded core.hooksPath (SmartGit and the Desktop link are
         undone first). Says "nothing to do" and exits 0 when nothing is installed.

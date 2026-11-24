@@ -379,7 +379,8 @@ test_fresh_install_records_the_state() {
         "the hash of every file install placed is recorded, also on an empty path"
     assert_eq "$(state_value timer_installed)" no "a plain install installs no timer"
     assert_eq "$(state_value auto_update)" no "a plain install turns no auto-update on"
-    assert_eq "$(wc -l <"$LC_STATE/state")" 10 "exactly the ten keys"
+    assert_eq "$(state_value cli_path)" "" "a Linux install adds nothing to PATH"
+    assert_eq "$(wc -l <"$LC_STATE/state")" 11 "exactly the eleven keys"
 }
 
 # ^ invariant what install writes is independent of the caller umask; WSL 1 starts every shell at 0000, the normal case there

@@ -28,7 +28,8 @@ test_real_install_downloads_and_verifies_the_pinned_tarballs_from_github() {
     lc_begin || return 1
     without_gitup_overrides
     if [ "$TEST_OS" = Darwin ]; then lc_real_uname || return 1; fi
-    gsg install
+    # ^ why --dont-change-path on Windows, not a seam-free suite; the plan returns before PowerShell is looked for => GSG_WINPATH_ROOT is never announced
+    if [ "$TEST_IS_WINDOWS" -eq 1 ]; then gsg install --dont-change-path; else gsg install; fi
     assert_rc 0 "install from the vendor URLs, verified against the shipped tools.lock"
     assert_not_contains "$ERR" "TEST OVERRIDE" "no override was active"
     assert_contains "$("$LC_BIN/trufflehog$LC_EXE" --version 2>&1)" "3.99.2" "the real trufflehog runs at the pinned version"

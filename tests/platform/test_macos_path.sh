@@ -94,7 +94,8 @@ test_existing_content_stays_byte_for_byte_and_the_record_says_what_to_restore() 
         gsg install
         assert_rc 0 "install over [$name]"
         assert_eq "$(state_value cli_path)" "macos-block $created $nonl $p" "[$name] the record says what to restore"
-        cmp -s -n "$n" -- "$p" <(printf '%s' "$content") || fail "[$name] the first $n bytes changed"
+        # ^ external cmp -n 0 exits non-zero on the macOS runner; a zero-length prefix is unchanged by definition, cmp runs for n > 0 only
+        if [ "$n" -gt 0 ]; then cmp -s -n "$n" -- "$p" <(printf '%s' "$content") || fail "[$name] the first $n bytes changed"; fi
         assert_contains "$(<"$p")" "$MARK" "[$name] the block is there"
         gsg uninstall
         assert_rc 0 "uninstall over [$name]"

@@ -28,11 +28,19 @@ test_a_healthy_machine_exits_0_and_shows_the_machine_section() {
 
 # ^ coupled issue #72 dr_begin keeps the CLI folder off PATH; doctor reports it as information only, never as a PROBLEM or a WARNING
 test_doctor_says_when_the_cli_folder_is_not_on_path_as_information_only() {
+    local listed
     dr_begin || return 1
     doctor
     assert_rc 0 "doctor with the CLI folder off PATH"
     assert_contains "$OUT" "  info     CLI folder: $LC_BIN is not on the PATH this shell runs with" "the information line"
-    assert_not_contains "$OUT" "warnings:" "no warning is counted"
+    assert_not_contains "$OUT" "  WARNING  CLI folder" "the CLI folder is no warning"
+    # ^ why count the listed WARNING lines, not assume zero; a macOS runner's old /usr/bin/git is a warning of its own
+    listed="$(awk '/^  WARNING  /{n++} END{print n+0}' <<<"$OUT")" || return 1
+    if [ "$listed" -eq 0 ]; then
+        assert_not_contains "$OUT" "warnings:" "no warning is counted"
+    else
+        assert_contains "$OUT" "warnings: $listed (" "only the warnings listed are counted"
+    fi
     assert_not_contains "$OUT" "PROBLEM" "and no problem"
     set_env PATH="$LC_BIN/:$SANDBOX/pathbin:$TEST_BASE_PATH"
     doctor

@@ -380,7 +380,8 @@ test_fresh_install_records_the_state() {
     assert_eq "$(state_value timer_installed)" no "a plain install installs no timer"
     assert_eq "$(state_value auto_update)" no "a plain install turns no auto-update on"
     assert_eq "$(state_value cli_path)" "" "a Linux install adds nothing to PATH"
-    assert_eq "$(wc -l <"$LC_STATE/state")" 11 "exactly the eleven keys"
+    assert_eq "$(state_value created_by_install)" "dir:$LC_HOME/.local/bin dir:$LC_HOME/.local" "the sandbox lacked only ~/.local, and install records the two it made"
+    assert_eq "$(wc -l <"$LC_STATE/state")" 12 "exactly the twelve keys"
 }
 
 # ^ invariant what install writes is independent of the caller umask; WSL 1 starts every shell at 0000, the normal case there

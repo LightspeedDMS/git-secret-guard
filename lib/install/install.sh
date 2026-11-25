@@ -692,7 +692,7 @@ install_unique_words() {
 # ^ invariant tools_installed_by_us only grows on install (kept from state plus the ones downloaded now)
 # ^ order write pending before install_commit_tools = old and new hash; write final after it = new hash only => a failed move never orphans install's own file
 install_write_state() {
-    local phase="$1" i tool kept prev_set=no prev="" tools="" backup="${GSG_BACKUP_NEW:-$ST_BACKUP}" replaced="$ST_REPLACED" placed="" timer=no
+    local phase="$1" i tool kept created prev_set=no prev="" tools="" backup="${GSG_BACKUP_NEW:-$ST_BACKUP}" replaced="$ST_REPLACED" placed="" timer=no
     if [ "$ST_PREV_SET" = yes ]; then
         prev_set=yes
         prev="$ST_PREV"
@@ -718,7 +718,9 @@ install_write_state() {
     done
     if [ "$INSTALL_TIMER" -eq 1 ]; then timer=yes; fi
     placed="$(install_unique_words "$placed")"
-    state_write "$(<"$GSG_ROOT/VERSION")" "$prev_set" "$prev" "$tools" "$backup" "$replaced" "$placed" "$timer" "$INSTALL_AUTO_UPDATE" "$INSTALL_SOURCE_CHECKOUT" "$INSTALL_PATH_RECORD"
+    created="$(install_created_record)" || return 1
+    state_write "$(<"$GSG_ROOT/VERSION")" "$prev_set" "$prev" "$tools" "$backup" "$replaced" "$placed" "$timer" "$INSTALL_AUTO_UPDATE" "$INSTALL_SOURCE_CHECKOUT" \
+        "$INSTALL_PATH_RECORD" "$created"
 }
 
 # ^ why --replace-all, not a plain set; a plain set exits 5 when the key already has several values, and --add would duplicate the event
@@ -822,6 +824,8 @@ install_run() {
     # ^ security umask only tightens (022 or stricter) => settings, share tree, CLI link and state are never group or other writable; WSL 1 starts at 0000
     umask "$(printf '%03o' "$((8#$(umask) | 8#022))")"
     paths_init || return 1
+    # ^ order before the first check => the config probe, the update lock and the state dir cannot hide what was missing (#74)
+    install_created_snapshot
     lifecycle_note_global_config
     trap install_cleanup EXIT
     trap 'exit 129' HUP

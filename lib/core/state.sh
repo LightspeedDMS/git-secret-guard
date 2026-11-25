@@ -3,7 +3,7 @@
 GSG_STATE_MAX_LINES=100
 # ^ why a cap per line, not only per file; the tools_* values go through read -a <<<, and Git for Windows bash hangs at 64 KiB + 1 to 128 bytes
 GSG_STATE_LINE_MAX=8192
-GSG_STATE_VALUES=11
+GSG_STATE_VALUES=12
 GSG_LAUNCHD_LABEL=com.lightspeeddms.git-secret-guard.doctor
 # ^ coupled the Windows updater's Task Scheduler task (lib/platform/schtasks.sh); one per user, like the units of Linux
 GSG_UPDATE_TASK_NAME=git-secret-guard-update
@@ -32,6 +32,33 @@ state_winrec_split() {
     fi
 }
 
+# ^ invariant a created_by_install word is the kind (file or dir), a colon and an absolute path with % space and tab written %25 %20 %09; sets REPLY
+# ^ why an encoding, not a path per key; the value is one line of space-separated words, and a home on Windows often holds a space
+state_created_encode() {
+    local p="${1//%/%25}"
+    p="${p// /%20}"
+    REPLY="${p//$'\t'/%09}"
+}
+
+state_created_decode() {
+    local p="${1//%20/ }"
+    p="${p//%09/$'\t'}"
+    REPLY="${p//%25/%}"
+}
+
+GSG_CREATED_WORD_RE='^(file|dir):/([^%]|%25|%20|%09)*$'
+
+# ^ invariant true when every word of $1 has the shape state_created_encode gives; a hand-edited record is refused at read, never half used
+# ^ invariant ST_CREATED is "" or words of this shape; an older state file reads "", nothing recorded as created
+state_created_valid() {
+    local w
+    local -a words=()
+    read -r -a words <<<"$1"
+    for w in "${words[@]}"; do
+        if [[ ! $w =~ $GSG_CREATED_WORD_RE ]]; then return 1; fi
+    done
+}
+
 # ^ invariant sets ST_* for every key (ST_PREV_SET, ST_TIMER and ST_AUTO_UPDATE are yes|no); the keys after backup_path are optional
 # ^ invariant ST_SOURCE_CHECKOUT is an absolute path or "" (no checkout recorded); an older state file reads as auto_update=no and no checkout
 # ^ invariant ST_CLI_PATH is "", "macos-block <created 0|1> <no final newline 0|1> <file>" or "windows-user-path <text>"; an older file reads ""
@@ -39,7 +66,7 @@ state_read() {
     local line key val missing="" seen=" "
     local -a lines=()
     ST_EXISTS=0 ST_VERSION="" ST_PREV_SET=no ST_PREV="" ST_TOOLS="" ST_BACKUP="" ST_REPLACED="" ST_PLACED="" ST_TIMER=no
-    ST_AUTO_UPDATE=no ST_SOURCE_CHECKOUT="" ST_CLI_PATH=""
+    ST_AUTO_UPDATE=no ST_SOURCE_CHECKOUT="" ST_CLI_PATH="" ST_CREATED=""
     if [ ! -e "$GSG_STATE_FILE" ]; then return 0; fi
     mapfile -t -n "$((GSG_STATE_MAX_LINES + 1))" lines <"$GSG_STATE_FILE" || return 1
     if [ "${#lines[@]}" -gt "$GSG_STATE_MAX_LINES" ]; then
@@ -65,6 +92,7 @@ state_read() {
             auto_update) ST_AUTO_UPDATE="$val" ;;
             source_checkout) ST_SOURCE_CHECKOUT="$val" ;;
             cli_path) ST_CLI_PATH="$val" ;;
+            created_by_install) ST_CREATED="$val" ;;
             *) key="" ;;
         esac
         if [[ $line != *=* ]] || [ -z "$key" ] || [[ $seen == *" $key "* ]]; then
@@ -82,6 +110,10 @@ state_read() {
     fi
     if { [ "$ST_AUTO_UPDATE" != yes ] && [ "$ST_AUTO_UPDATE" != no ]; } || { [ -n "$ST_SOURCE_CHECKOUT" ] && [ "${ST_SOURCE_CHECKOUT#/}" = "$ST_SOURCE_CHECKOUT" ]; }; then
         printf '%s: the state file %s has a bad auto_update or source_checkout; fix or remove it\n' "$GSG_NAME" "$GSG_STATE_FILE" >&2
+        return 1
+    fi
+    if ! state_created_valid "$ST_CREATED"; then
+        printf '%s: the state file %s has a bad created_by_install; fix or remove it\n' "$GSG_NAME" "$GSG_STATE_FILE" >&2
         return 1
     fi
     case "$ST_CLI_PATH" in
@@ -111,16 +143,16 @@ state_make_dir() {
     chmod 700 -- "$GSG_STATE_DIR" || return 1
 }
 
-# ^ invariant every caller passes all GSG_STATE_VALUES values; one written before auto_update, source_checkout and cli_path existed is refused, never defaulted
+# ^ invariant every caller passes all GSG_STATE_VALUES (12) values; one written before auto_update, source_checkout, cli_path or created_by_install is refused
 # ^ why refuse a short call, not default the new values; a default would silently turn a recorded auto_update=yes into no, or drop a recorded PATH entry
 state_write() {
-    local version prev_set prev tools backup replaced placed timer auto checkout clipath tmp all
+    local version prev_set prev tools backup replaced placed timer auto checkout clipath created tmp all
     if [ "$#" -ne "$GSG_STATE_VALUES" ]; then
         printf '%s: state_write needs %s values, got %s; refusing to write the state file\n' "$GSG_NAME" "$GSG_STATE_VALUES" "$#" >&2
         return 1
     fi
-    version="$1" prev_set="$2" prev="$3" tools="$4" backup="$5" replaced="$6" placed="$7" timer="$8" auto="$9" checkout="${10}" clipath="${11}"
-    all="$version$prev_set$prev$tools$backup$replaced$placed$timer$auto$checkout$clipath"
+    version="$1" prev_set="$2" prev="$3" tools="$4" backup="$5" replaced="$6" placed="$7" timer="$8" auto="$9" checkout="${10}" clipath="${11}" created="${12}"
+    all="$version$prev_set$prev$tools$backup$replaced$placed$timer$auto$checkout$clipath$created"
     if [[ $all == *$'\n'* ]]; then
         printf '%s: a value to record contains a newline; refusing to write the state file\n' "$GSG_NAME" >&2
         return 1
@@ -139,6 +171,7 @@ state_write() {
         printf 'auto_update=%s\n' "$auto"
         printf 'source_checkout=%s\n' "$checkout"
         printf 'cli_path=%s\n' "$clipath"
+        printf 'created_by_install=%s\n' "$created"
     } >"$tmp" || { rm -f -- "$tmp"; return 1; }
     mv -f -- "$tmp" "$GSG_STATE_FILE"
 }

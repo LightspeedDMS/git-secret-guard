@@ -19,7 +19,10 @@ lib/core/proc.sh <<<"${kids[$p]:-}"
 lib/install/tools.sh <<<"$line" <<<"${output:0:GSG_VERSION_OUTPUT_MAX}"
 lib/integrations/smartgit/smartgit_offer.sh <<<"$out"
 
-# state words: state_read refuses a line longer than GSG_STATE_LINE_MAX (8192) characters
+# state words: state_read refuses a line longer than GSG_STATE_LINE_MAX (8192) characters; install_created_record adds two lists of at most
+# INSTALL_CREATED_MAX_CHARS (2048) each (lib/install/install_created.sh)
+lib/core/state.sh <<<"$1"
+lib/install/install_created.sh <<<"$ST_CREATED" <<<"$ST_CREATED"
 lib/install/install.sh <<<"$1" <<<"$ST_PLACED"
 lib/install/install_tools.sh <<<"$(install_placed_hashes <<<"$ST_PLACED" <<<"$ST_REPLACED" <<<"$ST_REPLACED"
 lib/install/uninstall.sh <<<"$2" <<<"$ST_PLACED" <<<"$ST_REPLACED" <<<"$ST_TOOLS"

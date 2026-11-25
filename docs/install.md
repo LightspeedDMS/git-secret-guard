@@ -566,14 +566,21 @@ As for `jq`, the test is the hash alone, so a byte-identical copy you put there 
   install's own until a rerun confirms the placement, so install never mistakes its own half-upgraded file for yours. A scanner install did not replace is
   never touched.
 - **Order.** After the takeover check, the update lock and the findings lock: SmartGit is restored, the GitHub Desktop link is removed,
-  the recorded `core.hooksPath` is restored, the `hook.git-secret-guard` section is removed, then the auto-update timer and the
+  the recorded `core.hooksPath` is restored, the `hook.git-secret-guard` section is removed, the empty config file install created goes, then the auto-update timer and the
   weekly timer (or the LaunchAgent),
   the CLI link (and on Windows `git-secret-guard.cmd`), the `PATH` entry, the share dir, the moved-aside originals are put back, the
   downloaded tools go (`--remove-tools`), on Windows the files of a git upgrade hand-off (`handoff.txt`, `Git-*-64-bit.exe`),
-  and last doctor's findings record, the update record and the state file. A step that fails stops uninstall there, so a rerun finds what is
+  and last doctor's findings record, the update record and the state file; after the locks, the empty state dir and the empty directories install
+  created. A step that fails stops uninstall there, so a rerun finds what is
   left. The `core.hooksPath` restore comes before the hook section is removed. If git refuses the restore, uninstall stops with `core.hooksPath not restored`, the hook config, share dir and
   state stay, commits stay scanned, and running `uninstall` again finishes the job.
 
+- **What install brought into being goes when it is empty.** Install records in the state (`created_by_install`) the global git config file it creates (`~/.gitconfig`, or
+  the file `GIT_CONFIG_GLOBAL` names) and each directory it creates on its way: the parents of the state and share dirs, `~/.local/bin`, and with a timer or auto-update
+  `~/.config/systemd/user` (macOS `~/Library/LaunchAgents`), so `~/.local`, `~/.local/share`, `~/.local/state`, `~/.config` or their XDG equivalents. Uninstall removes that
+  file after the hook section when it is a regular file of 0 bytes (`removed <file>, which install created and which is empty now`), and each such directory after the state
+  dir when it is empty, silently. What existed before install, or holds anything at uninstall (a key or file of yours, the kept scanners), stays without a word: `--remove-tools`
+  leaves a profile that had none of them as it was, a plain `uninstall` keeps `~/.local/bin`. A reinstall keeps the first record; an older install's state records nothing.
 - **The backup is kept.** Uninstall removes the state *file* but not the state directory when it still holds
   `hooks-path-backup-*.tar.gz`; it prints the tarball's location. It is the safety net for your old hooks directory.
 - A `core.hooksPath` that was set again after install is **not overwritten** by the recorded one (a notice is printed).
@@ -854,7 +861,7 @@ repository, so only an absolute value gives a reliable answer.
   `core.hooksPath` **first** (`test_uninstall_restores_core_hooks_path_before_removing_the_hook_config`): never leave a
   machine with neither hook nor `core.hooksPath`.
 - **State keys**: `version`, `previous_hooks_path_set`, `previous_hooks_path`, `tools_installed_by_us`, `backup_path`,
-  `tools_replaced`, `tools_placed`, `timer_installed`, `auto_update`, `source_checkout`. `state_write` writes all ten and
+  `tools_replaced`, `tools_placed`, `timer_installed`, `auto_update`, `source_checkout`, `cli_path`, `created_by_install`. `state_write` writes all twelve and
   refuses a call with any other number of values (`GSG_STATE_VALUES`; a default would turn a recorded `auto_update=yes` into
   `no` without a word); `state_read` still accepts the older five-, six- and eight-key files and refuses anything odd.
   `auto_update` is `yes` or `no` (a missing key reads as `no`), validated like `timer_installed`; `source_checkout` is an
@@ -864,6 +871,18 @@ repository, so only an absolute value gives a reliable answer.
   (`tests/core/test_state.sh`). A recorded `no` is replaced by a later takeover
   (`test_a_hooks_path_taken_over_after_a_plain_install_is_recorded`); a differing recorded value refuses
   (`install_check_recorded_hooks_path`).
+- **What install created** (#74, `lib/install/install_created.sh`, key `created_by_install`). (1) **When.** `install_created_snapshot` runs right after `paths_init`,
+  before the config write probe, the update lock and `state_make_dir`, and notes what is missing; every `install_write_state` writes it (`install_created_record`). The
+  state dir's parents cannot be recorded before they exist (the record lives in them): noted before anything is made, written by the first state write; a run stopped in
+  between leaves them unrecorded, as before #74. (2) **What.** The file `git config --global` writes when missing (`GIT_CONFIG_GLOBAL`, else `~/.gitconfig` unless only
+  the XDG `git/config` exists; a relative `GIT_CONFIG_GLOBAL` is not recorded), and (`install_created_walk`, at most `INSTALL_CREATED_MAX_STEPS`) each missing directory up
+  from the parents of the state and share dirs (those two already go), `GSG_BIN_DIR`, and with a timer or `auto_update=yes` `GSG_UNIT_DIR` or, on macOS, `GSG_AGENT_DIR`.
+  (3) **Format and bound.** Words `file:<path>` and `dir:<path>` with `%`, space and tab as `%25`, `%20`, `%09`; `state_read` refuses other shapes (`GSG_CREATED_WORD_RE`). Each
+  list of a run holds at most `INSTALL_CREATED_MAX_CHARS` (2048) and a whole line over `GSG_STATE_LINE_MAX` keeps the earlier record alone: a word left out keeps its item.
+  (4) **Reinstall.** The earlier record stays first and whole, new words are added once (`install_unique_words`); an older state has no key, so nothing found is removed.
+  (5) **Uninstall.** `uninstall_created_files` after `uninstall_hook_section` (a 0-byte regular file only, one line), `uninstall_created_dirs` after the state dir's `rmdir`
+  (`rmdir` only, never on a link, silent, passes until none goes). Not recorded: Desktop's `applications` directory, SmartGit's (own record), the Windows git upgrade hand-off
+  (`uninstall_gitup_handoff`). Tests: `tests/install/test_uninstall_created.sh`, `test_state_records_what_install_created`.
 - **Scanner ownership.** `install_owns_file` = the file's hash is in `tools_placed`. `install_write_state pending` records
   the old and the new hash before `install_commit_tools`, `final` keeps the new one. `mv -T -n` is followed by a check of
   both paths (coreutils 8.32 exits 0 when `-n` skips). `uninstall_restore_replaced` validates records with `GSG_ASIDE_RE`

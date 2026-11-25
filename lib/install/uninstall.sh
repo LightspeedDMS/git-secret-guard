@@ -412,7 +412,10 @@ uninstall_run() {
     rc=$?
     doctor_rec_unlock || rc=1
     if [ "$locked" -eq 1 ]; then autoupdate_lock_release || rc=1; fi
-    if [ "$rc" -eq 0 ]; then rmdir -- "$GSG_STATE_DIR" 2>/dev/null || true; fi
+    if [ "$rc" -eq 0 ]; then
+        rmdir -- "$GSG_STATE_DIR" 2>/dev/null || true
+        uninstall_created_dirs
+    fi
     return "$rc"
 }
 
@@ -453,6 +456,8 @@ uninstall_steps() {
     # ^ order uninstall_restore_hooks_path before uninstall_hook_section => a failed restore leaves the hook config scanning, never a machine with neither
     uninstall_restore_hooks_path || return 1
     uninstall_hook_section || return 1
+    # ^ order after uninstall_hook_section => a config file holding only our section is empty now; a restored core.hooksPath keeps it (#74)
+    uninstall_created_files || return 1
     if brew_is_macos; then uninstall_agents || return 1; else uninstall_timer || return 1; fi
     uninstall_cli_link || return 1
     uninstall_path_entry || return 1

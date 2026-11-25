@@ -9,7 +9,7 @@ GSG_NAME=git-secret-guard
 GSG_UNINSTALL_ACTIONS=0
 uname() { if [ "${1:-}" = -m ]; then echo x86_64; else echo MINGW64_NT-10.0-26200; fi; }
 command -v cygpath >/dev/null 2>&1 || cygpath() { printf "%s\n" "${!#}"; }
-for lib in platform/brew core/common core/state install/tools install/hookspath scan/exempt autoupdate/timer platform/launchd platform/wsl install/install install/install_cmd install/install_tools install/uninstall inspect/status inspect/doctor inspect/doctor_repos inspect/doctor_findings core/proc integrations/desktop/desktop_git integrations/desktop/desktop_git_check integrations/desktop/desktop_git_report; do
+for lib in platform/brew core/common core/state install/tools install/hookspath scan/exempt autoupdate/timer platform/launchd platform/wsl install/install install/install_created install/install_cmd install/install_tools install/uninstall inspect/status inspect/doctor inspect/doctor_repos inspect/doctor_findings core/proc integrations/desktop/desktop_git integrations/desktop/desktop_git_check integrations/desktop/desktop_git_report; do
     source "$1/lib/$lib.sh" || exit 9
 done
 shift
@@ -109,7 +109,7 @@ JQ_ADOPT_ENV='GSG_OS=MINGW64_NT-10.0-26200 GSG_ARCH=x86_64 GSG_NAME=git-secret-g
 jq_adopt_chain() {
     local bin="$1" lock="$2" jqbin="$3"
     win "$JQ_ADOPT_ENV"' GSG_TOOLS_LOCK="$2" GSG_BIN_DIR="$1" INSTALL_JQ_BIN="$3" ST_PLACED="" GSG_STATE_DIR="$1/st" GSG_STATE_FILE="$1/st/state"
-GSG_TOOL_NEWSHA=("" "" "") ST_BACKUP="" ST_PREV_SET=no GSG_PREV_SET=no INSTALL_TIMER=0 INSTALL_AUTO_UPDATE=no INSTALL_SOURCE_CHECKOUT="" INSTALL_PATH_RECORD=""
+GSG_TOOL_NEWSHA=("" "" "") ST_BACKUP="" ST_CREATED="" ST_PREV_SET=no GSG_PREV_SET=no INSTALL_TIMER=0 INSTALL_AUTO_UPDATE=no INSTALL_SOURCE_CHECKOUT="" INSTALL_PATH_RECORD=""
 install_manage_jq; install_plan_lock && install_plan_tools; echo "names=[${GSG_TOOL_NAMES[*]}] need=${GSG_TOOL_NEED[2]} aside=[${GSG_TOOL_ASIDE[2]}] wrapper=[$INSTALL_JQ_WRAPPER]"
 state_make_dir && install_write_state final && state_read && echo "tools=[$ST_TOOLS] placed=[$ST_PLACED]"
 UN_HANDLED=" "; uninstall_read_placed && uninstall_tools' "$bin" "$lock" "$jqbin"

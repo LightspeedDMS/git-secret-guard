@@ -126,6 +126,7 @@ test_ui_restore - 11
 test_ui_status - 0
 test_ui_update - 6
 test_uninstall 330 20
+test_uninstall_created - 6
 test_update_log 288 48
 test_upgrade 218 12
 test_windows - 9

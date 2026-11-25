@@ -238,7 +238,8 @@ Behaviour: [Auto-update](install.md#auto-update---auto-update-and-update). Inter
     that machine until the run enabled it) holds event 332, `Task Scheduler did not launch task ... because user ... was not logged on when the
     launching conditions were met`. 13 minutes after install, both with exit 0: `status` `ok` without a `last check:` line, `doctor` `ok` with
     `no update run is recorded yet`.
-  - **Logon type S4U, an observation and not a supported setup** (no product decision yet). In run 2 the same task with only its principal replaced
+  - **Logon type S4U, an observation and not a supported setup** (decided in #73: the logged-on limit is accepted on Windows, the task keeps
+    the logon type Interactive and install does not set S4U). In run 2 the same task with only its principal replaced
     (`LogonType S4U`, `RunLevel Limited`, the same user, no stored password; `Set-ScheduledTask -Principal`) ran with nobody logged on: `/Run`
     updated 1.2.0 to 1.3.0 in the same 8 s with result 0, and a replaced trigger started it twice (`current`); log lines, record and checkout equal
     those of run 1. In the ssh session `USERDOMAIN` was `WORKGROUP`, and an account name built from it was refused (`No mapping between account

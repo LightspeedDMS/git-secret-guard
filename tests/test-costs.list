@@ -100,6 +100,7 @@ test_prerequisites - 10
 test_quality 172 319
 test_real 367 84
 test_recorded_bash - 5
+test_release_page - 1
 test_reminder 456 34
 test_report_collect - 0
 test_rule_file_hash - 1

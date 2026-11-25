@@ -1,0 +1,78 @@
+name: release
+
+# Creates the GitHub Release page of a release tag (v<x.y.z>) once the tag is pushed. It never creates, moves or deletes a tag: a tag is a deploy.
+# By hand (workflow_dispatch) it does the same for a tag that exists, or with dry_run (the default) only prints the page.
+# The rules (tag name, VERSION, release pull request, no release yet) are .github/scripts/release-notes.sh; this file only fetches their input.
+on:
+  push:
+    tags: ['v[0-9]*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing release tag, v<x.y.z>'
+        required: true
+        type: string
+      dry_run:
+        description: 'Print the page and create nothing'
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  # One run per tag; a run is never cancelled half way, a second one for the same tag waits and then finds the Release.
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      # The scripts come from the default branch, never from the tag (a tag older than the script still gets its page), and the history
+      # is complete so the tag can be checked against main (no free-text ref is checked out: a typed ref would run with write access).
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check the tag and create the Release
+        env:
+          TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          script=.github/scripts/release-notes.sh
+          work="$RUNNER_TEMP/release"
+          mkdir -p "$work"
+          # the name is checked before the tag text reaches git or gh
+          bash "$script" name "$TAG"
+          sha="$(git rev-parse --verify --quiet "refs/tags/$TAG^{commit}")" || { echo "::error::tag $TAG does not exist in this repository"; exit 1; }
+          git merge-base --is-ancestor "$sha" origin/main || { echo "::error::tag $TAG is on $sha, which is not on main"; exit 1; }
+          git show "$sha:VERSION" >"$work/VERSION"
+          gh api --paginate "repos/$GH_REPO/commits/$sha/pulls" >"$work/pulls.json"
+          gh api --paginate "repos/$GH_REPO/releases" --jq '.[].tag_name' >"$work/released.txt"
+          bash "$script" notes "$TAG" "$sha" "$work/VERSION" "$work/pulls.json" "$work/released.txt" "$work/notes.md"
+          case "$DRY_RUN" in
+            true)
+              printf 'dry run, nothing created\ntitle: %s\ntag: %s (%s)\n--- notes ---\n' "$TAG" "$TAG" "$sha"
+              # a body line starting with two colons would run as a workflow command: commands stop until the random token comes back
+              token="$(openssl rand -hex 16)"
+              printf '::stop-commands::%s\n' "$token"
+              cat "$work/notes.md"
+              printf '::%s::\n' "$token"
+              ;;
+            false)
+              gh release create "$TAG" --verify-tag --title "$TAG" --notes-file "$work/notes.md"
+              ;;
+            *)
+              echo "::error::dry_run is neither true nor false"
+              exit 1
+              ;;
+          esac

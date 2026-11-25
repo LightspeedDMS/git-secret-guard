@@ -266,7 +266,8 @@ than 1000 commits, `DCO_MAX_COMMITS`, is refused rather than cut short).
 
    `platforms.yml` (the container, VM and old-git runs) and `wsl.yml` (real WSL) run only when started by hand, never on a pull
    request: see [CI on real platforms](docs/platform-testing.md#ci-on-real-platforms) and
-   [WSL test runs](docs/platform-testing.md#wsl-test-runs).
+   [WSL test runs](docs/platform-testing.md#wsl-test-runs). `release.yml` runs only when a release tag is pushed or by hand
+   ([Versions](#versions)), never on a pull request.
 5. Link the issue in the PR description. The pull request template (`.github/pull_request_template.md`) holds this list as a checklist.
 
 ## Versions
@@ -284,6 +285,9 @@ and `status` shows it). It follows [Semantic Versioning](https://semver.org/); w
 - **Bumping a scanner pin** in `tools.lock` also needs the SHA-256 of the binary inside each archive, as the fifth column of its row
   (`<tool> <version> <platform> <archive sha256> <binary sha256>`): download the archive, check the fourth column, extract the binary, `sha256sum` it.
   Install refuses an extracted binary that differs, and a kept scanner with that hash is adopted as install's own; a test fails on a scanner row without it.
+- **A pushed tag `v<x.y.z>` gets its GitHub Release page from `.github/workflows/release.yml`** (the release pull request's description as the notes),
+  after it checks the tag, `VERSION` and that pull request. When it fails, fix the cause and run the workflow by hand for the tag; the tag is
+  never moved: [docs/agents.md](docs/agents.md#releases).
 - **Docs, tests and CI only** keep the version: merged alone, they need no release. Tests read `VERSION`, never a literal.
 - **After the release pull request is merged** its merge commit on `main` is tagged `v<VERSION>` (annotated,
   `git tag -a v<VERSION> -m "v<VERSION>"`) and the tag is pushed. A tag is never moved, replaced or deleted and re-created: a mistake gets the

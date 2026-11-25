@@ -32,6 +32,12 @@ releases and finishing. Where [CONTRIBUTING.md](../CONTRIBUTING.md) already says
   6. After it is merged: `git fetch origin`, then tag its merge commit and push the tag:
      `git tag -a v<x.y.z> -m "v<x.y.z>" <merge commit> && git push origin v<x.y.z>`; check with `git ls-remote --tags origin v<x.y.z>`
      that the tag peels to that merge commit.
+     The push starts `.github/workflows/release.yml`, which creates the Release page of the tag (title `v<x.y.z>`, notes the description of
+     the release pull request and a link to it) after checking the tag name, that the commit is on `main`, `VERSION`, the release pull
+     request and that no Release exists yet. Check it: `gh run list --workflow release.yml --limit 1`, `gh release view v<x.y.z>`. When it
+     fails, nothing was created: fix the cause (a wrong pull request title or description is edited on GitHub), then run it by hand for the
+     tag, first as a dry run: `gh workflow run release.yml --ref main -f tag=v<x.y.z> -f dry_run=true`, then with `-f dry_run=false`.
+     The tag stays where it is.
   7. A wrong tag is never moved, deleted or re-created: the fix is the next version.
 
 ## Repository settings (maintainers)

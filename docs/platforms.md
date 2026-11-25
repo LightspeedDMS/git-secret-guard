@@ -508,7 +508,8 @@ that run a git 2.54 or newer, because the hook lives in the global git config.
   auto-update runs. Pinned by `tests/install/test_jq_wrapper.sh`, which runs on Linux.
 - **Weekly doctor.** `--with-timer` needs systemd or launchd. Use [Task Scheduler](doctor.md#a-weekly-run-on-windows-task-scheduler).
 - **Auto-update.** `install --auto-update` registers an hourly Task Scheduler task of your own user (`git-secret-guard-update`) that runs while you are logged on; the
-  interval knob of the tests is ignored there. Details: [Auto-update on Windows](install.md#auto-update-on-windows).
+  interval knob of the tests is ignored there. That limit is accepted, not a bug: on a machine nobody logs on to, run `git-secret-guard update`
+  by hand. Details: [Auto-update on Windows](install.md#auto-update-on-windows).
 - **Line endings.** A checkout keeps LF whatever `core.autocrlf` says (`.gitattributes`), so the bash files run as they
   are. The warning `LF will be replaced by CRLF` in your own repositories comes from Git for Windows' default config and
   has nothing to do with the scan.

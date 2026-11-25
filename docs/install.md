@@ -370,6 +370,10 @@ type %USERPROFILE%\.local\state\git-secret-guard\update.log   # the output of th
   report such a task as `timer inactive`; these runs did not last long enough to see it. A run that happened is known by its lines in
   `update.log` and by the `last check: <UTC time> <result>` line of `status`; while both are missing, no run has happened. A login over ssh with
   a key is not a logon in this sense, so the task of a machine reached only that way never runs.
+- **This is an accepted limit on Windows, not a bug to be fixed.** The task is not registered with a logon type that runs without a session
+  (that would need a stored password, or a logon type a standard user may not be allowed to set). On a machine that nobody
+  logs on to, update by hand from any session, an ssh one included: `git-secret-guard update` (cmd and PowerShell:
+  `git-secret-guard.cmd update`). Or log on at the console now and then: the next hourly run then moves the install to the newest release.
 - **The action is a wrapper**, `update-task.cmd` in the state dir, because a task runs no shell. It sets `HOME` (the logon profile's may differ, and the child install writes the CLI link under it), the XDG variables and
   `GIT_CONFIG_GLOBAL` this install ran with, runs `"<Git for Windows>\bin\bash.exe" "<share>/bin/git-secret-guard" update` and
   appends both streams to `update.log` beside it. After the run a line of `cmd` moves a log over 1 MiB to `update.log.1` (one earlier file is kept,

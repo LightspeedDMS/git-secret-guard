@@ -134,7 +134,8 @@ they are not part of `tests/run.sh`.
 
 [CLAUDE.md](CLAUDE.md) is the index of the rules and the invariants a "simplification" breaks; the maintainer notes (why the code is
 shaped the way it is) are at the end of each file in `docs/`, and CLAUDE.md links the right one. Read it before changing the hook,
-extraction, exemptions or install. It is written for AI coding agents too.
+extraction, exemptions or install. It is written for AI coding agents too. How the parts fit together, in one read:
+[docs/architecture.md](docs/architecture.md).
 
 ## Where a new file goes
 

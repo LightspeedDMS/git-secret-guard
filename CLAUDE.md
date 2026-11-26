@@ -7,6 +7,7 @@ This file is an index: each topic states what must not break and links the doc h
 
 ## Where things are
 
+- The whole picture first (parts, commit path, CLI, `lib/` contexts, trust model, platforms): [architecture.md](docs/architecture.md).
 - Hook: `hooks/secret-scan` plus the files in `GSG_HOOK_LIBS`/`GSG_HOOK_FILES` (`lib/core/common.sh`, paths relative to `lib/`; a new hook
   library goes only there). The hook loads only `lib/core/` and `lib/scan/`; the rest of `lib/` is CLI-only (`test_the_hook_never_loads_*`,
   `test_the_hook_lists_name_only_files_under_lib_core_and_lib_scan`). How a scan runs: [scan.md#how-it-works](docs/scan.md#how-it-works).

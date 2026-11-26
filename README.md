@@ -99,6 +99,7 @@ The full list: [docs/scan.md#limits](docs/scan.md#limits).
 
 | Doc | Covers |
 |---|---|
+| [docs/architecture.md](docs/architecture.md) | how the parts fit together: the commit path, the CLI, `lib/`, the trust model, the platforms |
 | [docs/install.md](docs/install.md) | install, upgrade, uninstall, `status`, the `core.hooksPath` takeover, GitHub Desktop on Linux |
 | [docs/scan.md](docs/scan.md) | how a scan runs, its output, the settings file, signals, Git LFS, the scan's limits |
 | [docs/exemptions.md](docs/exemptions.md) | `.secret-scan-ignore`, inline markers, betterleaks config, local switches |
